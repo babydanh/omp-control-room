@@ -30,10 +30,9 @@ import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useState } fr
 
 import type { CompanyModelCatalogEntry, CompanyRole } from '../../../../core/src/company.js';
 import { Button } from '../../components/ui/Button.js';
-import { companyRoleLabel } from '../companyCharacters.js';
 import type { CompanyClient } from '../companyClient.js';
 import { isSubmitChord, promptBlockReason } from '../promptSubmission.js';
-import { withRoleModel } from '../roleProfiles.js';
+import { companyRoleLabel, withRoleModel } from '../roleProfiles.js';
 import {
   type ArgumentCompletion,
   commandCompletionQuery,

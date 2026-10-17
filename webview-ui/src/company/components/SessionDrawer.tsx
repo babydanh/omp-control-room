@@ -19,10 +19,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { Attempt, VerificationEvidence } from '../../../../core/src/company.js';
 import { Button } from '../../components/ui/Button.js';
-import { companyRoleLabel } from '../companyCharacters.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyDrawerTab } from '../companyState.js';
 import { questionProvenance } from '../questionProvenance.js';
+import { companyRoleLabel } from '../roleProfiles.js';
 import { sessionControls } from '../sessionActions.js';
 import {
   attemptStatusLabel,

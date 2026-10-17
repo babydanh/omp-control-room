@@ -14,7 +14,7 @@ import type {
   VerificationEvidence,
 } from '../../../../core/src/company.js';
 import { Button } from '../../components/ui/Button.js';
-import { companyRoleLabel } from '../companyCharacters.js';
+import { companyRoleLabel } from '../roleProfiles.js';
 import {
   changeKindLabel,
   requirementOutcomeLabel,

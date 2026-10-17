@@ -11,10 +11,10 @@ import type { ReactNode } from 'react';
 
 import type { BoardCard } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
-import { companyRoleLabel } from '../companyCharacters.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { questionProvenance } from '../questionProvenance.js';
+import { companyRoleLabel } from '../roleProfiles.js';
 import { pendingContract, selectionForSession } from '../selection.js';
 import { sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
 import type { BoardPane } from './BoardTopBar.js';

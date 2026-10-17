@@ -27,6 +27,11 @@ export const ROLE_LABELS: Record<CompanyRole, string> = {
   judge: 'Trọng tài',
 };
 
+/** A role as the board shows it; an unknown role is shown as sent. */
+export function companyRoleLabel(role: string): string {
+  return ROLE_LABELS[role as CompanyRole] ?? role;
+}
+
 /** Left-edge colour that marks a role on a card and in the role strip. */
 export const ROLE_EDGE_CLASS: Record<CompanyRole, string> = {
   director: 'border-l-accent-bright',

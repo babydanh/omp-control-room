@@ -33,17 +33,19 @@ test('Company plans, asks, waits for approval, then verifies the approved work',
     );
     await page.getByTestId('prompt-input').press('Control+Enter');
 
-    // The Company asks before it plans, and the question waits for a real answer.
+    // The Company asks before it plans; the question waits in the attention bar
+    // and opens in the detail pane, where it takes a real answer.
+    const attention = company.getByTestId('attention-bar');
+    await attention.getByRole('button', { name: /Câu hỏi/ }).click({ timeout: 45_000 });
     const question = company.getByTestId('question-panel');
-    await expect(question.getByText('Create the result file?', { exact: true })).toBeVisible({
-      timeout: 45_000,
-    });
+    await expect(question.getByText('Create the result file?', { exact: true })).toBeVisible();
     await question.getByRole('radio', { name: /proceed/i }).check();
     await question.getByRole('button', { name: 'Gửi câu trả lời' }).click();
 
     // Nothing runs until the Contract is approved, so the board stays empty of work.
+    await attention.getByRole('button', { name: /Chờ duyệt/ }).click({ timeout: 45_000 });
     const plan = company.getByTestId('contract-plan');
-    await expect(plan).toBeVisible({ timeout: 45_000 });
+    await expect(plan).toBeVisible();
     await expect(plan).toContainText('result.txt');
     // The plan names the file the approved task will write and the criterion it
     // will be held to; the command that proves it runs after approval.

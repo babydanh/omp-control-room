@@ -1,6 +1,6 @@
 # Pixel Agents — Compressed Reference
 
-Pixel art office where AI agents (Claude Code terminals today, any tool tomorrow) become animated characters. Ships as a **VS Code extension** and an **`npx pixel-agents` standalone CLI** from the same source tree.
+Full-screen board for Company runs on OMP: a Director plans a Contract, the user approves it, Workers execute, QA and a Judge verify, all on a seven-lane board. Ships as a **VS Code extension** and an **`npx pixel-agents` standalone CLI** from the same source tree; the browser CLI is the supported surface. The server still carries the legacy Claude Code tracking runtime and office assets; the webview no longer renders the pixel office.
 
 `CONTEXT.md` is the canonical glossary — read it for what terms like Agent, Sub-agent, Teammate, Lead, Adopt, or Headless agent mean here, and use its vocabulary in code, comments, and docs.
 
@@ -65,7 +65,7 @@ adapters/vscode/                     VS Code surface — composes core + server
   migrateVsCodeState.ts              One-time legacy state migration (verify-before-clear)
   constants.ts                       VS Code IDs, command names, key names
 
-webview-ui/                          React 19 + Canvas UI (depends only on core/)
+webview-ui/                          React 19 board UI (depends only on core/)
   src/
     transport/
       index.ts                       createTransport() — single runtime branching point
@@ -73,74 +73,34 @@ webview-ui/                          React 19 + Canvas UI (depends only on core/
       webSocketTransport.ts          Standalone mode (exponential backoff, send queue)
       types.ts                       Re-exports MessageTransport from core
     runtime.ts                       isBrowserRuntime detection
-    browserMock.ts                   Standalone-browser asset fetch + message injection
-    testHooks.ts                     window globals exposed for e2e (officeState, helpers)
     main.tsx                         React entry (StrictMode + createRoot)
-    App.tsx                          Composition root (hooks + components + EditActionBar)
-    constants.ts                     Webview magic numbers/strings
-    notificationSound.ts             Web Audio API chime
-    changelogData.ts                 Changelog modal content
-    components/                      React UI (toolbars, modals, settings)
-      BottomToolbar.tsx, ZoomControls.tsx, SettingsModal.tsx, InfoModal.tsx,
-      Tooltip.tsx, DebugView.tsx, ui/Button.tsx, ...
-    hooks/
-      useExtensionMessages.ts        Message handler — translates ServerMessage into OfficeState mutations
-      useEditorActions.ts            Editor state + callbacks
-      useEditorKeyboard.ts           Keyboard shortcuts (R, T, Esc, Ctrl+Z/Y)
-      introTourState.ts              Intro tour wire-state machine (pure reducer, Node-runner tested)
-      useIntroTour.ts                Wires the reducer to React + transport (snapshot, verdict, choices)
-    office/
-      types.ts                       OfficeLayout, Character, etc. + re-exports constants
-      toolUtils.ts                   STATUS_TO_TOOL mapping, extractToolName (DOM-free; defaultZoom lives in useEditorActions)
-      projection.ts                  World→screen math shared by renderer + DOM overlays (mapOffset, overlayProjection)
-      colorize.ts                    Colorize (grayscale→HSL) + Adjust (HSL shift)
-      floorTiles.ts                  Floor sprite storage + colorized cache
-      wallTiles.ts                   Wall auto-tile: 16 bitmask sprites
-      sprites/
-        spriteData.ts                Pixel data (characters, furniture, tiles, bubbles)
-        spriteCache.ts               SpriteData → offscreen canvas, per-zoom WeakMap
-      editor/
-        editorActions.ts             Pure layout ops
-        editorState.ts               Imperative state (tools, ghost, selection, undo/redo, drag)
-        EditorToolbar.tsx
-      layout/
-        furnitureCatalog.ts          Dynamic catalog from loaded assets
-        layoutSerializer.ts          OfficeLayout ↔ runtime (tileMap, furniture, seats)
-        tileMap.ts                   Walkability, BFS pathfinding
-      engine/
-        characters.ts                Character FSM (idle/walk/type) + wander AI
-        officeState.ts               Game world (layout, characters, seats, selection, subagents, consent greeter)
-        gameLoop.ts                  rAF loop with delta-time cap (0.1 s)
-        renderer.ts                  Canvas: tiles, z-sorted entities, overlays, edit UI
-        matrixEffect.ts              Spawn/despawn digital rain (drawing only)
-        matrixEffectState.ts         Effect state: startMatrixEffect/advanceMatrixEffect (DOM-free)
+    App.tsx                          Composition root: CompanyClient + BoardShell + ConnectionIndicator
+    constants.ts                     xterm theme and terminal sizes
+    components/                      ConnectionIndicator.tsx, ui/Button.tsx
+    company/
+      companyClient.ts               The one place company messages are sent and received
+      useCompanyTransport.ts         The app's ONE transport subscription; company messages → client
+      companyState.ts                Pure reducer for snapshots, changes, streams, terminals
+      boardView.ts                   Tasks → seven lanes + flow counts + wait reasons
+      roleProfiles.ts                Role labels, role colours, role → model edits
       components/
-        OfficeCanvas.tsx             Canvas, resize, DPR, mouse hit-testing, drag-to-move
-        ToolOverlay.tsx              Activity label above hovered/selected character
+        BoardShell.tsx               Top bar, role strip, attention bar, lanes, detail pane, composer
+        CompanyBoard.tsx             The seven lanes and task cards
+        CardDetail.tsx               Right pane: contract, question, sessions, files, or the selection
+        SessionDrawer.tsx            Terminal, activity, questions, usage, report for one session
 
-e2e/                                 Playwright suite (real VS Code + mock-claude scenarios)
+e2e/                                 Playwright suite
   playwright.config.ts
   global-setup.ts
   fixtures/
-    pixel-agents.ts                  VS Code fixture: launch Electron, wait for panel
-    standalone.ts                    Standalone CLI fixture: spawn server + browser page
-    mock-claude, mock-claude.cmd     Bash + cmd wrapper invoked instead of real claude
-    mock-claude-runner.cjs           Scenario runner: appendJsonl, emitHook, holdOpen
+    company-host.ts                  Real Company owner process for the board spec
+    mock-omp-company.cjs             Scripted OMP that plans, asks, writes and verifies
+    mock-claude, mock-claude.cmd     Legacy Claude mock (still used by server/__tests__/mockClaudeRunner)
+    mock-claude-runner.cjs           Legacy Claude scenario runner
   helpers/
-    launch.ts                        Electron app + isolated HOME/workspace
-    mock-claude.ts                   claudeScenario() builder
-    office.ts                        Overlay locators + assertions
-    webview.ts                       Settings/modal helpers
-    hooks.ts                         Hook server lifecycle helpers
-    standalone.ts                    Standalone server + WebSocket browser helpers
-    internal-agent.ts                spawnInternalAgentAndWait
-    lifecycle.ts                     Reusable scenario fragments
-    team.ts                          Team config seeding + teammate helpers
-    allure-labels.ts                 @area:<tag> → Allure epic
+    company.ts                       startCompanySmokeHost()
   tests/
-    claude/hooks-on/                 basic.spec.ts, lifecycle.spec.ts, teams.spec.ts
-    claude/hooks-off/                lifecycle.spec.ts, matrix.spec.ts
-    standalone/                      hooks.spec.ts
+    standalone/                      company.spec.ts
   README.md                          Auto-generated test inventory (regen via npm run e2e:inventory)
 
 scripts/
@@ -373,47 +333,17 @@ Every agent's context gauge. Fed from `message.usage` on assistant records by `p
 - **`seedContextUsage` runs once per agent in `startFileWatching`** — the single seam every watched agent passes through. Agents adopted or restored mid-session start at end-of-file, so without a tail read they'd have no gauge until their next turn.
 - Sub-agents get no gauge: no session of their own, and the shadow store never forwards `agentContextUsage`.
 
-## Office UI
+## Board UI
 
-**Rendering**: Game state in imperative `OfficeState` class (not React state). Pixel-perfect: zoom = integer device-pixels-per-sprite-pixel (1x–10x). No `ctx.scale(dpr)`. Default zoom = `Math.round(2 * devicePixelRatio)`. Z-sort all entities by Y. Pan via middle-mouse drag (`panRef`). **Camera follow**: `cameraFollowId` (separate from `selectedAgentId`) smoothly centers camera on the followed agent; set on agent click, cleared on deselection or manual pan.
+The webview is one full-screen board (`webview-ui/src/company/components/BoardShell.tsx`). Top to bottom: `BoardTopBar` (workspace, revision, model catalog, live OMP runners, provider quota, Sessions/Files toggles), `RoleStrip` (each role's requested model from `settings.roleProfiles`), `AttentionBar` (Contract awaiting approval, pending questions), the seven lanes (`CompanyBoard`) beside the detail pane (`CardDetail`), and the always-mounted `PromptComposer`.
 
-**UI styling**: Pixel art aesthetic — sharp corners (`borderRadius: 0`), solid backgrounds (`#1e1e2e`), `2px solid` borders, hard offset shadows (`2px 2px 0px #0a0a14`, no blur). CSS variables in `index.css` `:root` (`--pixel-bg`, `--pixel-border`, `--pixel-accent`, ...). Pixel font: FS Pixel Sans (`webview-ui/src/fonts/`), loaded via `@font-face`, applied globally.
+**Server owns status.** Lanes are `planned / ready / running / needs_input / review / done / failed`, mapped from task status in `boardView.ts`. Cards are buttons, never draggable; clicking selects. Each stalled card states why (dependency, awaiting answer, paused, queued behind full running lane). A card's left edge carries its session's role colour (`ROLE_EDGE_CLASS`).
 
-Custom ESLint rules (`eslint-rules/pixel-agents-rules.mjs`) enforce: `no-inline-colors` (hex/rgb/rgba/hsl/hsla literals only in `constants.ts`), `pixel-shadow` (must use `var(--pixel-shadow)` or `2px 2px 0px`), `pixel-font` (must reference FS Pixel Sans). All `error`-level — they block PRs.
+**One selection.** `CompanySelection` (task + session + drawer tab) is shared by the board and the detail pane. An explicitly opened item (Contract, question, sessions list, files) takes the pane until closed; otherwise the pane shows the selected task and its `SessionDrawer`.
 
-**Characters**: FSM states — active (pathfind to seat, typing/reading animation by tool type), idle (wander randomly with BFS, return to seat after `wanderLimit` moves). 4-directional sprites, left = flipped right. Tool animations: typing (Write/Edit/Bash/Task) vs reading (Read/Grep/Glob/WebFetch). Sitting offset: characters shift down 6 px in TYPE state. Z-sort uses `ch.y + TILE_SIZE/2 + 0.5` so characters render in front of same-row furniture but behind lower-row furniture. **Chair z-sorting**: non-back chairs use `zY = (row+1)*TILE_SIZE` (capped to first row); back-facing chairs use `zY = (row+1)*TILE_SIZE + 1` so the chair back renders in front of the character. Chair tiles are blocked for all characters except their own assigned seat (per-character pathfinding via `withOwnSeatUnblocked`).
+**One subscription.** `useCompanyTransport` is the app's only `transport.onMessage`; it hands company messages to `CompanyClient` and drops the legacy office/Claude messages the server still sends. A connect (first or reconnect) asks for a fresh snapshot.
 
-**Diverse palette assignment**: `pickDiversePalette()` counts palettes of current non-sub-agent characters; picks randomly from least-used palette(s). First 6 agents each get a unique skin; beyond 6, skins repeat with a random hue shift (45–315°) via `adjustSprite()`. Character stores `palette` (0-5) + `hueShift` (degrees). Sprite cache keyed by `"palette:hueShift"`.
-
-**Spawn/despawn effect**: Matrix-style digital rain animation (0.3 s). 16 vertical columns sweep top-to-bottom with staggered timing. Spawn: green rain reveals character pixels. Despawn: character pixels consumed by green rain trails. `matrixEffect` field on Character (`'spawn'`/`'despawn'`/`null`). Normal FSM is paused during effect. Restored agents (`existingAgents`) use `skipSpawnEffect: true` to appear instantly.
-
-**Sub-agents**: Negative IDs (from -1 down). Created on `agentToolStart` with "Subtask:" prefix, or lazily by `subagentToolStart` when missing (watched background spawns, post-reload recreation). Same palette + hueShift as parent. Click focuses parent terminal. Not persisted. Spawn at the closest free walkable tile to the parent (`closestFreeWalkableTile`) — around it, never in a seat. Idle (stop typing) when every tracked sub-tool row is done; overlay shows the latest non-done sub-tool status, falling back to the Subtask label.
-
-**Speech bubbles**: Permission ("..." amber dots) stays until clicked/cleared. Waiting (green checkmark) auto-fades 2 s. Sprites in `spriteData.ts`.
-
-**Sound notifications**: Ascending two-note chime (E5 → E6) via Web Audio API plays when waiting bubble appears (`agentStatus: 'waiting'`). `notificationSound.ts` manages AudioContext lifecycle; `unlockAudio()` on canvas mousedown resumes the context (webviews start suspended). Toggled via Settings modal. Persisted per-namespace in `~/.pixel-agents/config.json`.
-
-**Seats**: Derived from chair furniture. `layoutToSeats()` creates a seat at every footprint tile of every chair. Multi-tile chairs produce multiple seats keyed `uid` / `uid:1` / `uid:2`. Facing direction priority: 1) chair `orientation` from catalog (front→DOWN, back→UP, left→LEFT, right→RIGHT), 2) adjacent desk direction, 3) forward (DOWN). Click character → select (white outline) → click available seat → reassign.
-
-## Layout Editor
-
-Toggle via "Layout" button. Tools: SELECT (default), Floor paint, Wall paint, Erase (set tiles to VOID), Furniture place, Furniture pick (eyedropper for furniture type), Eyedropper (floor).
-
-**Floor**: 7 patterns from `floors.png` (grayscale 16×16), colorizable via HSBC sliders (Photoshop Colorize). Color baked per-tile on paint. Eyedropper picks pattern+color.
-
-**Walls**: Separate Wall paint tool. Click/drag to add walls; click/drag existing walls to remove (toggle direction set by first tile of drag, tracked by `wallDragAdding`). HSBC color sliders (Colorize mode) apply to all wall tiles at once. Eyedropper on a wall tile picks its color and switches to Wall tool. Furniture cannot be placed on wall tiles, but background rows may overlap walls.
-
-**Furniture**: Ghost preview (green/red validity). R key rotates, T key toggles on/off state. Drag-to-move in SELECT. Delete button (red X) + rotate button (blue arrow) on selected items. Any selected furniture shows HSBC color sliders (Color toggle + Clear button); color stored per-item in `PlacedFurniture.color?`. Single undo entry per color-editing session (tracked by `colorEditUidRef`). Pick tool copies type+color from placed item. Surface items preferred when clicking stacked furniture.
-
-**Undo/Redo**: 50-level, Ctrl+Z/Y. EditActionBar (top-center when dirty): Undo, Redo, Save, Reset.
-
-**Multi-stage Esc**: exit furniture pick → deselect catalog → close tool tab → deselect furniture → close editor.
-
-**Erase tool**: Sets tiles to `TileType.VOID` (transparent, non-walkable, no furniture). Right-click in floor/wall/erase tools also erases to VOID (drag-erasing supported). Context menu suppressed in edit mode.
-
-**Grid expansion**: In floor/wall/erase tools, a ghost border (dashed outline) appears 1 tile outside the grid. Clicking a ghost tile calls `expandLayout()` to grow the grid by 1 tile in that direction. New tiles are VOID. Furniture positions and character positions shift when expanding left/up. Max: `MAX_COLS`×`MAX_ROWS` (64×64). Default: `DEFAULT_COLS`×`DEFAULT_ROWS` (20×11). Characters outside bounds after resize relocated to random walkable tiles.
-
-**Layout model**: `{ version: 1, cols, rows, tiles: TileType[], furniture: PlacedFurniture[], tileColors?: ColorValue[] }`. Grid dimensions are dynamic. Persisted via debounced saveLayout message → `writeLayoutToFile()` → `~/.pixel-agents/layout.json`.
+**UI styling**: Inter for UI text inside `.company-ui` (compact text scale), 2px borders, tokens from `index.css` (`bg-bg`, `border-border`, `text-text-muted`, `text-warning`, `border-l-status-*`). Custom ESLint rules (`eslint-rules/pixel-agents-rules.mjs`) still enforce `no-inline-colors` (hex/rgb/rgba/hsl/hsla literals only in `constants.ts`), `pixel-shadow`, and `pixel-font` (Inter / FS Pixel Sans / `var(--font-ui)` only). All `error`-level.
 
 ## Asset System
 
@@ -475,7 +405,7 @@ Run: `npm run test:server` (or `npm test` for all).
 
 ### Webview unit (Vitest, Node runner)
 
-`webview-ui/test/` covers office state, layout editing and migration, assets, changelog behavior, and Vite/browser wiring.
+`webview-ui/test/` covers the company reducer, board lanes, composer, slash commands, usage view, contract plan view, OMP session view, transport replay, and Vite/browser wiring.
 
 Run: `npm run test:webview`.
 
@@ -548,7 +478,7 @@ The drift checks are the central guarantees: `core/asyncapi.yaml` ↔ `core/src/
 
 ## TypeScript Constraints
 
-- **No `enum`** (`erasableSyntaxOnly` in webview) — use `as const` objects (`TileType`, `CharacterState`, `Direction`, `EditTool`).
+- **No `enum`** (`erasableSyntaxOnly` in webview) — use `as const` objects.
 - **`import type`** required for type-only imports (`verbatimModuleSyntax` in webview; convention in extension).
 - **`noUnusedLocals` / `noUnusedParameters`** — strict everywhere.
 - **`.js` extensions** on all relative imports in extension + server (Node16 module resolution).
@@ -563,9 +493,9 @@ All magic numbers and strings are centralized — never inline:
 | `server/src/constants.ts`          | All timing/scanning constants (`PERMISSION_TIMER_DELAY_MS`, `TEXT_IDLE_DELAY_MS`, scanner intervals) shared by extension and standalone |
 | `adapters/vscode/constants.ts`     | VS Code-only IDs, command names, workspace state keys                                                                                   |
 | `core/src/constants.ts`            | Protocol-level constants (e.g., transport state names)                                                                                  |
-| `webview-ui/src/constants.ts`      | Webview magic numbers (grid, animation, rendering, camera, zoom, editor, game logic) + canvas overlay rgba strings                      |
+| `webview-ui/src/constants.ts`      | xterm theme and terminal sizes (concrete colour strings xterm needs)                                                                    |
+| `webview-ui/src/company/constants.ts` | Board lane order/labels, batching and paging sizes mirrored from the server                                                          |
 | `webview-ui/src/index.css` `:root` | CSS custom properties (`--pixel-bg`, `--pixel-border`, `--pixel-accent`, ...) for React inline styles and CSS                           |
-| `webview-ui/src/office/types.ts`   | Re-exports grid constants from `constants.ts` for convenience                                                                           |
 
 ## Error Handling
 

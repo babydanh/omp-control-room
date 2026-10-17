@@ -19,8 +19,7 @@
 
 import type { BoardCard, BoardFlow, BoardLane } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
-import { companyRoleLabel } from '../companyCharacters.js';
-import { ROLE_EDGE_CLASS } from '../roleProfiles.js';
+import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { taskStatusLabel } from '../statusLabels.js';
 
 export interface CompanyBoardProps {

@@ -33,7 +33,6 @@ import type {
   Contract,
   SubmitPromptInput,
 } from '../../../core/src/company.js';
-
 import {
   CONTRACT_STATUS_LABELS,
   PROMPT_DELIVERY_LABELS,

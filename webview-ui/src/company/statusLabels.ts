@@ -157,15 +157,3 @@ export const DRAWER_TAB_LABELS: Record<CompanyDrawerTab, string> = {
   usage: 'Chi phí',
   report: 'Báo cáo',
 };
-
-/** The two views the company panel switches between. */
-export const WORKSPACE_VIEW_LABELS: Readonly<Record<string, string>> = {
-  board: 'Bảng công việc',
-  files: 'Tệp',
-};
-
-/** The two panes the app shows as peers: the office and the company board. */
-export const SURFACE_TAB_LABELS: Readonly<Record<string, string>> = {
-  office: 'Văn phòng',
-  board: 'Bảng công việc',
-};

@@ -8,17 +8,13 @@
     "fastify",
     "@fastify/cors",
     "@fastify/static",
-    "@fastify/websocket"
+    "@fastify/websocket",
+    "allure-playwright"
   ],
   "ignoreExportsUsedInFile": true,
   "ignore": [
     "core/src/index.ts",
-    "server/src/providers/hook/claude/hooks/claude-hook.ts",
-    "webview-ui/src/office/components/index.ts",
-    "webview-ui/src/office/editor/index.ts",
-    "webview-ui/src/office/engine/index.ts",
-    "webview-ui/src/office/layout/index.ts",
-    "webview-ui/src/office/sprites/index.ts"
+    "server/src/providers/hook/claude/hooks/claude-hook.ts"
   ],
   "workspaces": {
     ".": {
