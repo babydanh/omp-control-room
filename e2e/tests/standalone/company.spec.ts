@@ -31,7 +31,8 @@ test('Company plans, asks, waits for approval, then verifies the approved work',
     await page.getByTestId('prompt-input').fill(
       'Create result.txt with the verification fixture content and run the declared verify.',
     );
-    await page.getByTestId('prompt-input').press('Control+Enter');
+    // Enter starts new work; Ctrl+Enter is the follow-up path and needs a target session.
+    await page.getByTestId('prompt-input').press('Enter');
 
     // The Company asks before it plans; the question waits in the attention bar
     // and opens in the detail pane, where it takes a real answer.
