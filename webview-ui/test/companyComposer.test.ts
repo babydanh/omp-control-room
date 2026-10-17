@@ -6,6 +6,7 @@ import { TRANSPORT_DISCONNECTED_ERROR } from '../../core/src/messageDelivery.js'
 import type { ClientMessage } from '../../core/src/messages.js';
 import { CompanyClient } from '../src/company/companyClient.js';
 import { isSubmitChord } from '../src/company/promptSubmission.js';
+import { thinkingForModel } from '../src/company/roleProfiles.js';
 import type { MessageTransport } from '../src/transport/types.js';
 import { session, settings, snapshot, task } from './companyFixtures.js';
 
@@ -150,6 +151,15 @@ describe('the prompt goes where the board points', () => {
     const message = sent.find((entry) => entry.type === 'companyPromptSubmit');
     expect(message).toBeDefined();
     expect(JSON.stringify(message)).not.toContain('targetSessionId');
+  });
+});
+
+describe('switching a role to another model', () => {
+  it('keeps the thinking level only when the new model accepts it', () => {
+    expect(thinkingForModel(['low', 'high', 'xhigh'], 'high')).toBe('high');
+    // Keeping "max" for a model without it is what the server refused.
+    expect(thinkingForModel(['low', 'high'], 'max')).toBe('high');
+    expect(thinkingForModel([], 'high')).toBeUndefined();
   });
 });
 

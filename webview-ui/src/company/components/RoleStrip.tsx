@@ -41,8 +41,10 @@ function ModelPicker({
 
   const rows = useMemo(() => {
     const needle = query.trim().toLowerCase();
+    // The server saves only a thinking level the model declares, so a model
+    // that declares none could never be saved: "Dùng" would always fail.
     return catalog
-      .filter((entry) => entry.credentialsConfigured)
+      .filter((entry) => entry.credentialsConfigured && entry.thinking.length > 0)
       .filter((entry) => needle === '' || entry.id.toLowerCase().includes(needle))
       .slice(0, PICKER_ROWS);
   }, [catalog, query]);

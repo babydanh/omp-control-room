@@ -33,7 +33,7 @@ import type { CompanyModelCatalogEntry, CompanyRole } from '../../../../core/src
 import { Button } from '../../components/ui/Button.js';
 import type { CompanyClient } from '../companyClient.js';
 import { isSubmitChord, promptBlockReason } from '../promptSubmission.js';
-import { companyRoleLabel, withRoleModel } from '../roleProfiles.js';
+import { companyRoleLabel, thinkingForModel, withRoleModel } from '../roleProfiles.js';
 import {
   type ArgumentCompletion,
   commandCompletionQuery,
@@ -121,10 +121,16 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const active = rows.length === 0 ? 0 : Math.min(highlight, rows.length - 1);
 
   const applyModel = (entry: CompanyModelCatalogEntry, command: OmpSlashCommand) => {
+    const profiles = state.settings?.roleProfiles ?? {};
+    const thinking = thinkingForModel(entry.thinking, profiles[role]?.thinking);
+    if (thinking === undefined) {
+      setNotice(
+        `${entry.id} không khai báo mức suy nghĩ nào nên công ty chưa dùng được model này.`,
+      );
+      return;
+    }
     client.setModel(entry.id);
-    const outcome = client.updateRoleProfiles(
-      withRoleModel(state.settings?.roleProfiles ?? {}, role, entry.id),
-    );
+    const outcome = client.updateRoleProfiles(withRoleModel(profiles, role, entry.id, thinking));
     setNotice(
       outcome.ok
         ? ompModelMessage(

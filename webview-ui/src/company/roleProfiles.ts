@@ -68,3 +68,17 @@ export function withRoleModel(
     },
   };
 }
+
+/**
+ * The thinking level to save with a model: the wanted one when the model
+ * accepts it, else the model's highest. Undefined when the model declares no
+ * level -- the server saves only a level the model declares, so keeping the
+ * old one would be refused.
+ */
+export function thinkingForModel(
+  levels: readonly string[],
+  wanted: string | undefined,
+): string | undefined {
+  if (wanted !== undefined && levels.includes(wanted)) return wanted;
+  return levels.at(-1);
+}
