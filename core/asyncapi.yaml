@@ -2552,6 +2552,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/PromptAttachment'
+        targetSessionId:
+          type: string
+          description: Session the prompt was routed to, so the board can show a prompt still being planned.
 
     CompanyPromptPutChange:
       type: object

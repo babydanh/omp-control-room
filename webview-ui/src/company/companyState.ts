@@ -340,6 +340,9 @@ function applyChange(state: CompanyViewState, change: CompanyPutChange | Company
         preview: change.value.preview,
         createdAt: change.value.createdAt,
         attachments: change.value.attachments ?? [],
+        ...(change.value.targetSessionId === undefined
+          ? {}
+          : { targetSessionId: change.value.targetSessionId }),
       };
       const prompts = state.prompts.some((entry) => entry.id === summary.id)
         ? state.prompts.map((entry) => (entry.id === summary.id ? summary : entry))

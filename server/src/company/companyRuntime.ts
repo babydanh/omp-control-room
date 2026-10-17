@@ -826,7 +826,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       (profile) => profile.criterionIds.length === 0,
     );
     if (discovered.length === 0) {
-      return 'Verification profiles: none were discovered in this workspace, so no criterion can be a "command" criterion; use "review" or "surface".';
+      return 'Verification profiles: none were discovered in this workspace, so no task can be proven done. Ask the user with company_ask_user to add a check (for example a package.json "test" script) before submitting a Contract.';
     }
     const lines = discovered.map(
       (profile) =>
@@ -1064,7 +1064,9 @@ class NativeCompanyRuntime implements CompanyRuntime {
       role: session.role,
       runner,
       profile,
-      busy: true,
+      // A run started with no turn (the catalog probe) is not working on anything;
+      // reporting it busy showed a second Director "at work" on every prompt.
+      busy: firstTurn !== undefined,
       liveTools: new Map(),
       approvals: new Map(),
       effectiveModel: launch.effectiveModel,
@@ -1180,7 +1182,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
             ...(run.nativeSessionPath === undefined
               ? {}
               : { nativeSessionPath: run.nativeSessionPath }),
-            status: 'busy',
+            status: run.busy ? 'busy' : 'idle',
             lastUsedAt: this.deps.now(),
           },
         },
@@ -1189,8 +1191,14 @@ class NativeCompanyRuntime implements CompanyRuntime {
     );
   }
 
+  /**
+   * Where OMP keeps a session's transcript: the company namespace, never the
+   * workspace. Inside the workspace every role could list and read every other
+   * role's transcript as if it were project code, and live runs spent minutes
+   * doing exactly that instead of their task.
+   */
   private sessionDirectory(sessionId: string): string {
-    return path.join(this.store.workspacePath, '.pixel-agents', 'sessions', sessionId);
+    return path.join(this.store.namespaceDir, 'sessions', sessionId);
   }
 
   /** True only when the run is not mid-turn and no tool or child is still live. */
@@ -1787,10 +1795,29 @@ class NativeCompanyRuntime implements CompanyRuntime {
   ): Promise<void> {
     const session = await this.acquireReviewerSession(role, this.workstreamOf(contract));
     if (session === undefined) return;
+    // The Advisor reviews a draft that exists only in company state, not in the
+    // workspace, so the draft itself travels with the instruction. Seen live: an
+    // Advisor told only the id asked the user for the Contract it was reviewing.
+    const draft =
+      role === 'advisor'
+        ? `\n\nThe draft under review:\n${JSON.stringify({
+            title: contract.title,
+            summary: contract.summary,
+            requirements: contract.requirements,
+            phases: contract.phases,
+            tasks: contract.tasks.map(
+              ({ status: _status, attemptIds: _attempts, ...task }) => task,
+            ),
+            acceptance: contract.acceptance,
+            assumptions: contract.assumptions,
+            decisions: contract.decisions,
+            risks: contract.risks,
+          })}`
+        : '';
     await this.dispatchTurn(session.id, {
       text: this.composePromptText(
         session,
-        `Contract ${contract.code}, id ${contract.id}, revision ${contract.revision}. ${instruction}`,
+        `Contract ${contract.code}, id ${contract.id}, revision ${contract.revision}. ${instruction}${draft}`,
       ),
       delivery: 'prompt',
       attachments: [],
@@ -2389,16 +2416,51 @@ class NativeCompanyRuntime implements CompanyRuntime {
     if (verdict !== 'approve' && verdict !== 'changes_requested') {
       throw new OmpBridgeRpcError('company_payload_invalid', `Unknown verdict: ${verdict}.`);
     }
+    const issues = (readRecordArray(payload, 'issues') ?? []).map((issue) => normalizeIssue(issue));
     await this.coordinator().submitArchitectureReview({
       sessionId: run.sessionId,
       runEpoch: run.runEpoch,
       contractId,
       revision,
       verdict,
-      issues: (readRecordArray(payload, 'issues') ?? []).map((issue) => normalizeIssue(issue)),
+      issues,
       advisorNotes: readStringArray(payload, 'advisorNotes') ?? [],
     });
+    // A blocking review leaves the draft in review: only its Director can fix
+    // it, so the findings go back to that Director. Scheduled after this RPC
+    // answers, like every other hand-off from inside a tool call, because the
+    // bridge holds the Advisor's answer until the chain it starts returns.
+    const contract = this.state().contracts[contractId];
+    if (contract?.status === 'architecture_review') {
+      queueMicrotask(() => {
+        void this.returnDraftToDirector(contract, issues).catch((error: unknown) => {
+          console.error('[Company] Returning the draft to its Director failed.', error);
+        });
+      });
+    }
     return { accepted: true };
+  }
+
+  /** Hand the Advisor's blocking findings to the Director that wrote the draft. */
+  private async returnDraftToDirector(
+    contract: Contract,
+    issues: readonly CompanyArchitectureIssue[],
+  ): Promise<void> {
+    const state = this.state();
+    const director = contract.promptIds
+      .map((id) => state.prompts[id]?.targetSessionId)
+      .find((id): id is string => id !== undefined && state.sessions[id]?.role === 'director');
+    if (director === undefined) return;
+    const findings = issues
+      .map((issue) => `- ${issue.severity} [${issue.requirementIds.join(', ')}] ${issue.fix}`)
+      .join('\n');
+    await this.dispatchTurn(director, {
+      text:
+        `The Advisor asked for changes to Contract ${contract.code} revision ${contract.revision}:\n${findings}\n` +
+        'Fix these and submit the whole Contract again with company_submit_contract; it becomes the next revision of the same Contract.',
+      delivery: 'follow_up',
+      attachments: [],
+    });
   }
 
   private async submitTaskResult(
@@ -2455,7 +2517,6 @@ class NativeCompanyRuntime implements CompanyRuntime {
       .filter(([, profile]) => profile.criterionIds.some((id) => task.acceptance.includes(id)))
       .flatMap(([, profile]) => profile.commands.map((command) => command.id))
       .filter((id) => approvedVerificationCommand(state, task, id) !== undefined);
-    if (commandIds.length === 0) return true;
     const session = await this.acquireReviewerSession('qa', this.workstreamOf(contract));
     if (session === undefined) return false;
     // QA is only allowed to report on the task its session is actively working
@@ -2478,15 +2539,21 @@ class NativeCompanyRuntime implements CompanyRuntime {
       ],
       this.state().revision,
     );
+    // A task proven only by "review"/"surface" criteria has no command to run;
+    // QA still has to look. Returning early here left such a task in
+    // `verifying` forever with nobody assigned to verify it.
+    const how =
+      commandIds.length > 0
+        ? `Run ${commandIds.join(', ')} with company_verify. Evidence: (fill in from the company_verify result). `
+        : 'No command proves these criteria: read the files the task changed and judge them against the criteria yourself. ';
     await this.dispatchTurn(session.id, {
       text: this.composePromptText(
         { ...session, status: 'busy' },
         `Contract ${contract.code}, id ${contract.id}, revision ${contract.revision}. ` +
           `Verify task ${task.code} (task id ${task.id}, attempt id ${attemptId}). ` +
-          `Run ${commandIds.join(', ')} with company_verify. ` +
-          `Evidence: (fill in from the company_verify result). ` +
+          how +
           `Criteria: ${task.acceptance.join(', ')}. ` +
-          `Submit both with the verdict to company_qa_result.`,
+          `Submit the verdict with company_qa_result.`,
       ),
       delivery: 'prompt',
       attachments: [],

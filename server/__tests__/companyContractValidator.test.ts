@@ -452,36 +452,45 @@ describe('verification commands', () => {
     expect(codes(validate(source))).toContain('criterion_kind_invalid');
   });
 
-  it('accepts a required review criterion with no command profile', () => {
+  it('refuses a required review or surface criterion, which no evidence can ever pass', () => {
+    // An approved Contract with one of these sat in verification forever: done
+    // is earned only from a command that exited 0.
+    for (const kind of ['review', 'surface'] as const) {
+      const source = draft();
+      source.verificationProfiles = {};
+      source.contract.acceptance[0] = { ...source.contract.acceptance[0], kind, required: true };
+
+      expect(codes(validate(source))).toContain('criterion_required_without_command');
+    }
+  });
+
+  it('accepts an optional review criterion as a note beside a required command', () => {
+    const source = draft();
+    const note = { ...source.contract.acceptance[0], id: '99999999-9999-4999-8999-999999999999' };
+    source.contract.acceptance.push({ ...note, kind: 'review', required: false });
+
+    expect(codes(validate(source))).not.toContain('criterion_required_without_command');
+    expect(codes(validate(source))).not.toContain('task_without_required_command');
+  });
+
+  it('refuses a task held only to optional criteria, which would pass with no evidence', () => {
     const source = draft();
     source.verificationProfiles = {};
     source.contract.acceptance[0] = {
       ...source.contract.acceptance[0],
       kind: 'review',
-      required: true,
+      required: false,
     };
 
-    expect(validate(source).ok).toBe(true);
+    expect(codes(validate(source))).toContain('task_without_required_command');
   });
 
-  it('accepts a required surface criterion with no command profile', () => {
-    const source = draft();
-    source.verificationProfiles = {};
-    source.contract.acceptance[0] = {
-      ...source.contract.acceptance[0],
-      kind: 'surface',
-      required: true,
-    };
-
-    expect(validate(source).ok).toBe(true);
-  });
-
-  it('accepts an optional command criterion with no command profile', () => {
+  it('does not ask an optional command criterion for a profile', () => {
     const source = draft();
     source.verificationProfiles = {};
     source.contract.acceptance[0].required = false;
 
-    expect(validate(source).ok).toBe(true);
+    expect(codes(validate(source))).not.toContain('criterion_verification_profile_missing');
   });
 
   it('rejects a profile that runs no command', () => {

@@ -377,9 +377,23 @@ function validateVerification(
   }
 
   for (const criterion of list(contract.acceptance)) {
+    if (criterion.required === false) continue;
+    // Done is earned only from a command that exited 0, so a required
+    // "review" or "surface" criterion can never pass: the approved Contract
+    // would sit in verification forever. Refusing it here tells the Director
+    // while the plan is still a draft.
+    if (criterion.kind !== 'command') {
+      issues.push(
+        issue(
+          'criterion_required_without_command',
+          `Acceptance criterion "${criterion.description}" is ${criterion.kind} and required, but only a command criterion can be proven. Make it required: false, or bind a command criterion to a verification profile.`,
+          { criterionId: criterion.id },
+        ),
+      );
+      continue;
+    }
     // `required` is true on anything but an explicit false, so a criterion that
     // lost the flag cannot quietly escape the evidence it was promised.
-    if (criterion.required === false || criterion.kind !== 'command') continue;
     const claiming = claimants.get(criterion.id);
     if (!claiming || claiming.size === 0) {
       issues.push(
@@ -398,6 +412,23 @@ function validateVerification(
         ),
       );
     }
+  }
+
+  // A task whose criteria are all optional would pass with no evidence at all,
+  // so every task must be held to at least one required command criterion.
+  const provable = new Set(
+    list(contract.acceptance)
+      .filter((criterion) => criterion.required !== false && criterion.kind === 'command')
+      .map((criterion) => criterion.id),
+  );
+  for (const task of list(contract.tasks)) {
+    if (list(task.acceptance).some((id) => provable.has(id))) continue;
+    issues.push(
+      issue(
+        'task_without_required_command',
+        `Task "${task.title}" has no required command criterion, so nothing could ever prove it done.`,
+      ),
+    );
   }
 }
 

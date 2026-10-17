@@ -12,18 +12,19 @@
  *  - Model. Moved into the box as OMP's own `/model` and `/switch`
  *    (builtin-modes.ts:451-543), with the completion and the wording ported in
  *    `slashCommands.ts`.
+ *  - Target. A selected session is where the box sends: a prompt, a steer and
+ *    a Ctrl+Enter follow-up all go to that OMP session. Nothing selected means
+ *    new work for the Director.
  *  - Delivery. OMP decides it from the session instead of asking: a streaming
  *    session steers and an idle one starts a turn
  *    (input-controller.ts:1216-1233). Ctrl+Enter is the follow-up path
- *    (input-controller.ts:1851-1860). Those two keys cover all three
- *    deliveries the wire allows.
+ *    (input-controller.ts:1851-1860).
  *  - Attach. OMP's box carries an image picker that the company bridge cannot
  *    reach, so the affordance is gone rather than faked.
  *
- * Dispatch is OMP's, rule for rule: `resolveSlashCommand` decides whether a
- * draft is a command at all, and a command this box cannot execute itself is
- * sent to the model as the literal text typed — which is what OMP does for
- * text its own dispatcher declines (input-controller.ts:1071-1081).
+ * Commands: `/model` and `/switch` run here; every other OMP command is typed
+ * into the selected session's terminal, so it runs as the command OMP itself
+ * would run, not as text the model reads.
  */
 
 import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
@@ -140,6 +141,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
    * caller to send the text as an ordinary prompt.
    */
   const runModelCommand = (command: OmpSlashCommand, args: string): boolean => {
+    if (command.name !== 'model' && command.name !== 'switch') return false;
     if (args === '') {
       // OMP opens the Model Hub here and the picker for `/switch`; the company
       // has neither dashboard, so both open the one catalog picker.
@@ -163,8 +165,34 @@ export function PromptComposer({ client }: PromptComposerProps) {
     setNotice(outcome.ok ? null : (outcome.message ?? outcome.errorCode ?? 'Chưa gửi được.'));
   };
 
+  /**
+   * Every other OMP command runs in the selected session itself. The bridge
+   * hands prompts to OMP with command handling off, so `/compact` sent as a
+   * prompt would be text for the model; typed into the session's terminal it is
+   * the command, exactly as in OMP.
+   */
+  const runSessionCommand = (): boolean => {
+    if (selectedSession === null) {
+      setNotice('Chọn một phiên (bấm thẻ hoặc nút Phiên) để chạy lệnh này trong omp của phiên đó.');
+      return true;
+    }
+    const outcome = client.writeTerminal(
+      selectedSession.id,
+      selectedSession.runEpoch,
+      `${draft.text.trim()}\r`,
+    );
+    if (!outcome.ok) {
+      setNotice('Terminal của phiên chưa mở; mở tab Bảng điều khiển của phiên rồi gửi lại.');
+      return true;
+    }
+    setNotice(`Đã chạy ${draft.text.trim().split(/\s/)[0]} trong ${selectedSession.code}.`);
+    client.setDraftText('');
+    return true;
+  };
+
   const onSubmitKey = () => {
     if (resolved !== null && runModelCommand(resolved.command, resolved.parsed.args)) return;
+    if (resolved !== null && runSessionCommand()) return;
     const steering =
       selectedSession !== null && BUSY_STATUSES.includes(selectedSession.status)
         ? 'steer'

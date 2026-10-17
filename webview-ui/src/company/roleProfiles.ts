@@ -47,16 +47,24 @@ export function roleProfile(state: CompanyViewState, role: CompanyRole): RolePro
 }
 
 /**
- * The profile map with one role pointed at a new model. Unknown roles keep the
- * profile they already had rather than being rebuilt from defaults the client
- * does not know.
+ * The profile map with one role pointed at a new model, and optionally a new
+ * thinking level. Unknown roles keep the profile they already had rather than
+ * being rebuilt from defaults the client does not know.
  */
 export function withRoleModel(
   profiles: Record<string, RoleProfile>,
   role: CompanyRole,
   modelId: string,
+  thinking?: string,
 ): Record<string, RoleProfile> {
   const existing = profiles[role];
   if (!existing) return profiles;
-  return { ...profiles, [role]: { ...existing, requestedModel: modelId } };
+  return {
+    ...profiles,
+    [role]: {
+      ...existing,
+      requestedModel: modelId,
+      ...(thinking === undefined ? {} : { thinking }),
+    },
+  };
 }

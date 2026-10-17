@@ -220,6 +220,39 @@ describe('Company Contract draft creation', () => {
     expect(nextContract.tasks[0]?.code).toBe('PA-T0002');
     expect(next.counters).toEqual({ session: 0, task: 2, contract: 1 });
   });
+
+  it('revises the same Contract when the Director resubmits for the same prompt', () => {
+    // Seen live: after an Advisor asked for changes, the Director resubmitted and
+    // a second Contract appeared, which the next Advisor could not even address.
+    const first = submitPrompt();
+    const draft = proposal(first.prompt);
+    const created = createContractDraft(first.state, {
+      promptId: first.prompt.id,
+      proposal: draft.value,
+      verificationProfiles: draft.verificationProfiles,
+      now: NOW,
+      newEvent: { id: 'draft-event-1' },
+    });
+    const withDraft = applyCompanyEvent(first.state, created.events[0]!);
+    const contract = Object.values(withDraft.contracts)[0]!;
+
+    // Same requirement ids are allowed: the revised draft replaces the old one.
+    const resubmitted = createContractDraft(withDraft, {
+      promptId: first.prompt.id,
+      proposal: { ...draft.value, title: 'Team standings, revised' },
+      verificationProfiles: draft.verificationProfiles,
+      now: NOW,
+      newEvent: { id: 'draft-event-2' },
+    });
+    const next = applyCompanyEvent(withDraft, resubmitted.events[0]!);
+
+    expect(Object.keys(next.contracts)).toEqual([contract.id]);
+    expect(next.contracts[contract.id]).toMatchObject({
+      code: contract.code,
+      revision: 2,
+      title: 'Team standings, revised',
+    });
+  });
   it('rejects a draft revision with an unknown persisted task status', () => {
     const first = submitPrompt();
     const firstDraft = proposal(first.prompt);

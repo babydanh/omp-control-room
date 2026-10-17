@@ -639,18 +639,30 @@ describe('omp bridge', () => {
     expect(pi.userMessages[0].content).toBe(text);
   });
 
-  it('passes the requested delivery mode to the native queue semantics', async () => {
+  it('queues a follow-up behind a streaming turn', async () => {
+    const handle = startBridge();
+    const pi = loadExtension(handle);
+    await handle.ready;
+    await pi.emit('session_start', { type: 'session_start' }, makeContext({ isIdle: () => false }));
+
+    await handle.sendPrompt({ requestId: 'p-2', text: 'also answer this', delivery: 'follow_up' });
+    await waitFor(() => pi.userMessages.length === 1, 'the delivered prompt');
+    expect(pi.userMessages[0].options).toEqual({ deliverAs: 'followUp' });
+  });
+
+  it('starts a turn for a follow-up to an idle session instead of queueing it unread', async () => {
+    // OMP 18.11 queues an explicit followUp without starting a turn, even idle;
+    // an answered question sent that way was never read by the model.
     const handle = startBridge();
     const pi = await startExtension(handle);
-    await handle.ready;
 
     await handle.sendPrompt({
-      requestId: 'p-2',
-      text: 'also answer this',
+      requestId: 'p-idle',
+      text: 'the user answered',
       delivery: 'follow_up',
     });
     await waitFor(() => pi.userMessages.length === 1, 'the delivered prompt');
-    expect(pi.userMessages[0].options).toEqual({ deliverAs: 'followUp' });
+    expect(pi.userMessages[0].options).toBeUndefined();
   });
 
   it('refuses to send a prompt when the extension is gone', async () => {
@@ -2191,7 +2203,7 @@ describe('omp bridge', () => {
     ]);
   });
 
-  it('reports a busy session as not quiescent while a native job runs', async () => {
+  it('reports an idle session as not quiescent while a native job runs', async () => {
     const handle = startBridge();
     const pi = await startExtension(handle);
     await handle.ready;
@@ -2200,7 +2212,7 @@ describe('omp bridge', () => {
       'agent_end',
       { type: 'agent_end', messages: [] },
       makeContext({
-        isIdle: () => false,
+        isIdle: () => true,
         getAsyncJobSnapshot: () => ({ running: [{ id: 'job-1' }], recent: [], delivery: {} }),
       }),
     );
@@ -2209,6 +2221,29 @@ describe('omp bridge', () => {
       k: 'quiescent',
       idle: false,
     });
+  });
+
+  it('reports idle once the prompt that ran the turn has unwound', async () => {
+    // OMP delivers agent_end to extensions before its prompt unwinds, so the
+    // session still reads as streaming at that moment. Reporting then left every
+    // finished session "busy" and starved the Judge of a slot.
+    const handle = startBridge();
+    const pi = await startExtension(handle);
+    await handle.ready;
+    let streaming = true;
+
+    await pi.emit(
+      'agent_end',
+      { type: 'agent_end', messages: [] },
+      makeContext({ isIdle: () => !streaming }),
+    );
+    expect(events.some((event) => event.k === 'quiescent')).toBe(false);
+    streaming = false;
+
+    await waitFor(() => events.some((event) => event.k === 'quiescent'), 'the quiescent report');
+    expect(events.filter((event) => event.k === 'quiescent')).toEqual([
+      { k: 'quiescent', idle: true },
+    ]);
   });
 
   it('bounds one streamed delta into several ordered frames', async () => {

@@ -17,7 +17,7 @@
  * because status is the server's to change.
  */
 
-import type { BoardCard, BoardFlow, BoardLane } from '../boardView.js';
+import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { taskStatusLabel } from '../statusLabels.js';
@@ -25,7 +25,33 @@ import { taskStatusLabel } from '../statusLabels.js';
 export interface CompanyBoardProps {
   lanes: readonly BoardLane[];
   flow: BoardFlow;
+  /** Prompts a Director is still planning; shown in the planned lane. */
+  planning: readonly PlanningPrompt[];
   onSelectTask: (taskId: string) => void;
+  onSelectSession: (sessionId: string) => void;
+}
+
+function PlanningCard({ prompt, onSelect }: { prompt: PlanningPrompt; onSelect: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      disabled={prompt.session === null}
+      data-testid="planning-card"
+      className={`w-full cursor-pointer border-2 border-l-4 border-dashed border-border bg-bg-dark p-2 text-left hover:border-accent ${ROLE_EDGE_CLASS.director}`}
+    >
+      <span className="block text-sm text-text">{prompt.preview}</span>
+      <span className="mt-1 block text-2xs uppercase tracking-wide text-text-muted">
+        Giám đốc đang lập kế hoạch
+      </span>
+      {prompt.session && (
+        <span className="mt-1 block text-2xs text-text-muted">
+          {prompt.session.code} &middot;{' '}
+          {prompt.session.effectiveModel ?? prompt.session.requestedModel}
+        </span>
+      )}
+    </button>
+  );
 }
 
 function FlowStrip({ flow }: { flow: BoardFlow }) {
@@ -122,29 +148,49 @@ function TaskCard({ card, onSelect }: { card: BoardCard; onSelect: () => void })
   );
 }
 
-export function CompanyBoard({ lanes, flow, onSelectTask }: CompanyBoardProps) {
+export function CompanyBoard({
+  lanes,
+  flow,
+  planning,
+  onSelectTask,
+  onSelectSession,
+}: CompanyBoardProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="company-board">
       <FlowStrip flow={flow} />
       <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto p-2">
-        {lanes.map((lane) => (
-          <section
-            key={lane.id}
-            aria-label={lane.label}
-            data-testid={`company-lane-${lane.id}`}
-            className="flex min-w-48 flex-1 flex-col gap-2 overflow-y-auto border-2 border-border bg-bg p-2"
-          >
-            <h3 className="text-xs uppercase tracking-wide text-text-muted">
-              {lane.label} ({lane.cards.length})
-            </h3>
-            {lane.cards.length === 0 && (
-              <p className="text-2xs text-text-muted">Không có gì ở đây.</p>
-            )}
-            {lane.cards.map((card) => (
-              <TaskCard key={card.taskId} card={card} onSelect={() => onSelectTask(card.taskId)} />
-            ))}
-          </section>
-        ))}
+        {lanes.map((lane) => {
+          const drafts = lane.id === 'planned' ? planning : [];
+          return (
+            <section
+              key={lane.id}
+              aria-label={lane.label}
+              data-testid={`company-lane-${lane.id}`}
+              className="flex min-w-48 flex-1 flex-col gap-2 overflow-y-auto border-2 border-border bg-bg p-2"
+            >
+              <h3 className="text-xs uppercase tracking-wide text-text-muted">
+                {lane.label} ({lane.cards.length + drafts.length})
+              </h3>
+              {lane.cards.length + drafts.length === 0 && (
+                <p className="text-2xs text-text-muted">Không có gì ở đây.</p>
+              )}
+              {drafts.map((prompt) => (
+                <PlanningCard
+                  key={prompt.promptId}
+                  prompt={prompt}
+                  onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
+                />
+              ))}
+              {lane.cards.map((card) => (
+                <TaskCard
+                  key={card.taskId}
+                  card={card}
+                  onSelect={() => onSelectTask(card.taskId)}
+                />
+              ))}
+            </section>
+          );
+        })}
       </div>
     </div>
   );

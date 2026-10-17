@@ -178,6 +178,35 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
   }));
 }
 
+/** A prompt a Director is still turning into a Contract. */
+export interface PlanningPrompt {
+  promptId: string;
+  preview: string;
+  session: BoardCardSession | null;
+}
+
+/**
+ * Prompts the board must show before any task exists: sent to a Director and
+ * not yet part of a Contract. Without these a prompt vanished from the board
+ * for the minutes the Director spent planning it.
+ */
+export function planningPrompts(state: CompanyViewState): PlanningPrompt[] {
+  const planned = new Set(Object.values(state.contracts).flatMap((contract) => contract.promptIds));
+  return state.prompts
+    .filter((prompt) => !planned.has(prompt.id))
+    .filter((prompt) => {
+      const session = prompt.targetSessionId ? state.sessions[prompt.targetSessionId] : undefined;
+      return session?.role === 'director';
+    })
+    .map((prompt) => ({
+      promptId: prompt.id,
+      preview: prompt.preview,
+      session: cardSession(
+        prompt.targetSessionId ? state.sessions[prompt.targetSessionId] : undefined,
+      ),
+    }));
+}
+
 /** Why a card is not moving. Null when nothing is holding it. */
 export type WaitReason = 'awaiting_answer' | 'blocked_by_dependencies' | 'paused' | 'queued' | null;
 

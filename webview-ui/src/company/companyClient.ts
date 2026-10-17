@@ -242,7 +242,7 @@ export class CompanyClient {
     const blocker = promptBlockReason(this.state.prompt);
     if (blocker !== null) return { ok: false, errorCode: 'prompt_invalid', message: blocker };
     const requestId = commands.newRequestId();
-    const plan = planSubmit(this.state.prompt, requestId);
+    const plan = planSubmit(this.state.prompt, requestId, this.state.selection.sessionId);
     const outcome = this.send(commands.promptSubmit(plan.input));
     // The draft keeps its text either way: the server clears it on an `ok`
     // result, and a refusal leaves the user looking at what they wrote.

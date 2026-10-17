@@ -183,6 +183,28 @@ describe('WorkspaceCompanyCoordinator', () => {
     });
     await store.commit(seed);
     state = applyCompanyEvent(state, seed);
+    // The workspace's discovered check: the only thing that can prove a task done.
+    const profiles = event(state, {
+      entity: 'settings',
+      op: 'put',
+      id: 'settings',
+      value: {
+        ...state.settings,
+        verificationProfiles: {
+          test: {
+            id: 'test',
+            criterionIds: [],
+            commands: [
+              { id: 'test:test', executable: 'npm', argv: ['test'], cwd: '.', timeoutSeconds: 600 },
+            ],
+            prerequisites: [],
+            outputScopes: [],
+          },
+        },
+      },
+    });
+    await store.commit(profiles);
+    state = applyCompanyEvent(state, profiles);
     const coordinator = new WorkspaceCompanyCoordinator({
       store,
       state,
@@ -245,11 +267,12 @@ describe('WorkspaceCompanyCoordinator', () => {
         {
           id: criterionId,
           requirementIds: [requirementId],
-          description: 'The result view behavior is reviewed.',
-          kind: 'review',
+          description: 'The result view tests pass.',
+          kind: 'command',
           required: true,
         },
       ],
+      verificationProfiles: { [criterionId]: { profileId: 'test' } },
     };
 
     await coordinator.submitContractDraft({

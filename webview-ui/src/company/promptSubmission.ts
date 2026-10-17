@@ -43,9 +43,15 @@ export interface SubmitPlan {
 
 /**
  * Build the message to send and mark the draft in flight. The text stays in the
- * draft until the result says otherwise.
+ * draft until the result says otherwise. A selected session is the target: the
+ * prompt goes to that OMP session the way typing into it would, and steering or
+ * a follow-up is refused by the server without one.
  */
-export function planSubmit(state: PromptDraftState, requestId: string): SubmitPlan {
+export function planSubmit(
+  state: PromptDraftState,
+  requestId: string,
+  targetSessionId: string | null = null,
+): SubmitPlan {
   const text = state.text;
   return {
     state: {
@@ -57,6 +63,7 @@ export function planSubmit(state: PromptDraftState, requestId: string): SubmitPl
       requestId,
       text,
       delivery: state.delivery,
+      ...(targetSessionId === null ? {} : { targetSessionId }),
     },
   };
 }

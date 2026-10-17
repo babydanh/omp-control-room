@@ -16,9 +16,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { boardFlow, buildBoardLanes } from '../boardView.js';
+import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
-import { pendingContract, selectionForTask } from '../selection.js';
+import { companyRoleLabel, withRoleModel } from '../roleProfiles.js';
+import { pendingContract, selectionForSession, selectionForTask } from '../selection.js';
 import { useCompanyState } from '../useCompanyState.js';
 import { AttentionBar } from './AttentionBar.js';
 import { type BoardPane, BoardTopBar } from './BoardTopBar.js';
@@ -35,6 +36,7 @@ export function BoardShell({ client }: BoardShellProps) {
   const state = useCompanyState(client);
   const [focus, setFocus] = useState<DetailFocus | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
+  const [roleNotice, setRoleNotice] = useState<string | null>(null);
 
   const lanes = useMemo(() => buildBoardLanes(state), [state]);
   const pendingQuestions = useMemo(
@@ -62,7 +64,28 @@ export function BoardShell({ client }: BoardShellProps) {
         pane={typeof focus === 'string' ? focus : null}
         onTogglePane={togglePane}
       />
-      <RoleStrip profiles={state.settings?.roleProfiles ?? {}} />
+      <RoleStrip
+        profiles={state.settings?.roleProfiles ?? {}}
+        catalog={state.modelCatalog}
+        onChange={(role, modelId, thinking) => {
+          const outcome = client.updateRoleProfiles(
+            withRoleModel(state.settings?.roleProfiles ?? {}, role, modelId, thinking),
+          );
+          setRoleNotice(
+            outcome.ok
+              ? `${companyRoleLabel(role)} sẽ dùng ${modelId}${thinking ? ` · ${thinking}` : ''} từ lượt tới.`
+              : (outcome.message ?? outcome.errorCode ?? 'Máy chủ từ chối đổi model.'),
+          );
+        }}
+      />
+      {roleNotice && (
+        <p
+          className="border-b-2 border-border px-3 py-1 text-2xs text-text-muted"
+          data-testid="role-notice"
+        >
+          {roleNotice}
+        </p>
+      )}
       {state.needsSnapshot && (
         <p className="border-b-2 border-warning px-3 py-1 text-2xs text-warning">
           Có thay đổi đã bị bỏ sót; đang chờ một bản chụp mới từ máy chủ.
@@ -78,6 +101,11 @@ export function BoardShell({ client }: BoardShellProps) {
         <CompanyBoard
           lanes={lanes}
           flow={boardFlow(lanes, state.settings?.maxWorkers ?? null)}
+          planning={planningPrompts(state)}
+          onSelectSession={(sessionId) => {
+            setFocus(null);
+            client.select(selectionForSession(state, sessionId));
+          }}
           onSelectTask={(taskId) => {
             setFocus(null);
             client.select(selectionForTask(state, taskId));

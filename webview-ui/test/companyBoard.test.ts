@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Task } from '../../core/src/company.js';
-import { boardFlow, buildBoardLanes, evidenceForTask } from '../src/company/boardView.js';
+import {
+  boardFlow,
+  buildBoardLanes,
+  evidenceForTask,
+  planningPrompts,
+} from '../src/company/boardView.js';
 import { COMPANY_LANE_ORDER } from '../src/company/constants.js';
 import { buildContractPlanView } from '../src/company/contractPlanView.js';
 import { buildQuestionAnswers, isQuestionAnswered } from '../src/company/questionAnswers.js';
@@ -25,6 +30,35 @@ describe('company board lanes', () => {
     const lanes = buildBoardLanes(stateFrom());
     expect(lanes.map((lane) => lane.id)).toEqual([...COMPANY_LANE_ORDER]);
     expect(lanes.every((lane) => lane.cards.length === 0)).toBe(true);
+  });
+
+  it('shows a prompt a Director is planning until a Contract takes it over', () => {
+    const director = session({ role: 'director' });
+    const worker = session({ code: 'PA-S0002', role: 'worker' });
+    const prompt = {
+      id: '11111111-1111-4111-8111-111111111111',
+      preview: 'Build the standings page',
+      createdAt: '2026-10-02T00:00:00.000Z',
+      attachments: [],
+      targetSessionId: director.id,
+    };
+    const followUp = {
+      ...prompt,
+      id: '22222222-2222-4222-8222-222222222222',
+      targetSessionId: worker.id,
+    };
+
+    const planning = stateFrom({ sessions: [director, worker], prompts: [prompt, followUp] });
+    expect(planningPrompts(planning).map((entry) => entry.preview)).toEqual([
+      'Build the standings page',
+    ]);
+
+    const planned = stateFrom({
+      sessions: [director, worker],
+      prompts: [prompt, followUp],
+      contracts: [contract({ promptIds: [prompt.id] })],
+    });
+    expect(planningPrompts(planned)).toEqual([]);
   });
 
   it('puts each task in the lane its status belongs to', () => {
@@ -71,9 +105,7 @@ describe('company board lanes', () => {
     const lanes = buildBoardLanes(
       stateFrom({ contracts: [plan], tasks: [first, second], sessions: [workstream] }),
     );
-    const card = lanes
-      .flatMap((lane) => lane.cards)
-      .find((entry) => entry.code === 'PA-T0002');
+    const card = lanes.flatMap((lane) => lane.cards).find((entry) => entry.code === 'PA-T0002');
 
     expect(card).toMatchObject({
       contractCode: 'PA-C0001',
@@ -124,11 +156,14 @@ describe('company board lanes', () => {
   });
 });
 
-
 describe('contract approval', () => {
   const requirementId = 'req-1';
   const buildPhase = phase();
-  const planned = task({ code: 'PA-T0001', phaseId: buildPhase.id, requirementIds: [requirementId] });
+  const planned = task({
+    code: 'PA-T0001',
+    phaseId: buildPhase.id,
+    requirementIds: [requirementId],
+  });
   const complete = contract({
     phases: [buildPhase],
     tasks: [planned],

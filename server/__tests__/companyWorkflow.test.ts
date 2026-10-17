@@ -275,6 +275,12 @@ describe('verification gate', () => {
     expect(verdict.passed).toBe(true);
     expect(verdict.criteria.find((entry) => entry.id === 'c3')?.passed).toBe(false);
   });
+
+  it('never passes a task held only to optional criteria, even with no evidence', () => {
+    const note = criterion({ id: 'c1', required: false });
+
+    expect(evaluateVerification([note], new Map(), []).passed).toBe(false);
+  });
 });
 
 describe('repair bound', () => {

@@ -334,7 +334,9 @@ export function evaluateVerification(
     criteria.some((criterion) => criterion.id === verdict.id && criterion.required),
   );
   return {
-    passed: requiredVerdicts.every((verdict) => verdict.passed),
+    // With no required criterion, `every` over nothing would read as a pass:
+    // done must be proven by at least one required command, never assumed.
+    passed: requiredVerdicts.length > 0 && requiredVerdicts.every((verdict) => verdict.passed),
     criteria: verdicts,
     issues,
   };

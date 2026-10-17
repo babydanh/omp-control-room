@@ -126,6 +126,33 @@ describe('the prompt draft survives a failure', () => {
   });
 });
 
+describe('the prompt goes where the board points', () => {
+  it('targets the selected session, so a follow-up is not refused for lack of one', () => {
+    const { client, sent } = connectedClient();
+    const sessionId = randomUUID();
+    client.select({ sessionId, taskId: null });
+    client.setDraftText('also cover the empty state');
+    client.setDraftDelivery('follow_up');
+
+    client.submitPrompt();
+
+    expect(sent.find((message) => message.type === 'companyPromptSubmit')).toMatchObject({
+      prompt: { delivery: 'follow_up', targetSessionId: sessionId },
+    });
+  });
+
+  it('sends new work to the Director when nothing is selected', () => {
+    const { client, sent } = connectedClient();
+    client.setDraftText('build the standings page');
+
+    client.submitPrompt();
+
+    const message = sent.find((entry) => entry.type === 'companyPromptSubmit');
+    expect(message).toBeDefined();
+    expect(JSON.stringify(message)).not.toContain('targetSessionId');
+  });
+});
+
 describe('the submit chord', () => {
   it('is Ctrl+Enter (or Cmd+Enter), never a bare Enter', () => {
     expect(isSubmitChord({ key: 'Enter', ctrlKey: true, metaKey: false })).toBe(true);

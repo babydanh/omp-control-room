@@ -67,6 +67,8 @@ const DEFAULT_CONNECT_RETRY_MS = 50;
 const TEXT_FRAME_BYTES = 16 * 1024;
 /** Coalescing window for streamed deltas; keeps token churn off the pipe. */
 const TEXT_FLUSH_MS = 80;
+/** How often a finished turn is re-checked until OMP's prompt has unwound. */
+const IDLE_RECHECK_MS = 50;
 /** Wire frames larger than this are not bridge frames and are not buffered. */
 const MAX_INBOUND_FRAME_BYTES = 1024 * 1024;
 
@@ -137,9 +139,11 @@ const CONTRACT_PROPOSAL_SHAPE = [
   '  "readScopes":[{"path":string,"kind":"file"|"directory","operations":["read"|"list"|"search"]}],',
   '  "writeScopes":[{"path":<workspace-relative>,"kind":"file"|"directory","operations":["create"|"modify"]}],',
   '  "sharedResources":[],"acceptance":[<criterion ids>],"executionMode":"session"|"inline"|"subagent","routeReason":string}],',
-  '"acceptance":[{"id":uuid,"requirementIds":[...],"description":string,"kind":"command"|"surface"|"review","required":true}],',
+  '"acceptance":[{"id":uuid,"requirementIds":[...],"description":string,"kind":"command"|"surface"|"review","required":boolean}],',
+  '  "done" is earned only from a command that exited 0: every task needs at least one required "command" criterion bound to a profile;',
+  '  "review"/"surface" criteria are notes for reviewers and must be required:false;',
   '"verificationProfiles":{<criterion id>:{"profileId":<a profile id listed in your instruction>}},',
-  '  only for "command" criteria; with no profile listed, use "review" or "surface" criteria instead;',
+  '  with no profile listed nothing can be proven: ask the user with company_ask_user to add a check (e.g. a package.json "test" script) instead of submitting;',
   '"assumptions":[string],"decisions":[string],"risks":[string]}',
 ].join('\n');
 
@@ -1114,8 +1118,14 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     }
     const content =
       images.length === 0 ? text : [{ type: 'text', text } satisfies OmpTextContent, ...images];
+    // OMP 18.11 queues an explicit `steer`/`followUp` WITHOUT starting a turn,
+    // even when the session is idle; only an omitted `deliverAs` starts one. A
+    // follow-up to an idle session (an answered question, Advisor findings sent
+    // back to the Director) would otherwise sit in the queue unread.
+    const idle = sessionContext.isIdle?.() === true;
+    const options = deliverAs && !idle ? { deliverAs } : undefined;
     try {
-      pi.sendUserMessage(content, deliverAs ? { deliverAs } : undefined);
+      pi.sendUserMessage(content, options);
     } catch (error) {
       // The error name only: a native message may quote the content it choked
       // on, and prompt text and image bytes stay in the pipe.
@@ -1885,10 +1895,41 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     return !running || running.length === 0;
   }
 
+  let idleRecheck: NodeJS.Timeout | undefined;
+
+  function stopIdleRecheck(): void {
+    clearTimeout(idleRecheck);
+    idleRecheck = undefined;
+  }
+
+  /**
+   * Report whether the session is quiescent once its turn has really ended.
+   * OMP hands `agent_end` to extensions while the prompt that ran the turn is
+   * still unwinding (agent-session.ts `#promptInFlightCount`), so `isIdle()` is
+   * still false at that moment. Reporting then said "busy" for every finished
+   * turn: no session ever went idle, none could be parked, and a queued Judge
+   * waited forever behind four "busy" slots. Look again until the prompt has
+   * unwound; a new turn or a shutdown cancels the wait.
+   */
+  function reportQuiescence(ctx: OmpContext): void {
+    stopIdleRecheck();
+    const unwinding =
+      ctx.isIdle !== undefined &&
+      !ctx.isIdle() &&
+      !(ctx.hasPendingMessages !== undefined && ctx.hasPendingMessages());
+    if (unwinding) {
+      idleRecheck = setTimeout(() => reportQuiescence(ctx), IDLE_RECHECK_MS);
+      idleRecheck.unref?.();
+      return;
+    }
+    sendEvent({ k: 'quiescent', idle: quiescent(ctx) });
+  }
+
   // ── Handlers ──────────────────────────────────────────────
 
   function registerHandlers(): void {
     pi.on('agent_start', (_event, ctx) => {
+      stopIdleRecheck();
       activeContext = ctx;
     });
     pi.on('tool_call', (event, ctx) => gateToolCall(event, ctx));
@@ -1907,6 +1948,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       for (const replay of heldUntilSessionStart.splice(0)) replay();
     });
     pi.on('session_shutdown', () => {
+      stopIdleRecheck();
       activeContext = undefined;
       sessionContext = undefined;
       // The disconnect below fails these on the host; nothing is left to answer.
@@ -1946,7 +1988,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     });
     pi.on('agent_end', (_event, ctx) => {
       flushText();
-      sendEvent({ k: 'quiescent', idle: quiescent(ctx) });
+      reportQuiescence(ctx);
       activeContext = undefined;
     });
   }

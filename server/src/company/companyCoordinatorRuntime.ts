@@ -1243,6 +1243,9 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
       preview: prompt.preview,
       createdAt: prompt.createdAt,
       attachments: structuredClone(prompt.attachments ?? []),
+      ...(prompt.targetSessionId === undefined
+        ? {}
+        : { targetSessionId: prompt.targetSessionId }),
     }));
     const sessions = Object.values(this.state.sessions).map((session) => ({
       id: session.id,

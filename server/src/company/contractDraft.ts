@@ -122,15 +122,25 @@ function assertUuidIds(proposal: ContractDraftProposal): void {
   }
 }
 
-function assertUniqueAgainstState(state: CompanyState, proposal: ContractDraftProposal): void {
+function assertUniqueAgainstState(
+  state: CompanyState,
+  proposal: ContractDraftProposal,
+  replaced: Contract | undefined,
+): void {
+  // The draft being revised is replaced whole in the same event, so its ids are
+  // free to reuse: a revision that keeps its requirement ids is the same plan.
   const used = new Set<string>();
   for (const contract of Object.values(state.contracts)) {
+    if (contract.id === replaced?.id) continue;
     for (const requirement of contract.requirements) used.add(requirement.id);
     for (const phase of contract.phases) used.add(phase.id);
     for (const task of contract.tasks) used.add(task.id);
     for (const criterion of contract.acceptance) used.add(criterion.id);
   }
-  for (const taskId of Object.keys(state.tasks)) used.add(taskId);
+  const replacedTasks = new Set(replaced?.tasks.map((task) => task.id) ?? []);
+  for (const taskId of Object.keys(state.tasks)) {
+    if (!replacedTasks.has(taskId)) used.add(taskId);
+  }
 
   const proposed = [
     ...proposal.requirements.map((entry) => entry.id),
@@ -279,8 +289,13 @@ export function createContractDraft(
   }
   assertUuidIds(input.proposal);
 
+  // A prompt names the Contract it revises, or it is planned for the first time.
+  // A Director that submits again for the same prompt -- after an Advisor asked
+  // for changes -- is revising that draft, not opening a second Contract.
   const existing =
-    prompt.targetContractId === undefined ? undefined : state.contracts[prompt.targetContractId];
+    prompt.targetContractId === undefined
+      ? Object.values(state.contracts).find((contract) => contract.promptIds.includes(prompt.id))
+      : state.contracts[prompt.targetContractId];
   if (prompt.targetContractId !== undefined && existing === undefined) {
     throw new CompanyError(
       'contract_not_found',
@@ -288,7 +303,7 @@ export function createContractDraft(
     );
   }
   if (existing) ensureDraftCanBeRevised(state, existing);
-  assertUniqueAgainstState(state, input.proposal);
+  assertUniqueAgainstState(state, input.proposal, existing);
 
   const contractId = existing?.id ?? randomUUID();
   const contractCode = existing?.code ?? formatCode('PA-C', state.counters.contract + 1);
