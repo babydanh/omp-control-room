@@ -87,16 +87,15 @@ export const COMPANY_OWNER_DESCRIPTOR_FILE = 'owner.json';
 
 /**
  * Company follows the host's OMP model roles instead of choosing its own, and
- * `hostModelRoles.ts` reads them live (`omp config get modelRoles --json`).
- * One model per role BREAKS the prompt cache: each role forms its own prefix, so
- * only sessions sharing a role ever hit. Using the host's plan model for
- * planning — `/plan` behaving exactly as it does in OMP — and the single
- * default model for every other role gives the board ONE cache entry instead of
- * five. Only the thinking level varies.
+ * `hostModelRoles.ts` reads them live (`omp config get modelRoles --json`):
+ * Director <- `plan`, Advisor <- `advisor`, Worker <- `task`, QA and Judge <-
+ * `default`, and any role the host has not set borrows `default`. Separate
+ * roles cost prompt-cache sharing between roles; that is the chosen trade.
  *
  * THE `COMPANY_DEFAULT_*` PAIR BELOW IS THE FALLBACK, NOT THE SOURCE. It applies
- * only when the host exposes no usable `plan`/`default` role (OMP absent, a CLI
- * without `config`, a timeout, an unreadable payload); `hostModelRoles.ts` falls
+ * only when the host exposes neither the role's own host role nor `default`
+ * (OMP absent, a CLI without `config`, a timeout, an unreadable payload);
+ * `hostModelRoles.ts` falls
  * back per slot and reports `source: 'host' | 'mixed' | 'fallback'` so a board
  * running on these values says so. They were transcribed from ONE machine's
  * `modelRoles` (`plan: openai-codex/gpt-6.1-sol:max`, `default:

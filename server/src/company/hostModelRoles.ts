@@ -5,16 +5,23 @@
  * machine is set to". OMP keeps that answer in its `modelRoles` config — a
  * record of role -> `provider/model[:effort]` selector, e.g.
  * `plan: openai-codex/gpt-6.1-sol:max`, `default: openai-codex/gpt-6-luna:xhigh`
- * — and Company consumes exactly two of those roles:
+ * — and each Company role reads the host role that matches its job
+ * ({@link COMPANY_HOST_ROLE_BY_ROLE}):
  *
- *  - `plan` becomes the **Director**, so the role that plans reasons exactly the
- *    way `/plan` reasons in the host session.
- *  - `default` becomes every other role, deliberately. One model per Company role
- *    would give the board five separate prompt prefixes; sharing the default
- *    model keeps it to one. OMP's other roles (`advisor`, `judge`, `smol`,
- *    `task`, ...) are reported as ignored rather than silently mapped — Company
- *    has one advisor and one judge with its own tools policy, and borrowing the
- *    host's `judge` model for the verifier would change what verification means.
+ *  - `plan` -> **Director**, so the role that plans reasons exactly the way
+ *    `/plan` reasons in the host session.
+ *  - `advisor` -> **Advisor**, the host's own read-only reviewer model.
+ *  - `task` -> **Worker**, the model the host hands delegated work to.
+ *  - `default` -> **QA** and **Judge**. The host's `judge` role is a one-shot
+ *    classifier, not an agent; borrowing it for the verifier would change what
+ *    verification means.
+ *
+ * A role the host has not set borrows `default`, and `hostRole` on the
+ * assignment says which host role actually answered. Separate roles mean
+ * separate prompt prefixes and fewer cache hits across roles; that is the
+ * user's chosen trade for running each role on the model they assigned it.
+ * Other host roles (`smol`, `slow`, `judge`, ...) are reported as ignored rather
+ * than silently mapped.
  *
  * Where the read comes from, and what it is NOT:
  *
@@ -68,11 +75,22 @@ import { defaultQuotaRunner, type QuotaRunner, type QuotaRunnerResult } from './
  */
 export const OMP_MODEL_ROLES_ARGV: readonly string[] = ['config', 'get', 'modelRoles', '--json'];
 
-/** The host role Company plans on. */
-export const COMPANY_HOST_PLANNING_ROLE = 'plan';
-
-/** The host role every non-planning Company role runs on. */
+/** The host role a Company role runs on when the host has nothing more specific. */
 export const COMPANY_HOST_DEFAULT_ROLE = 'default';
+
+/**
+ * The host role each Company role reads first. A role the host has not set
+ * borrows {@link COMPANY_HOST_DEFAULT_ROLE}. The host's own `judge` role is a
+ * one-shot classifier, not an agent that can verify work, so Company's Judge
+ * deliberately runs on `default` like QA.
+ */
+export const COMPANY_HOST_ROLE_BY_ROLE: Readonly<Record<CompanyRole, string>> = {
+  director: 'plan',
+  advisor: 'advisor',
+  worker: 'task',
+  qa: COMPANY_HOST_DEFAULT_ROLE,
+  judge: COMPANY_HOST_DEFAULT_ROLE,
+};
 
 /** Company roles, in the order the board is presented. */
 export const COMPANY_ROLES: readonly CompanyRole[] = [
@@ -103,7 +121,10 @@ export interface CompanyRoleModelAssignment {
   readonly model: string;
   /** Effort, kept out of `model` because the catalog reports it separately. */
   readonly thinking: string;
-  /** The host role this was taken from; null when it came from the fallback. */
+  /**
+   * The host role this was taken from -- the role's own, or `default` when the
+   * host has not set it. Null when it came from the fallback.
+   */
   readonly hostRole: string | null;
   /** False when `thinking` fell back because the host selector had no effort. */
   readonly thinkingFromHost: boolean;
@@ -111,14 +132,14 @@ export interface CompanyRoleModelAssignment {
 export interface CompanyModelResolution {
   readonly assignments: Readonly<Record<CompanyRole, CompanyRoleModelAssignment>>;
   /**
-   * `host` when both host roles resolved, `mixed` when only one did, and
-   * `fallback` when neither did. There is no fourth state: a role is either read
-   * from the host or taken from the documented fallback.
+   * `host` when every role resolved from the host, `mixed` when only some did,
+   * and `fallback` when none did. There is no fourth state: a role is either
+   * read from the host or taken from the documented fallback.
    */
   readonly source: 'host' | 'mixed' | 'fallback';
   /** Host roles Company deliberately does not map, sorted for stable display. */
   readonly ignoredHostRoles: readonly string[];
-  /** Why the fallback is in play; null when the host answered for both roles. */
+  /** Why the fallback is in play; null when the host answered for every role. */
   readonly diagnostic: string | null;
 }
 
@@ -213,28 +234,29 @@ export function resolveCompanyModelRoles(
   roles: Readonly<Record<string, HostRoleSelector>> | null | undefined,
 ): CompanyModelResolution {
   const host = roles ?? {};
-  const planning = host[COMPANY_HOST_PLANNING_ROLE];
   const shared = host[COMPANY_HOST_DEFAULT_ROLE];
 
   const assignments = {} as Record<CompanyRole, CompanyRoleModelAssignment>;
   for (const role of COMPANY_ROLES) {
-    const hostRole = role === 'director' ? COMPANY_HOST_PLANNING_ROLE : COMPANY_HOST_DEFAULT_ROLE;
-    const selector = role === 'director' ? planning : shared;
+    const ownRole = COMPANY_HOST_ROLE_BY_ROLE[role];
+    const own = host[ownRole];
+    const selector = own ?? shared;
     assignments[role] = {
       role,
       model: selector?.model ?? COMPANY_DEFAULT_MODELS[role],
       thinking: selector?.thinking ?? COMPANY_FALLBACK_ROLE_THINKING[role],
-      hostRole: selector === undefined ? null : hostRole,
-      thinkingFromHost: selector?.thinking !== null && selector !== undefined,
+      hostRole: own ? ownRole : shared ? COMPANY_HOST_DEFAULT_ROLE : null,
+      thinkingFromHost: selector !== undefined && selector.thinking !== null,
     };
   }
 
-  const fromHost = assignments.director.hostRole !== null ? 1 : 0;
+  const fromHost = COMPANY_ROLES.filter((role) => assignments[role].hostRole !== null).length;
   const source: CompanyModelResolution['source'] =
-    fromHost === 0 ? 'fallback' : assignments.worker.hostRole === null ? 'mixed' : 'host';
+    fromHost === 0 ? 'fallback' : fromHost === COMPANY_ROLES.length ? 'host' : 'mixed';
 
+  const mapped = new Set(Object.values(COMPANY_HOST_ROLE_BY_ROLE));
   const ignoredHostRoles = Object.keys(host)
-    .filter((name) => name !== COMPANY_HOST_PLANNING_ROLE && name !== COMPANY_HOST_DEFAULT_ROLE)
+    .filter((name) => !mapped.has(name))
     .sort();
 
   return {
@@ -300,6 +322,6 @@ export async function readCompanyModelRoles(
   }
   return {
     ...resolution,
-    diagnostic: 'the host OMP reported no usable plan/default model roles',
+    diagnostic: 'the host OMP reported no usable plan/advisor/task/default model roles',
   };
 }
