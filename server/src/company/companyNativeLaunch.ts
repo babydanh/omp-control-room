@@ -43,6 +43,9 @@ const SCRIPT_EXTENSIONS: Readonly<Record<string, true>> = {
  */
 const OMP_PACKAGE = '@oh-my-pi/pi-coding-agent';
 
+/** The command name the published package maps in its `bin` field. */
+const OMP_COMMAND = 'omp';
+
 export interface NativeLaunchInput {
   /** Explicit override; validated, never re-resolved. */
   readonly runnerCommand?: OmpRunnerCommand;
@@ -88,18 +91,21 @@ function isReadableFile(candidate: string): boolean {
  *
  * The published CLI is a Bun script, so this host's own Node cannot run it, and
  * an Electron host is never a runtime at all. Bun is located the same way a
- * shell would: on PATH, or beside the shim that launches it. When Bun is absent
- * the caller is told so; the entry point is never run under a runtime that
- * cannot honour it.
+ * shell would: `BUN`, beside this runtime, then every PATH directory. The
+ * answer is an ABSOLUTE path whenever one exists: the PTY helper spawns
+ * through node-pty, which on Windows does not search PATH and fails a bare
+ * `bun` with "File not found".
  */
 function bunRuntime(): string {
   const configured = process.env.BUN;
   if (configured && isReadableFile(configured)) return configured;
+  const executable = process.platform === 'win32' ? 'bun.exe' : 'bun';
   const execDir = path.dirname(process.execPath);
-  for (const candidate of [
-    path.join(execDir, process.platform === 'win32' ? 'bun.exe' : 'bun'),
-    path.join(execDir, '..', 'bun.exe'),
-  ]) {
+  const pathDirs = (process.env.PATH ?? process.env.Path ?? '')
+    .split(path.delimiter)
+    .filter((dir) => dir.trim() !== '');
+  for (const dir of [execDir, path.join(execDir, '..'), ...pathDirs]) {
+    const candidate = path.join(dir, executable);
     if (isReadableFile(candidate)) return candidate;
   }
   return 'bun';
@@ -131,7 +137,11 @@ function candidatePackageRoots(distDir: string): string[] {
   return roots;
 }
 
-/** The file a package's `bin` field names, or undefined when it names none. */
+/**
+ * The file a package's `bin` field names, or undefined when it names none. The
+ * published package maps its `omp` command (`{ "omp": "dist/cli.js" }`); a map
+ * keyed by the package name is accepted too.
+ */
 function binEntry(packageRoot: string): string | undefined {
   let manifest: unknown;
   try {
@@ -142,8 +152,9 @@ function binEntry(packageRoot: string): string | undefined {
   if (manifest === null || typeof manifest !== 'object' || !('bin' in manifest)) return undefined;
   const bin = manifest.bin;
   if (typeof bin === 'string') return path.resolve(packageRoot, bin);
-  if (bin !== null && typeof bin === 'object' && OMP_PACKAGE in bin) {
-    const named = bin[OMP_PACKAGE];
+  if (bin === null || typeof bin !== 'object') return undefined;
+  for (const key of [OMP_COMMAND, OMP_PACKAGE]) {
+    const named: unknown = (bin as Record<string, unknown>)[key];
     if (typeof named === 'string') return path.resolve(packageRoot, named);
   }
   return undefined;

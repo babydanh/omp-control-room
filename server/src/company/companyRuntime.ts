@@ -810,9 +810,29 @@ class NativeCompanyRuntime implements CompanyRuntime {
       .join('\n');
     const brief = this.composePromptText(
       session,
-      `Plan the Contract for prompt ${prompt.id}. Classify every fragment below exactly once.\n\n${rows}`,
+      `Plan the Contract for prompt ${prompt.id}. Classify every fragment below exactly once.\n\n${rows}\n\n${this.verificationProfileList()}`,
     );
     return `${brief}\n--- user prompt ${prompt.id} (verbatim) ---\n${text}\n`;
+  }
+
+  /**
+   * The checks a "command" criterion may bind to, as the Director must name them.
+   * Only profiles discovered in this workspace are listed: a binding to anything
+   * else is dropped by the coordinator, so naming one here would be a promise
+   * the Contract cannot keep.
+   */
+  private verificationProfileList(): string {
+    const discovered = Object.values(this.state().settings.verificationProfiles).filter(
+      (profile) => profile.criterionIds.length === 0,
+    );
+    if (discovered.length === 0) {
+      return 'Verification profiles: none were discovered in this workspace, so no criterion can be a "command" criterion; use "review" or "surface".';
+    }
+    const lines = discovered.map(
+      (profile) =>
+        `- ${profile.id}: ${profile.commands.map((command) => [command.executable, ...command.argv].join(' ')).join('; ')}`,
+    );
+    return `Verification profiles a "command" criterion may bind to (by profileId):\n${lines.join('\n')}`;
   }
 
   private contractForSession(state: CompanyState, session: CompanySession): Contract | undefined {
@@ -2192,7 +2212,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
           id: 'approve',
           question: reason,
           options: [
-            { label: 'Duyệt một lần', description: 'Cho phép đúng lệnh gọi này trong đúng lần chạy này.' },
+            {
+              label: 'Duyệt một lần',
+              description: 'Cho phép đúng lệnh gọi này trong đúng lần chạy này.',
+            },
             { label: 'Từ chối', description: 'Từ chối đúng lệnh gọi này.' },
           ],
         },

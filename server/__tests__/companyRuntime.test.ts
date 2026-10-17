@@ -283,6 +283,7 @@ describe('company runtime effects', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     fs.rmSync(WORKSPACE, { recursive: true, force: true });
   });
 
@@ -299,6 +300,10 @@ describe('company runtime effects', () => {
   });
 
   it('reports a missing native prerequisite instead of substituting anything', async () => {
+    // The machine running the suite may have OMP installed globally; point every
+    // lookup root at the empty workspace so "not installed" is what is tested.
+    vi.stubEnv('APPDATA', WORKSPACE);
+    vi.stubEnv('OMP_CLI_ENTRY', '');
     const store = await CompanyStore.open(WORKSPACE);
     const state = await store.load();
     const usageLedger = new UsageLedger();

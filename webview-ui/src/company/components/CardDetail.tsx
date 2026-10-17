@@ -35,6 +35,8 @@ export interface CardDetailProps {
   onOpenArtifact: (artifactId: string) => void;
   onClearArtifact: () => void;
   onClose: () => void;
+  /** Drop the explicit focus so the pane shows the shared selection. */
+  onShowSelection: () => void;
 }
 
 function Pane({
@@ -62,7 +64,11 @@ function Pane({
   );
 }
 
-function SessionList({ client, state }: { client: CompanyClient; state: CompanyViewState }) {
+function SessionList({
+  client,
+  state,
+  onShowSelection,
+}: Pick<CardDetailProps, 'client' | 'state' | 'onShowSelection'>) {
   const sessions = Object.values(state.sessions);
   if (sessions.length === 0)
     return <p className="p-3 text-2xs text-text-muted">Chưa có phiên nào.</p>;
@@ -73,7 +79,10 @@ function SessionList({ client, state }: { client: CompanyClient; state: CompanyV
           <button
             type="button"
             className="w-full cursor-pointer border-2 border-border bg-bg-dark p-2 text-left text-2xs hover:border-accent"
-            onClick={() => client.select(selectionForSession(state, entry.id))}
+            onClick={() => {
+              client.select(selectionForSession(state, entry.id));
+              onShowSelection();
+            }}
           >
             {entry.code} · {companyRoleLabel(entry.role)} · {sessionStatusLabel(entry.status)} ·{' '}
             {entry.effectiveModel ?? entry.requestedModel}
@@ -104,7 +113,8 @@ function TaskFacts({ card }: { card: BoardCard }) {
   );
 }
 
-function FocusedContent({ client, state, focus, artifactId, onClearArtifact }: CardDetailProps) {
+function FocusedContent(props: CardDetailProps) {
+  const { client, state, focus, artifactId, onClearArtifact } = props;
   if (focus === 'files') {
     return (
       <WorkspaceFileBrowser
@@ -115,7 +125,7 @@ function FocusedContent({ client, state, focus, artifactId, onClearArtifact }: C
       />
     );
   }
-  if (focus === 'sessions') return <SessionList client={client} state={state} />;
+  if (focus === 'sessions') return <SessionList {...props} />;
   if (focus?.kind === 'question') {
     const question = state.questions[focus.id];
     if (!question || question.status !== 'pending') {

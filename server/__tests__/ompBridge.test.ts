@@ -46,6 +46,8 @@ interface FakeTool {
   label: string;
   description: string;
   parameters: unknown;
+  loadMode?: string;
+  approval?: string;
   execute(
     toolCallId: string,
     params: unknown,
@@ -408,8 +410,10 @@ async function startFakeHost(): Promise<FakeHost> {
     },
   };
   // The extension reads its endpoint at load time, so wait for the handshake
-  // before a case pushes frames at it.
+  // before a case pushes frames at it; then start the session the way OMP does
+  // once its extensions are loaded.
   await host.waitFor((frame) => frame['t'] === 'hello');
+  await pi.emit('session_start', { type: 'session_start' });
   return host;
 }
 
@@ -601,6 +605,25 @@ describe('omp bridge', () => {
 
     expect(pi.userMessages[0].content).toBe('Draft the contract for the sprint.');
     expect(pi.userMessages[0].options).toBeUndefined();
+  });
+
+  it('holds a prompt that arrives before the session starts and delivers it after', async () => {
+    // OMP binds sendUserMessage only just before session_start; a call before
+    // that throws ExtensionRuntimeNotInitializedError and the prompt is lost.
+    const handle = startBridge();
+    const pi = loadExtension(handle, 'director');
+    await handle.ready;
+
+    const sent = handle.sendPrompt({ requestId: 'p-early', text: 'Plan the sprint.' });
+    // Frames are handled in socket order: once the abort has an answer, the
+    // prompt ahead of it has been handled too.
+    await handle.abort().catch(() => undefined);
+    expect(pi.userMessages).toHaveLength(0);
+
+    await pi.emit('session_start', { type: 'session_start' });
+    await sent;
+
+    expect(pi.userMessages.map((message) => message.content)).toEqual(['Plan the sprint.']);
   });
 
   it('reassembles a prompt larger than one frame', async () => {
@@ -1606,6 +1629,42 @@ describe('omp bridge', () => {
       'company_task_result',
       'company_verify',
     ]);
+  });
+
+  it('registers company tools so OMP neither hides them nor stops on its own dialog', async () => {
+    // OMP 18.11 mounts "discoverable" extension tools behind `write(xd://…)`,
+    // which the gate refuses; and a tool with no tier is "exec", which
+    // `--approval-mode write` stops on in a terminal nobody watches. The host
+    // gate still decides every call.
+    const handle = startBridge();
+    const pi = await startExtension(handle);
+
+    const tools = [...pi.tools.values()];
+    expect(tools.filter((tool) => tool.loadMode !== 'essential')).toEqual([]);
+    expect(tools.filter((tool) => tool.approval !== 'read' && tool.approval !== 'write')).toEqual(
+      [],
+    );
+  });
+
+  it('tells the model the payload each company tool takes', async () => {
+    // An open `record` schema gave a real Director nothing to go on: it put the
+    // Contract fields at the top level, then sent `contract` as a JSON string.
+    const handle = startBridge();
+    const pi = await startExtension(handle);
+
+    const shapes = Object.fromEntries(
+      [...pi.tools.values()]
+        .filter((tool) => tool.name.startsWith('company_'))
+        .map((tool) => {
+          const schema = tool.parameters as { kind: string; shape?: Record<string, unknown> };
+          return [tool.name, schema.kind === 'object' ? Object.keys(schema.shape ?? {}) : null];
+        }),
+    );
+
+    expect(shapes['company_submit_contract']).toEqual(['contract']);
+    expect(Object.entries(shapes).filter(([, keys]) => keys === null || keys.length === 0)).toEqual(
+      [],
+    );
   });
 
   it('offers each company tool to the role that owns it', async () => {

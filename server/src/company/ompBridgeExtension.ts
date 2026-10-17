@@ -118,9 +118,30 @@ interface OmpContext {
  * answer; this side refuses to build anything larger so an oversized catalog is
  * a reported refusal instead of a dropped frame.
  */
-const CATALOG_MAX_MODELS = 512;
+const CATALOG_MAX_MODELS = 2048;
 /** Serialized ceiling for one answer; below the 256 KiB bridge frame cap. */
 const CATALOG_MAX_BYTES = 192 * 1024;
+
+/**
+ * The Contract a Director submits, written for the model that has to author it.
+ * It mirrors what `normalizeContractProposal` and the contract validator in the
+ * host check, so a first submission can be right instead of found by refusal.
+ */
+const CONTRACT_PROPOSAL_SHAPE = [
+  'A JSON OBJECT (not a string). Every id you create is a fresh UUID; reference ids exactly.',
+  '{"title":string,"summary":string,',
+  '"requirements":[{"id":uuid,"promptId":<prompt id from your instruction>,"fragmentIds":[<fragment ids>],"text":string,"kind":"goal"|"constraint"|"context","status":"open"}],',
+  "  every fragment listed in your instruction must appear in exactly one requirement's fragmentIds;",
+  '"phases":[{"id":uuid,"title":string,"ordinal":0,"taskIds":[],"acceptanceIds":[<criterion ids>]}],',
+  '"tasks":[{"id":uuid,"phaseId":<phase id>,"title":string,"requirementIds":[...],"dependsOn":[<task ids>],"workstreamId":string,',
+  '  "readScopes":[{"path":string,"kind":"file"|"directory","operations":["read"|"list"|"search"]}],',
+  '  "writeScopes":[{"path":<workspace-relative>,"kind":"file"|"directory","operations":["create"|"modify"]}],',
+  '  "sharedResources":[],"acceptance":[<criterion ids>],"executionMode":"session"|"inline"|"subagent","routeReason":string}],',
+  '"acceptance":[{"id":uuid,"requirementIds":[...],"description":string,"kind":"command"|"surface"|"review","required":true}],',
+  '"verificationProfiles":{<criterion id>:{"profileId":<a profile id listed in your instruction>}},',
+  '  only for "command" criteria; with no profile listed, use "review" or "surface" criteria instead;',
+  '"assumptions":[string],"decisions":[string],"risks":[string]}',
+].join('\n');
 
 /**
  * The subset of an OMP `Model` the catalog projects. Everything else on the
@@ -292,6 +313,20 @@ interface OmpToolDefinition {
   label: string;
   description: string;
   parameters: unknown;
+  /**
+   * OMP 18.11 presents extension tools as `xd://` devices by default
+   * ("discoverable"), reached through the built-in `write` tool. The tool gate
+   * then sees `write`, not the company tool, and refuses it as an effect.
+   * `"essential"` keeps a tool a top-level call the gate can name.
+   */
+  loadMode?: 'essential' | 'discoverable';
+  /**
+   * OMP's own approval tier; omitted means `"exec"`. Company runs pass
+   * `--approval-mode write`, so an `"exec"` tool stops on an approval dialog in
+   * a terminal nobody is watching. Company tools only record company state and
+   * every call still passes the host's tool gate, so they declare `"write"`.
+   */
+  approval?: 'read' | 'write' | 'exec';
   execute(
     toolCallId: string,
     params: unknown,
@@ -317,7 +352,7 @@ interface OmpImageContent {
  * registered tool's `parameters` must be.
  */
 interface OmpSchema {
-  describe(description: string): unknown;
+  describe(description: string): OmpSchema;
   optional(): OmpSchema;
   min(bound: number): OmpSchema;
 }
@@ -476,6 +511,16 @@ export default function ompBridgeExtension(pi: OmpApi): void {
    * turns — a catalog request must be answerable while the session is idle.
    */
   let sessionContext: OmpContext | undefined;
+  /**
+   * Host requests that arrived before `session_start`, replayed in order once
+   * it fires. The bridge connects while OMP is still loading extensions; OMP
+   * binds the extension runtime (`sendUserMessage` throws
+   * ExtensionRuntimeNotInitializedError until then) and only afterwards emits
+   * `session_start`. The host's first prompt and catalog read can land in that
+   * gap, so they are held, not refused: the host bounds each with its own
+   * deadline.
+   */
+  const heldUntilSessionStart: (() => void)[] = [];
 
   // ── Reporting ─────────────────────────────────────────────
 
@@ -719,6 +764,10 @@ export default function ompBridgeExtension(pi: OmpApi): void {
         ok: false,
         error: { code: 'omp_bridge_disconnected', message: 'the company bridge is closed' },
       });
+      return;
+    }
+    if (sessionContext === undefined) {
+      heldUntilSessionStart.push(() => answerModelCatalog(frame));
       return;
     }
     const answer = buildCatalogAnswer(sessionContext);
@@ -1059,6 +1108,10 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     images: readonly OmpImageContent[],
     deliverAs: string | undefined,
   ): void {
+    if (sessionContext === undefined) {
+      heldUntilSessionStart.push(() => deliverPrompt(id, text, images, deliverAs));
+      return;
+    }
     const content =
       images.length === 0 ? text : [{ type: 'text', text } satisfies OmpTextContent, ...images];
     try {
@@ -1158,7 +1211,24 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     /** Role allowed to call it, or `'*'` for every role. */
     readonly role: string;
     readonly description: string;
+    /**
+     * The payload the runtime handler accepts, so the model sees the fields it
+     * must send. Nested records stay open (`record(unknown)`) and are described
+     * in prose: the runtime validates them, and a schema that strips an unknown
+     * nested key would hide the mistake the runtime reports.
+     */
+    readonly parameters: (z: OmpZod) => OmpSchema;
   }
+
+  const reviewerResult = (z: OmpZod): OmpSchema =>
+    z.object({
+      taskId: z.string().describe('The task id named in your instruction.'),
+      attemptId: z.string().describe('The attempt id named in your instruction.'),
+      verdict: z.string().describe('"pass" or "fail".'),
+      criterionIds: z.array(z.string()).optional().describe('Acceptance criterion ids judged.'),
+      evidenceIds: z.array(z.string()).optional().describe('Evidence record ids relied on.'),
+      notes: z.array(z.string()).optional().describe('Short findings, one per entry.'),
+    });
 
   const COMPANY_TOOLS: readonly CompanyToolSpec[] = [
     {
@@ -1166,7 +1236,9 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       label: 'Submit contract',
       role: 'director',
       description:
-        'Submit a Contract draft for user approval. Director only; the runtime validates it.',
+        'Submit a Contract draft for user approval. Director only; the runtime validates it and answers with the exact field to fix.',
+      parameters: (z) =>
+        z.object({ contract: z.record(z.unknown()).describe(CONTRACT_PROPOSAL_SHAPE) }),
     },
     {
       name: 'company_architecture_review',
@@ -1174,18 +1246,44 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       role: 'advisor',
       description:
         'Return an architecture verdict for a Contract draft. Advisor only; runtime validated.',
+      parameters: (z) =>
+        z.object({
+          contractId: z.string(),
+          revision: z.number().describe('The Contract revision you reviewed.'),
+          verdict: z.string().describe('"approve" or "changes_requested".'),
+          issues: z
+            .array(z.record(z.unknown()))
+            .optional()
+            .describe(
+              'Each: {"severity":"P0"|"P1"|"P2"|"P3","message":string,"requirementIds":[string],"evidence":[string]}.',
+            ),
+          advisorNotes: z.array(z.string()).optional(),
+        }),
     },
     {
       name: 'company_task_result',
       label: 'Report task result',
       role: 'worker',
       description: 'Report the outcome of an assigned task. Worker only; runtime validated.',
+      parameters: (z) =>
+        z.object({
+          taskId: z.string().describe('The task id named in your instruction.'),
+          attemptId: z.string().describe('The attempt id named in your instruction.'),
+          summary: z.string().optional().describe('What you did, in one or two sentences.'),
+          changes: z
+            .array(z.record(z.unknown()))
+            .optional()
+            .describe(
+              'Each file you touched: {"path":string,"kind":"create"|"modify"|"delete","summary":string}.',
+            ),
+        }),
     },
     {
       name: 'company_qa_result',
       label: 'Report QA result',
       role: 'qa',
       description: 'Report a QA verdict with evidence. QA only; runtime validated.',
+      parameters: reviewerResult,
     },
     {
       name: 'company_verify',
@@ -1193,12 +1291,19 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       role: 'qa',
       description:
         'Run one command from the approved Contract verification profile and record its evidence. QA only; the runtime refuses anything not approved.',
+      parameters: (z) =>
+        z.object({
+          taskId: z.string(),
+          attemptId: z.string(),
+          commandId: z.string().describe('A command id listed in your instruction.'),
+        }),
     },
     {
       name: 'company_judge_result',
       label: 'Report judge result',
       role: 'judge',
       description: 'Report a judge verdict. Judge only; runtime validated.',
+      parameters: reviewerResult,
     },
     {
       name: 'company_report',
@@ -1206,12 +1311,22 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       role: 'judge',
       description:
         'Publish the final CompanyReport for a completed Contract. Judge only; runtime validated.',
+      parameters: (z) => z.object({ contractId: z.string() }),
     },
     {
       name: 'company_ask_user',
       label: 'Ask the user',
       role: '*',
       description: 'Ask the user a question that blocks progress. Any role; runtime validated.',
+      parameters: (z) =>
+        z.object({
+          title: z.string().describe('One line naming what is blocked.'),
+          questions: z
+            .array(z.record(z.unknown()))
+            .describe(
+              'Each: {"id":string,"question":string,"options":[{"label":string,"description":string}]} with at least one option.',
+            ),
+        }),
     },
   ];
 
@@ -1235,15 +1350,15 @@ export default function ompBridgeExtension(pi: OmpApi): void {
   }
 
   function registerCompanyTool(spec: CompanyToolSpec): void {
-    const parameters = pi.zod
-      .record(pi.zod.unknown())
-      .describe('Payload the runtime validates; its shape comes from the company contract.');
+    const parameters = spec.parameters(pi.zod);
 
     pi.registerTool({
       name: spec.name,
       label: spec.label,
       description: spec.description,
       parameters,
+      loadMode: 'essential',
+      approval: 'write',
       async execute(toolCallId, params, ...rest): Promise<OmpToolResult> {
         // OMP's declared signature ends with the context; a bundled example
         // names the third slot differently, so the context is taken from
@@ -1588,6 +1703,8 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       description:
         'Ask the user a question during execution and wait for their answer. Each question needs at least one option; the user may pick one, pick several when multi is set, or type their own answer.',
       parameters,
+      loadMode: 'essential',
+      approval: 'read',
       async execute(toolCallId, params, ...rest): Promise<OmpToolResult> {
         const ctx = rest.map(asContext).find((candidate) => candidate !== undefined);
         if (ctx?.agent?.kind === 'sub') {
@@ -1787,10 +1904,13 @@ export default function ompBridgeExtension(pi: OmpApi): void {
         nativeSessionId,
         nativeSessionPath: ctx.sessionManager?.getSessionFile?.(),
       });
+      for (const replay of heldUntilSessionStart.splice(0)) replay();
     });
     pi.on('session_shutdown', () => {
       activeContext = undefined;
       sessionContext = undefined;
+      // The disconnect below fails these on the host; nothing is left to answer.
+      heldUntilSessionStart.length = 0;
       flushText();
       sendEvent({ k: 'session', phase: 'shutdown' });
       drop('the session shut down', true);

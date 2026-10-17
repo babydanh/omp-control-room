@@ -94,6 +94,7 @@ export function BoardShell({ client }: BoardShellProps) {
             setFocus('files');
           }}
           onClearArtifact={() => setArtifactId(null)}
+          onShowSelection={() => setFocus(null)}
           onClose={() => {
             setFocus(null);
             client.select({ sessionId: null, taskId: null, tab: null });

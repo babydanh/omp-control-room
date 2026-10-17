@@ -121,7 +121,7 @@ interface FakeContext {
 
 function fakeSchema(kind: string): unknown {
   const schema: Record<string, unknown> = { kind };
-  for (const method of ['describe', 'optional', 'default']) schema[method] = () => schema;
+  for (const method of ['describe', 'optional', 'default', 'min']) schema[method] = () => schema;
   return schema;
 }
 
@@ -132,6 +132,9 @@ class FakePi {
   readonly logs: { level: string; args: unknown[] }[] = [];
   readonly zod = {
     string: () => fakeSchema('string'),
+    number: () => fakeSchema('number'),
+    boolean: () => fakeSchema('boolean'),
+    array: () => fakeSchema('array'),
     record: () => fakeSchema('record'),
     object: () => fakeSchema('object'),
     unknown: () => fakeSchema('unknown'),
@@ -455,6 +458,30 @@ describe('native model catalog', () => {
     );
   });
 
+  it('answers a catalog request that reaches the extension before the session starts', async () => {
+    // OMP connects extensions while loading them and emits session_start only
+    // afterwards, so the host's first read can arrive with no session context.
+    const handle = startBridge();
+    const pi = new FakePi();
+    Object.assign(process.env, handle.childEnv);
+    ompBridgeExtension(pi as unknown as never);
+    await handle.ready;
+
+    let settled = false;
+    const request = handle.requestModelCatalog().finally(() => {
+      settled = true;
+    });
+    // Frames are handled in socket order: once the abort has an answer (a
+    // refusal, since nothing is running), the catalog request ahead of it has
+    // been handled too.
+    await handle.abort().catch(() => undefined);
+    expect(settled).toBe(false);
+
+    await pi.emit('session_start', { type: 'session_start' }, modelContext());
+
+    expect((await request).models.map((entry) => entry.id)).toContain('openai-codex/gpt-6-luna');
+  });
+
   // ── Fail closed ─────────────────────────────────────────────
 
   it('refuses the catalog when the extension context has no model facade', async () => {
@@ -505,6 +532,17 @@ describe('native model catalog', () => {
     await expect(handle.requestModelCatalog()).rejects.toMatchObject({
       code: 'omp_model_catalog_unavailable',
     });
+  });
+
+  it('carries an OpenRouter-scale registry that still fits one frame', async () => {
+    // A real install lists 700+ models, 580 of them from OpenRouter alone.
+    const handle = startBridge();
+    const rows = Array.from({ length: 721 }, (_, index) =>
+      modelRow({ id: `vendor/model-${index}`, provider: 'openrouter' }),
+    );
+    await startExtension(handle, modelContext({ models: { list: () => rows } }));
+
+    expect((await handle.requestModelCatalog()).models).toHaveLength(721);
   });
 
   it('refuses a catalog too large for one bridge frame rather than truncating it', async () => {

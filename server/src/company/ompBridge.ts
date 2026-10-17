@@ -110,8 +110,12 @@ export const OMP_BRIDGE_ABORT_TIMEOUT_MS = 5_000;
 /** Default deadline for the extension to present an authenticated hello. */
 export const OMP_BRIDGE_DEFAULT_HANDSHAKE_TIMEOUT_MS = 30_000;
 
-/** Model rows one catalog answer may carry; larger answers are refused. */
-export const OMP_BRIDGE_MAX_CATALOG_MODELS = 512;
+/**
+ * Model rows one catalog answer may carry; larger answers are refused. Sized
+ * for an OpenRouter-scale registry (hundreds of models from one provider); the
+ * byte ceiling the extension enforces is what keeps the answer inside a frame.
+ */
+export const OMP_BRIDGE_MAX_CATALOG_MODELS = 2048;
 
 /** Catalog requests held at once. Beyond this the caller is told, not queued. */
 export const OMP_BRIDGE_MAX_PENDING_MODEL_REQUESTS = 4;
