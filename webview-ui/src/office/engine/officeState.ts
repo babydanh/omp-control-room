@@ -179,7 +179,7 @@ export class OfficeState {
     // Second pass: assign remaining characters to free seats
     for (const ch of this.characters.values()) {
       if (ch.seatId) continue;
-      const seatId = this.findFreeSeat(ch.folderName);
+      const seatId = this.findFreeSeat(ch.folderName, ch.preferredAreaLabels);
       if (seatId) {
         this.seats.get(seatId)!.assigned = true;
         ch.seatId = seatId;
@@ -357,7 +357,10 @@ export class OfficeState {
    * preserves pre-Areas single-stage behavior (skips Stage 1; Stage 2 picks
    * unzoned seats from a layout without `areaTiles`, which is every seat).
    */
-  private findFreeSeat(folderName?: string): string | null {
+  private findFreeSeat(
+    folderName?: string,
+    preferredAreaLabels?: readonly string[],
+  ): string | null {
     const electronicsTiles = this.buildElectronicsTileSet();
     const freeSeats: string[] = [];
     for (const [uid, seat] of this.seats) {
@@ -365,7 +368,15 @@ export class OfficeState {
     }
     if (freeSeats.length === 0) return null;
 
-    const areaLabels = folderName ? this.areaMappings[folderName] : undefined;
+    // A role states its own preferred Areas directly; a workspace folder is
+    // mapped to them instead. Explicit areas win, because a Company character
+    // belongs in its department, not in whatever folder happens to own it.
+    const areaLabels =
+      preferredAreaLabels && preferredAreaLabels.length > 0
+        ? preferredAreaLabels
+        : folderName
+          ? this.areaMappings[folderName]
+          : undefined;
 
     // Stage 1 — in-area seats for the folder's mapped Area labels.
     if (areaLabels && areaLabels.length > 0) {
@@ -430,6 +441,13 @@ export class OfficeState {
     skipSpawnEffect?: boolean,
     folderName?: string,
     nearAgentId?: number,
+    /**
+     * Area labels this agent prefers to sit in, tried before the folder mapping.
+     *
+     * Appended last so existing positional callers keep their meaning, and stored
+     * on the character so a later re-seat (layout edit, reload) still honours it.
+     */
+    preferredAreaLabels?: readonly string[],
   ): void {
     if (this.characters.has(id)) return;
 
@@ -461,7 +479,7 @@ export class OfficeState {
       seatId = closestFreeSeat(this.seats, anchorAt.col, anchorAt.row);
     }
     if (!seatId) {
-      seatId = this.findFreeSeat(folderName);
+      seatId = this.findFreeSeat(folderName, preferredAreaLabels);
     }
 
     let ch: Character;
@@ -487,6 +505,11 @@ export class OfficeState {
 
     if (folderName) {
       ch.folderName = folderName;
+    }
+    if (preferredAreaLabels && preferredAreaLabels.length > 0) {
+      // Copied so a caller that later mutates its array cannot retune a character
+      // that already has a desk.
+      ch.preferredAreaLabels = [...preferredAreaLabels];
     }
     if (!skipSpawnEffect) {
       startMatrixEffect(ch, 'spawn');
@@ -1153,6 +1176,11 @@ export class OfficeState {
   > {
     const seats: Record<number, { palette: number; hueShift: number; seatId: string | null }> = {};
     for (const ch of this.characters.values()) {
+      // A company character is derived from the company snapshot, not from the
+      // server's agent store, so persisting its seat would write a seat for an
+      // agent id the server will never send back. It is re-seated from the
+      // snapshot on the next sync instead.
+      if (ch.companySessionId) continue;
       if (ch.isSubagent) continue;
       seats[ch.id] = { palette: ch.palette, hueShift: ch.hueShift, seatId: ch.seatId };
     }

@@ -4,6 +4,10 @@ import {
   TRANSPORT_STATE_DISCONNECTED,
   TRANSPORT_STATE_RECONNECTING,
 } from '../../../core/src/constants.js';
+import {
+  isReplayableClientMessage,
+  TRANSPORT_DISCONNECTED_ERROR,
+} from '../../../core/src/messageDelivery.js';
 import type { ClientMessage, ServerMessage } from '../../../core/src/messages.js';
 import type { MessageTransport, TransportState } from './types.js';
 
@@ -92,10 +96,16 @@ export class WebSocketTransport implements MessageTransport {
   send(message: ClientMessage): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(message));
-    } else {
-      // Queue messages while connecting (flushed in onopen)
-      this.pendingMessages.push(message);
+      return;
     }
+    // Queue only what is safe to send twice. A prompt, an approval answer or
+    // terminal input is delivered once or not at all: the UI catches the
+    // throw and keeps the draft, because replaying it would perform the
+    // action again after the reconnect.
+    if (!isReplayableClientMessage(message)) {
+      throw new Error(TRANSPORT_DISCONNECTED_ERROR);
+    }
+    this.pendingMessages.push(message);
   }
 
   onMessage(handler: (message: ServerMessage) => void): () => void {

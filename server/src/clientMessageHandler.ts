@@ -4,6 +4,8 @@ import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
+import type { CompanyCommandServices } from './company/clientCommands.js';
+import { handleCompanyCommand } from './company/clientCommands.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -60,6 +62,19 @@ export interface ClientMessageContext {
    * to false so a caller that forgets to pass it gets the safe answer.
    */
   privileged?: boolean;
+
+  /**
+   * Company command surface for this process. `null` (or absent) means no
+   * company workspace is open, and every company command answers
+   * `company_unavailable` rather than being silently ignored.
+   */
+  company?: CompanyCommandServices | null;
+  /** Separate from transport authentication: untrusted workspaces may only read. */
+  companyExecutionAllowed?: boolean;
+  /** Called as soon as attach rotates the socket's terminal egress lease. */
+  onTerminalAttached?: (sessionId: string, leaseId: string) => void;
+  /** Called after a successful detach; see CompanyCommandContext. */
+  onTerminalDetached?: (sessionId: string, leaseId: string) => void;
 }
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
@@ -85,6 +100,27 @@ export function handleClientMessage(
 ): void {
   const { store, runtime, cache } = ctx;
   const adapter = store.getAdapter();
+
+  // Company and terminal commands are dispatched first and exclusively: the
+  // office switch below knows nothing about them, so an authorized prompt can
+  // never fall through to a legacy branch with the same field names.
+  if (
+    handleCompanyCommand(
+      msg,
+      // The dispatcher emits generated `ServerMessage` values; this handler's
+      // historical `WsSend` predates that union and takes a plain record.
+      (message) => send(message as unknown as Record<string, unknown>),
+      {
+        services: ctx.company ?? null,
+        privileged: ctx.privileged === true,
+        executionAllowed: ctx.companyExecutionAllowed === true,
+        onTerminalAttached: ctx.onTerminalAttached,
+        onTerminalDetached: ctx.onTerminalDetached,
+      },
+    )
+  ) {
+    return;
+  }
 
   switch (msg.type) {
     case 'webviewReady':

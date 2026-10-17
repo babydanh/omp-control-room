@@ -71,13 +71,13 @@ export function VersionIndicator({
         >
           <div className="flex justify-between items-center gap-10">
             <span className="text-lg text-accent-bright leading-none">
-              Updated to v{currentMajorMinor}!
+              Đã cập nhật lên v{currentMajorMinor}!
             </span>
             <Button variant="ghost" size="icon" onClick={handleDismiss} className="leading-none">
               x
             </Button>
           </div>
-          <span className="text-sm whitespace-nowrap">See what's new</span>
+          <span className="text-sm whitespace-nowrap">Xem những gì mới</span>
         </div>
       )}
       {/* Hover tooltip — "See what's new" appears on label hover after notice is gone */}
@@ -86,7 +86,7 @@ export function VersionIndicator({
           onClick={handleOpenChangelog}
           className="absolute bottom-42 right-28 z-20 pixel-panel py-6 px-12 cursor-pointer text-sm whitespace-nowrap"
         >
-          See what's new!
+          Xem những gì mới!
         </div>
       )}
       {/* Version label — always visible */}

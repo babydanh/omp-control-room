@@ -48,7 +48,7 @@ export function ChangelogModal({ isOpen, onClose, currentVersion }: ChangelogMod
     <Modal
       isOpen={isOpen}
       onClose={onClose}
-      title={<span className="text-4xl">What's New in v{entry.version}</span>}
+      title={<span className="text-4xl">Có gì mới trong v{entry.version}</span>}
       zIndex={51}
       className="min-w-sm!"
     >
@@ -70,7 +70,7 @@ export function ChangelogModal({ isOpen, onClose, currentVersion }: ChangelogMod
         {/* Contributors */}
         {entry.contributors.length > 0 && (
           <div className="mb-8">
-            <div className="text-lg text-accent-bright mb-4">Contributors</div>
+            <div className="text-lg text-accent-bright mb-4">Người đóng góp</div>
             <ul className="m-0 pl-18 list-disc">
               {entry.contributors.map((c) => (
                 <li key={c.name} className="text-sm mb-2">
@@ -100,7 +100,7 @@ export function ChangelogModal({ isOpen, onClose, currentVersion }: ChangelogMod
           className="flex-1 py-6 px-10 border-r border-border flex items-center justify-center gap-12 text-lg no-underline cursor-pointer transition-colors duration-200 hover:text-accent-bright"
         >
           <GitHubIcon />
-          View on GitHub
+          Xem trên GitHub
         </a>
         <a
           href={DISCORD_INVITE_URL}
@@ -109,7 +109,7 @@ export function ChangelogModal({ isOpen, onClose, currentVersion }: ChangelogMod
           className="flex-1 py-6 px-10 flex items-center justify-center gap-12 text-lg no-underline cursor-pointer transition-colors duration-200 hover:text-accent-bright"
         >
           <DiscordIcon />
-          Join our Discord!
+          Tham gia Discord của chúng tôi!
         </a>
       </div>
     </Modal>

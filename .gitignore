@@ -39,6 +39,9 @@ allure-report/
 agent-orchestrator.yaml
 .worktrees
 
+
+# PTY test bundles (written inside the repo so node-pty resolves)
+.tmp-pty-*/
 # Local notes (not for commit)
 /notes/
 /docs/e2e-*.md

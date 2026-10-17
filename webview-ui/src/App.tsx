@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import type { ServerMessage } from '../../core/src/messages.js';
 import { toMajorMinor } from './changelogData.js';
+import { CompanyCharacterLayer } from './company/companyCharacters.js';
+import { CompanyClient } from './company/companyClient.js';
+import { CompanyBubble } from './company/components/CompanyBubble.js';
+import { CompanyWorkspace } from './company/components/CompanyWorkspace.js';
+import { PromptComposer } from './company/components/PromptComposer.js';
+import { COMPANY_PANEL_WIDTH_PX } from './company/constants.js';
+import { resolveAgentClick } from './company/selection.js';
+import { SURFACE_TAB_LABELS } from './company/statusLabels.js';
+import { useCompanyLayout } from './company/useCompanyLayout.js';
+import { useCompanyState } from './company/useCompanyState.js';
 import { BottomToolbar } from './components/BottomToolbar.js';
 import { ChangelogModal } from './components/ChangelogModal.js';
 import { ConnectionIndicator } from './components/ConnectionIndicator.js';
@@ -59,6 +70,22 @@ function App() {
     }
   }, []);
 
+  // The company client owns every company message and every company command.
+  // It is created once and outlives the effects around it: the single
+  // transport subscription hands messages to it instead of opening its own.
+  const [company] = useState(() => new CompanyClient(transport));
+  // One layer instance for the app's life: it owns the sessionId -> character
+  // id map the office characters, the click routing and the bubbles all read.
+  const [companyCharacters] = useState(() => new CompanyCharacterLayer());
+  const companyState = useCompanyState(company);
+  const companyLayout = useCompanyLayout();
+  const [companyTab, setCompanyTab] = useState<'office' | 'board'>('office');
+  const onCompanyMessage = useCallback(
+    (message: ServerMessage) => company.accept(message),
+    [company],
+  );
+  const onCompanyConnect = useCallback(() => company.connect(), [company]);
+
   const editor = useEditorActions(getOfficeState, editorState);
 
   const isEditDirty = useCallback(
@@ -96,7 +123,44 @@ function App() {
     setAreaMappings,
     showAreas,
     setShowAreas,
-  } = useExtensionMessages(getOfficeState, editor.setLastSavedLayout, isEditDirty);
+  } = useExtensionMessages(
+    getOfficeState,
+    editor.setLastSavedLayout,
+    isEditDirty,
+    onCompanyMessage,
+    onCompanyConnect,
+  );
+
+  // The office floor mirrors the company snapshot. Nothing here reaches the
+  // server: these characters are a view of Company sessions, derived from the
+  // one company subscription this app already has, and they never enter the
+  // agent store the Claude scanners read.
+  useEffect(() => {
+    // Seats only exist once the layout has loaded; adding a character before
+    // that would drop it on a bare grid.
+    if (!layoutReady) return;
+    companyCharacters.sync(companyState, getOfficeState());
+  }, [layoutReady, companyState, companyCharacters]);
+
+  // One selection, both directions. A board card click has to light the
+  // character doing the work and follow it there; the office answers through
+  // company.select() above, so neither direction sends a message.
+  useEffect(() => {
+    const os = getOfficeState();
+    const sessionId = companyState.selection.sessionId;
+    const characterId = sessionId === null ? null : companyCharacters.characterId(sessionId);
+    if (characterId === null) {
+      // Give up the office highlight only when it pointed at a COMPANY
+      // character: a Claude agent the user selected keeps its selection.
+      if (os.selectedAgentId !== null && companyCharacters.sessionIdFor(os.selectedAgentId)) {
+        os.selectedAgentId = null;
+        os.cameraFollowId = null;
+      }
+      return;
+    }
+    os.selectedAgentId = characterId;
+    os.cameraFollowId = characterId;
+  }, [companyState.selection.sessionId, companyCharacters]);
 
   // Show migration notice once layout reset is detected
   const [migrationNoticeDismissed, setMigrationNoticeDismissed] = useState(false);
@@ -142,9 +206,19 @@ function App() {
     transport.send({ type: 'setGhostHeadlessAgents', enabled: next });
   }, [ghostHeadlessAgents, setGhostHeadlessAgents]);
 
-  const handleSelectAgent = useCallback((id: number) => {
-    transport.send({ type: 'focusAgent', id });
-  }, []);
+  const handleSelectAgent = useCallback(
+    (id: number) => {
+      // A company character has no terminal to raise; selecting it opens the
+      // company drawer instead of asking the host for a window.
+      const resolution = resolveAgentClick(companyCharacters, companyState, id);
+      if (resolution.kind === 'company') {
+        company.select(resolution.selection);
+        return;
+      }
+      transport.send({ type: 'focusAgent', id });
+    },
+    [company, companyCharacters, companyState],
+  );
 
   // The Intro's wire-facing state machine — which asks survive being mooted,
   // when a hooksStatus is this tour's install verdict — lives in useIntroTour
@@ -232,13 +306,21 @@ function App() {
     transport.send({ type: 'closeAgent', id });
   }, []);
 
-  const handleClick = useCallback((agentId: number) => {
-    // If clicked agent is a sub-agent, focus the parent's terminal instead
-    const os = getOfficeState();
-    const meta = os.subagentMeta.get(agentId);
-    const focusId = meta ? meta.parentAgentId : agentId;
-    transport.send({ type: 'focusAgent', id: focusId });
-  }, []);
+  const handleClick = useCallback(
+    (agentId: number) => {
+      const resolution = resolveAgentClick(companyCharacters, companyState, agentId);
+      if (resolution.kind === 'company') {
+        company.select(resolution.selection);
+        return;
+      }
+      // If clicked agent is a sub-agent, focus the parent's terminal instead
+      const os = getOfficeState();
+      const meta = os.subagentMeta.get(agentId);
+      const focusId = meta ? meta.parentAgentId : agentId;
+      transport.send({ type: 'focusAgent', id: focusId });
+    },
+    [company, companyCharacters, companyState],
+  );
 
   const officeState = getOfficeState();
 
@@ -331,274 +413,325 @@ function App() {
     return <div className="w-full h-full flex items-center justify-center ">Loading...</div>;
   }
 
+  // Wide window: office and board side by side. Narrow: one at a time, with
+  // the composer always mounted under whichever pane is showing.
+  const showOfficePane = companyLayout === 'split' || companyTab === 'office';
+  const showCompanyPane = companyLayout === 'split' || companyTab === 'board';
+
   return (
-    <div ref={containerRef} className="w-full h-full relative overflow-hidden">
-      <OfficeCanvas
-        officeState={officeState}
-        onClick={handleClick}
-        isEditMode={editor.isEditMode}
-        editorState={editorState}
-        onEditorTileAction={editor.handleEditorTileAction}
-        onEditorEraseAction={editor.handleEditorEraseAction}
-        onEditorSelectionChange={editor.handleEditorSelectionChange}
-        onDeleteSelected={editor.handleDeleteSelected}
-        onRotateSelected={editor.handleRotateSelected}
-        onDragMove={editor.handleDragMove}
-        editorTick={editor.editorTick}
-        zoom={editor.zoom}
-        onZoomChange={editor.handleZoomChange}
-        panRef={editor.panRef}
-        showAreas={effectiveShowAreas}
-        activeAreaLabel={activeAreaLabel}
-      />
-
-      {!isDebugMode ? (
-        <>
-          <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
-
-          {/* Vignette overlay */}
-          <div
-            className="absolute inset-0 pointer-events-none"
-            style={{ background: 'var(--vignette)' }}
-          />
-
-          {editor.isEditMode && editor.isDirty && (
-            <EditActionBar editor={editor} editorState={editorState} />
-          )}
-
-          {showRotateHint && (
-            <div
-              className="absolute left-1/2 -translate-x-1/2 z-11 bg-accent-bright text-white text-sm py-3 px-8 rounded-none border-2 border-accent shadow-pixel pointer-events-none whitespace-nowrap"
-              style={{ top: editor.isDirty ? 64 : 8 }}
-            >
-              Rotate (R)
-            </div>
-          )}
-
-          {editor.isEditMode &&
-            (() => {
-              const selUid = editorState.selectedFurnitureUid;
-              const selColor = selUid
-                ? (officeState.getLayout().furniture.find((f) => f.uid === selUid)?.color ?? null)
-                : null;
-              return (
-                <EditorToolbar
-                  activeTool={editorState.activeTool}
-                  selectedTileType={editorState.selectedTileType}
-                  selectedFurnitureType={editorState.selectedFurnitureType}
-                  selectedFurnitureUid={selUid}
-                  selectedFurnitureColor={selColor}
-                  floorColor={editorState.floorColor}
-                  wallColor={editorState.wallColor}
-                  selectedWallSet={editorState.selectedWallSet}
-                  onToolChange={editor.handleToolChange}
-                  onTileTypeChange={editor.handleTileTypeChange}
-                  onFloorColorChange={editor.handleFloorColorChange}
-                  onWallColorChange={editor.handleWallColorChange}
-                  onWallSetChange={editor.handleWallSetChange}
-                  onSelectedFurnitureColorChange={editor.handleSelectedFurnitureColorChange}
-                  pickedFurnitureColor={editorState.pickedFurnitureColor}
-                  onPickedFurnitureColorChange={editor.handlePickedFurnitureColorChange}
-                  onFurnitureTypeChange={editor.handleFurnitureTypeChange}
-                  loadedAssets={loadedAssets}
-                  activePetTypes={officeState.getActivePetTypes()}
-                  petCount={getPetCount()}
-                  onPetToggle={editor.handlePetToggle}
-                  carpetVariant={editor.carpetVariant}
-                  carpetColor={editor.carpetColor}
-                  carpetAccentColor={editor.carpetAccentColor}
-                  onCarpetVariantChange={editor.handleCarpetVariantChange}
-                  onCarpetColorChange={editor.handleCarpetColorChange}
-                  onCarpetAccentColorChange={editor.handleCarpetAccentColorChange}
-                  areas={officeState.getLayout().areas ?? []}
-                  selectedAreaLabel={editor.selectedAreaLabel}
-                  workspaceFolders={areaFolders}
-                  areasAvailable={areasAvailable}
-                  areaMappings={areaMappings}
-                  onSelectArea={editor.handleSelectArea}
-                  onAddArea={editor.handleAddArea}
-                  onRemoveArea={editor.handleRemoveArea}
-                  onRenameArea={editor.handleRenameArea}
-                  onAreaColorChange={editor.handleAreaColorChange}
-                  onAreaMappingChange={handleAreaMappingChange}
-                />
-              );
-            })()}
-
-          <ToolOverlay
+    <div className="flex h-full w-full overflow-hidden">
+      <div className={showOfficePane ? 'flex h-full min-w-0 flex-1 flex-col' : 'hidden'}>
+        {companyLayout === 'tabs' && (
+          <nav className="flex gap-1 border-b-2 border-border p-1" aria-label="Mặt phẳng làm việc">
+            {(['office', 'board'] as const).map((entry) => (
+              <button
+                key={entry}
+                type="button"
+                onClick={() => setCompanyTab(entry)}
+                aria-current={companyTab === entry}
+                className={
+                  companyTab === entry
+                    ? 'cursor-pointer border-2 border-accent px-3 text-2xs text-text'
+                    : 'cursor-pointer border-2 border-transparent px-3 text-2xs text-text-muted'
+                }
+              >
+                {SURFACE_TAB_LABELS[entry]}
+              </button>
+            ))}
+          </nav>
+        )}
+        {/* Canvas plus its overlays. The pixel face is scoped to the artwork, not
+            this wrapper: it also holds the toolbars and modals, which read in
+            Inter like the rest of the UI. */}
+        <div ref={containerRef} className="relative min-h-0 flex-1 overflow-hidden">
+          <OfficeCanvas
             officeState={officeState}
-            agents={agents}
-            agentTools={agentTools}
-            subagentTools={subagentTools}
-            subagentCharacters={subagentCharacters}
-            containerRef={containerRef}
+            onClick={handleClick}
+            isEditMode={editor.isEditMode}
+            editorState={editorState}
+            onEditorTileAction={editor.handleEditorTileAction}
+            onEditorEraseAction={editor.handleEditorEraseAction}
+            onEditorSelectionChange={editor.handleEditorSelectionChange}
+            onDeleteSelected={editor.handleDeleteSelected}
+            onRotateSelected={editor.handleRotateSelected}
+            onDragMove={editor.handleDragMove}
+            editorTick={editor.editorTick}
             zoom={editor.zoom}
+            onZoomChange={editor.handleZoomChange}
             panRef={editor.panRef}
-            onCloseAgent={handleCloseAgent}
-            alwaysShowOverlay={alwaysShowOverlay}
+            showAreas={effectiveShowAreas}
+            activeAreaLabel={activeAreaLabel}
           />
-        </>
-      ) : (
-        <DebugView
-          agents={agents}
-          selectedAgent={selectedAgent}
-          agentTools={agentTools}
-          agentStatuses={agentStatuses}
-          subagentTools={subagentTools}
-          officeState={officeState}
-          onSelectAgent={handleSelectAgent}
-        />
-      )}
 
-      {/* Hooks first-run tooltip. Gated on hooksInstalled (the hooksStatus
+          {!isDebugMode ? (
+            <>
+              <ZoomControls zoom={editor.zoom} onZoomChange={editor.handleZoomChange} />
+
+              {/* Vignette overlay */}
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{ background: 'var(--vignette)' }}
+              />
+
+              {editor.isEditMode && editor.isDirty && (
+                <EditActionBar editor={editor} editorState={editorState} />
+              )}
+
+              {showRotateHint && (
+                <div
+                  className="absolute left-1/2 -translate-x-1/2 z-11 bg-accent-bright text-white text-sm py-3 px-8 rounded-none border-2 border-accent shadow-pixel pointer-events-none whitespace-nowrap"
+                  style={{ top: editor.isDirty ? 64 : 8 }}
+                >
+                  Rotate (R)
+                </div>
+              )}
+
+              {editor.isEditMode &&
+                (() => {
+                  const selUid = editorState.selectedFurnitureUid;
+                  const selColor = selUid
+                    ? (officeState.getLayout().furniture.find((f) => f.uid === selUid)?.color ??
+                      null)
+                    : null;
+                  return (
+                    <EditorToolbar
+                      activeTool={editorState.activeTool}
+                      selectedTileType={editorState.selectedTileType}
+                      selectedFurnitureType={editorState.selectedFurnitureType}
+                      selectedFurnitureUid={selUid}
+                      selectedFurnitureColor={selColor}
+                      floorColor={editorState.floorColor}
+                      wallColor={editorState.wallColor}
+                      selectedWallSet={editorState.selectedWallSet}
+                      onToolChange={editor.handleToolChange}
+                      onTileTypeChange={editor.handleTileTypeChange}
+                      onFloorColorChange={editor.handleFloorColorChange}
+                      onWallColorChange={editor.handleWallColorChange}
+                      onWallSetChange={editor.handleWallSetChange}
+                      onSelectedFurnitureColorChange={editor.handleSelectedFurnitureColorChange}
+                      pickedFurnitureColor={editorState.pickedFurnitureColor}
+                      onPickedFurnitureColorChange={editor.handlePickedFurnitureColorChange}
+                      onFurnitureTypeChange={editor.handleFurnitureTypeChange}
+                      loadedAssets={loadedAssets}
+                      activePetTypes={officeState.getActivePetTypes()}
+                      petCount={getPetCount()}
+                      onPetToggle={editor.handlePetToggle}
+                      carpetVariant={editor.carpetVariant}
+                      carpetColor={editor.carpetColor}
+                      carpetAccentColor={editor.carpetAccentColor}
+                      onCarpetVariantChange={editor.handleCarpetVariantChange}
+                      onCarpetColorChange={editor.handleCarpetColorChange}
+                      onCarpetAccentColorChange={editor.handleCarpetAccentColorChange}
+                      areas={officeState.getLayout().areas ?? []}
+                      selectedAreaLabel={editor.selectedAreaLabel}
+                      workspaceFolders={areaFolders}
+                      areasAvailable={areasAvailable}
+                      areaMappings={areaMappings}
+                      onSelectArea={editor.handleSelectArea}
+                      onAddArea={editor.handleAddArea}
+                      onRemoveArea={editor.handleRemoveArea}
+                      onRenameArea={editor.handleRenameArea}
+                      onAreaColorChange={editor.handleAreaColorChange}
+                      onAreaMappingChange={handleAreaMappingChange}
+                    />
+                  );
+                })()}
+
+              <ToolOverlay
+                officeState={officeState}
+                agents={agents}
+                agentTools={agentTools}
+                subagentTools={subagentTools}
+                subagentCharacters={subagentCharacters}
+                containerRef={containerRef}
+                zoom={editor.zoom}
+                panRef={editor.panRef}
+                onCloseAgent={handleCloseAgent}
+                alwaysShowOverlay={alwaysShowOverlay}
+              />
+
+              <CompanyBubble
+                client={company}
+                characters={companyCharacters}
+                officeState={officeState}
+                containerRef={containerRef}
+                zoom={editor.zoom}
+                panRef={editor.panRef}
+                alwaysShowOverlay={alwaysShowOverlay}
+              />
+            </>
+          ) : (
+            <DebugView
+              agents={agents}
+              selectedAgent={selectedAgent}
+              agentTools={agentTools}
+              agentStatuses={agentStatuses}
+              subagentTools={subagentTools}
+              officeState={officeState}
+              onSelectAgent={handleSelectAgent}
+            />
+          )}
+
+          {/* Hooks first-run tooltip. Gated on hooksInstalled (the hooksStatus
           message), NOT the hooksEnabled preference: hooksEnabled defaults true
           while first-run consent is still pending, and announcing "Instant
           Detection Active" before anything is installed would be a lie. */}
-      {hooksEnabled && claudeHooksInstalled && !hooksInfoShown && !hooksTooltipDismissed && (
-        <Tooltip
-          title="Instant Detection Active"
-          position="top-right"
-          onDismiss={() => {
-            setHooksTooltipDismissed(true);
-            transport.send({ type: 'setHooksInfoShown' });
-          }}
-        >
-          <span className="text-sm text-text leading-none">
-            Your agents now respond in real-time.{' '}
-            <span
-              className="text-accent cursor-pointer underline"
-              onClick={() => {
-                setIsHooksInfoOpen(true);
+          {hooksEnabled && claudeHooksInstalled && !hooksInfoShown && !hooksTooltipDismissed && (
+            <Tooltip
+              title="Phát hiện tức thì đang bật"
+              position="top-right"
+              onDismiss={() => {
                 setHooksTooltipDismissed(true);
                 transport.send({ type: 'setHooksInfoShown' });
               }}
             >
-              View more
-            </span>
-          </span>
-        </Tooltip>
-      )}
+              <span className="text-sm text-text leading-none">
+                Agent của bạn giờ phản hồi theo thời gian thực.{' '}
+                <span
+                  className="text-accent cursor-pointer underline"
+                  onClick={() => {
+                    setIsHooksInfoOpen(true);
+                    setHooksTooltipDismissed(true);
+                    transport.send({ type: 'setHooksInfoShown' });
+                  }}
+                >
+                  Xem thêm
+                </span>
+              </span>
+            </Tooltip>
+          )}
 
-      {/* Hooks info modal */}
-      <Modal
-        isOpen={isHooksInfoOpen}
-        onClose={() => setIsHooksInfoOpen(false)}
-        title="Instant Detection is ON"
-        zIndex={52}
-      >
-        <div className="text-base text-text px-10" style={{ lineHeight: 1.4 }}>
-          <p className="mb-8">Your Pixel Agents office now reacts in real-time:</p>
-          <ul className="mb-8 pl-18 list-disc m-0">
-            <li className="text-sm mb-2">Permission prompts appear instantly</li>
-            <li className="text-sm mb-2">Turn completions detected the moment they happen</li>
-            <li className="text-sm mb-2">Sound notifications play immediately</li>
-          </ul>
-          <p className="mb-12 text-text-muted">
-            This works through Claude Code Hooks, small event listeners that notify Pixel Agents
-            whenever something happens in your Claude sessions.
-          </p>
-          <div className="text-center">
-            <button
-              onClick={() => setIsHooksInfoOpen(false)}
-              className="py-4 px-20 text-lg bg-accent text-white border-2 border-accent rounded-none cursor-pointer shadow-pixel"
-            >
-              Got it
-            </button>
-          </div>
-          <p className="mt-8 text-xs text-text-muted text-center">
-            To disable, go to Settings {'>'} Instant Detection
-          </p>
+          {/* Hooks info modal */}
+          <Modal
+            isOpen={isHooksInfoOpen}
+            onClose={() => setIsHooksInfoOpen(false)}
+            title="Phát hiện tức thì đang bật"
+            zIndex={52}
+          >
+            <div className="text-base text-text px-10" style={{ lineHeight: 1.4 }}>
+              <p className="mb-8">Your Pixel Agents office now reacts in real-time:</p>
+              <ul className="mb-8 pl-18 list-disc m-0">
+                <li className="text-sm mb-2">Permission prompts appear instantly</li>
+                <li className="text-sm mb-2">Turn completions detected the moment they happen</li>
+                <li className="text-sm mb-2">Sound notifications play immediately</li>
+              </ul>
+              <p className="mb-12 text-text-muted">
+                This works through Claude Code Hooks, small event listeners that notify Pixel Agents
+                whenever something happens in your Claude sessions.
+              </p>
+              <div className="text-center">
+                <button
+                  onClick={() => setIsHooksInfoOpen(false)}
+                  className="py-4 px-20 text-lg bg-accent text-white border-2 border-accent rounded-none cursor-pointer shadow-pixel"
+                >
+                  Got it
+                </button>
+              </div>
+              <p className="mt-8 text-xs text-text-muted text-center">
+                Để tắt, hãy vào Cài đặt {'>'} Phát hiện tức thì
+              </p>
+            </div>
+          </Modal>
+
+          <BottomToolbar
+            isEditMode={editor.isEditMode}
+            onOpenClaude={editor.handleOpenClaude}
+            onToggleEditMode={editor.handleToggleEditMode}
+            isSettingsOpen={isSettingsOpen}
+            onToggleSettings={() => setIsSettingsOpen((v) => !v)}
+            workspaceFolders={workspaceFolders}
+          />
+
+          <VersionIndicator
+            currentVersion={extensionVersion}
+            lastSeenVersion={lastSeenVersion}
+            onDismiss={handleWhatsNewDismiss}
+            onOpenChangelog={handleOpenChangelog}
+          />
+
+          <ConnectionIndicator />
+
+          <ChangelogModal
+            isOpen={isChangelogOpen}
+            onClose={() => setIsChangelogOpen(false)}
+            currentVersion={extensionVersion}
+          />
+
+          <SettingsModal
+            isOpen={isSettingsOpen}
+            onClose={() => setIsSettingsOpen(false)}
+            isDebugMode={isDebugMode}
+            onToggleDebugMode={handleToggleDebugMode}
+            alwaysShowOverlay={alwaysShowOverlay}
+            onToggleAlwaysShowOverlay={handleToggleAlwaysShowOverlay}
+            ghostHeadlessAgents={ghostHeadlessAgents}
+            onToggleGhostHeadlessAgents={handleToggleGhostHeadlessAgents}
+            externalAssetDirectories={externalAssetDirectories}
+            watchAllSessions={watchAllSessions}
+            onToggleWatchAllSessions={() => {
+              const newVal = !watchAllSessions;
+              setWatchAllSessions(newVal);
+              transport.send({ type: 'setWatchAllSessions', enabled: newVal });
+            }}
+            hooksInstalled={claudeHooksInstalled}
+            onToggleHooksEnabled={() => {
+              // Toggle the DISPLAYED state (actual install), not the preference: when the two disagree — preference on,
+              // nothing installed while consent is pending — toggling the preference would turn hooks OFF for a user
+              // asking for ON. No optimistic local update either; both backends answer with the truthful hooksStatus this
+              // checkbox renders, so it lands correct instead of flickering when an install fails. The providerId is
+              // ECHOED from that row (never originated here), so nothing sends until the row has arrived.
+              const [rowProviderId] =
+                Object.entries(hooksInstalled).find(([id]) => id === 'claude') ?? [];
+              if (rowProviderId !== undefined) {
+                transport.send({
+                  type: 'setHooksEnabled',
+                  providerId: rowProviderId,
+                  enabled: !claudeHooksInstalled,
+                });
+              }
+            }}
+            showAreas={showAreas}
+            onToggleShowAreas={onToggleShowAreas}
+            showAreasAvailable={areasAvailable}
+            onExportLayout={handleExportLayout}
+            onImportLayout={handleImportLayout}
+          />
+
+          {showMigrationNotice && (
+            <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
+          )}
+
+          {intro && (
+            <IntroBubble
+              officeState={officeState}
+              headline={intro.headline}
+              disclosure={intro.disclosure}
+              containerRef={containerRef}
+              zoom={editor.zoom}
+              panRef={editor.panRef}
+              installFailed={installFailed}
+              installPending={installPending}
+              onChoice={handleConsentChoice}
+              onClose={handleIntroClose}
+              escapeSuppressed={
+                isSettingsOpen ||
+                isChangelogOpen ||
+                isHooksInfoOpen ||
+                showMigrationNotice ||
+                editor.isEditMode
+              }
+            />
+          )}
         </div>
-      </Modal>
-
-      <BottomToolbar
-        isEditMode={editor.isEditMode}
-        onOpenClaude={editor.handleOpenClaude}
-        onToggleEditMode={editor.handleToggleEditMode}
-        isSettingsOpen={isSettingsOpen}
-        onToggleSettings={() => setIsSettingsOpen((v) => !v)}
-        workspaceFolders={workspaceFolders}
-      />
-
-      <VersionIndicator
-        currentVersion={extensionVersion}
-        lastSeenVersion={lastSeenVersion}
-        onDismiss={handleWhatsNewDismiss}
-        onOpenChangelog={handleOpenChangelog}
-      />
-
-      <ConnectionIndicator />
-
-      <ChangelogModal
-        isOpen={isChangelogOpen}
-        onClose={() => setIsChangelogOpen(false)}
-        currentVersion={extensionVersion}
-      />
-
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        isDebugMode={isDebugMode}
-        onToggleDebugMode={handleToggleDebugMode}
-        alwaysShowOverlay={alwaysShowOverlay}
-        onToggleAlwaysShowOverlay={handleToggleAlwaysShowOverlay}
-        ghostHeadlessAgents={ghostHeadlessAgents}
-        onToggleGhostHeadlessAgents={handleToggleGhostHeadlessAgents}
-        externalAssetDirectories={externalAssetDirectories}
-        watchAllSessions={watchAllSessions}
-        onToggleWatchAllSessions={() => {
-          const newVal = !watchAllSessions;
-          setWatchAllSessions(newVal);
-          transport.send({ type: 'setWatchAllSessions', enabled: newVal });
-        }}
-        hooksInstalled={claudeHooksInstalled}
-        onToggleHooksEnabled={() => {
-          // Toggle the DISPLAYED state (actual install), not the preference: when the two disagree — preference on,
-          // nothing installed while consent is pending — toggling the preference would turn hooks OFF for a user
-          // asking for ON. No optimistic local update either; both backends answer with the truthful hooksStatus this
-          // checkbox renders, so it lands correct instead of flickering when an install fails. The providerId is
-          // ECHOED from that row (never originated here), so nothing sends until the row has arrived.
-          const [rowProviderId] =
-            Object.entries(hooksInstalled).find(([id]) => id === 'claude') ?? [];
-          if (rowProviderId !== undefined) {
-            transport.send({
-              type: 'setHooksEnabled',
-              providerId: rowProviderId,
-              enabled: !claudeHooksInstalled,
-            });
-          }
-        }}
-        showAreas={showAreas}
-        onToggleShowAreas={onToggleShowAreas}
-        showAreasAvailable={areasAvailable}
-        onExportLayout={handleExportLayout}
-        onImportLayout={handleImportLayout}
-      />
-
-      {showMigrationNotice && (
-        <MigrationNotice onDismiss={() => setMigrationNoticeDismissed(true)} />
-      )}
-
-      {intro && (
-        <IntroBubble
-          officeState={officeState}
-          headline={intro.headline}
-          disclosure={intro.disclosure}
-          containerRef={containerRef}
-          zoom={editor.zoom}
-          panRef={editor.panRef}
-          installFailed={installFailed}
-          installPending={installPending}
-          onChoice={handleConsentChoice}
-          onClose={handleIntroClose}
-          escapeSuppressed={
-            isSettingsOpen ||
-            isChangelogOpen ||
-            isHooksInfoOpen ||
-            showMigrationNotice ||
-            editor.isEditMode
-          }
-        />
+        {companyLayout === 'tabs' && companyTab === 'office' && <PromptComposer client={company} />}
+      </div>
+      {showCompanyPane && (
+        <div
+          className="shrink-0 overflow-hidden"
+          style={companyLayout === 'split' ? { width: COMPANY_PANEL_WIDTH_PX } : undefined}
+        >
+          <CompanyWorkspace client={company} showComposer={companyLayout === 'split'} />
+        </div>
       )}
     </div>
   );

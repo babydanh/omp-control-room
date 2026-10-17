@@ -109,6 +109,8 @@ async function main() {
     copyAssets();
     buildHooks();
     await buildCli();
+    await buildPtyHost();
+    await buildOmpBridge();
     await buildUninstall();
   }
 }
@@ -145,6 +147,47 @@ async function buildCli() {
   if (!production) {
     console.log('[build] CLI bundled: dist/cli.mjs');
   }
+}
+
+/**
+ * Bundle the PTY helper: a separate Node process that owns node-pty.
+ *
+ * The native addon stays external on purpose. It is compiled against the
+ * system Node ABI, and the extension host is Electron with a different one, so
+ * requiring it from the extension bundle would throw at startup. The helper
+ * resolves it from the installed package at run time instead.
+ */
+async function buildPtyHost() {
+  await esbuild.build({
+    entryPoints: ['server/src/company/ptyHost.ts'],
+    bundle: true,
+    format: 'cjs',
+    minify: production,
+    sourcemap: !production,
+    platform: 'node',
+    target: 'node20',
+    outfile: 'dist/company-pty-host.js',
+    external: ['node-pty', '@xterm/headless', '@xterm/addon-serialize'],
+    define: versionDefine,
+    logLevel: 'silent',
+  });
+  console.log('[build] PTY helper bundled: dist/company-pty-host.js');
+}
+
+/** Native OMP loads this extension in its own runtime; no OMP import enters either surface bundle. */
+async function buildOmpBridge() {
+  await esbuild.build({
+    entryPoints: ['server/src/company/ompBridgeExtension.ts'],
+    bundle: true,
+    format: 'esm',
+    minify: production,
+    sourcemap: !production,
+    platform: 'node',
+    target: 'node20',
+    outfile: 'dist/company-omp-bridge.mjs',
+    logLevel: 'silent',
+  });
+  console.log('[build] OMP bridge bundled: dist/company-omp-bridge.mjs');
 }
 
 main().catch((e) => {

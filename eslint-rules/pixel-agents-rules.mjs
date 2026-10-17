@@ -10,6 +10,15 @@
 const HEX_COLOR = /#[0-9a-fA-F]{3,8}\b/;
 const RGB_FUNC = /\brgba?\s*\(/;
 const HSL_FUNC = /\bhsla?\s*\(/;
+
+/**
+ * The two faces this project is allowed to set directly.
+ *
+ * Inter is the UI reading face; FS Pixel Sans belongs to the office canvas and
+ * the overlays drawn on top of it. Anything else is a hardcoded font that will
+ * not follow the theme.
+ */
+const PROJECT_FONTS = ['Inter', 'FS Pixel Sans', 'var(--font-ui)', 'var(--font-pixel)'];
 const COLOR_PATTERNS = [HEX_COLOR, RGB_FUNC, HSL_FUNC];
 
 /** Check whether a raw string value contains a color literal. */
@@ -107,11 +116,13 @@ const pixelFont = {
   meta: {
     type: 'suggestion',
     docs: {
-      description: 'Require font-family values to reference FS Pixel Sans.',
+      description:
+        'Require font-family values to reference a project font token (Inter for UI chrome, FS Pixel Sans for the office canvas).',
     },
     schema: [],
     messages: {
-      found: 'Use the FS Pixel Sans font for UI styling.',
+      found:
+        'Use the project font tokens — Inter for UI text, FS Pixel Sans for canvas overlays.',
     },
   },
   create(context) {
@@ -120,7 +131,7 @@ const pixelFont = {
         if (!isFontFamilyProperty(node)) return;
         const value = node.value;
         if (value.type !== 'Literal' || typeof value.value !== 'string') return;
-        if (value.value.includes('FS Pixel Sans')) return;
+        if (PROJECT_FONTS.some((font) => value.value.includes(font))) return;
         context.report({ node: value, messageId: 'found' });
       },
     };

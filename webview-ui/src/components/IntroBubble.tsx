@@ -217,15 +217,15 @@ export function IntroBubble({
   };
 
   const titles = [
-    'Welcome to Pixel Agents!',
-    'Powered by Claude Code',
+    'Chào mừng đến với Pixel Agents!',
+    'Được hỗ trợ bởi Claude Code',
     headline,
-    installFailed ? "Hooks couldn't be installed" : "You're all set!",
+    installFailed ? 'Không thể cài đặt hooks' : 'Mọi thứ đã sẵn sàng!',
   ];
 
   return (
     <div
-      className="absolute"
+      className="office-ui absolute"
       style={{
         ...wrapperStyle,
         zIndex: INTRO_BUBBLE_Z_INDEX,
@@ -261,7 +261,7 @@ export function IntroBubble({
         <Button
           variant="ghost"
           size="icon"
-          aria-label="Close"
+          aria-label="Đóng"
           className="absolute top-4 right-4"
           onClick={onClose}
         >
@@ -269,7 +269,7 @@ export function IntroBubble({
         </Button>
 
         {/* Step dots: the tour's "1 of 4", drawn as pixels rather than prose. */}
-        <div className="flex gap-4 mb-8" aria-label={`Step ${step + 1} of ${STEP_COUNT}`}>
+        <div className="flex gap-4 mb-8" aria-label={`Bước ${step + 1} trên ${STEP_COUNT}`}>
           {Array.from({ length: STEP_COUNT }, (_, i) => (
             <div
               key={i}
@@ -283,22 +283,23 @@ export function IntroBubble({
 
         {step === WELCOME_STEP && (
           <p className="text-sm m-0 mb-8">
-            In this office, your AI agents become tiny pixel characters: they type at their desks
-            while they work, wander off when they're done, and speak up when they need you.
+            Trong văn phòng này, các agent AI của bạn trở thành những nhân vật pixel tí hon: chúng
+            gõ bàn phím tại bàn làm việc khi đang làm việc, đi loanh quanh khi rảnh tay, và lên
+            tiếng khi cần đến bạn.
           </p>
         )}
 
         {step === CLAUDE_CODE_STEP && (
           <>
             <p className="text-sm m-0 mb-8">
-              The office watches your Claude Code sessions and brings them to life in here. New to
-              Claude Code? Download it first:
+              Văn phòng này theo dõi các phiên Claude Code của bạn và thể hiện chúng ngay tại đây. Bạn
+              mới dùng Claude Code? Hãy tải nó trước:
             </p>
             <div className="text-sm bg-btn-bg border-2 border-border py-4 px-8 mb-8 select-all">
               {CLAUDE_CODE_INSTALL_COMMAND}
             </div>
             <p className="text-sm m-0 mb-8">
-              For more info, visit{' '}
+              Để biết thêm chi tiết, hãy xem{' '}
               <a
                 href={CLAUDE_CODE_URL}
                 target="_blank"
@@ -322,14 +323,14 @@ export function IntroBubble({
           <>
             {installFailed ? (
               <p className="text-sm m-0 mb-8">
-                Something went wrong writing to your Claude Code settings, so the office will watch
-                your sessions the slower way instead. No worries, everything still works and you can
-                retry activating them any time from Settings.
+                Đã xảy ra lỗi khi ghi vào cài đặt Claude Code của bạn, nên văn phòng sẽ theo dõi các
+                phiên của bạn theo cách chậm hơn. Đừng lo, mọi thứ vẫn hoạt động và bạn có thể bật
+                lại bất cứ lúc nào trong phần Cài đặt.
               </p>
             ) : null}
             <p className="text-sm m-0 mb-8">
-              Enjoy your new office! Questions, ideas, or pixel art to show off? Come hang out in
-              our Discord.
+              Hãy tận hưởng văn phòng mới của bạn! Có câu hỏi, ý tưởng, hay muốn khoe pixel art? Hãy
+              đến chơi cùng chúng tôi trên Discord.
             </p>
             <p className="text-base text-center m-0 mt-12 mb-12">
               <a
@@ -339,7 +340,7 @@ export function IntroBubble({
                 className="inline-flex items-center gap-8 text-accent-bright hover:text-accent no-underline"
               >
                 <DiscordIcon />
-                Join our Discord!
+                Tham gia Discord của chúng tôi!
               </a>
             </p>
           </>
@@ -358,7 +359,7 @@ export function IntroBubble({
               className={installPending ? 'opacity-[var(--btn-disabled-opacity)]' : ''}
               onClick={back}
             >
-              Back
+              Quay lại
             </Button>
           )}
 
@@ -371,7 +372,7 @@ export function IntroBubble({
                 className={installPending ? 'opacity-[var(--btn-disabled-opacity)]' : ''}
                 onClick={() => choose('never')}
               >
-                Don't Ask Again
+                Không hỏi lại
               </Button>
               <Button
                 variant={installPending ? 'disabled' : 'default'}
@@ -379,7 +380,7 @@ export function IntroBubble({
                 disabled={installPending}
                 onClick={() => choose('notNow')}
               >
-                Not Now
+                Để sau
               </Button>
               <Button
                 variant={installPending ? 'disabled' : 'accent'}
@@ -387,16 +388,16 @@ export function IntroBubble({
                 disabled={installPending}
                 onClick={() => choose('install')}
               >
-                {installPending ? 'Installing...' : 'Install Hooks'}
+                {installPending ? 'Đang cài đặt...' : 'Cài đặt hooks'}
               </Button>
             </div>
           ) : step === CLOSING_STEP ? (
             <Button variant="accent" size="sm" onClick={onClose}>
-              Let's Go
+              Bắt đầu nào
             </Button>
           ) : (
             <Button variant="default" size="sm" onClick={forward}>
-              Continue
+              Tiếp tục
             </Button>
           )}
         </div>

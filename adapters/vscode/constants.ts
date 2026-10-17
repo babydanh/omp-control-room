@@ -35,6 +35,7 @@ export const SETTING_KEY_AREA_MAPPINGS = 'pixel-agents.areaMappings';
 // ── VS Code Settings (contributes.configuration keys) ───────
 export const CONFIG_KEY_AUTO_SHOW_PANEL = 'pixel-agents.autoShowPanel';
 export const CONFIG_KEY_AUTO_SPAWN_AGENT = 'pixel-agents.autoSpawnAgent';
+export const CONFIG_KEY_COMPANY_WORKSPACE = 'pixel-agents.companyWorkspace';
 
 // ── VS Code Identifiers ─────────────────────────────────────
 export const VIEW_ID = 'pixel-agents.panelView';

@@ -9,6 +9,18 @@
 }
 
 :root {
+  /**
+   * UI reading face.
+   *
+   * The pixel face belongs to the artwork — it is what the office canvas draws
+   * with — but it is hard to read at the density the Company panels, drawer and
+   * report need. Those surfaces read in Inter, falling back to the platform UI
+   * face when Inter is not installed, so nothing depends on a network fetch.
+   */
+  --app-font-ui:
+    'Inter', 'Inter Variable', -apple-system, 'Segoe UI Variable Text', 'Segoe UI', system-ui,
+    sans-serif;
+
   /* Core palette */
   --color-bg: #1e1e2e;
   --color-bg-dark: #181828;
@@ -49,7 +61,10 @@
   /* 1px base so Tailwind spacing maps directly to pixels (pixel-art project) */
   --spacing: 1px;
 
-  --font-pixel: 'FS Pixel Sans', sans-serif;
+  /* UI chrome reads in Inter; the office canvas and its overlays keep the pixel
+     face, which is part of the artwork rather than a reading surface. */
+  --font-ui: var(--app-font-ui);
+  --font-pixel: 'FS Pixel Sans', var(--font-ui);
 
   /* Text sizes (pixel-art scale, base = 22px) */
   --text-*: initial;
@@ -92,15 +107,38 @@
   html,
   body,
   #root {
-    @apply m-0 w-full h-full overflow-hidden font-pixel text-base text-text;
-  }
-
-  * {
-    @apply font-pixel;
+    @apply m-0 w-full h-full overflow-hidden font-ui text-base text-text;
   }
 }
 
 @layer components {
+  /**
+   * Compact type scale for the Company surface.
+   *
+   * The 16–64px scale above is tuned for a bitmap face at sprite resolution.
+   * Inter fills the same em noticeably wider, so the board's narrow lanes wrapped
+   * every header and wrapped "Nothing here." across three lines. The panel needs
+   * its own scale rather than a global one, because the canvas labels still need
+   * the large sizes to stay legible over the artwork.
+   */
+  .company-ui {
+    --text-2xs: 11px;
+    --text-xs: 12px;
+    --text-sm: 13px;
+    --text-base: 14px;
+    --text-lg: 16px;
+    --text-xl: 19px;
+    --text-2xl: 23px;
+    --text-3xl: 28px;
+    --text-4xl: 34px;
+    --text-5xl: 42px;
+  }
+
+  /* The office canvas and its overlays draw over the artwork, so they keep the
+     pixel face and the large scale. */
+  .office-ui {
+    @apply font-pixel;
+  }
   /* Panel with standard pixel-art border + shadow */
   .pixel-panel {
     @apply bg-bg border-2 border-border rounded-none shadow-pixel;

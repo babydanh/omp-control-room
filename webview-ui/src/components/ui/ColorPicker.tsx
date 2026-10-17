@@ -62,28 +62,28 @@ export function ColorPicker({
   return (
     <div className="flex flex-col py-8 px-10 bg-bg-dark border-2 border-border rounded-none">
       <ColorSlider
-        label="Hue"
+        label="Sắc độ"
         value={value.h}
         min={isColorize ? 0 : -180}
         max={isColorize ? 360 : 180}
         onChange={(v) => handleChange('h', v)}
       />
       <ColorSlider
-        label="Saturation"
+        label="Độ bão hoà"
         value={value.s}
         min={isColorize ? 0 : -100}
         max={100}
         onChange={(v) => handleChange('s', v)}
       />
       <ColorSlider
-        label="Brightness"
+        label="Độ sáng"
         value={value.b}
         min={-100}
         max={100}
         onChange={(v) => handleChange('b', v)}
       />
       <ColorSlider
-        label="Contrast"
+        label="Độ tương phản"
         value={value.c}
         min={-100}
         max={100}
@@ -99,7 +99,7 @@ export function ColorPicker({
               type="button"
               onClick={() => onChange({ ...value, colorize: !value.colorize || undefined })}
               className="flex items-center gap-8 shrink-0 bg-transparent border-0 p-0 cursor-pointer text-left"
-              title="Toggle colorize mode"
+              title="Bật/tắt chế độ colorize"
             >
               <span className="text-sm text-text-muted w-64 shrink-0">Colorize</span>
               <span
@@ -124,10 +124,10 @@ export function ColorPicker({
               variant="default"
               size="sm"
               onClick={onReset}
-              title="Reset to default"
+              title="Đặt lại về mặc định"
               className="mt-6"
             >
-              Reset
+              Đặt lại
             </Button>
           )}
         </div>

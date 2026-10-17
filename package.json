@@ -35,6 +35,8 @@
     "CHANGELOG.md",
     "LICENSE",
     "dist/cli.js",
+    "dist/company-pty-host.js",
+    "dist/company-omp-bridge.mjs",
     "dist/extension.js",
     "dist/hooks/claude-hook.js",
     "dist/uninstall.js",
@@ -83,6 +85,11 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically spawn a Claude Code agent when VS Code starts, if no agents are currently running."
+        },
+        "pixel-agents.companyWorkspace": {
+          "type": "string",
+          "default": "D:\\Duancanhan\\Project_QuanLyGiaiDau",
+          "description": "Canonical workspace managed by the Company board. Execution requires a trusted VS Code workspace."
         }
       }
     }
@@ -160,7 +167,10 @@
     "@fastify/cors": "^11.2.0",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.2.0",
-    "fastify": "^5.8.5"
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
+    "fastify": "^5.8.5",
+    "node-pty": "1.1.0"
   },
   "overrides": {
     "jsonpath-plus": "^10.4.0",

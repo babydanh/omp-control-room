@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import type { HooksConsentRequest } from '../../../core/src/messages.js';
+import { TRANSPORT_STATE_CONNECTED } from '../../../core/src/constants.js';
+import type { HooksConsentRequest, ServerMessage } from '../../../core/src/messages.js';
+import { isCompanyServerMessage } from '../company/companyMessages.js';
 import { playDoneSound, playPermissionSound, setSoundEnabled } from '../notificationSound.js';
 import type { ExistingAgentMeta, PendingAgent } from '../office/engine/existingAgents.js';
 import { reconcileExistingAgents } from '../office/engine/existingAgents.js';
@@ -120,6 +122,8 @@ export function useExtensionMessages(
   getOfficeState: () => OfficeState,
   onLayoutLoaded?: (layout: OfficeLayout) => void,
   isEditDirty?: () => boolean,
+  onCompanyMessage?: (message: ServerMessage) => void,
+  onCompanyConnect?: () => void,
 ): ExtensionMessageState {
   const [agents, setAgents] = useState<number[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<number | null>(null);
@@ -171,6 +175,13 @@ export function useExtensionMessages(
   // character to a new tile every turn. Cleared by subagentClear/agentClosed.
   const backgroundParentToolIdsRef = useRef<Record<number, Set<string>>>({});
 
+  // The company client's callbacks, kept in refs so this subscription is
+  // registered once and always calls the CURRENT handlers.
+  const onCompanyMessageRef = useRef(onCompanyMessage);
+  const onCompanyConnectRef = useRef(onCompanyConnect);
+  onCompanyMessageRef.current = onCompanyMessage;
+  onCompanyConnectRef.current = onCompanyConnect;
+
   useEffect(() => {
     // Buffer agents from existingAgents until layout is loaded
     let pendingAgents: PendingAgent[] = [];
@@ -205,6 +216,14 @@ export function useExtensionMessages(
           toolId: msg.toolId,
           parentToolId: msg.parentToolId,
         });
+      }
+
+      // Company traffic leaves this handler immediately. The client owns the
+      // reduction; letting it fall through would run every snapshot and
+      // terminal frame through the office's message chain a second time.
+      if (isCompanyServerMessage(msg)) {
+        onCompanyMessageRef.current?.(msg);
+        return;
       }
 
       if (msg.type === 'providerCapabilities') {
@@ -739,7 +758,18 @@ export function useExtensionMessages(
     };
     const unsubscribe = transport.onMessage(handler);
     transport.send({ type: 'webviewReady' });
-    return unsubscribe;
+    // The company asks for its first snapshot from the same handshake the
+    // office uses, so one authorized connection loads both surfaces.
+    onCompanyConnectRef.current?.();
+    // A reconnect re-requests everything: the changes that happened while the
+    // socket was down were never delivered.
+    const unsubscribeState = transport.onStateChange((state) => {
+      if (state === TRANSPORT_STATE_CONNECTED) onCompanyConnectRef.current?.();
+    });
+    return () => {
+      unsubscribe();
+      unsubscribeState();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [getOfficeState]);
 

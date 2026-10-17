@@ -1366,7 +1366,7 @@ test.describe('Hooks ON / lifecycle', () => {
 
   // Hook installer side effects: claudeHookInstaller side effects on ~/.claude/settings.json.
   //
-  // Background: when "Instant Detection (Hooks)" is toggled in Settings, the
+  // Background: when "Phát hiện tức thì (Hooks)" is toggled in Settings, the
   // extension writes (install) or rewrites (uninstall) ~/.claude/settings.json
   // via claudeHookInstaller. Historical bugs around clobbering pre-existing
   // third-party hook entries make this a real bug surface. Unit tests cover the
@@ -1444,7 +1444,7 @@ test.describe('Hooks ON / lifecycle', () => {
     );
   });
 
-  // toggling "Instant Detection" off uninstalls the pixel-agents hook;
+  // toggling "Phát hiện tức thì" off uninstalls the pixel-agents hook;
   // toggling it back on reinstalls. Round-trip is idempotent (no duplicate
   // entries on the second install).
   test('hook install and uninstall round-trip via the Settings toggle @area:cross-cutting', async ({
@@ -1639,10 +1639,10 @@ test.describe('Hooks ON / lifecycle', () => {
     }
 
     // Dismiss any first-run tooltips that overlay the top toolbar. The
-    // "Instant Detection Active" tooltip and the "Updated to vN" tooltip
+    // "Phát hiện tức thì đang bật" tooltip and the "Đã cập nhật lên vN" tooltip
     // both intercept clicks on the Undo/Redo/Save row. We dismiss them via
     // their close buttons (the X) before entering edit mode.
-    for (const tooltipText of ['Instant Detection Active', 'Updated to v']) {
+    for (const tooltipText of ['Phát hiện tức thì đang bật', 'Đã cập nhật lên v']) {
       const tooltip = frame.locator('div', { hasText: tooltipText }).first();
       if (await tooltip.isVisible().catch(() => false)) {
         const closeBtn = tooltip.locator('button', { hasText: 'x' }).first();

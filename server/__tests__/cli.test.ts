@@ -119,6 +119,18 @@ describe('parseArgs', () => {
   it('parses --host', () => {
     expect(parseArgs(['--host', '0.0.0.0']).host).toBe('0.0.0.0');
   });
+
+  it('accepts an explicit Company workspace without normalizing or splitting its path', () => {
+    const workspace = path.join(os.tmpdir(), 'Company workspace with spaces');
+    expect(parseArgs(['--workspace', workspace, '--port', '3100']).workspace).toBe(workspace);
+  });
+
+  it.each([{ suffix: [] }, { suffix: ['--port', '3100'] }])(
+    'rejects --workspace without a path: $suffix',
+    ({ suffix }) => {
+      expect(() => parseArgs(['--workspace', ...suffix])).toThrow(CliArgsError);
+    },
+  );
 });
 
 // The TTY consent prompt is gone: first-run consent is asked in the app, as
@@ -173,11 +185,15 @@ describe('dist/cli.js entry-point guard', () => {
   ): Promise<void> {
     const workspaceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cli-workspace-'));
     const port = await getFreePort();
-    const child = spawn(process.execPath, [CLI_BUNDLE, '--port', port.toString(), '--host', host], {
-      cwd: workspaceDir,
-      env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const child = spawn(
+      process.execPath,
+      [CLI_BUNDLE, '--port', port.toString(), '--host', host, '--workspace', workspaceDir],
+      {
+        cwd: workspaceDir,
+        env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      },
+    );
     let output = '';
     child.stdout.on('data', (chunk: Buffer) => (output += chunk.toString()));
     child.stderr.on('data', (chunk: Buffer) => (output += chunk.toString()));
@@ -421,7 +437,12 @@ describe('dist/cli.js entry-point guard', () => {
         string,
         unknown
       >;
-      expect(JSON.stringify(settings)).toContain(installedHook);
+      // Read the PARSED structure: JSON escapes a Windows separator as `\\`, so a
+      // substring check on the re-serialized text could never match a raw path.
+      const commands = Object.values(
+        (settings.hooks ?? {}) as Record<string, { hooks?: { command?: string }[] }[]>,
+      ).flatMap((entries) => entries.flatMap((entry) => entry.hooks ?? []));
+      expect(commands.map((entry) => entry.command)).toContain(`node "${installedHook}"`);
     } finally {
       await stopChild(child);
       fs.rmSync(tmpHome, { recursive: true, force: true });

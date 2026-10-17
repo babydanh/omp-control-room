@@ -104,7 +104,7 @@ export function BottomToolbar({
           </Button>
           <Dropdown isOpen={isBypassMenuOpen}>
             <DropdownItem onClick={() => handleBypassSelect(true)}>
-              Skip permissions mode <span className="text-2xs text-warning">⚠</span>
+              Bỏ qua chế độ xin quyền <span className="text-2xs text-warning">⚠</span>
             </DropdownItem>
           </Dropdown>
           <Dropdown isOpen={isFolderPickerOpen} className="min-w-128">
@@ -123,16 +123,16 @@ export function BottomToolbar({
       <Button
         variant={isEditMode ? 'active' : 'default'}
         onClick={onToggleEditMode}
-        title="Edit office layout"
+        title="Chỉnh sửa bố cục văn phòng"
       >
-        Layout
+        Bố cục
       </Button>
       <Button
         variant={isSettingsOpen ? 'active' : 'default'}
         onClick={onToggleSettings}
-        title="Settings"
+        title="Cài đặt"
       >
-        Settings
+        Cài đặt
       </Button>
     </div>
   );

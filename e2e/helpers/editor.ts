@@ -47,12 +47,12 @@ export interface TestHooksWindow extends Window {
 }
 
 /**
- * Dismiss the first-run tooltips ("Instant Detection Active", "Updated to vN")
+ * Dismiss the first-run tooltips ("Phát hiện tức thì đang bật", "Đã cập nhật lên vN")
  * that overlay the top toolbar and would otherwise intercept the Layout click.
  * Mirrors the helper inlined in pets.spec.ts.
  */
 export async function dismissFirstRunTooltips(frame: Frame): Promise<void> {
-  for (const tooltipText of ['Instant Detection Active', 'Updated to v']) {
+  for (const tooltipText of ['Phát hiện tức thì đang bật', 'Đã cập nhật lên v']) {
     const tooltip = frame.locator('div', { hasText: tooltipText }).first();
     if (await tooltip.isVisible().catch(() => false)) {
       const closeBtn = tooltip.locator('button', { hasText: 'x' }).first();

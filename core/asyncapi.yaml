@@ -118,6 +118,21 @@ components:
         - $ref: '#/components/schemas/WorkspaceFolders'
         # Diagnostics
         - $ref: '#/components/schemas/AgentDiagnostics'
+        # Company board (privileged messages; see egress filter in the server)
+        - $ref: '#/components/schemas/CompanySnapshotMessage'
+        - $ref: '#/components/schemas/CompanyStateChangedMessage'
+        - $ref: '#/components/schemas/CompanyCommandResultMessage'
+        - $ref: '#/components/schemas/CompanyTextDeltaMessage'
+        - $ref: '#/components/schemas/CompanyModelCatalogMessage'
+        - $ref: '#/components/schemas/CompanyArtifactPageMessage'
+        - $ref: '#/components/schemas/CompanyFileListMessage'
+        - $ref: '#/components/schemas/CompanyFileReadMessage'
+        - $ref: '#/components/schemas/CompanyAttachmentUploadedMessage'
+        # Native terminal (per-session attachments only)
+        - $ref: '#/components/schemas/TerminalAttachedMessage'
+        - $ref: '#/components/schemas/TerminalSnapshotMessage'
+        - $ref: '#/components/schemas/TerminalDataMessage'
+        - $ref: '#/components/schemas/TerminalClosedMessage'
       discriminator: type
 
     ClientMessage:
@@ -144,6 +159,23 @@ components:
         - $ref: '#/components/schemas/SaveAreaMappings'
         - $ref: '#/components/schemas/SetShowAreas'
         - $ref: '#/components/schemas/RequestDiagnostics'
+        # Company board commands (all require a privileged connection)
+        - $ref: '#/components/schemas/CompanySnapshotRequestMessage'
+        - $ref: '#/components/schemas/CompanyPromptSubmitMessage'
+        - $ref: '#/components/schemas/CompanyContractDecisionMessage'
+        - $ref: '#/components/schemas/CompanyQuestionAnswerMessage'
+        - $ref: '#/components/schemas/CompanySessionControlMessage'
+        - $ref: '#/components/schemas/CompanySettingsUpdateMessage'
+        - $ref: '#/components/schemas/CompanyModelCatalogRequestMessage'
+        - $ref: '#/components/schemas/CompanyArtifactRequestMessage'
+        - $ref: '#/components/schemas/CompanyFileListRequestMessage'
+        - $ref: '#/components/schemas/CompanyFileReadRequestMessage'
+        - $ref: '#/components/schemas/CompanyAttachmentUploadMessage'
+        # Native terminal
+        - $ref: '#/components/schemas/TerminalAttachMessage'
+        - $ref: '#/components/schemas/TerminalInputMessage'
+        - $ref: '#/components/schemas/TerminalResizeMessage'
+        - $ref: '#/components/schemas/TerminalDetachMessage'
       discriminator: type
 
     # ── Server message variants ────────────────────────────────────
@@ -1196,3 +1228,2090 @@ components:
           type: string
         frame:
           type: integer
+    CompanyRole:
+      type: string
+      enum: [director, advisor, worker, qa, judge]
+
+    CompanySettings:
+      type: object
+      additionalProperties: false
+      required:
+        - workspacePath
+        - maxRetainedSessions
+        - maxLiveRunners
+        - maxConcurrentModelCalls
+        - maxWorkers
+        - idleParkSeconds
+        - roleProfiles
+        - verificationProfiles
+      properties:
+        workspacePath:
+          type: string
+        maxRetainedSessions:
+          type: integer
+          const: 10
+        maxLiveRunners:
+          type: integer
+          const: 4
+        maxConcurrentModelCalls:
+          type: integer
+          const: 4
+        maxWorkers:
+          type: integer
+          const: 4
+        idleParkSeconds:
+          type: integer
+          const: 120
+        roleProfiles:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/RoleProfile'
+        verificationProfiles:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VerificationProfile'
+
+    RoleProfile:
+      type: object
+      additionalProperties: false
+      required: [role, requestedModel, thinking, workflowFingerprint, toolsPolicy]
+      properties:
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        requestedModel:
+          type: string
+        thinking:
+          type: string
+        workflowFingerprint:
+          type: string
+        toolsPolicy:
+          type: string
+          enum: [read-only, scoped-write, verification-only]
+
+    PromptAttachment:
+      type: object
+      additionalProperties: false
+      required: [artifactId, fileName, mediaType, byteLength, sha256]
+      properties:
+        artifactId:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+        mediaType:
+          type: string
+        byteLength:
+          type: integer
+          minimum: 0
+        sha256:
+          type: string
+
+    PromptFragment:
+      type: object
+      additionalProperties: false
+      required: [id, start, end, ordinal]
+      properties:
+        id:
+          type: string
+          format: uuid
+        start:
+          type: integer
+          minimum: 0
+        end:
+          type: integer
+          minimum: 0
+        ordinal:
+          type: integer
+          minimum: 0
+
+    CompanyPrompt:
+      type: object
+      additionalProperties: false
+      required: [id, rawTextArtifactId, preview, createdAt, fragments]
+      properties:
+        id:
+          type: string
+          format: uuid
+        rawTextArtifactId:
+          type: string
+          format: uuid
+        preview:
+          type: string
+          maxLength: 240
+        createdAt:
+          type: string
+          format: date-time
+        fragments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptFragment'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptAttachment'
+        targetContractId:
+          type: string
+          format: uuid
+        targetSessionId:
+          type: string
+          format: uuid
+        routingReason:
+          type: string
+
+    Requirement:
+      type: object
+      additionalProperties: false
+      required: [id, promptId, fragmentIds, text, kind, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        promptId:
+          type: string
+          format: uuid
+        fragmentIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        text:
+          type: string
+        kind:
+          type: string
+          enum: [goal, constraint, context]
+        status:
+          type: string
+          enum: [open, clarification, planned, satisfied, blocked]
+
+    AcceptanceCriterion:
+      type: object
+      additionalProperties: false
+      required: [id, requirementIds, description, kind, required]
+      properties:
+        id:
+          type: string
+          format: uuid
+        requirementIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        description:
+          type: string
+        kind:
+          type: string
+          enum: [command, surface, review]
+        required:
+          type: boolean
+
+    Phase:
+      type: object
+      additionalProperties: false
+      required: [id, title, ordinal, taskIds, acceptanceIds]
+      properties:
+        id:
+          type: string
+          format: uuid
+        title:
+          type: string
+        ordinal:
+          type: integer
+          minimum: 0
+        taskIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        acceptanceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    VerificationCommand:
+      type: object
+      additionalProperties: false
+      required: [id, executable, argv, cwd, timeoutSeconds]
+      properties:
+        id:
+          type: string
+          format: uuid
+        executable:
+          type: string
+        argv:
+          type: array
+          items:
+            type: string
+        cwd:
+          type: string
+        timeoutSeconds:
+          type: integer
+          minimum: 1
+
+    VerificationProfile:
+      type: object
+      additionalProperties: false
+      required: [id, criterionIds, commands, prerequisites, outputScopes]
+      properties:
+        id:
+          type: string
+          format: uuid
+        criterionIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        commands:
+          type: array
+          items:
+            $ref: '#/components/schemas/VerificationCommand'
+        prerequisites:
+          type: array
+          items:
+            type: string
+        outputScopes:
+          type: array
+          items:
+            type: string
+
+    WriteScope:
+      type: object
+      additionalProperties: false
+      required: [path, kind, operations]
+      properties:
+        path:
+          type: string
+        kind:
+          type: string
+          enum: [file, directory]
+        operations:
+          type: array
+          items:
+            type: string
+            enum: [create, modify]
+
+    ReadScope:
+      type: object
+      additionalProperties: false
+      required: [path, kind, operations]
+      properties:
+        path:
+          type: string
+        kind:
+          type: string
+          enum: [file, directory]
+        operations:
+          type: array
+          items:
+            type: string
+            enum: [read, list, search]
+
+
+    RelatedWorkspaceFile:
+      type: object
+      additionalProperties: false
+      required: [path, relation]
+      properties:
+        path:
+          type: string
+        relation:
+          type: string
+          enum: [source, changed, test, config, evidence]
+        reason:
+          type: string
+        artifactId:
+          type: string
+          format: uuid
+
+    WorkspaceChange:
+      type: object
+      additionalProperties: false
+      required: [path, kind, summary]
+      properties:
+        path:
+          type: string
+        kind:
+          type: string
+          enum: [create, modify, delete]
+        summary:
+          type: string
+        diffArtifactId:
+          type: string
+          format: uuid
+
+    Task:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - code
+        - contractId
+        - phaseId
+        - title
+        - requirementIds
+        - dependsOn
+        - workstreamId
+        - readScopes
+        - writeScopes
+        - sharedResources
+        - acceptance
+        - executionMode
+        - status
+        - attemptIds
+        - routeReason
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        contractId:
+          type: string
+          format: uuid
+        phaseId:
+          type: string
+          format: uuid
+        title:
+          type: string
+        requirementIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        dependsOn:
+          type: array
+          items:
+            type: string
+            format: uuid
+        workstreamId:
+          type: string
+          format: uuid
+        readScopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReadScope'
+        writeScopes:
+          type: array
+          items:
+            $ref: '#/components/schemas/WriteScope'
+        sharedResources:
+          type: array
+          items:
+            type: string
+        acceptance:
+          type: array
+          items:
+            type: string
+        executionMode:
+          type: string
+          enum: [inline, subagent, session]
+        sessionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+            - planned
+            - ready
+            - running
+            - waiting_input
+            - paused
+            - verifying
+            - changes_requested
+            - done
+            - failed
+            - cancelled
+        attemptIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        routeReason:
+          type: string
+        relatedFiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelatedWorkspaceFile'
+
+    CompanyArchitectureIssue:
+      type: object
+      additionalProperties: false
+      required: [severity, requirementIds, evidence, fix]
+      properties:
+        severity:
+          type: string
+          enum: [P0, P1, P2, P3]
+        requirementIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        evidence:
+          type: array
+          items:
+            type: string
+        fix:
+          type: string
+
+    CompanyArchitectureReview:
+      type: object
+      additionalProperties: false
+      required: [revision, verdict, issues, advisorNotes, reviewedAt]
+      properties:
+        revision:
+          type: integer
+          minimum: 1
+        verdict:
+          type: string
+          enum: [approve, changes_requested]
+        issues:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyArchitectureIssue'
+        advisorNotes:
+          type: array
+          items:
+            type: string
+        reviewedAt:
+          type: string
+          format: date-time
+
+    Contract:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - code
+        - revision
+        - promptIds
+        - requirements
+        - phases
+        - tasks
+        - assumptions
+        - decisions
+        - acceptance
+        - status
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        revision:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+        summary:
+          type: string
+        promptIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/Requirement'
+        phases:
+          type: array
+          items:
+            $ref: '#/components/schemas/Phase'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        assumptions:
+          type: array
+          items:
+            type: string
+        decisions:
+          type: array
+          items:
+            type: string
+        risks:
+          type: array
+          items:
+            type: string
+        acceptance:
+          type: array
+          items:
+            $ref: '#/components/schemas/AcceptanceCriterion'
+        architectureReviews:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyArchitectureReview'
+
+        relatedFiles:
+          type: array
+          items:
+            $ref: '#/components/schemas/RelatedWorkspaceFile'
+        status:
+          type: string
+          enum:
+            - draft
+            - clarifying
+            - architecture_review
+            - awaiting_approval
+            - approved
+            - running
+            - completed
+            - blocked
+            - cancelled
+
+    CompanySession:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - code
+        - name
+        - role
+        - workstreamId
+        - workspaceKey
+        - requestedModel
+        - runEpoch
+        - status
+        - lastUsedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        workstreamId:
+          type: string
+          format: uuid
+        workspaceKey:
+          type: string
+        requestedModel:
+          type: string
+        effectiveModel:
+          type: string
+        nativeSessionId:
+          type: string
+        nativeSessionPath:
+          type: string
+        agentId:
+          type: integer
+        runEpoch:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+          enum:
+            - parked
+            - starting
+            - idle
+            - busy
+            - waiting_input
+            - pausing
+            - paused
+            - stopping
+            - stopped
+            - crashed
+            - archived
+        activeTaskId:
+          type: string
+          format: uuid
+        lastUsedAt:
+          type: string
+          format: date-time
+        contextSnapshot:
+          type: object
+          additionalProperties: true
+        handoffArtifactId:
+          type: string
+          format: uuid
+
+    CompanySessionSummary:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, role, requestedModel, runEpoch, status, lastUsedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        requestedModel:
+          type: string
+        effectiveModel:
+          type: string
+        agentId:
+          type: integer
+        runEpoch:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+        activeTaskId:
+          type: string
+          format: uuid
+        lastUsedAt:
+          type: string
+          format: date-time
+        contextSnapshot:
+          type: object
+          additionalProperties: true
+
+    QuestionOption:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label:
+          type: string
+        description:
+          type: string
+
+    QuestionPrompt:
+      type: object
+      additionalProperties: false
+      required: [id, question, options]
+      properties:
+        id:
+          type: string
+        question:
+          type: string
+        options:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionOption'
+        recommended:
+          type: integer
+          minimum: 0
+        multi:
+          type: boolean
+
+    Question:
+      type: object
+      additionalProperties: false
+      required: [id, sessionId, runEpoch, kind, title, questions, status, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        nativeToolCallId:
+          type: string
+        kind:
+          type: string
+          enum: [clarification, technical_choice, approval]
+        title:
+          type: string
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuestionPrompt'
+        actionDigest:
+          type: string
+        status:
+          type: string
+          enum: [pending, answered, rejected, cancelled, expired]
+        answer:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+
+    QuestionAnswer:
+      type: object
+      additionalProperties: false
+      required: [selectedIndices, isOther]
+      properties:
+        selectedIndices:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+        text:
+          type: string
+        isOther:
+          type: boolean
+
+    QuestionAnswerInput:
+      type: object
+      additionalProperties: false
+      required: [requestId, questionId, runEpoch, answers]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        questionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        actionDigest:
+          type: string
+        answers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/QuestionAnswer'
+        decision:
+          type: string
+          enum: [approve_once, reject]
+
+    Attempt:
+      type: object
+      additionalProperties: false
+      required: [id, taskId, sessionId, runEpoch, startedAt, status, changes, evidenceIds]
+      properties:
+        id:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [running, passed, failed, interrupted, blocked]
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceChange'
+        evidenceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        qaVerdict:
+          type: object
+          additionalProperties: true
+        judgeVerdict:
+          type: object
+          additionalProperties: true
+        error:
+          type: string
+
+    VerificationEvidence:
+      type: object
+      additionalProperties: false
+      required:
+        - id
+        - command
+        - startedAt
+        - endedAt
+        - criterionIds
+      properties:
+        id:
+          type: string
+          format: uuid
+        command:
+          $ref: '#/components/schemas/VerificationCommand'
+        startedAt:
+          type: string
+          format: date-time
+        endedAt:
+          type: string
+          format: date-time
+        exitCode:
+          type: integer
+        signal:
+          type: string
+        stdoutArtifactId:
+          type: string
+          format: uuid
+        stderrArtifactId:
+          type: string
+          format: uuid
+        prerequisites:
+          type: array
+          items:
+            type: string
+        criterionIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+
+    UsageProvenance:
+      type: string
+      enum: [own_turn, native_child, child_aggregate]
+
+    UsageRecord:
+      type: object
+      additionalProperties: false
+      required:
+        - sessionId
+        - nativeSessionId
+        - nativeEntryId
+        - role
+        - model
+        - provider
+        - purpose
+        - input
+        - output
+        - cacheRead
+        - cacheWrite
+        - timestamp
+        - source
+        - availability
+        - provenance
+        - runEpoch
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        nativeSessionId:
+          type: string
+        nativeEntryId:
+          type: string
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        model:
+          type: string
+        provider:
+          type: string
+        purpose:
+          type: string
+        input:
+          type: integer
+          minimum: 0
+        output:
+          type: integer
+          minimum: 0
+        cacheRead:
+          type: integer
+          minimum: 0
+        cacheWrite:
+          type: integer
+          minimum: 0
+        costUsd:
+          type: number
+          minimum: 0
+        timestamp:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [provider, native_session]
+        availability:
+          type: string
+        # How the entry relates to the owning company session. A native child's
+        # spend is kept under its parent's id, and the parent `task` tool result
+        # rolls the same calls up again; the provenance is what lets a restored
+        # ledger count that spend exactly once.
+        provenance:
+          $ref: '#/components/schemas/UsageProvenance'
+        # Tool call linking a child entry to the parent's rollup of it.
+        toolCallId:
+          type: string
+        # Run the call belonged to. Totals for "this run" are the newest epoch,
+        # so a restart cannot silently widen the window to the session lifetime.
+        runEpoch:
+          type: integer
+          minimum: 0
+        taskId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        # OMP's own `totalTokens`, when the source reported it.
+        totalTokens:
+          type: integer
+          minimum: 0
+
+    QuotaWindow:
+      type: object
+      additionalProperties: false
+      required: [label, reportedUnit]
+      properties:
+        label:
+          type: string
+        used:
+          type: number
+          minimum: 0
+        remaining:
+          type: number
+          minimum: 0
+        resetAt:
+          type: string
+          format: date-time
+        reportedUnit:
+          type: string
+
+    QuotaSnapshot:
+      type: object
+      additionalProperties: false
+      required: [provider, windows, fetchedAt, status]
+      properties:
+        provider:
+          type: string
+        accountLabel:
+          type: string
+        windows:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaWindow'
+        fetchedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [available, unsupported, unauthenticated, error, stale]
+
+    RequirementResult:
+      type: object
+      additionalProperties: false
+      required: [requirementId, taskIds, attemptIds, evidenceIds, result]
+      properties:
+        requirementId:
+          type: string
+          format: uuid
+        taskIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        attemptIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        evidenceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        result:
+          type: string
+
+    SessionLifecycleSummary:
+      type: object
+      additionalProperties: false
+      required: [sessionId, role, requestedModel, runEpoch, status]
+      properties:
+        sessionId:
+          type: string
+          format: uuid
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        requestedModel:
+          type: string
+        effectiveModel:
+          type: string
+        runEpoch:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+
+    CompanyReport:
+      type: object
+      additionalProperties: false
+      required:
+        - contractId
+        - revision
+        - requirements
+        - relatedChanges
+        - verificationEvidenceIds
+        - advisorNotes
+        - usage
+        - sessions
+      properties:
+        contractId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+        requirements:
+          type: array
+          items:
+            $ref: '#/components/schemas/RequirementResult'
+        relatedChanges:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkspaceChange'
+        verificationEvidenceIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+        advisorNotes:
+          type: array
+          items:
+            type: string
+        usage:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageRecord'
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/SessionLifecycleSummary'
+
+    CompanyCounters:
+      type: object
+      additionalProperties: false
+      required: [session, task, contract]
+      properties:
+        session:
+          type: integer
+          minimum: 0
+        task:
+          type: integer
+          minimum: 0
+        contract:
+          type: integer
+          minimum: 0
+
+    CompanyState:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - revision
+        - counters
+        - settings
+        - prompts
+        - contracts
+        - tasks
+        - sessions
+        - questions
+        - attempts
+        - reports
+        - evidence
+        - usageIndex
+        - quotas
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        revision:
+          type: integer
+          minimum: 0
+        counters:
+          $ref: '#/components/schemas/CompanyCounters'
+        settings:
+          $ref: '#/components/schemas/CompanySettings'
+        prompts:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CompanyPrompt'
+        contracts:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Contract'
+        tasks:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Task'
+        sessions:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CompanySession'
+        questions:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Question'
+        attempts:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/Attempt'
+        reports:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/CompanyReport'
+        evidence:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/VerificationEvidence'
+        usageIndex:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/UsageRecord'
+        quotas:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/QuotaSnapshot'
+
+    CompanySnapshot:
+      type: object
+      additionalProperties: false
+      required: [revision, settings, prompts, contracts, tasks, sessions, questions, quotas]
+      properties:
+        revision:
+          type: integer
+          minimum: 0
+        settings:
+          $ref: '#/components/schemas/CompanySettings'
+        prompts:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyPromptSummary'
+        contracts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Contract'
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        sessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanySessionSummary'
+        questions:
+          type: array
+          items:
+            $ref: '#/components/schemas/Question'
+        quotas:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaSnapshot'
+        diagnostics:
+          $ref: '#/components/schemas/CompanyDiagnostics'
+
+    CompanyDiagnostics:
+      type: object
+      additionalProperties: false
+      required:
+        - liveRunners
+        - modelLeases
+        - nativeJobs
+        - queuedTasks
+        - pendingQuestions
+        - retainedSessions
+        - archivedSessions
+        - terminalBufferedBytes
+        - ownedHandleCount
+        - measuredAt
+      properties:
+        liveRunners:
+          type: integer
+          minimum: 0
+        modelLeases:
+          type: integer
+          minimum: 0
+        nativeJobs:
+          type: integer
+          minimum: 0
+        queuedTasks:
+          type: integer
+          minimum: 0
+        pendingQuestions:
+          type: integer
+          minimum: 0
+        retainedSessions:
+          type: integer
+          minimum: 0
+        archivedSessions:
+          type: integer
+          minimum: 0
+        terminalBufferedBytes:
+          type: integer
+          minimum: 0
+        ownedHandleCount:
+          type: integer
+          minimum: 0
+        ownedRssBytes:
+          type: integer
+          minimum: 0
+        measuredAt:
+          type: string
+          format: date-time
+
+    CompanyEvent:
+      type: object
+      additionalProperties: false
+      required: [id, sequence, at, baseRevision, changes]
+      properties:
+        id:
+          type: string
+          format: uuid
+        sequence:
+          type: integer
+          minimum: 1
+        at:
+          type: string
+          format: date-time
+        baseRevision:
+          type: integer
+          minimum: 0
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyChange'
+
+    CompanyChange:
+      oneOf:
+        - $ref: '#/components/schemas/CompanyPromptPutChange'
+        - $ref: '#/components/schemas/CompanyContractPutChange'
+        - $ref: '#/components/schemas/CompanyTaskPutChange'
+        - $ref: '#/components/schemas/CompanySessionPutChange'
+        - $ref: '#/components/schemas/CompanyQuestionPutChange'
+        - $ref: '#/components/schemas/CompanyAttemptPutChange'
+        - $ref: '#/components/schemas/CompanyReportPutChange'
+        - $ref: '#/components/schemas/CompanyEvidencePutChange'
+        - $ref: '#/components/schemas/CompanySettingsPutChange'
+        - $ref: '#/components/schemas/CompanyUsagePutChange'
+        - $ref: '#/components/schemas/CompanyQuotaPutChange'
+        - $ref: '#/components/schemas/CompanyCountersPutChange'
+        - $ref: '#/components/schemas/CompanyRemoveChange'
+
+    SubmitPromptInput:
+      type: object
+      additionalProperties: false
+      required: [requestId, text, delivery]
+      properties:
+        requestId:
+          type: string
+          format: uuid
+        text:
+          type: string
+          maxLength: 2097152
+        targetContractId:
+          type: string
+          format: uuid
+        targetSessionId:
+          type: string
+          format: uuid
+        delivery:
+          type: string
+          enum: [prompt, steer, follow_up]
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptAttachment'
+
+    ArtifactPage:
+      type: object
+      additionalProperties: false
+      required: [id, offset, totalBytes, dataBase64, contentType, eof]
+      properties:
+        id:
+          type: string
+          format: uuid
+        offset:
+          type: integer
+          minimum: 0
+        totalBytes:
+          type: integer
+          minimum: 0
+        dataBase64:
+          type: string
+        contentType:
+          type: string
+        eof:
+          type: boolean
+
+    CompanyPromptSummary:
+      type: object
+      additionalProperties: false
+      required: [id, preview, createdAt, attachments]
+      properties:
+        id:
+          type: string
+          format: uuid
+        preview:
+          type: string
+          maxLength: 240
+        createdAt:
+          type: string
+          format: date-time
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/PromptAttachment'
+
+    CompanyPromptPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: prompt
+        op:
+          const: put
+        id:
+          type: string
+          format: uuid
+        value:
+          $ref: '#/components/schemas/CompanyPrompt'
+
+    CompanyContractPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: contract
+        op:
+          const: put
+        id:
+          type: string
+          format: uuid
+        value:
+          $ref: '#/components/schemas/Contract'
+
+    CompanyTaskPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: task
+        op:
+          const: put
+        id:
+          type: string
+          format: uuid
+        value:
+          $ref: '#/components/schemas/Task'
+
+    CompanySessionPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: session
+        op:
+          const: put
+        id:
+          type: string
+          format: uuid
+        value:
+          $ref: '#/components/schemas/CompanySession'
+
+    CompanyQuestionPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: question
+        op:
+          const: put
+        id:
+          type: string
+          format: uuid
+        value:
+          $ref: '#/components/schemas/Question'
+
+    CompanyAttemptPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: attempt
+        op:
+          const: put
+        id:
+          type: string
+          format: uuid
+        value:
+          $ref: '#/components/schemas/Attempt'
+
+    CompanyReportPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: report
+        op:
+          const: put
+        id:
+          type: string
+          format: uuid
+        value:
+          $ref: '#/components/schemas/CompanyReport'
+
+    CompanyEvidencePutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: evidence
+        op:
+          const: put
+        id:
+          type: string
+          format: uuid
+        value:
+          $ref: '#/components/schemas/VerificationEvidence'
+
+    CompanySettingsPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: settings
+        op:
+          const: put
+        id:
+          const: settings
+        value:
+          $ref: '#/components/schemas/CompanySettings'
+
+    CompanyUsagePutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: usage
+        op:
+          const: put
+        id:
+          type: string
+        value:
+          $ref: '#/components/schemas/UsageRecord'
+
+    CompanyQuotaPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: quota
+        op:
+          const: put
+        id:
+          type: string
+        value:
+          $ref: '#/components/schemas/QuotaSnapshot'
+
+    CompanyCountersPutChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id, value]
+      properties:
+        entity:
+          const: counters
+        op:
+          const: put
+        id:
+          const: counters
+        value:
+          $ref: '#/components/schemas/CompanyCounters'
+
+    CompanyRemoveChange:
+      type: object
+      additionalProperties: false
+      required: [entity, op, id]
+      properties:
+        entity:
+          type: string
+          enum: [prompt, contract, task, session, question, attempt, report, evidence, usage, quota]
+        op:
+          const: remove
+        id:
+          type: string
+
+
+    # ── Company shared shapes ───────────────────────────────────
+
+    CompanyModelCatalogEntry:
+      type: object
+      additionalProperties: false
+      required: [id, provider, model, thinking, acceptsImages, credentialsConfigured]
+      properties:
+        id:
+          type: string
+          description: '`provider/model`, the identifier a dispatch uses.'
+        provider:
+          type: string
+        model:
+          type: string
+        thinking:
+          type: array
+          items:
+            type: string
+          description: Reasoning levels this model actually accepts.
+        acceptsImages:
+          type: boolean
+          description: |
+            True only when the runtime verified native image input for this
+            model. Never inferred from the model name: an image attachment is
+            delivered only when this flag is true.
+        credentialsConfigured:
+          type: boolean
+          description: Whether a usable credential exists, without exposing it.
+
+    CompanyFileEntry:
+      type: object
+      additionalProperties: false
+      required: [name, path, kind]
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+          description: Workspace-relative path with forward slashes.
+        kind:
+          type: string
+          enum: [file, directory]
+        sizeBytes:
+          type: integer
+          minimum: 0
+        modifiedAt:
+          type: string
+          format: date-time
+
+    CompanyFileContent:
+      type: object
+      additionalProperties: false
+      required: [path, totalBytes, offset, encoding, truncated]
+      properties:
+        path:
+          type: string
+        totalBytes:
+          type: integer
+          minimum: 0
+        offset:
+          type: integer
+          minimum: 0
+        encoding:
+          type: string
+          enum: [utf8, base64]
+        text:
+          type: string
+        dataBase64:
+          type: string
+        mediaType:
+          type: string
+        truncated:
+          type: boolean
+
+    # ── Company client messages ─────────────────────────────────
+
+    CompanySnapshotRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: companySnapshotRequest
+        requestId:
+          type: string
+          format: uuid
+        includeDiagnostics:
+          type: boolean
+
+    CompanyPromptSubmitMessage:
+      type: object
+      additionalProperties: false
+      required: [type, prompt]
+      properties:
+        type:
+          const: companyPromptSubmit
+        prompt:
+          $ref: '#/components/schemas/SubmitPromptInput'
+
+    CompanyContractDecisionMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, contractId, revision, decision]
+      properties:
+        type:
+          const: companyContractDecision
+        requestId:
+          type: string
+          format: uuid
+        contractId:
+          type: string
+          format: uuid
+        revision:
+          type: integer
+          minimum: 1
+        decision:
+          type: string
+          enum: [approve, reject]
+        note:
+          type: string
+          maxLength: 2000
+
+    CompanyQuestionAnswerMessage:
+      type: object
+      additionalProperties: false
+      required: [type, answer]
+      properties:
+        type:
+          const: companyQuestionAnswer
+        answer:
+          $ref: '#/components/schemas/QuestionAnswerInput'
+
+    CompanySessionControlMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, sessionId, runEpoch, action]
+      properties:
+        type:
+          const: companySessionControl
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        action:
+          type: string
+          enum: [pause, resume, kill, restart, archive]
+
+    CompanySettingsUpdateMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, roleProfiles]
+      properties:
+        type:
+          const: companySettingsUpdate
+        requestId:
+          type: string
+          format: uuid
+        roleProfiles:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/RoleProfile'
+
+    CompanyModelCatalogRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: companyModelCatalogRequest
+        requestId:
+          type: string
+          format: uuid
+
+    CompanyArtifactRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, artifactId, offset]
+      properties:
+        type:
+          const: companyArtifactRequest
+        requestId:
+          type: string
+          format: uuid
+        artifactId:
+          type: string
+          format: uuid
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 65536
+
+    CompanyFileListRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path]
+      properties:
+        type:
+          const: companyFileListRequest
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          maxLength: 1024
+          description: Workspace-relative directory path; '' is the workspace root.
+
+    CompanyFileReadRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path, offset]
+      properties:
+        type:
+          const: companyFileReadRequest
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          maxLength: 1024
+          description: Workspace-relative file path; never a client filesystem path.
+        offset:
+          type: integer
+          minimum: 0
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 262144
+
+    CompanyAttachmentUploadMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, fileName, mediaType, dataBase64]
+      properties:
+        type:
+          const: companyAttachmentUpload
+        requestId:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+          maxLength: 512
+        mediaType:
+          type: string
+          maxLength: 255
+        dataBase64:
+          type: string
+          maxLength: 8388608
+
+    TerminalAttachMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, sessionId, runEpoch]
+      properties:
+        type:
+          const: terminalAttach
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        cols:
+          type: integer
+          minimum: 20
+          maximum: 500
+        rows:
+          type: integer
+          minimum: 5
+          maximum: 300
+
+    TerminalInputMessage:
+      type: object
+      additionalProperties: false
+      required: [type, sessionId, runEpoch, leaseId, data]
+      properties:
+        type:
+          const: terminalInput
+        sessionId:
+          type: string
+          format: uuid
+        leaseId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        data:
+          type: string
+          maxLength: 8192
+          description: One input chunk; never queued across a disconnect.
+
+    TerminalResizeMessage:
+      type: object
+      additionalProperties: false
+      required: [type, sessionId, runEpoch, leaseId, cols, rows]
+      properties:
+        type:
+          const: terminalResize
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        leaseId:
+          type: string
+          format: uuid
+        cols:
+          type: integer
+          minimum: 20
+          maximum: 500
+        rows:
+          type: integer
+          minimum: 5
+          maximum: 300
+
+    TerminalDetachMessage:
+      type: object
+      additionalProperties: false
+      required: [type, sessionId, runEpoch, leaseId]
+      properties:
+        type:
+          const: terminalDetach
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        leaseId:
+          type: string
+          format: uuid
+
+    # ── Company server messages ─────────────────────────────────
+
+    CompanySnapshotMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, snapshot]
+      properties:
+        type:
+          const: companySnapshot
+        requestId:
+          type: string
+          format: uuid
+        snapshot:
+          $ref: '#/components/schemas/CompanySnapshot'
+
+    CompanyStateChangedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, revision, changes]
+      properties:
+        type:
+          const: companyStateChanged
+        revision:
+          type: integer
+          minimum: 1
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyChange'
+
+    CompanyCommandResultMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, ok]
+      properties:
+        type:
+          const: companyCommandResult
+        requestId:
+          type: string
+          format: uuid
+        ok:
+          type: boolean
+        errorCode:
+          type: string
+        message:
+          type: string
+        revision:
+          type: integer
+          minimum: 0
+
+    CompanyTextDeltaMessage:
+      type: object
+      additionalProperties: false
+      required: [type, sessionId, runEpoch, seq, text]
+      properties:
+        type:
+          const: companyTextDelta
+        sessionId:
+          type: string
+          format: uuid
+        taskId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        seq:
+          type: integer
+          minimum: 0
+        text:
+          type: string
+
+    CompanyModelCatalogMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, entries]
+      properties:
+        type:
+          const: companyModelCatalog
+        requestId:
+          type: string
+          format: uuid
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyModelCatalogEntry'
+
+    CompanyArtifactPageMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, page]
+      properties:
+        type:
+          const: companyArtifactPage
+        requestId:
+          type: string
+          format: uuid
+        page:
+          $ref: '#/components/schemas/ArtifactPage'
+
+    CompanyFileListMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path, entries]
+      properties:
+        type:
+          const: companyFileList
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyFileEntry'
+
+    CompanyFileReadMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, content]
+      properties:
+        type:
+          const: companyFileRead
+        requestId:
+          type: string
+          format: uuid
+        content:
+          $ref: '#/components/schemas/CompanyFileContent'
+
+    CompanyAttachmentUploadedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, attachment]
+      properties:
+        type:
+          const: companyAttachmentUploaded
+        requestId:
+          type: string
+          format: uuid
+        attachment:
+          $ref: '#/components/schemas/PromptAttachment'
+
+    TerminalAttachedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, sessionId, runEpoch, leaseId, cols, rows]
+      properties:
+        type:
+          const: terminalAttached
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        leaseId:
+          type: string
+          format: uuid
+          description: Controller lease; the last attach for a session wins.
+        cols:
+          type: integer
+          minimum: 1
+        rows:
+          type: integer
+          minimum: 1
+
+    TerminalSnapshotMessage:
+      type: object
+      additionalProperties: false
+      required: [type, sessionId, runEpoch, seq, data]
+      properties:
+        type:
+          const: terminalSnapshot
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        seq:
+          type: integer
+          minimum: 0
+        data:
+          type: string
+          description: Base64 serialized framebuffer, replayed on reattach.
+
+    TerminalDataMessage:
+      type: object
+      additionalProperties: false
+      required: [type, sessionId, runEpoch, seq, data]
+      properties:
+        type:
+          const: terminalData
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        seq:
+          type: integer
+          minimum: 0
+        data:
+          type: string
+          description: Base64-encoded bytes exactly as the PTY produced them.
+
+    TerminalClosedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, sessionId, runEpoch, seq, reason]
+      properties:
+        type:
+          const: terminalClosed
+        sessionId:
+          type: string
+          format: uuid
+        runEpoch:
+          type: integer
+          minimum: 0
+        seq:
+          type: integer
+          minimum: 0
+        reason:
+          type: string

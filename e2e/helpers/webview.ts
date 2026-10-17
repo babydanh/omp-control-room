@@ -470,13 +470,13 @@ async function ensureSettingsModalFits(surface: WebviewSurface): Promise<void> {
 
 export async function openSettingsModal(frame: WebviewSurface): Promise<Locator> {
   await ensureSettingsModalFits(frame);
-  const settingsButton = frame.locator('button', { hasText: 'Settings' });
+  const settingsButton = frame.locator('button', { hasText: 'Cài đặt' });
   await expect(settingsButton).toBeVisible({ timeout: WEBVIEW_TIMEOUT_MS });
   await settingsButton.click();
 
   const settingsModal = frame
     .locator('div.fixed')
-    .filter({ has: frame.getByText('Settings', { exact: true }) });
+    .filter({ has: frame.getByText('Cài đặt', { exact: true }) });
   await expect(settingsModal).toBeVisible({ timeout: WEBVIEW_TIMEOUT_MS });
   return settingsModal;
 }
@@ -506,19 +506,19 @@ export async function setSettings(frame: WebviewSurface, settings: WebviewSettin
   const settingsModal = await openSettingsModal(frame);
 
   if (settings.watchAllSessions !== undefined) {
-    await setCheckbox(settingsModal, 'Watch All Sessions', settings.watchAllSessions);
+    await setCheckbox(settingsModal, 'Theo dõi mọi phiên', settings.watchAllSessions);
   }
   if (settings.hooksEnabled !== undefined) {
-    await setCheckbox(settingsModal, 'Instant Detection (Hooks)', settings.hooksEnabled);
+    await setCheckbox(settingsModal, 'Phát hiện tức thì (Hooks)', settings.hooksEnabled);
   }
   if (settings.alwaysShowLabels !== undefined) {
-    await setCheckbox(settingsModal, 'Always Show Labels', settings.alwaysShowLabels);
+    await setCheckbox(settingsModal, 'Luôn hiện nhãn', settings.alwaysShowLabels);
   }
   if (settings.ghostHeadlessAgents !== undefined) {
-    await setCheckbox(settingsModal, 'Display Headless as Ghosts', settings.ghostHeadlessAgents);
+    await setCheckbox(settingsModal, 'Hiện agent ẩn dạng ma', settings.ghostHeadlessAgents);
   }
   if (settings.debugView !== undefined) {
-    await setCheckbox(settingsModal, 'Debug View', settings.debugView);
+    await setCheckbox(settingsModal, 'Chế độ gỡ lỗi', settings.debugView);
   }
 
   await closeSettingsModal(settingsModal);

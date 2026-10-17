@@ -54,8 +54,8 @@ describe('PixelAgentsServer', () => {
     server = new PixelAgentsServer();
   });
 
-  afterEach(() => {
-    server?.stop();
+  afterEach(async () => {
+    await server?.stop();
     try {
       fs.rmSync(tmpBase, { recursive: true, force: true });
     } catch {
@@ -180,7 +180,7 @@ describe('PixelAgentsServer', () => {
     expect(config2.port).toBe(config1.port);
     expect(config2.pid).toBe(config1.pid);
     expect(registryFiles()).toHaveLength(1); // reuse -- server2 wrote no entry of its own
-    server2.stop(); // should not delete server.json / the registry entry (not owner)
+    await server2.stop(); // should not delete server.json / the registry entry (not owner)
   });
 
   // 12. Second instance, same capability (standalone+standalone), reuses existing server
@@ -190,7 +190,7 @@ describe('PixelAgentsServer', () => {
     const config2 = await server2.start({ embedded: false });
     expect(config2.port).toBe(config1.port);
     expect(registryFiles()).toHaveLength(1);
-    server2.stop();
+    await server2.stop();
   });
 
   // 13. Capability mismatch: a standalone caller never reuses an embedded server
@@ -200,7 +200,7 @@ describe('PixelAgentsServer', () => {
     const config2 = await server2.start({ embedded: false });
     expect(config2.port).not.toBe(config1.port);
     expect(registryFiles()).toHaveLength(2);
-    server2.stop();
+    await server2.stop();
   });
 
   // 14. Capability mismatch, mirrored: an embedded caller never reuses a standalone server
@@ -210,7 +210,7 @@ describe('PixelAgentsServer', () => {
     const config2 = await server2.start({ embedded: true });
     expect(config2.port).not.toBe(config1.port);
     expect(registryFiles()).toHaveLength(2);
-    server2.stop();
+    await server2.stop();
   });
 
   // 15. Embedded + standalone coexist: two independent live registry entries, neither reuses
@@ -231,7 +231,7 @@ describe('PixelAgentsServer', () => {
       true,
     );
 
-    standalone.stop();
+    await standalone.stop();
   });
 
   // 16. Dead-pid registry entries are pruned on start, never reused
@@ -284,7 +284,7 @@ describe('PixelAgentsServer', () => {
   it('deletes server.json on stop', async () => {
     await server.start();
     expect(fs.existsSync(serverJsonPath)).toBe(true);
-    server.stop();
+    await server.stop();
     expect(fs.existsSync(serverJsonPath)).toBe(false);
   });
 
@@ -297,7 +297,7 @@ describe('PixelAgentsServer', () => {
     );
     // Server never started (it would reuse), just stop
     const server2 = new PixelAgentsServer();
-    server2.stop();
+    await server2.stop();
     expect(fs.existsSync(serverJsonPath)).toBe(true);
   });
 
@@ -308,7 +308,7 @@ describe('PixelAgentsServer', () => {
     const standaloneConfig = await standalone.start({ embedded: false });
     expect(registryFiles()).toHaveLength(2);
 
-    standalone.stop();
+    await standalone.stop();
 
     // Only the standalone's own entry is gone; the still-running embedded
     // server's registry entry is untouched (self-only cleanup, D6).

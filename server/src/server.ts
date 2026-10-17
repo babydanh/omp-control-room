@@ -11,6 +11,7 @@ import type {
   ReloadAssetsSideEffect,
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
+import type { CompanyCommandServices } from './company/clientCommands.js';
 import {
   SERVER_JSON_DIR,
   SERVER_JSON_NAME,
@@ -49,6 +50,7 @@ export class PixelAgentsServer {
   private config: ServerConfig | null = null;
   private ownsServer = false;
   private callback: HookEventCallback | null = null;
+  private stopPromise: Promise<void> | null = null;
 
   /** Register a callback for incoming hook events from any provider. */
   onHookEvent(callback: HookEventCallback): void {
@@ -69,7 +71,11 @@ export class PixelAgentsServer {
     assetCache?: AssetCache;
     onSetHooksEnabled?: SetHooksEnabledSideEffect;
     onReloadAssets?: ReloadAssetsSideEffect;
+    company?: CompanyCommandServices | null;
+    getCompany?: () => CompanyCommandServices | null;
+    isCompanyExecutionAllowed?: () => boolean;
   }): Promise<ServerConfig> {
+    this.stopPromise = null;
     const embedded = options?.embedded ?? true;
     const wantsSpa = !embedded;
 
@@ -80,7 +86,12 @@ export class PixelAgentsServer {
     // server (blank page). Prune dead entries first so a crashed server's
     // stale file never blocks discovery of a live one.
     const registry = this.readAndPruneRegistry();
-    const candidate = registry.find((e) => e.servesSpa === wantsSpa);
+    // A Company surface is workspace-scoped. Reusing an unrelated server would
+    // attach its clients to another workspace's coordinator.
+    const candidate =
+      options?.company || options?.getCompany
+        ? undefined
+        : registry.find((e) => e.servesSpa === wantsSpa);
     if (candidate) {
       this.config = candidate;
       this.ownsServer = false;
@@ -106,6 +117,9 @@ export class PixelAgentsServer {
       onHookEvent: (providerId, event) => this.callback?.(providerId, event),
       onSetHooksEnabled: options?.onSetHooksEnabled,
       onReloadAssets: options?.onReloadAssets,
+      company: options?.company,
+      getCompany: options?.getCompany,
+      isCompanyExecutionAllowed: options?.isCompanyExecutionAllowed,
     });
 
     this.app = app;
@@ -133,17 +147,18 @@ export class PixelAgentsServer {
   }
 
   /** Stop the server and clean up its discovery records (only if we own them). */
-  stop(): void {
-    if (this.app) {
-      this.app.close();
-      this.app = null;
-    }
+  stop(): Promise<void> {
+    if (this.stopPromise) return this.stopPromise;
+    const closing = this.app?.close();
+    this.app = null;
     if (this.ownsServer) {
       this.deleteServerJson();
       this.deleteRegistryEntry();
     }
     this.config = null;
     this.ownsServer = false;
+    this.stopPromise = Promise.resolve(closing).then(() => undefined);
+    return this.stopPromise;
   }
 
   /** Returns the current server config, or null if not started. */

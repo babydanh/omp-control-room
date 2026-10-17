@@ -18,8 +18,15 @@ const REPO_ROOT = path.resolve(SCRIPT_DIR, '..');
 const METADATA_FILE = 'package-metadata.json';
 const START_TIMEOUT_MS = 20_000;
 
-function npmCommand() {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+function npmInvocation() {
+  if (process.platform !== 'win32') return { file: 'npm', args: [] };
+  const entry =
+    process.env.npm_execpath ??
+    path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  if (!path.isAbsolute(entry) || !entry.endsWith('.js') || !fs.existsSync(entry)) {
+    throw new Error('Cannot resolve the native npm CLI entry; run this check through npm run verify:npm-package.');
+  }
+  return { file: process.execPath, args: [entry] };
 }
 
 function parseArgs(argv) {
@@ -40,11 +47,13 @@ function parseArgs(argv) {
 }
 
 async function execNpm(args, options = {}) {
-  return await execFileAsync(npmCommand(), args, {
+  const npm = npmInvocation();
+  return await execFileAsync(npm.file, [...npm.args, ...args], {
     cwd: REPO_ROOT,
     env: { ...process.env, HUSKY: '0' },
     maxBuffer: 20 * 1024 * 1024,
     ...options,
+    shell: false,
   });
 }
 
@@ -157,7 +166,7 @@ async function verifyInstalledTarball(tarballPath) {
     const port = await getFreePort();
     child = spawn(
       process.execPath,
-      [installedCli, '--port', port.toString(), '--host', '127.0.0.1'],
+      [installedCli, '--port', port.toString(), '--host', '127.0.0.1', '--workspace', smokeProject],
       {
         cwd: smokeProject,
         env: { ...process.env, HOME: smokeHome, USERPROFILE: smokeHome },

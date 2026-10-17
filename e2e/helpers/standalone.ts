@@ -92,10 +92,9 @@ async function waitForHttpOk(url: string): Promise<void> {
 }
 
 /**
- * Spawn our standalone CLI (dist/cli.js). The CLI serves both the SPA and the
- * /ws WebSocket on the same port; tests connect Playwright's chromium to that
- * single origin. Workspace dir is communicated via process.cwd() since our CLI
- * doesn't take a --workspace-dir flag.
+ * Spawn our standalone CLI (dist/cli.js). The CLI serves the SPA and /ws on
+ * one origin. Both cwd and --workspace point at the isolated fixture directory,
+ * so Company execution never opens the user's configured/default workspace.
  */
 function spawnStandaloneHost(args: {
   homeDir: string;
@@ -109,7 +108,15 @@ function spawnStandaloneHost(args: {
   }
   return spawn(
     process.execPath,
-    [STANDALONE_CLI, '--port', args.hostPort.toString(), '--host', '127.0.0.1'],
+    [
+      STANDALONE_CLI,
+      '--port',
+      args.hostPort.toString(),
+      '--host',
+      '127.0.0.1',
+      '--workspace',
+      args.workspaceDir,
+    ],
     {
       cwd: args.workspaceDir,
       env: {

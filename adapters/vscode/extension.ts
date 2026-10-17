@@ -47,6 +47,8 @@ export function activate(context: vscode.ExtensionContext) {
   }
 }
 
-export function deactivate() {
-  providerInstance?.dispose();
+export async function deactivate(): Promise<void> {
+  const provider = providerInstance;
+  providerInstance = undefined;
+  await provider?.dispose();
 }

@@ -25,12 +25,12 @@ describe('consent copy', () => {
   it('carries all five disclosure facts', () => {
     const full = `${CONSENT_INSTALL_HEADLINE}\n\n${CONSENT_DISCLOSURE}`;
     expect(full).toContain('~/.claude/settings.json');
-    expect(full).toContain(`${CLAUDE_HOOK_EVENTS.length.toString()} Claude Code events`);
-    expect(full).toContain('your existing settings are kept');
+    expect(full).toContain(`${CLAUDE_HOOK_EVENTS.length.toString()} sự kiện Claude Code`);
+    expect(full).toContain('cài đặt hiện có của bạn được giữ nguyên');
     expect(full).toContain(`settings.json${SETTINGS_BACKUP_SUFFIX}`);
-    expect(full).toContain('tool names and tool inputs');
+    expect(full).toContain('tên công cụ và đầu vào của công cụ');
     expect(full).toContain('127.0.0.1');
-    expect(full).toContain('Settings → Instant Detection (Hooks)');
+    expect(full).toContain('Cài đặt → Phát hiện tức thì (Hooks)');
   });
 
   // Every fact must be in the DISCLOSURE block, not the headline: the headline
@@ -41,12 +41,12 @@ describe('consent copy', () => {
   it('keeps every disclosure fact in the shared block, not the headline', () => {
     expect(CONSENT_DISCLOSURE).toContain('~/.claude/settings.json');
     expect(CONSENT_DISCLOSURE).toContain(
-      `${CLAUDE_HOOK_EVENTS.length.toString()} Claude Code events`,
+      `${CLAUDE_HOOK_EVENTS.length.toString()} sự kiện Claude Code`,
     );
     expect(CONSENT_DISCLOSURE).toContain(`settings.json${SETTINGS_BACKUP_SUFFIX}`);
-    expect(CONSENT_DISCLOSURE).toContain('tool names and tool inputs');
+    expect(CONSENT_DISCLOSURE).toContain('tên công cụ và đầu vào của công cụ');
     expect(CONSENT_DISCLOSURE).toContain('127.0.0.1');
-    expect(CONSENT_DISCLOSURE).toContain('Settings → Instant Detection (Hooks)');
+    expect(CONSENT_DISCLOSURE).toContain('Cài đặt → Phát hiện tức thì (Hooks)');
   });
 
   // The ask is about a FIRST install and nothing else. A user who already has
@@ -54,9 +54,9 @@ describe('consent copy', () => {
   // would be copy for a surface that no longer exists. The disclosure asks in
   // install terms ("adds hooks"), and the headline is a pure welcome.
   it('asks about a first install, the only case that prompts', () => {
-    expect(CONSENT_DISCLOSURE).toContain('adds hooks');
-    expect(CONSENT_INSTALL_HEADLINE).not.toContain('already installed');
-    expect(CONSENT_DISCLOSURE).not.toContain('already installed');
+    expect(CONSENT_DISCLOSURE).toContain('thêm hook');
+    expect(CONSENT_INSTALL_HEADLINE).not.toContain('đã cài đặt');
+    expect(CONSENT_DISCLOSURE).not.toContain('đã cài đặt');
   });
 
   // The disclosure keeps its paragraph breaks: the bubble splits on the blank

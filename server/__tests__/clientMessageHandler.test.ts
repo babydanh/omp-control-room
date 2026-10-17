@@ -58,6 +58,7 @@ function createTestAgent(overrides: Partial<AgentState> = {}): AgentState {
 describe('clientMessageHandler: areas + carpet wire ordering', () => {
   let tempHome: string;
   let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
   let store: AgentStateStore;
   let sent: Array<Record<string, unknown>>;
   let ctx: ClientMessageContext;
@@ -69,7 +70,9 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
   beforeEach(() => {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cmh-test-'));
     originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
 
     store = new AgentStateStore();
     store.setAdapter(new FileStateAdapter({ namespace: 'standalone' }));
@@ -82,6 +85,11 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
     }
     store.dispose();
     fs.rmSync(tempHome, { recursive: true, force: true });
@@ -425,6 +433,7 @@ describe('clientMessageHandler: areas + carpet wire ordering', () => {
 describe('clientMessageHandler: saveAgentSeats palette sync', () => {
   let tempHome: string;
   let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
   let store: AgentStateStore;
   let sent: Array<Record<string, unknown>>;
   let ctx: ClientMessageContext;
@@ -436,7 +445,9 @@ describe('clientMessageHandler: saveAgentSeats palette sync', () => {
   beforeEach(() => {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-cmh-seats-'));
     originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
 
     store = new AgentStateStore();
     store.setAdapter(new FileStateAdapter({ namespace: 'standalone' }));
@@ -449,6 +460,11 @@ describe('clientMessageHandler: saveAgentSeats palette sync', () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
     }
     store.dispose();
     fs.rmSync(tempHome, { recursive: true, force: true });
@@ -601,5 +617,60 @@ describe('clientMessageHandler: saveAgentSeats palette sync', () => {
       ctx,
     );
     expect(store.get(1)?.palette).toBe(7);
+  });
+});
+
+describe('clientMessageHandler: terminal lease ownership', () => {
+  it('grants the socket lease before replying to a terminal attach', async () => {
+    const store = new AgentStateStore();
+    store.setAdapter(new FileStateAdapter({ namespace: 'standalone' }));
+    const order: string[] = [];
+    const leaseId = 'lease-current';
+    const context = {
+      store,
+      cache: null,
+      privileged: true,
+      company: {
+        terminal: {
+          attach: async (
+            _sessionId: string,
+            _runEpoch: number,
+            cols?: number,
+            rows?: number,
+            onLeaseGranted?: (id: string) => void,
+          ) => {
+            onLeaseGranted?.(leaseId);
+            return { leaseId, cols: cols ?? 120, rows: rows ?? 32 };
+          },
+        },
+      },
+      onTerminalAttached: () => order.push('lease-granted'),
+      // Execution is refused unless the surface states its trust decision.
+      companyExecutionAllowed: true,
+    } as unknown as ClientMessageContext;
+    let finish!: () => void;
+    const reply = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+
+    handleClientMessage(
+      {
+        type: 'terminalAttach',
+        requestId: 'request-1',
+        sessionId: 'session-1',
+        runEpoch: 1,
+      },
+      (message) => {
+        if (message.type === 'terminalAttached') {
+          order.push('attach-reply');
+          finish();
+        }
+      },
+      context,
+    );
+    await reply;
+    store.dispose();
+
+    expect(order).toEqual(['lease-granted', 'attach-reply']);
   });
 });

@@ -234,6 +234,23 @@ export interface Character {
    *  (testHooks.getCharacters) to tell the greeter from agents. */
   isGreeter?: boolean;
 
+  /**
+   * The Company session this character visualizes.
+   *
+   * A MARKER, like `isGreeter`: a company session is not a Claude agent — it
+   * has no transcript, no terminal and no place in the server's agent store —
+   * so seat persistence and every Claude-only list skip it, and everything
+   * about it (role, status, output) is read from the company snapshot instead
+   * of from agent messages. Setting it is what makes a character managed.
+   */
+  companySessionId?: string;
+  /**
+   * Area labels this agent prefers to be seated in, tried before the folder
+   * mapping. Generic on purpose: the office does not know what a Company role
+   * is, only where it asked to sit.
+   */
+  preferredAreaLabels?: readonly string[];
+
   // -- Agent Teams --
   /** Team name this agent belongs to */
   teamName?: string;

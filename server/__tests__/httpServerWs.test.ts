@@ -109,10 +109,10 @@ describe('/ws connection gate', () => {
     server = new PixelAgentsServer();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const socket of sockets) socket.terminate();
     sockets.length = 0;
-    server?.stop();
+    await server?.stop();
     try {
       fs.rmSync(tmpBase, { recursive: true, force: true });
     } catch {
@@ -262,10 +262,10 @@ describe('/ws privileged-message gate', () => {
     server = new PixelAgentsServer();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const socket of sockets) socket.terminate();
     sockets.length = 0;
-    server?.stop();
+    await server?.stop();
     try {
       fs.rmSync(tmpBase, { recursive: true, force: true });
     } catch {

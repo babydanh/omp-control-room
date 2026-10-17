@@ -13,6 +13,8 @@ import type {
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
+import type { CompanyCommandServices } from './company/clientCommands.js';
+import { CompanyClientGate } from './company/egress.js';
 import {
   HOOK_API_PREFIX,
   MAX_HOOK_BODY_SIZE,
@@ -45,6 +47,12 @@ export interface HttpServerOptions {
   onSetHooksEnabled?: SetHooksEnabledSideEffect;
   /** Invoked when an external asset directory is added/removed. Standalone reloads + re-broadcasts assets here. */
   onReloadAssets?: ReloadAssetsSideEffect;
+  /** Company command surface; absent until a company workspace is open. */
+  company?: CompanyCommandServices | null;
+  /** Resolves an asynchronously opened workspace without capturing a stale null. */
+  getCompany?: () => CompanyCommandServices | null;
+  /** Execution trust decision supplied by embedded hosts, independent of the bearer token. */
+  isCompanyExecutionAllowed?: () => boolean;
 }
 
 /** Result of createHttpServer(). */
@@ -143,6 +151,7 @@ function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): vo
 // ── WebSocket ──────────────────────────────────────────────────
 
 function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions): void {
+  const currentTerminalLeases = new Map<string, string>();
   app.get('/ws', { websocket: true }, (socket, request) => {
     // CONNECTION gate. Embedded (VS Code) requires the Bearer token. Standalone
     // requires a same-origin handshake instead (isAllowedWebSocketOrigin), so a
@@ -189,7 +198,13 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       safeSend(socket, { type: 'agentClosed', id });
     };
 
+    // Per-socket egress gate. Ingress is checked in the dispatcher; this is the
+    // other half, so an observer socket cannot read company state out of the
+    // store broadcast path.
+    const gate = new CompanyClientGate(privileged, currentTerminalLeases);
+
     const onBroadcast = (message: Record<string, unknown>) => {
+      if (!gate.allowsDelivery(message)) return;
       safeSend(socket, message);
     };
 
@@ -204,14 +219,25 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
         if (!options.embedded && msg.type) {
           console.log('[Pixel Agents] WS client message:', msg.type);
         }
-        handleClientMessage(msg, (m) => safeSend(socket, m), {
-          store,
-          runtime: options.runtime,
-          cache: options.assetCache ?? null,
-          onSetHooksEnabled: options.onSetHooksEnabled,
-          onReloadAssets: options.onReloadAssets,
-          privileged,
-        });
+        handleClientMessage(
+          msg,
+          (m) => {
+            gate.observeOutbound(m);
+            safeSend(socket, m);
+          },
+          {
+            store,
+            runtime: options.runtime,
+            cache: options.assetCache ?? null,
+            onSetHooksEnabled: options.onSetHooksEnabled,
+            onReloadAssets: options.onReloadAssets,
+            company: options.getCompany?.() ?? options.company ?? null,
+            privileged,
+            companyExecutionAllowed: options.isCompanyExecutionAllowed?.() ?? !options.embedded,
+            onTerminalAttached: (sessionId, leaseId) => gate.grant(sessionId, leaseId),
+            onTerminalDetached: (sessionId, leaseId) => gate.release(sessionId, leaseId),
+          },
+        );
       } catch {
         // Malformed JSON, ignore
       }
@@ -221,6 +247,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
+      gate.dispose();
     });
   });
 }

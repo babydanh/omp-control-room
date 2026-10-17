@@ -20,6 +20,12 @@ import {
 } from './assetReload.js';
 import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
 import {
+  COMPANY_DEFAULT_WORKSPACE_PATH,
+  COMPANY_OMP_BRIDGE_FILENAME,
+  COMPANY_PTY_HOST_FILENAME,
+} from './company/constants.js';
+import { openWorkspaceCompany, type WorkspaceCompanyHost } from './company/workspaceCompanyHost.js';
+import {
   getHooksConsent,
   getHooksEnabled,
   grantHooksConsent,
@@ -37,6 +43,8 @@ export interface CliArgs {
    *  can run at once without a collision. --port picks a fixed one. */
   port?: number;
   host: string;
+  /** Workspace whose Company runtime this server exposes. */
+  workspace: string;
 }
 
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
@@ -45,7 +53,7 @@ export interface CliArgs {
 export class CliArgsError extends Error {}
 
 export function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { host: '127.0.0.1' };
+  const args: CliArgs = { host: '127.0.0.1', workspace: COMPANY_DEFAULT_WORKSPACE_PATH };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port' || argv[i] === '-p') {
       const raw = argv[i + 1];
@@ -65,12 +73,20 @@ export function parseArgs(argv: string[]): CliArgs {
     } else if (argv[i] === '--host' && argv[i + 1]) {
       args.host = argv[i + 1];
       i++;
+    } else if (argv[i] === '--workspace') {
+      const workspace = argv[i + 1];
+      if (!workspace?.trim() || workspace.startsWith('--')) {
+        throw new CliArgsError('Missing value for --workspace: expected a directory path.');
+      }
+      args.workspace = workspace;
+      i++;
     } else if (argv[i] === '--help') {
       console.log(`Usage: pixel-agents [options]
 
 Options:
   --port, -p <number>   Port to listen on (default: OS-assigned ephemeral port)
   --host <string>       Host to bind to (default: 127.0.0.1)
+  --workspace <path>    Company workspace (default: ${COMPANY_DEFAULT_WORKSPACE_PATH})
   --help                Show this help message`);
       process.exit(0);
     }
@@ -140,10 +156,40 @@ async function main(): Promise<void> {
 
   // ── Create server ──
   const server = new PixelAgentsServer();
+  const runtime = new AgentRuntime(store, claudeProvider);
+  let companyHost: WorkspaceCompanyHost | null = null;
+  let acceptingCompany = true;
+  let disposal: Promise<void> | null = null;
+  const dispose = (): Promise<void> => {
+    if (disposal) return disposal;
+    acceptingCompany = false;
+    disposal = (async () => {
+      try {
+        await companyHost?.dispose();
+      } finally {
+        companyHost = null;
+        runtime.dispose();
+        await server.stop();
+        store.dispose();
+      }
+    })();
+    return disposal;
+  };
 
   try {
-    // Create runtime first (before server.start, so we can pass it in)
-    const runtime = new AgentRuntime(store, claudeProvider);
+    try {
+      companyHost = await openWorkspaceCompany({
+        workspacePath: args.workspace,
+        helperPath: path.join(distRoot, COMPANY_PTY_HOST_FILENAME),
+        extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
+        onMessage: (message) => store.broadcast(message as unknown as Record<string, unknown>),
+      });
+      console.log(`[Pixel Agents] Company workspace: ${args.workspace}`);
+    } catch (error) {
+      // Legacy observation remains usable; Company commands fail closed while
+      // the workspace or native runtime prerequisite is unavailable.
+      console.error('[Pixel Agents] Company workspace unavailable:', error);
+    }
 
     // Wire hook events: HTTP POST -> runtime -> hookEventHandler -> agents
     server.onHookEvent((providerId, event) => {
@@ -237,6 +283,8 @@ async function main(): Promise<void> {
       assetCache,
       onSetHooksEnabled,
       onReloadAssets,
+      getCompany: () => (acceptingCompany ? (companyHost?.services ?? null) : null),
+      isCompanyExecutionAllowed: () => acceptingCompany,
     });
     currentConfig = { port: config.port, token: config.token };
 
@@ -309,15 +357,22 @@ async function main(): Promise<void> {
     // ── Graceful shutdown ──
     function shutdown(): void {
       console.log('\nShutting down...');
-      runtime.dispose();
-      server.stop();
-      process.exit(0);
+      void dispose().then(
+        () => process.exit(0),
+        (error: unknown) => {
+          console.error('[Pixel Agents] Company shutdown failed:', error);
+          process.exit(1);
+        },
+      );
     }
 
     process.on('SIGINT', shutdown);
     process.on('SIGTERM', shutdown);
   } catch (err) {
     console.error('Failed to start server:', err);
+    await dispose().catch((error: unknown) => {
+      console.error('[Pixel Agents] Shutdown after startup failure:', error);
+    });
     process.exit(1);
   }
 }

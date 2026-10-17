@@ -20,11 +20,14 @@ import {
 describe('configPersistence: areas', () => {
   let tempHome: string;
   let originalHome: string | undefined;
+  let originalUserProfile: string | undefined;
 
   beforeEach(() => {
     tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pxl-config-test-'));
     originalHome = process.env.HOME;
+    originalUserProfile = process.env.USERPROFILE;
     process.env.HOME = tempHome;
+    process.env.USERPROFILE = tempHome;
   });
 
   afterEach(() => {
@@ -32,6 +35,11 @@ describe('configPersistence: areas', () => {
       delete process.env.HOME;
     } else {
       process.env.HOME = originalHome;
+    }
+    if (originalUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = originalUserProfile;
     }
     fs.rmSync(tempHome, { recursive: true, force: true });
   });

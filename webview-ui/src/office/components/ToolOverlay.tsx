@@ -149,7 +149,7 @@ export function ToolOverlay({
           return (
             <div
               key={id}
-              className="absolute"
+              className="office-ui absolute"
               style={{ left: screenX, top: screenY, pointerEvents: 'none' }}
               data-testid="agent-overlay"
               data-agent-id={id}

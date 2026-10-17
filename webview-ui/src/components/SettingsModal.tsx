@@ -63,7 +63,7 @@ export function SettingsModal({
   const [assetDirDraft, setAssetDirDraft] = useState('');
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Settings">
+    <Modal isOpen={isOpen} onClose={onClose} title="Cài đặt">
       {/* Open Sessions Folder opens an OS file manager — impossible in the browser. */}
       {!isBrowserRuntime && (
         <MenuItem
@@ -72,7 +72,7 @@ export function SettingsModal({
             onClose();
           }}
         >
-          Open Sessions Folder
+          Mở thư mục phiên
         </MenuItem>
       )}
       <MenuItem
@@ -85,7 +85,7 @@ export function SettingsModal({
           onClose();
         }}
       >
-        Export Layout
+        Xuất bố cục
       </MenuItem>
       <MenuItem
         onClick={() => {
@@ -98,7 +98,7 @@ export function SettingsModal({
           }
         }}
       >
-        Import Layout
+        Nhập bố cục
       </MenuItem>
       {isBrowserRuntime && (
         <input
@@ -123,7 +123,7 @@ export function SettingsModal({
           <input
             type="text"
             value={assetDirDraft}
-            placeholder="Absolute asset directory path"
+            placeholder="Đường dẫn tuyệt đối của thư mục tài nguyên"
             onChange={(e) => setAssetDirDraft(e.target.value)}
             className="flex-1 min-w-0 text-xs py-2 px-4 bg-bg border-2 border-border rounded-none text-text"
           />
@@ -138,7 +138,7 @@ export function SettingsModal({
             }}
             className="shrink-0"
           >
-            Add
+            Thêm
           </Button>
         </div>
       ) : (
@@ -148,7 +148,7 @@ export function SettingsModal({
             onClose();
           }}
         >
-          Add Asset Directory
+          Thêm thư mục tài nguyên
         </MenuItem>
       )}
       {externalAssetDirectories.map((dir) => (
@@ -170,7 +170,7 @@ export function SettingsModal({
         </div>
       ))}
       <Checkbox
-        label="Sound Notifications"
+        label="Thông báo bằng âm thanh"
         checked={soundLocal}
         onChange={() => {
           const newVal = !isSoundEnabled();
@@ -180,17 +180,17 @@ export function SettingsModal({
         }}
       />
       <Checkbox
-        label="Watch All Sessions"
+        label="Theo dõi mọi phiên"
         checked={watchAllSessions}
         onChange={onToggleWatchAllSessions}
       />
       <Checkbox
-        label="Instant Detection (Hooks)"
+        label="Phát hiện tức thì (Hooks)"
         checked={hooksInstalled}
         onChange={onToggleHooksEnabled}
       />
       <Checkbox
-        label="Always Show Labels"
+        label="Luôn hiện nhãn"
         checked={alwaysShowOverlay}
         onChange={onToggleAlwaysShowOverlay}
       />
@@ -198,15 +198,15 @@ export function SettingsModal({
           Standalone has no terminals at all, so nothing there would ever ghost. */}
       {!isBrowserRuntime && (
         <Checkbox
-          label="Display Headless as Ghosts"
+          label="Hiện agent ẩn dạng ma"
           checked={ghostHeadlessAgents}
           onChange={onToggleGhostHeadlessAgents}
         />
       )}
       {showAreasAvailable && (
-        <Checkbox label="Show Areas" checked={showAreas} onChange={onToggleShowAreas} />
+        <Checkbox label="Hiện khu vực" checked={showAreas} onChange={onToggleShowAreas} />
       )}
-      <Checkbox label="Debug View" checked={isDebugMode} onChange={onToggleDebugMode} />
+      <Checkbox label="Chế độ gỡ lỗi" checked={isDebugMode} onChange={onToggleDebugMode} />
     </Modal>
   );
 }

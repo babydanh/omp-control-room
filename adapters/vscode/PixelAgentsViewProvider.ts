@@ -26,6 +26,18 @@ import {
   sendWallTilesToWebview,
 } from '../../server/src/assetLoader.js';
 import { loadAllCharacters, loadAllFurniture, loadAllPets } from '../../server/src/assetReload.js';
+import type { CompanyCommandServices } from '../../server/src/company/clientCommands.js';
+import { handleCompanyCommand, isCompanyCommand } from '../../server/src/company/clientCommands.js';
+import {
+  COMPANY_DEFAULT_WORKSPACE_PATH,
+  COMPANY_OMP_BRIDGE_FILENAME,
+  COMPANY_PTY_HOST_FILENAME,
+} from '../../server/src/company/constants.js';
+import { CompanyClientGate } from '../../server/src/company/egress.js';
+import {
+  openWorkspaceCompany,
+  type WorkspaceCompanyHost,
+} from '../../server/src/company/workspaceCompanyHost.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -63,6 +75,7 @@ import {
 import {
   CONFIG_KEY_AUTO_SHOW_PANEL,
   CONFIG_KEY_AUTO_SPAWN_AGENT,
+  CONFIG_KEY_COMPANY_WORKSPACE,
   GLOBAL_KEY_ALWAYS_SHOW_LABELS,
   GLOBAL_KEY_GHOST_HEADLESS_AGENTS,
   GLOBAL_KEY_HOOKS_INFO_SHOWN,
@@ -114,6 +127,18 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   // session, even though webviewReady fires on every panel focus.
   private autoSpawnAttempted = false;
 
+  // Company command surface. Null until a company workspace is opened, in
+  // which case every company command answers `company_unavailable` instead of
+  // being silently dropped by this surface's own message chain.
+  private companyServices: CompanyCommandServices | null = null;
+  private companyHost: WorkspaceCompanyHost | null = null;
+  private readonly companyReady: Promise<void>;
+  private companyDisposed = false;
+  private disposePromise: Promise<void> | null = null;
+  private readonly serverReady: Promise<void>;
+  // An embedded webview is our own iframe reached through no socket, so it is
+  // privileged by construction; the gate still tracks terminal leases.
+  private readonly companyGate = new CompanyClientGate(true);
   constructor(
     private readonly context: vscode.ExtensionContext,
     adapter: StateAdapter,
@@ -181,7 +206,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     // Create shared runtime (owns timer Maps, scanners, hook handler, dismissal tracker)
     this.runtime = new AgentRuntime(this.store, claudeProvider);
 
-    this.initServer();
+    this.companyReady = this.initializeCompany();
+    this.serverReady = this.initServer();
   }
 
   private get extensionUri(): vscode.Uri {
@@ -196,6 +222,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
    *  yet. Drops silently when no view exists at all (matches prior behavior).
    *  Flushed by the `webviewReady` handler in resolveWebviewView. */
   private sendOrBuffer(message: Record<string, unknown>): void {
+    if (!this.companyGate.allowsDelivery(message)) return;
     const wv = this.webview;
     if (!wv) return;
     if (this.isWebviewReady) {
@@ -211,15 +238,47 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.pendingBroadcasts.push(message);
   }
 
-  private initServer(): void {
+  /** Both surfaces open the same canonical workspace owner, never a second executor. */
+  private async initializeCompany(): Promise<void> {
+    const workspacePath = vscode.workspace
+      .getConfiguration()
+      .get<string>(CONFIG_KEY_COMPANY_WORKSPACE, COMPANY_DEFAULT_WORKSPACE_PATH);
+    try {
+      const host = await openWorkspaceCompany({
+        workspacePath,
+        helperPath: path.join(this.context.extensionPath, 'dist', COMPANY_PTY_HOST_FILENAME),
+        extensionPath: path.join(this.context.extensionPath, 'dist', COMPANY_OMP_BRIDGE_FILENAME),
+        onMessage: (message) => {
+          if (!this.companyDisposed) {
+            this.store.broadcast(message as unknown as Record<string, unknown>);
+          }
+        },
+      });
+      if (this.companyDisposed) {
+        await host.dispose();
+        return;
+      }
+      this.companyHost = host;
+      this.companyServices = host.services;
+    } catch (error) {
+      console.error('[Pixel Agents] Company workspace unavailable:', error);
+    }
+  }
+  private initServer(): Promise<void> {
     this.pixelAgentsServer = new PixelAgentsServer();
     this.pixelAgentsServer.onHookEvent((providerId, event) => {
       this.runtime.handleHookEvent(providerId, event);
     });
 
-    this.pixelAgentsServer
-      .start({ store: this.store, embedded: true })
+    return this.pixelAgentsServer
+      .start({
+        store: this.store,
+        embedded: true,
+        getCompany: () => this.companyServices,
+        isCompanyExecutionAllowed: () => vscode.workspace.isTrusted && !this.companyDisposed,
+      })
       .then((config) => {
+        if (this.companyDisposed) return;
         // Server always starts regardless of hooks-enabled state.
         // It's the foundation for WebSocket transport and health monitoring.
         // Only hook installation/script-copy is gated by the toggle. The
@@ -417,6 +476,34 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = getWebviewContent(webviewView.webview, this.extensionUri);
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
+      if (isCompanyCommand(message as Record<string, unknown>)) await this.companyReady;
+      // Company and terminal commands are handled here rather than falling
+      // through this surface's own chain, which knows nothing about them. An
+      // embedded webview is privileged by construction (our own iframe, no
+      // socket in between); the gate still scopes terminal frames to the
+      // session's current lease.
+      if (
+        handleCompanyCommand(
+          message as Record<string, unknown>,
+          (reply) => {
+            // The dispatcher emits generated `ServerMessage` values; this
+            // provider's historical send path takes a plain record.
+            const wire = reply as unknown as Record<string, unknown>;
+            this.companyGate.observeOutbound(wire);
+            this.sendOrBuffer(wire);
+          },
+          {
+            services: this.companyServices,
+            privileged: true,
+            executionAllowed: vscode.workspace.isTrusted && !this.companyDisposed,
+            onTerminalAttached: (sessionId, leaseId) => this.companyGate.grant(sessionId, leaseId),
+            onTerminalDetached: (sessionId, leaseId) =>
+              this.companyGate.release(sessionId, leaseId),
+          },
+        )
+      ) {
+        return;
+      }
       if (message.type === 'launchAgent') {
         const prevAgentIds = new Set(this.store.keys());
         await launchNewTerminal(
@@ -1037,13 +1124,29 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
-  dispose() {
-    this.pixelAgentsServer?.stop();
-    this.pixelAgentsServer = null;
-    this.runtime.dispose();
-    this.layoutWatcher?.dispose();
-    this.layoutWatcher = null;
-    this.store.dispose();
+  dispose(): Promise<void> {
+    if (this.disposePromise) return this.disposePromise;
+    this.companyDisposed = true;
+    this.companyServices = null;
+    this.companyGate.dispose();
+    this.disposePromise = this.disposeResources();
+    return this.disposePromise;
+  }
+
+  private async disposeResources(): Promise<void> {
+    try {
+      await this.companyReady;
+      await this.companyHost?.dispose();
+    } finally {
+      this.companyHost = null;
+      await this.serverReady;
+      await this.pixelAgentsServer?.stop();
+      this.pixelAgentsServer = null;
+      this.runtime.dispose();
+      this.layoutWatcher?.dispose();
+      this.layoutWatcher = null;
+      this.store.dispose();
+    }
   }
 }
 
