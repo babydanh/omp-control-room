@@ -160,15 +160,6 @@ import type { UsageLedger } from './usageService.js';
 import { discoverVerificationProfiles } from './verificationDiscovery.js';
 import { WorkspaceLockTable } from './workspaceLocks.js';
 
-/** Human label per role; a session name is never empty. */
-const ROLE_LABELS: Readonly<Record<string, string>> = {
-  director: 'Director',
-  advisor: 'Advisor',
-  worker: 'Worker',
-  qa: 'QA',
-  judge: 'Judge',
-};
-
 /** Image media types the native bridge can actually carry. */
 const IMAGE_MEDIA_TYPES: Readonly<Record<string, true>> = {
   'image/png': true,

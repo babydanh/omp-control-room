@@ -20,8 +20,8 @@
 import type { BoardCard, BoardFlow, BoardLane } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import { companyRoleLabel } from '../companyCharacters.js';
+import { ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { taskStatusLabel } from '../statusLabels.js';
-
 
 export interface CompanyBoardProps {
   lanes: readonly BoardLane[];
@@ -74,6 +74,7 @@ function EvidenceBadges({ card }: { card: BoardCard }) {
 }
 
 function TaskCard({ card, onSelect }: { card: BoardCard; onSelect: () => void }) {
+  const edge = card.session ? ROLE_EDGE_CLASS[card.session.role] : 'border-l-border';
   return (
     <button
       type="button"
@@ -82,8 +83,8 @@ function TaskCard({ card, onSelect }: { card: BoardCard; onSelect: () => void })
       data-testid={`task-card-${card.code}`}
       className={
         card.selected
-          ? 'w-full cursor-pointer border-2 border-accent bg-bg-dark p-2 text-left'
-          : 'w-full cursor-pointer border-2 border-border bg-bg-dark p-2 text-left hover:border-accent'
+          ? `w-full cursor-pointer border-2 border-l-4 border-accent bg-bg-dark p-2 text-left ${edge}`
+          : `w-full cursor-pointer border-2 border-l-4 border-border bg-bg-dark p-2 text-left hover:border-accent ${edge}`
       }
     >
       <span className="flex items-baseline justify-between gap-2">
@@ -124,15 +125,15 @@ function TaskCard({ card, onSelect }: { card: BoardCard; onSelect: () => void })
 
 export function CompanyBoard({ lanes, flow, onSelectTask }: CompanyBoardProps) {
   return (
-    <div data-testid="company-board">
+    <div className="flex min-h-0 flex-1 flex-col" data-testid="company-board">
       <FlowStrip flow={flow} />
-      <div className="flex gap-2 overflow-x-auto p-2">
+      <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto p-2">
         {lanes.map((lane) => (
           <section
             key={lane.id}
             aria-label={lane.label}
             data-testid={`company-lane-${lane.id}`}
-            className="flex w-56 shrink-0 flex-col gap-2 border-2 border-border bg-bg p-2"
+            className="flex min-w-48 flex-1 flex-col gap-2 overflow-y-auto border-2 border-border bg-bg p-2"
           >
             <h3 className="text-xs uppercase tracking-wide text-text-muted">
               {lane.label} ({lane.cards.length})

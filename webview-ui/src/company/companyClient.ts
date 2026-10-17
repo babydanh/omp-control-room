@@ -2,7 +2,7 @@
  * companyClient: the one place company messages are sent and received.
  *
  * The app keeps exactly ONE `transport.onMessage` subscription (in
- * useExtensionMessages); it hands company messages here instead of this class
+ * useCompanyTransport); it hands company messages here instead of this class
  * subscribing for itself. That rule is why `accept` is a public method rather
  * than something the constructor wires up.
  *

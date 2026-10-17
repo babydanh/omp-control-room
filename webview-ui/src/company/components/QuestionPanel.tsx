@@ -24,7 +24,7 @@ import {
   questionHeadline,
   type QuestionSelection,
 } from '../questionAnswers.js';
-import { questionProvenanceNote, type QuestionProvenance } from '../questionProvenance.js';
+import { type QuestionProvenance,questionProvenanceNote } from '../questionProvenance.js';
 
 export interface QuestionPanelProps {
   question: Question;

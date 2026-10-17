@@ -4,9 +4,9 @@
  * Two jobs:
  *
  *  1. `isCompanyServerMessage` is the single routing test the app's ONE
- *     transport subscription (useExtensionMessages) uses to hand a server
- *     message to the company client. Every other office message keeps its
- *     existing path, and no second `transport.onMessage` is ever registered.
+ *     transport subscription (useCompanyTransport) uses to hand a server
+ *     message to the company client. Anything else the server sends has no
+ *     reader on the board, and no second `transport.onMessage` is registered.
  *  2. Builders produce the `ClientMessage` values, so a command is built in
  *     the same shape on both surfaces and a typo in a message `type` is a
  *     compile error rather than a silently ignored command.

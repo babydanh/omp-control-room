@@ -24,13 +24,13 @@ export const COMPANY_LANE_ORDER = [
 export type CompanyLaneId = (typeof COMPANY_LANE_ORDER)[number];
 
 export const COMPANY_LANE_LABELS: Record<CompanyLaneId, string> = {
-  planned: 'Đã lên kế hoạch',
+  planned: 'Kế hoạch',
   ready: 'Sẵn sàng',
   running: 'Đang chạy',
-  needs_input: 'Chờ phản hồi',
-  review: 'Đang xem xét',
-  done: 'Hoàn thành',
-  failed: 'Thất bại',
+  needs_input: 'Chờ bạn',
+  review: 'QA / Review',
+  done: 'Xong',
+  failed: 'Lỗi',
 };
 
 /** Excerpt length for the public assistant text shown in a bubble. */

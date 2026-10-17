@@ -6,8 +6,8 @@
  * `useSyncExternalStore` wants: no copies, no effect-driven setState, and the
  * board re-renders when the company changed rather than when a timer fired.
  *
- * There is deliberately no hook here that subscribes to the transport. The app
- * has one subscription (useExtensionMessages) and it feeds the client.
+ * There is deliberately no transport subscription here. The app has one
+ * (useCompanyTransport) and it feeds the client.
  */
 
 import { useSyncExternalStore } from 'react';
