@@ -21,24 +21,17 @@
  * because status is the server's to change.
  */
 
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 
 import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
-import { failureNotice } from '../commandResults.js';
-import type { CompanyClient } from '../companyClient.js';
 import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS } from '../constants.js';
-import { type FlightMemory, flyChangedCards } from '../flip.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
-import { REFUSED_NOTICE } from '../sessionActions.js';
 import { taskStatusLabel } from '../statusLabels.js';
-import { useMediaQuery } from '../useMediaQuery.js';
-import { CompanyButton } from './CompanyButton.js';
-import { ConfirmAction } from './SessionActions.js';
+import { useFlightLayout } from '../useFlightLayout.js';
 
 export interface CompanyBoardProps {
-  client: CompanyClient;
   lanes: readonly BoardLane[];
   flow: BoardFlow;
   /** Prompts a Director is still planning; shown in the planned lane. */
@@ -59,7 +52,7 @@ const CARD_TONE_CLASS: Readonly<Record<CardTone, string>> = {
 };
 
 /** The chip shape the owner and sent-back tags share. */
-const PILL_CLASS = 'mt-1 inline-block rounded-full bg-btn-bg px-2 font-mono text-[10.5px]';
+const PILL_CLASS = 'mt-1 inline-block rounded-full bg-btn-bg px-2 text-2xs';
 
 function cardTone(card: BoardCard): CardTone {
   if (card.sentBack || card.lane === 'needs_input' || card.lane === 'failed') return 'alert';
@@ -69,80 +62,48 @@ function cardTone(card: BoardCard): CardTone {
 }
 
 /**
- * A prompt a Director is still planning. The board lists it only while no Contract holds
- * it (planningPrompts), so the cancel is offered only for a prompt the server can still
- * withdraw.
+ * A prompt a Director is still planning. The board lists it only while no Contract
+ * holds it (planningPrompts). Its menu offers the cancel while the server can still
+ * withdraw the prompt; a prompt with no session yet has no drawer to open.
  */
 function PlanningCard({
-  client,
   prompt,
+  index,
   onSelect,
+  onMenu,
 }: {
-  client: CompanyClient;
   prompt: PlanningPrompt;
+  index: number;
   onSelect: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
-  const [confirming, setConfirming] = useState(false);
-  const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  async function cancel(): Promise<void> {
-    setPending(true);
-    setNotice(null);
-    const verdict = await client.waitForCommand(client.cancelPrompt(prompt.promptId));
-    setPending(false);
-    if (verdict.ok) return;
-    setConfirming(false);
-    setNotice(failureNotice(verdict, REFUSED_NOTICE));
-  }
-
+  const triggers = agentMenuTriggers<HTMLButtonElement>(
+    { kind: 'planning', promptId: prompt.promptId, sessionId: prompt.session?.id ?? null },
+    onMenu,
+  );
   return (
-    <div
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-disabled={prompt.session === null}
+      {...triggers}
       data-testid="planning-card"
-      className={`company-card block w-full border-dashed border-l-4 px-2 py-[7px] ${ROLE_EDGE_CLASS.director}`}
+      data-flight-key={`prompt:${prompt.promptId}`}
+      data-lane="planned"
+      data-index={index}
+      className={`company-card w-full border-dashed border-l-4 px-2.5 py-2 text-left ${prompt.session === null ? 'cursor-default' : 'cursor-pointer'} ${ROLE_EDGE_CLASS.director}`}
     >
-      <button
-        type="button"
-        onClick={onSelect}
-        disabled={prompt.session === null}
-        className="block w-full cursor-pointer text-left disabled:cursor-default"
-      >
-        <span className="block text-sm leading-snug text-text">{prompt.preview}</span>
-        <span className="mt-1 block text-2xs text-text-muted">Giám đốc đang lập kế hoạch</span>
-        {prompt.session && (
-          <span className="mt-1 block font-mono text-2xs text-text-muted">
-            {prompt.session.code} &middot;{' '}
-            {prompt.session.effectiveModel ?? prompt.session.requestedModel}
-          </span>
-        )}
-      </button>
-      {confirming ? (
-        <div className="mt-2">
-          <ConfirmAction
-            message="Huỷ prompt này? Máy chủ sẽ dừng và xoá những gì đang lập kế hoạch từ nó."
-            confirmLabel="Huỷ prompt"
-            danger
-            disabled={pending}
-            onConfirm={() => void cancel()}
-            onCancel={() => setConfirming(false)}
-          />
-        </div>
-      ) : (
-        <CompanyButton
-          size="sm"
-          className="mt-2"
-          disabled={pending}
-          onClick={() => setConfirming(true)}
-        >
-          Huỷ prompt này
-        </CompanyButton>
+      <span className="block break-words text-base font-medium leading-[1.35] text-text">
+        {prompt.preview}
+      </span>
+      <span className="mt-1 block text-xs text-text-muted">Giám đốc đang lập kế hoạch</span>
+      {prompt.session && (
+        <span className="mt-1 block text-xs text-text-muted">
+          <span className="font-mono">{prompt.session.code}</span> &middot;{' '}
+          {prompt.session.effectiveModel ?? prompt.session.requestedModel}
+        </span>
       )}
-      {notice !== null && (
-        <p role="status" className="mt-1 text-2xs text-warning">
-          {notice}
-        </p>
-      )}
-    </div>
+    </button>
   );
 }
 
@@ -210,7 +171,7 @@ function TaskCard({
 }) {
   const edge = card.session ? ROLE_EDGE_CLASS[card.session.role] : 'border-l-border';
   const triggers = agentMenuTriggers<HTMLButtonElement>(
-    { kind: 'session', sessionId: card.session?.id ?? null },
+    { kind: 'task', taskId: card.taskId, sessionId: card.session?.id ?? null, drawer: null },
     onMenu,
   );
   return (
@@ -221,31 +182,33 @@ function TaskCard({
       aria-pressed={card.selected}
       data-testid={`task-card-${card.code}`}
       data-task-id={card.taskId}
+      data-flight-key={`task:${card.taskId}`}
       data-lane={card.lane}
       data-index={index}
-      className={`company-card w-full cursor-pointer border-l-4 px-2 py-[7px] text-left ${edge} ${card.sentBack ? 'company-sent-back' : ''}`}
+      className={`company-card w-full cursor-pointer border-l-4 px-2.5 py-2 text-left ${edge} ${card.sentBack ? 'company-sent-back' : ''}`}
     >
-      <span className="block text-sm leading-snug text-text">
-        <span className="font-mono text-2xs text-text-muted">{card.code}</span> {card.title}
+      <span className="block break-words text-base font-medium leading-[1.35] text-text">
+        <span className="font-mono text-xs text-text-muted">{card.code}</span> {card.title}
       </span>
-      <span className={`mt-1 block font-mono text-2xs ${CARD_TONE_CLASS[cardTone(card)]}`}>
+      <span className={`mt-1 block text-xs ${CARD_TONE_CLASS[cardTone(card)]}`}>
         {taskStatusLabel(card.status)}
       </span>
       {card.sentBack && <span className={`${PILL_CLASS} text-warning`}>trả lại</span>}
       <OwnerChip card={card} />
       {card.waitReason && (
-        <span className="mt-1 block text-2xs text-warning" data-testid={`wait-${card.code}`}>
+        <span className="mt-1 block text-xs text-warning" data-testid={`wait-${card.code}`}>
           {card.waitReason === 'blocked_by_dependencies'
             ? `${WAIT_REASON_LABELS[card.waitReason]} (${card.blockedByCodes.join(', ')})`
             : WAIT_REASON_LABELS[card.waitReason]}
         </span>
       )}
-      <span className="mt-1 block text-2xs text-text-muted">
+      <span className="mt-1 block text-xs text-text-muted">
         {card.contractCode} &middot; {card.phaseTitle}
       </span>
       {card.session && (
-        <span className="mt-1 block text-2xs text-text-muted">
-          {card.session.code} &middot; {companyRoleLabel(card.session.role)} &middot;{' '}
+        <span className="mt-1 block text-xs text-text-muted">
+          <span className="font-mono">{card.session.code}</span> &middot;{' '}
+          {companyRoleLabel(card.session.role)} &middot;{' '}
           {card.session.effectiveModel ?? card.session.requestedModel}
           {card.session.effectiveModel !== null &&
             card.session.effectiveModel !== card.session.requestedModel && (
@@ -254,25 +217,14 @@ function TaskCard({
         </span>
       )}
       {card.routeReason && (
-        <span className="mt-1 block text-2xs italic text-text-muted">{card.routeReason}</span>
+        <span className="mt-1 block text-xs italic text-text-muted">{card.routeReason}</span>
       )}
       <EvidenceBadges card={card} />
     </button>
   );
 }
 
-/** The reduced-motion preference: when it matches, cards sit in their new place. */
-const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
-
-/** Where every task card sits now, as one string: a change here means a move. */
-function layoutSignature(lanes: readonly BoardLane[]): string {
-  return lanes
-    .flatMap((lane) => lane.cards.map((card, index) => `${card.taskId}:${lane.id}:${index}`))
-    .join('|');
-}
-
 export function CompanyBoard({
-  client,
   lanes,
   flow,
   planning,
@@ -281,18 +233,7 @@ export function CompanyBoard({
   onMenu,
 }: CompanyBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
-  const flightRef = useRef<ReadonlyMap<string, FlightMemory>>(new Map());
-  const layout = layoutSignature(lanes);
-  const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
-
-  // Cards that changed lane or slot fly from where they were. The positions are
-  // read after the layout commits, so the flight starts exactly where the card
-  // was on screen.
-  useLayoutEffect(() => {
-    if (boardRef.current === null) return;
-    const cards = Array.from(boardRef.current.querySelectorAll<HTMLElement>('[data-task-id]'));
-    flightRef.current = flyChangedCards(cards, flightRef.current, reducedMotion);
-  }, [layout, reducedMotion]);
+  useFlightLayout(boardRef);
 
   return (
     <div
@@ -314,24 +255,25 @@ export function CompanyBoard({
               className="company-lane min-w-[96px] flex-1"
             >
               <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1.5">
-                <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
+                <h3 className="flex items-baseline justify-between gap-2 text-base font-semibold text-text">
                   <span className="min-w-0">
                     {COMPANY_LANE_ICONS[lane.id]} {lane.label}
                   </span>
-                  <span className="shrink-0 text-2xs font-normal text-text-muted">{count}</span>
+                  <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
                 </h3>
-                <p className="truncate font-mono text-2xs text-status-active">
+                <p className="truncate text-xs text-status-active">
                   {COMPANY_LANE_OWNERS[lane.id]}
                 </p>
               </header>
               <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-1.5">
-                {count === 0 && <p className="px-1 text-2xs text-text-muted">Không có gì ở đây.</p>}
-                {drafts.map((prompt) => (
+                {count === 0 && <p className="px-1 text-xs text-text-muted">Không có gì ở đây.</p>}
+                {drafts.map((prompt, index) => (
                   <PlanningCard
                     key={prompt.promptId}
-                    client={client}
                     prompt={prompt}
+                    index={index}
                     onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
+                    onMenu={onMenu}
                   />
                 ))}
                 {lane.cards.map((card, index) => (

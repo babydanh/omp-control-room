@@ -1,11 +1,11 @@
 /**
  * flip: the board's card motion. A card that changes lane or slot flies from
- * where it was to where it is now.
+ * where it was to where it is now; a card that arrives fades and scales in.
  *
  * The plan and the bookkeeping are described with structural types, so this
- * module needs no DOM lib and runs under the node test config. The board hands
- * in its rendered cards; reduced motion plans nothing and the card simply sits
- * in its new place.
+ * module needs no DOM lib and runs under the node test config. The DOM side
+ * (useFlightLayout) measures every keyed element and hands in its layout place;
+ * reduced motion plans nothing and the card simply sits in its new place.
  */
 
 /** A card's top-left corner in layout space (transforms do not move it). */
@@ -27,6 +27,7 @@ export interface FlightMemory {
  */
 export type FlightKeyframe = {
   transform: string;
+  opacity?: number;
   boxShadow?: string;
   offset?: number;
 };
@@ -41,11 +42,14 @@ export interface FlightPlan {
   options: FlightAnimationOptions;
 }
 
-/** The part of a rendered card a flight reads and animates; an HTMLElement satisfies it. */
+/**
+ * The part of a rendered card a flight reads and animates. `rect` is the card's
+ * layout place, which the DOM side measures so that a card mid-flight still
+ * reports where it belongs.
+ */
 export interface FlightCard {
   readonly dataset: { readonly [key: string]: string | undefined };
-  readonly offsetLeft: number;
-  readonly offsetTop: number;
+  readonly rect: FlightRect;
   animate(keyframes: FlightKeyframe[], options: FlightAnimationOptions): unknown;
 }
 
@@ -55,6 +59,7 @@ const FAR_PX = 40;
 const STILL_PX = 1;
 const ARC_MS = 720;
 const NEAR_MS = 260;
+const ENTER_MS = 240;
 const EASING = 'cubic-bezier(.22,1,.36,1)';
 /** How far the card lifts off the board at the top of the arc. */
 const ARC_LIFT_PX = 28;
@@ -62,6 +67,11 @@ const ARC_SCALE = 1.06;
 const ARC_TILT_DEG = 2;
 /** The lifted card's shadow: the project's hard pixel offset, in the board's dark ink. */
 const ARC_SHADOW = '2px 2px 0px var(--color-bg-dark)';
+/** An arriving card rises a few pixels, grows from a little smaller, and fades in. */
+const ENTER_KEYFRAMES: FlightKeyframe[] = [
+  { transform: 'translateY(6px) scale(0.97)', opacity: 0 },
+  { transform: 'none', opacity: 1 },
+];
 
 /**
  * The keyframes that carry a card from `from` back to where it now sits at
@@ -104,10 +114,8 @@ export function planFlight(
  * Fly every card that changed lane or slot since `previous` was taken, and
  * return where every card sits now for the next layout change to compare with.
  *
- * Cards carry `data-task-id`, `data-lane` and `data-index`. Positions come from
- * `offsetLeft`/`offsetTop`, which ignore the transforms of a flight still
- * running, so a card mid-flight measures where it belongs rather than where it
- * is drawn.
+ * Cards carry `data-flight-key`, `data-lane` and `data-index`. A card with no
+ * earlier memory flies nothing here; `enterArrivingCards` handles it.
  */
 export function flyChangedCards(
   cards: readonly FlightCard[],
@@ -116,21 +124,37 @@ export function flyChangedCards(
 ): Map<string, FlightMemory> {
   const next = new Map<string, FlightMemory>();
   for (const card of cards) {
-    next.set(card.dataset['taskId'] ?? '', {
+    next.set(card.dataset['flightKey'] ?? '', {
       lane: card.dataset['lane'] ?? '',
-      index: Number(card.dataset['index']),
-      rect: { left: card.offsetLeft, top: card.offsetTop },
+      index: Number(card.dataset['index'] ?? '-1'),
+      rect: card.rect,
     });
   }
 
   for (const card of cards) {
-    const taskId = card.dataset['taskId'] ?? '';
-    const before = previous.get(taskId);
-    const after = next.get(taskId);
+    const key = card.dataset['flightKey'] ?? '';
+    const before = previous.get(key);
+    const after = next.get(key);
     if (before === undefined || after === undefined) continue;
     if (before.lane === after.lane && before.index === after.index) continue;
     const plan = planFlight(before.rect, after.rect, reducedMotion);
     if (plan !== null) card.animate(plan.keyframes, plan.options);
   }
   return next;
+}
+
+/**
+ * Fade and scale in every card whose key was not in `previous`. Call it only
+ * after the first layout: the cards that exist then are not arrivals.
+ */
+export function enterArrivingCards(
+  cards: readonly FlightCard[],
+  previous: ReadonlyMap<string, FlightMemory>,
+  reducedMotion: boolean,
+): void {
+  if (reducedMotion) return;
+  for (const card of cards) {
+    if (previous.has(card.dataset['flightKey'] ?? '')) continue;
+    card.animate(ENTER_KEYFRAMES, { duration: ENTER_MS, easing: EASING });
+  }
 }

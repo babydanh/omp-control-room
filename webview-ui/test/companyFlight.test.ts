@@ -1,26 +1,35 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  enterArrivingCards,
   type FlightCard,
+  type FlightKeyframe,
   type FlightMemory,
   flyChangedCards,
   planFlight,
 } from '../src/company/flip.js';
 
+/** One animation a fake card received, so a test can read what it flew or faded. */
+interface Animated {
+  key: string;
+  keyframes: FlightKeyframe[];
+  duration: number;
+}
+
+/** A card as the DOM side reports it: its flight key, lane, slot, and layout rect. */
 function fakeCard(
-  taskId: string,
+  key: string,
   lane: string,
   index: number,
   left: number,
   top: number,
-  flown: string[],
+  log: Animated[],
 ): FlightCard {
   return {
-    dataset: { taskId, lane, index: String(index) },
-    offsetLeft: left,
-    offsetTop: top,
-    animate: () => {
-      flown.push(taskId);
+    dataset: { flightKey: key, lane, index: String(index) },
+    rect: { left, top },
+    animate: (keyframes, options) => {
+      log.push({ key, keyframes, duration: options.duration });
     },
   };
 }
@@ -64,12 +73,9 @@ describe('planFlight', () => {
 });
 
 describe('flyChangedCards', () => {
-  it('flies a card that changed lane, and returns where every card now sits', () => {
-    const flown: string[] = [];
-    const cards = [
-      fakeCard('a', 'running', 0, 300, 0, flown),
-      fakeCard('b', 'ready', 0, 0, 0, flown),
-    ];
+  it('flies a card that changed lane and records where every card now sits', () => {
+    const log: Animated[] = [];
+    const cards = [fakeCard('a', 'running', 0, 300, 0, log), fakeCard('b', 'ready', 0, 0, 0, log)];
     const previous = new Map<string, FlightMemory>([
       ['a', { lane: 'ready', index: 0, rect: { left: 0, top: 0 } }],
       ['b', { lane: 'ready', index: 0, rect: { left: 0, top: 0 } }],
@@ -77,42 +83,90 @@ describe('flyChangedCards', () => {
 
     const next = flyChangedCards(cards, previous, false);
 
-    expect(flown).toEqual(['a']);
+    expect(log.map((entry) => entry.key)).toEqual(['a']);
     expect(next.get('a')).toEqual({ lane: 'running', index: 0, rect: { left: 300, top: 0 } });
     expect(next.get('b')).toEqual({ lane: 'ready', index: 0, rect: { left: 0, top: 0 } });
   });
 
-  it('does not fly a card whose lane and slot are unchanged', () => {
-    const flown: string[] = [];
-    const cards = [fakeCard('a', 'ready', 0, 0, 0, flown)];
+  it('flies a card that moved to another slot in its own lane', () => {
+    const log: Animated[] = [];
+    const cards = [fakeCard('a', 'ready', 1, 0, 90, log)];
     const previous = new Map<string, FlightMemory>([
       ['a', { lane: 'ready', index: 0, rect: { left: 0, top: 0 } }],
     ]);
 
     flyChangedCards(cards, previous, false);
 
-    expect(flown).toEqual([]);
+    expect(log.map((entry) => entry.key)).toEqual(['a']);
+  });
+
+  it('does not fly a card whose lane and slot are unchanged', () => {
+    const log: Animated[] = [];
+    const cards = [fakeCard('a', 'ready', 0, 0, 0, log)];
+    const previous = new Map<string, FlightMemory>([
+      ['a', { lane: 'ready', index: 0, rect: { left: 0, top: 0 } }],
+    ]);
+
+    flyChangedCards(cards, previous, false);
+
+    expect(log).toEqual([]);
   });
 
   it('flies nothing under reduced motion, but still records the new layout', () => {
-    const flown: string[] = [];
-    const cards = [fakeCard('a', 'running', 0, 300, 0, flown)];
+    const log: Animated[] = [];
+    const cards = [fakeCard('a', 'running', 0, 300, 0, log)];
     const previous = new Map<string, FlightMemory>([
       ['a', { lane: 'ready', index: 0, rect: { left: 0, top: 0 } }],
     ]);
 
     const next = flyChangedCards(cards, previous, true);
 
-    expect(flown).toEqual([]);
+    expect(log).toEqual([]);
     expect(next.get('a')?.lane).toBe('running');
   });
 
   it('flies nothing for a card with no earlier position, such as the first render', () => {
-    const flown: string[] = [];
-    const cards = [fakeCard('a', 'running', 0, 300, 0, flown)];
+    const log: Animated[] = [];
+    const cards = [fakeCard('a', 'running', 0, 300, 0, log)];
 
     flyChangedCards(cards, new Map(), false);
 
-    expect(flown).toEqual([]);
+    expect(log).toEqual([]);
+  });
+
+  it('reads a card with no slot number as slot -1', () => {
+    const card: FlightCard = {
+      dataset: { flightKey: 'a', lane: 'ready' },
+      rect: { left: 0, top: 0 },
+      animate: () => undefined,
+    };
+
+    expect(flyChangedCards([card], new Map(), false).get('a')?.index).toBe(-1);
+  });
+});
+
+describe('enterArrivingCards', () => {
+  it('fades and rises in only the cards that were not laid out before', () => {
+    const log: Animated[] = [];
+    const cards = [fakeCard('a', 'ready', 0, 0, 0, log), fakeCard('b', 'ready', 1, 0, 90, log)];
+    const previous = new Map<string, FlightMemory>([
+      ['b', { lane: 'ready', index: 1, rect: { left: 0, top: 90 } }],
+    ]);
+
+    enterArrivingCards(cards, previous, false);
+
+    expect(log.map((entry) => entry.key)).toEqual(['a']);
+    expect(log[0]?.duration).toBe(240);
+    expect(log[0]?.keyframes[0]).toMatchObject({ opacity: 0 });
+    expect(log[0]?.keyframes[1]).toMatchObject({ opacity: 1 });
+  });
+
+  it('enters nothing under reduced motion', () => {
+    const log: Animated[] = [];
+    const cards = [fakeCard('a', 'ready', 0, 0, 0, log)];
+
+    enterArrivingCards(cards, new Map(), true);
+
+    expect(log).toEqual([]);
   });
 });

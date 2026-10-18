@@ -139,15 +139,6 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
         />
       ) : (
         <>
-          <div className="flex flex-wrap gap-1">
-            <CompanyButton size="sm" onClick={() => track(client.herdrFocus(paneId))}>
-              Mở trong herdr
-            </CompanyButton>
-            <CompanyButton size="sm" onClick={() => track(client.herdrRead(paneId))}>
-              Đọc lại màn hình
-            </CompanyButton>
-          </div>
-
           {agent.status === 'blocked' && (
             <div className="flex flex-wrap gap-1" role="group" aria-label="Phím gửi tới agent">
               {HERDR_CHOICE_KEYS.map((choice) => (

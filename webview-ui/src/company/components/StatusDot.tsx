@@ -40,7 +40,7 @@ export function StatusDot({ tone }: { tone: DotTone }) {
   return (
     <span
       aria-hidden="true"
-      className={`inline-block h-2 w-2 shrink-0 rounded-full ${DOT_CLASS[tone]}`}
+      className={`company-dot inline-block h-2 w-2 shrink-0 rounded-full ${DOT_CLASS[tone]}`}
     />
   );
 }

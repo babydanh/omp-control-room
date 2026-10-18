@@ -1,18 +1,18 @@
 /**
- * AgentSidebar: every agent the company runs, grouped by role, plus the herdr
- * agents grouped by the repository they work in. Each agent takes two lines:
- * what it is and its state, then what it is doing. Collapsing the sidebar leaves
- * the AgentRail, which still shows every agent.
+ * AgentSidebar: the project tree beside the board. Each board folder is a project
+ * header with its counts; the active folder expands into its roles and their
+ * sessions, and the herdr agents sit under the repository they work in, one
+ * project per repo. A project folds with its header, and the fold is remembered.
  *
  * A row that waits on the user is red and sorts first. A role's parked sessions
- * sit collapsed under "Tạm trữ" so live work stays in view. The role header
- * opens that role's model picker inline; the server applies a change at the
- * role's next turn. The sidebar can be resized from its right edge with the
- * pointer or with the arrow keys.
+ * sit collapsed under "Tạm trữ" so live work stays in view. The role header opens
+ * that role's model picker inline; the server applies a change at the role's next
+ * turn. Every action on a project or a row is in its right-click menu. The sidebar
+ * can be resized from its right edge with the pointer or with the arrow keys.
  */
 
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 
 import type { CompanyRole, RoleProfile } from '../../../../core/src/company.js';
 import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
@@ -21,44 +21,26 @@ import {
   type AgentRoleGroup,
   type AgentRow,
   agentTooltip,
-  buildAgentGroups,
   type HerdrGroup,
-  herdrGroup,
-  type HerdrRepoGroup,
   type HerdrRow,
   herdrRowCount,
   herdrTooltip,
-  type RepoPlacement,
   type SummaryLine,
 } from '../agentSidebarView.js';
+import { buildProjectTree, projectCountsText, type ProjectNode } from '../agentTree.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS, withRoleModel } from '../roleProfiles.js';
-import { DELETE_CONFIRM_DETAIL } from '../sessionActions.js';
-import {
-  deleteSessionsInOrder,
-  removableErroredSessionIds,
-  removalNotice,
-} from '../sessionRemoval.js';
 import { clampSidebarWidth } from '../sidebarPrefs.js';
+import { useFlightLayout } from '../useFlightLayout.js';
 import { useNow } from '../useNow.js';
 import { ActivityChips } from './ActivityCounts.js';
-import { CompanyButton } from './CompanyButton.js';
 import { ModelPicker } from './ModelPicker.js';
-import { ConfirmAction } from './SessionActions.js';
 import { StatusDot } from './StatusDot.js';
 
 /** Pixels one arrow-key press moves the resize edge. */
 const RESIZE_STEP_PX = 16;
-
-/** What a repo group header's tooltip says about how the group was found. */
-const REPO_SOURCE_TITLE: Readonly<Record<RepoPlacement['source'], string>> = {
-  repo: 'Nhóm theo repository git',
-  workspace: 'Nhóm theo workspace của herdr (chưa có repository)',
-  folder: 'Nhóm theo tên thư mục (chưa có repository hay workspace)',
-  other: 'Chưa rõ repository, workspace hay thư mục',
-};
 
 export interface AgentSidebarProps {
   client: CompanyClient;
@@ -70,10 +52,28 @@ export interface AgentSidebarProps {
   width: number;
   /** True below the overlay breakpoint: the sidebar floats over the board. */
   overlay: boolean;
+  /** The keys of the projects the user folded. */
+  collapsedProjects: ReadonlySet<string>;
   onWidthChange: (width: number) => void;
   onCollapse: () => void;
   onSelectSession: (sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
+  onToggleProject: (key: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
+}
+
+/** What every row and header needs from the sidebar, passed down once. */
+interface TreeView {
+  catalog: CompanyViewState['modelCatalog'];
+  editingRole: CompanyRole | null;
+  selectedSessionId: string | null;
+  selectedPaneId: string | null;
+  profileOf: (role: CompanyRole) => RoleProfile | null;
+  onToggleEdit: (role: CompanyRole) => void;
+  onPick: (role: CompanyRole, modelId: string, thinking: string | undefined) => void;
+  onSelectSession: (sessionId: string) => void;
+  onOpenHerdr: (paneId: string) => void;
+  onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
 }
 
@@ -84,23 +84,28 @@ export function AgentSidebar({
   selectedPaneId,
   width,
   overlay,
+  collapsedProjects,
   onWidthChange,
   onCollapse,
   onSelectSession,
   onOpenHerdr,
+  onToggleProject,
   onMenu,
 }: AgentSidebarProps) {
   const [editingRole, setEditingRole] = useState<CompanyRole | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [cleaning, setCleaning] = useState(false);
   const now = useNow();
+  const treeRef = useRef<HTMLDivElement>(null);
+  useFlightLayout(treeRef);
 
-  const groups = buildAgentGroups(state, now);
-  const herdr = herdrGroup(state.herdr);
-  const counts = activityCounts(groups, herdr);
+  const tree = buildProjectTree(state, now, collapsedProjects);
+  const boards = tree.projects.filter((project) => project.kind === 'board');
+  const repos = tree.projects.filter((project) => project.kind === 'herdr');
+  const activeGroups = boards.find((project) => project.active)?.groups ?? [];
+  const counts = activityCounts(activeGroups, tree.herdr);
   const total =
-    groups.reduce((sum, group) => sum + group.active.length + group.parked.length, 0) +
-    herdrRowCount(herdr);
+    activeGroups.reduce((sum, group) => sum + group.active.length + group.parked.length, 0) +
+    herdrRowCount(tree.herdr);
   const profiles = state.settings?.roleProfiles ?? {};
 
   function changeRole(role: CompanyRole, modelId: string, thinking: string | undefined): void {
@@ -113,14 +118,19 @@ export function AgentSidebar({
     );
   }
 
-  // Deletes the given folded sessions one at a time, then reports the outcome.
-  async function cleanErrored(sessionIds: readonly string[]): Promise<void> {
-    setCleaning(true);
-    setNotice(null);
-    const report = await deleteSessionsInOrder(client, sessionIds);
-    setCleaning(false);
-    setNotice(removalNotice(report));
-  }
+  const view: TreeView = {
+    catalog: state.modelCatalog,
+    editingRole,
+    selectedSessionId,
+    selectedPaneId,
+    profileOf: (role) => profiles[role] ?? null,
+    onToggleEdit: (role) => setEditingRole((current) => (current === role ? null : role)),
+    onPick: changeRole,
+    onSelectSession,
+    onOpenHerdr,
+    onToggleProject,
+    onMenu,
+  };
 
   return (
     <aside
@@ -130,7 +140,7 @@ export function AgentSidebar({
       style={{ width: `${width}px` }}
     >
       <header className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
-        <h2 className="text-2xs font-semibold text-text-muted">Đàn agent · {total}</h2>
+        <h2 className="text-xs font-semibold text-text-muted">Đàn agent · {total}</h2>
         <button
           type="button"
           onClick={onCollapse}
@@ -143,43 +153,18 @@ export function AgentSidebar({
       </header>
       <ActivityChips counts={counts} />
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        {groups.map((group, index) => (
-          <Fragment key={group.role}>
-            {index > 0 && groups[index - 1]?.role === 'chat' && group.role !== 'chat' && (
-              <div role="separator" className="mx-2.5 my-1 border-t border-border" />
-            )}
-            <RoleSection
-              group={group}
-              catalog={state.modelCatalog}
-              profile={profiles[group.role] ?? null}
-              editing={editingRole === group.role}
-              selectedSessionId={selectedSessionId}
-              removable={removableErroredSessionIds(state, group)}
-              cleaning={cleaning}
-              onToggleEdit={() =>
-                setEditingRole((current) => (current === group.role ? null : group.role))
-              }
-              onPick={(modelId, thinking) => changeRole(group.role, modelId, thinking)}
-              onSelectSession={onSelectSession}
-              onMenu={onMenu}
-              onClean={(sessionIds) => void cleanErrored(sessionIds)}
-            />
-          </Fragment>
+      <div ref={treeRef} data-testid="agent-tree" className="min-h-0 flex-1 overflow-y-auto">
+        {boards.map((project) => (
+          <ProjectSection key={project.key} project={project} view={view} />
         ))}
-        <HerdrSection
-          group={herdr}
-          selectedPaneId={selectedPaneId}
-          onOpen={onOpenHerdr}
-          onMenu={onMenu}
-        />
+        <HerdrBlock herdr={tree.herdr} repos={repos} view={view} />
       </div>
 
       {notice && (
         <p
           role="status"
           data-testid="role-notice"
-          className="border-t border-border px-2 py-1 text-2xs text-text-muted"
+          className="border-t border-border px-2 py-1 text-xs text-text-muted"
         >
           {notice}
         </p>
@@ -190,54 +175,144 @@ export function AgentSidebar({
   );
 }
 
-function RoleSection({
-  group,
-  catalog,
-  profile,
-  editing,
-  selectedSessionId,
-  onToggleEdit,
-  onPick,
-  onSelectSession,
-  onMenu,
-  removable,
-  cleaning,
-  onClean,
-}: {
-  group: AgentRoleGroup;
-  catalog: CompanyViewState['modelCatalog'];
-  profile: RoleProfile | null;
-  editing: boolean;
-  selectedSessionId: string | null;
-  onToggleEdit: () => void;
-  onPick: (modelId: string, thinking: string | undefined) => void;
-  onSelectSession: (sessionId: string) => void;
-  onMenu: (request: AgentMenuRequest) => void;
-  /** Folded sessions the cleanup may delete: crashed, with no task and no work held. */
-  removable: readonly string[];
-  cleaning: boolean;
-  onClean: (sessionIds: readonly string[]) => void;
-}) {
-  const [showParked, setShowParked] = useState(false);
-  const [confirmingClean, setConfirmingClean] = useState(false);
-  const rowCount = group.active.length + group.parked.length;
-
+/** A project's header, and its children when it is open. */
+function ProjectSection({ project, view }: { project: ProjectNode; view: TreeView }) {
+  const triggers = agentMenuTriggers<HTMLButtonElement>({ kind: 'project', project }, view.onMenu);
   return (
     <section
-      aria-label={group.label}
-      data-testid={`agent-group-${group.role}`}
+      aria-label={project.name}
+      data-testid={`project-${project.key}`}
       className="border-b border-border"
     >
       <button
         type="button"
+        aria-expanded={!project.collapsed}
+        onClick={() => view.onToggleProject(project.key)}
+        {...triggers}
+        title={project.tooltip}
+        className="flex w-full min-w-0 cursor-pointer items-center gap-2 px-2.5 py-2 text-left hover:bg-btn-hover"
+      >
+        <span aria-hidden="true" className="w-3 shrink-0 text-2xs text-text-muted">
+          {project.collapsed ? '▸' : '▾'}
+        </span>
+        <span
+          aria-hidden="true"
+          className="h-4 w-[3px] shrink-0 rounded-full"
+          style={{ backgroundColor: `var(--company-project-${project.tone})` }}
+        />
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
+          {project.name}
+        </span>
+        {project.branch !== null && (
+          <span
+            title={project.branch}
+            className="max-w-[40%] min-w-0 shrink truncate rounded-[3px] border border-border px-1 font-mono text-2xs text-status-active"
+          >
+            {project.branch}
+          </span>
+        )}
+        <span className="shrink-0 text-xs text-text-muted">
+          {projectCountsText(project.counts)}
+        </span>
+      </button>
+      {!project.collapsed && <ProjectBody project={project} view={view} />}
+    </section>
+  );
+}
+
+/** A project's children, indented under a guide: its roles, its panes, or a note. */
+function ProjectBody({ project, view }: { project: ProjectNode; view: TreeView }) {
+  if (project.kind === 'herdr') {
+    return (
+      <ul className="ml-4 border-l border-border pb-1 pl-1">
+        {project.panes.map((row, index) => (
+          <li key={row.paneId}>
+            <HerdrRowButton
+              row={row}
+              lane={project.key}
+              index={index}
+              selected={row.paneId === view.selectedPaneId}
+              onOpen={() => view.onOpenHerdr(row.paneId)}
+              onMenu={view.onMenu}
+            />
+          </li>
+        ))}
+      </ul>
+    );
+  }
+  if (!project.active) {
+    return (
+      <p className="px-4 pb-2 text-xs text-text-muted">Mở thư mục này trên bảng để xem phiên.</p>
+    );
+  }
+  return (
+    <div className="ml-4 border-l border-border pb-1 pl-1">
+      {project.groups.map((group, index) => (
+        <Fragment key={group.role}>
+          {index > 0 && project.groups[index - 1]?.role === 'chat' && group.role !== 'chat' && (
+            <div role="separator" className="mx-1 my-1 border-t border-border" />
+          )}
+          <RoleSection group={group} profile={view.profileOf(group.role)} view={view} />
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+/** The herdr agents, under a heading, one project per repository they work in. */
+function HerdrBlock({
+  herdr,
+  repos,
+  view,
+}: {
+  herdr: HerdrGroup;
+  repos: readonly ProjectNode[];
+  view: TreeView;
+}) {
+  if (herdr.kind === 'hidden') return null;
+  if (herdr.kind === 'unavailable') {
+    return <p className="px-2.5 py-2 text-xs text-text-muted">{herdr.message}</p>;
+  }
+  if (repos.length === 0) {
+    return <p className="px-2.5 py-2 text-xs text-text-muted">Không có agent nào trong herdr.</p>;
+  }
+  return (
+    <div data-testid="agent-group-herdr">
+      <h3 className="flex items-baseline gap-2 px-2.5 pb-1 pt-2">
+        <span className="text-sm font-semibold text-text">Herdr</span>
+        <span className="text-xs text-status-active">{herdrRowCount(herdr)} agent</span>
+      </h3>
+      {repos.map((project) => (
+        <ProjectSection key={project.key} project={project} view={view} />
+      ))}
+    </div>
+  );
+}
+
+function RoleSection({
+  group,
+  profile,
+  view,
+}: {
+  group: AgentRoleGroup;
+  profile: RoleProfile | null;
+  view: TreeView;
+}) {
+  const [showParked, setShowParked] = useState(false);
+  const editing = view.editingRole === group.role;
+
+  return (
+    <section aria-label={group.label} data-testid={`agent-group-${group.role}`} className="pb-1">
+      <button
+        type="button"
         disabled={profile === null}
-        onClick={onToggleEdit}
+        onClick={() => view.onToggleEdit(group.role)}
         aria-expanded={editing}
         title="Bấm để đổi model và mức suy nghĩ của vai này"
-        className={`flex w-full min-w-0 cursor-pointer items-center gap-2 border-l-4 px-2.5 pb-1 pt-2 text-left hover:bg-btn-hover disabled:cursor-default disabled:hover:bg-transparent ${ROLE_EDGE_CLASS[group.role]}`}
+        className={`flex w-full min-w-0 cursor-pointer items-center gap-2 border-l-4 px-2 pb-1 pt-1.5 text-left hover:bg-btn-hover disabled:cursor-default disabled:hover:bg-transparent ${ROLE_EDGE_CLASS[group.role]}`}
       >
         <span className="shrink-0 text-sm font-semibold text-text">{group.label}</span>
-        <span className="min-w-0 flex-1 truncate font-mono text-2xs text-status-active">
+        <span className="min-w-0 flex-1 truncate font-mono text-xs text-status-active">
           {profile === null
             ? 'chưa có hồ sơ'
             : `${group.hostRole} · ${profile.requestedModel}${profile.thinking ? ` · ${profile.thinking}` : ''}`}
@@ -251,67 +326,50 @@ function RoleSection({
 
       {editing && profile !== null && (
         <div className="px-2 pb-2">
-          <ModelPicker profile={profile} catalog={catalog} onPick={onPick} />
+          <ModelPicker
+            profile={profile}
+            catalog={view.catalog}
+            onPick={(modelId, thinking) => view.onPick(group.role, modelId, thinking)}
+          />
         </div>
       )}
 
       <ul>
-        {group.active.map((row) => (
+        {group.active.map((row, index) => (
           <li key={row.sessionId}>
             <AgentRowButton
               row={row}
-              selected={row.sessionId === selectedSessionId}
-              onSelect={() => onSelectSession(row.sessionId)}
-              onMenu={onMenu}
+              lane={group.role}
+              index={index}
+              selected={row.sessionId === view.selectedSessionId}
+              onSelect={() => view.onSelectSession(row.sessionId)}
+              onMenu={view.onMenu}
             />
           </li>
         ))}
-        {rowCount === 0 && (
-          <li className="px-2 py-1 text-2xs text-text-muted">Chưa có phiên nào.</li>
-        )}
       </ul>
 
       {group.parked.length > 0 && (
-        <div className="px-2 pb-1">
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              aria-expanded={showParked}
-              onClick={() => setShowParked((current) => !current)}
-              className="cursor-pointer text-2xs text-text-muted hover:text-text"
-            >
-              Tạm trữ ({group.parked.length}) {showParked ? '▴' : '▾'}
-            </button>
-            {removable.length > 0 && (
-              <CompanyButton size="sm" disabled={cleaning} onClick={() => setConfirmingClean(true)}>
-                Dọn các phiên lỗi
-              </CompanyButton>
-            )}
-          </div>
-          {confirmingClean && removable.length > 0 && (
-            <div className="mt-1">
-              <ConfirmAction
-                message={`Xoá ${removable.length} phiên lỗi của ${group.label}? ${DELETE_CONFIRM_DETAIL}`}
-                confirmLabel="Xoá các phiên"
-                danger
-                disabled={cleaning}
-                onConfirm={() => {
-                  setConfirmingClean(false);
-                  onClean(removable);
-                }}
-                onCancel={() => setConfirmingClean(false)}
-              />
-            </div>
-          )}
+        <div className="px-2">
+          <button
+            type="button"
+            aria-expanded={showParked}
+            onClick={() => setShowParked((current) => !current)}
+            className="cursor-pointer py-0.5 text-xs text-text-muted hover:text-text"
+          >
+            Tạm trữ ({group.parked.length}) {showParked ? '▴' : '▾'}
+          </button>
           {showParked && (
             <ul>
-              {group.parked.map((row) => (
+              {group.parked.map((row, index) => (
                 <li key={row.sessionId}>
                   <AgentRowButton
                     row={row}
-                    selected={row.sessionId === selectedSessionId}
-                    onSelect={() => onSelectSession(row.sessionId)}
-                    onMenu={onMenu}
+                    lane={`${group.role}:parked`}
+                    index={index}
+                    selected={row.sessionId === view.selectedSessionId}
+                    onSelect={() => view.onSelectSession(row.sessionId)}
+                    onMenu={view.onMenu}
                   />
                 </li>
               ))}
@@ -326,7 +384,7 @@ function RoleSection({
 /** A row's second line: what the agent is doing, its glyph, and how long ago. */
 function SummaryText({ summary }: { summary: SummaryLine }) {
   return (
-    <span className="mt-0.5 flex min-w-0 items-baseline gap-2 font-mono text-2xs text-text-muted">
+    <span className="mt-0.5 flex min-w-0 items-baseline gap-2 text-xs text-text-muted">
       <span className="min-w-0 flex-1 truncate">
         {summary.glyph !== '' && <span aria-hidden="true">{summary.glyph} </span>}
         {summary.text}
@@ -338,17 +396,21 @@ function SummaryText({ summary }: { summary: SummaryLine }) {
 
 function AgentRowButton({
   row,
+  lane,
+  index,
   selected,
   onSelect,
   onMenu,
 }: {
   row: AgentRow;
+  lane: string;
+  index: number;
   selected: boolean;
   onSelect: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
   const triggers = agentMenuTriggers<HTMLButtonElement>(
-    { kind: 'session', sessionId: row.sessionId },
+    { kind: 'session', sessionId: row.sessionId, drawer: null },
     onMenu,
   );
   return (
@@ -359,6 +421,9 @@ function AgentRowButton({
       aria-pressed={selected}
       title={agentTooltip(row)}
       data-testid={`agent-row-${row.code}`}
+      data-flight-key={`session:${row.sessionId}`}
+      data-lane={lane}
+      data-index={index}
       className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
     >
       <span className="flex h-4 w-3 shrink-0 items-center justify-center">
@@ -368,9 +433,7 @@ function AgentRowButton({
         <span className="flex items-baseline gap-2">
           <span className="shrink-0 font-mono text-2xs text-text-muted">{row.code}</span>
           <span className="min-w-0 flex-1 truncate text-sm text-text">{row.name}</span>
-          <span
-            className={`shrink-0 text-2xs ${row.needsYou ? 'text-warning' : 'text-text-muted'}`}
-          >
+          <span className={`shrink-0 text-xs ${row.needsYou ? 'text-warning' : 'text-text-muted'}`}>
             {row.label}
           </span>
         </span>
@@ -380,97 +443,23 @@ function AgentRowButton({
   );
 }
 
-function HerdrSection({
-  group,
-  selectedPaneId,
-  onOpen,
-  onMenu,
-}: {
-  group: HerdrGroup;
-  selectedPaneId: string | null;
-  onOpen: (paneId: string) => void;
-  onMenu: (request: AgentMenuRequest) => void;
-}) {
-  if (group.kind === 'hidden') return null;
-  return (
-    <section aria-label="herdr" data-testid="agent-group-herdr" className="border-b border-border">
-      <h3 className="flex items-baseline gap-2 px-2.5 pb-1 pt-2">
-        <span className="text-sm font-semibold text-text">Herdr</span>
-        {group.kind === 'ready' && (
-          <span className="font-mono text-2xs text-status-active">
-            {herdrRowCount(group)} agent
-          </span>
-        )}
-      </h3>
-      {group.kind === 'unavailable' ? (
-        <p className="px-2 pb-2 text-2xs text-text-muted">{group.message}</p>
-      ) : group.repos.length === 0 ? (
-        <p className="px-2.5 pb-2 text-2xs text-text-muted">Không có agent nào trong herdr.</p>
-      ) : (
-        group.repos.map((repo) => (
-          <HerdrRepoSection
-            key={repo.key}
-            repo={repo}
-            selectedPaneId={selectedPaneId}
-            onOpen={onOpen}
-            onMenu={onMenu}
-          />
-        ))
-      )}
-    </section>
-  );
-}
-
-/** The herdr agents of one repository, under a header that says where they work. */
-function HerdrRepoSection({
-  repo,
-  selectedPaneId,
-  onOpen,
-  onMenu,
-}: {
-  repo: HerdrRepoGroup;
-  selectedPaneId: string | null;
-  onOpen: (paneId: string) => void;
-  onMenu: (request: AgentMenuRequest) => void;
-}) {
-  return (
-    <div className="pb-1">
-      <h4
-        title={REPO_SOURCE_TITLE[repo.source]}
-        className="flex items-baseline gap-2 px-2.5 pt-1 text-2xs text-text-muted"
-      >
-        <span className="min-w-0 flex-1 truncate font-semibold text-text">{repo.label}</span>
-        <span className="shrink-0 font-mono">{repo.rows.length}</span>
-      </h4>
-      <ul>
-        {repo.rows.map((row) => (
-          <li key={row.paneId}>
-            <HerdrRowButton
-              row={row}
-              selected={row.paneId === selectedPaneId}
-              onOpen={() => onOpen(row.paneId)}
-              onMenu={onMenu}
-            />
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function HerdrRowButton({
   row,
+  lane,
+  index,
   selected,
   onOpen,
   onMenu,
 }: {
   row: HerdrRow;
+  lane: string;
+  index: number;
   selected: boolean;
   onOpen: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
   const triggers = agentMenuTriggers<HTMLButtonElement>(
-    { kind: 'herdr', paneId: row.paneId },
+    { kind: 'herdr', paneId: row.paneId, drawer: null },
     onMenu,
   );
   return (
@@ -481,6 +470,9 @@ function HerdrRowButton({
       aria-pressed={selected}
       title={herdrTooltip(row)}
       data-testid={`herdr-row-${row.paneId}`}
+      data-flight-key={`pane:${row.paneId}`}
+      data-lane={lane}
+      data-index={index}
       className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
     >
       <span className="flex h-4 w-3 shrink-0 items-center justify-center">
@@ -499,7 +491,7 @@ function HerdrRowButton({
               {row.branch}
             </span>
           )}
-          <span className="shrink-0 text-2xs text-text-muted">{row.label}</span>
+          <span className="shrink-0 text-xs text-text-muted">{row.label}</span>
         </span>
         {row.summary !== null && <SummaryText summary={row.summary} />}
       </span>

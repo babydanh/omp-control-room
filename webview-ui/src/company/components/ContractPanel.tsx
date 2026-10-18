@@ -25,8 +25,8 @@ export interface ContractPanelProps {
   contract: Contract;
   verificationProfiles: Record<string, VerificationProfile>;
   evidence: readonly VerificationEvidence[];
-  onApprove: (revision: number) => void;
-  onReject: (revision: number) => void;
+  onApprove?: (revision: number) => void;
+  onReject?: (revision: number) => void;
 }
 
 export function ContractPanel({
@@ -44,10 +44,14 @@ export function ContractPanel({
       contract={contract}
       commandsByCriterion={criteria}
       evidence={evidence}
-      onApprove={(revision) => {
-        if (!canSendContractApproval(contract, view)) return;
-        onApprove(revision);
-      }}
+      onApprove={
+        onApprove === undefined
+          ? undefined
+          : (revision) => {
+              if (!canSendContractApproval(contract, view)) return;
+              onApprove(revision);
+            }
+      }
       onReject={onReject}
     />
   );

@@ -1,12 +1,18 @@
 /**
- * agentMenu: what the right-click menu on an agent offers, as pure data.
+ * agentMenu: what the right-click menu offers, as pure data.
  *
- * One menu serves every surface that shows an agent: sidebar rows, rail badges,
- * task cards, and herdr rows. This file decides which items appear and which are
- * enabled; the component draws them and runs the chosen action. It also holds the
- * name rules a rename is checked against before it is sent, the placement that keeps
- * the menu inside the viewport, and the trigger that opens it from the mouse or the
- * keyboard.
+ * One menu serves every surface that shows work: a session row, a rail badge, a
+ * task card, a planning card, a herdr agent, a project header, and the drawer
+ * headers that show any of them. Items come from the subject alone: a task card
+ * with no session offers task items only, and a pane with no folder offers no
+ * folder copy. Nothing is listed disabled to explain an absence. The only
+ * disabled item is a delete the server refuses while a session holds work, and
+ * it says why.
+ *
+ * This file decides which items appear and in what order; the component draws
+ * them and runs the chosen action. It also holds the name rules a rename is
+ * checked against before it is sent, the placement that keeps the menu inside
+ * the viewport, and the trigger that opens it from the mouse or the keyboard.
  */
 
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
@@ -14,9 +20,30 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import type { HerdrDrawerTab } from './herdrView.js';
 import { HOLDS_WORK_REASON, sessionControls, type SessionControlSet } from './sessionActions.js';
 
-/** What a menu was opened on. A session subject with no session is a task card nobody runs. */
+/** A drawer header that opened the menu: whether the drawer is currently maximized. */
+export interface DrawerView {
+  maximized: boolean;
+}
+
+/** What a project header's menu needs to know, captured when it opens. */
+export interface ProjectMenuFacts {
+  key: string;
+  name: string;
+  path: string | null;
+  collapsed: boolean;
+  /** The folder the board switches to: set for a board folder that is not active. */
+  switchTo: string | null;
+  /** Errored sessions the cleanup may delete now; empty when there are none. */
+  cleanable: string[];
+}
+
+/** What a menu was opened on. */
 export type AgentMenuSubject =
-  { kind: 'session'; sessionId: string | null } | { kind: 'herdr'; paneId: string };
+  | { kind: 'session'; sessionId: string; drawer: DrawerView | null }
+  | { kind: 'task'; taskId: string; sessionId: string | null; drawer: DrawerView | null }
+  | { kind: 'planning'; promptId: string; sessionId: string | null }
+  | { kind: 'herdr'; paneId: string; drawer: DrawerView | null }
+  | { kind: 'project'; project: ProjectMenuFacts };
 
 /** The drawer tabs a session's menu can open. */
 export type SessionMenuTab = 'info' | 'log' | 'commands' | 'terminal';
@@ -24,181 +51,308 @@ export type SessionMenuTab = 'info' | 'log' | 'commands' | 'terminal';
 export type SessionControlAction =
   'interrupt' | 'pause' | 'resume' | 'restart' | 'kill' | 'archive' | 'delete';
 
+export type CopyWhat = 'cwd' | 'sessionCode' | 'paneId' | 'taskCode' | 'path';
+
 export type AgentMenuAction =
   | { kind: 'sessionTab'; tab: SessionMenuTab }
-  | { kind: 'rename' }
-  | { kind: 'copy'; what: 'cwd' | 'sessionCode' | 'paneId' }
-  | { kind: 'control'; action: SessionControlAction }
   | { kind: 'herdrTab'; tab: HerdrDrawerTab }
-  | { kind: 'focus' };
+  | { kind: 'rename' }
+  | { kind: 'copy'; what: CopyWhat }
+  | { kind: 'control'; action: SessionControlAction }
+  | { kind: 'focus' }
+  | { kind: 'readScreen' }
+  | { kind: 'maximize' }
+  | { kind: 'openTask' }
+  | { kind: 'openContract'; contractId: string }
+  | { kind: 'openSession' }
+  | { kind: 'cancelPrompt' }
+  | { kind: 'toggleProject' }
+  | { kind: 'openBoardFolder' }
+  | { kind: 'cleanErrored' };
 
 export interface AgentMenuItem {
   /** Stable within one menu: a React key, and how tests find an item. */
   id: string;
   label: string;
   action: AgentMenuAction;
-  /** Shown dimmed and never run. */
+  /** Shown dimmed and never run. Only a refused delete is ever disabled. */
   disabled: boolean;
-  /** Why the item is disabled, in a few words; null when it is enabled. */
-  reason: string | null;
-  /** Drawn in the warning tone: a control that stops work. */
+  /** A few words on the right of the row, such as a refusal's cause; null when there is none. */
+  hint: string | null;
+  /** The full explanation, for the row's tooltip; null when the label says it all. */
+  title: string | null;
+  /** Drawn in the danger tone, and kept at the bottom of its menu. */
   danger: boolean;
-  /** Drawn after a rule: the groups are identity, opening, then controls. */
+  /** Drawn after a separator: items group as identity, views, controls, then danger. */
   startsGroup: boolean;
 }
 
-/** What a session's menu needs to know: its wire status, and the folder it works in if known. */
+/** What a session's menu needs to know. */
 export interface SessionMenuFacts {
   status: string;
+  /** The folder the session works in, when known. */
   cwd: string | null;
-  /** Whether the session holds work; delete is refused for it, so its item is disabled. */
+  /** Whether the session holds work; delete is refused for it. */
   holdsWork: boolean;
 }
 
-const NO_SESSION_REASON = 'Chưa có phiên nào để thao tác.';
-const FOLDER_UNKNOWN_REASON = 'Chưa rõ thư mục làm việc.';
+export interface TaskMenuFacts {
+  code: string;
+  /** The task's Contract when the board holds it; null when it does not. */
+  contractId: string | null;
+}
 
+/** Short hint shown beside a refused delete. The full reason is the row's tooltip. */
+const HOLDS_WORK_HINT = 'đang giữ việc';
+
+/** The session controls, in menu order. Kill and delete are danger items and sit last. */
 const CONTROL_ITEMS: ReadonlyArray<{
   flag: keyof SessionControlSet;
   action: SessionControlAction;
   label: string;
-  danger: boolean;
 }> = [
-  { flag: 'interrupt', action: 'interrupt', label: 'Dừng lượt', danger: false },
-  { flag: 'pause', action: 'pause', label: 'Tạm dừng', danger: false },
-  { flag: 'resume', action: 'resume', label: 'Tiếp tục', danger: false },
-  { flag: 'restart', action: 'restart', label: 'Khởi động lại', danger: false },
-  { flag: 'kill', action: 'kill', label: 'Tắt phiên', danger: true },
-  { flag: 'archive', action: 'archive', label: 'Lưu trữ', danger: false },
+  { flag: 'interrupt', action: 'interrupt', label: 'Dừng lượt' },
+  { flag: 'pause', action: 'pause', label: 'Tạm dừng' },
+  { flag: 'resume', action: 'resume', label: 'Tiếp tục' },
+  { flag: 'restart', action: 'restart', label: 'Khởi động lại' },
+  { flag: 'archive', action: 'archive', label: 'Lưu trữ' },
 ];
 
-interface MenuItemSpec {
+interface ItemSpec {
   id: string;
   label: string;
   action: AgentMenuAction;
-  /** Null when the item is enabled; otherwise why it is not. */
-  blockedBy: string | null;
   danger?: boolean;
   startsGroup?: boolean;
+  disabled?: boolean;
+  hint?: string | null;
+  title?: string | null;
 }
 
-function menuItem(spec: MenuItemSpec): AgentMenuItem {
+function item(spec: ItemSpec): AgentMenuItem {
   return {
     id: spec.id,
     label: spec.label,
     action: spec.action,
-    disabled: spec.blockedBy !== null,
-    reason: spec.blockedBy,
+    disabled: spec.disabled ?? false,
+    hint: spec.hint ?? null,
+    title: spec.title ?? null,
     danger: spec.danger ?? false,
     startsGroup: spec.startsGroup ?? false,
   };
 }
 
-/**
- * The items for a session. `session` is null when the subject holds no session at
- * all: every item is still listed but disabled, so the user sees what the menu does.
- * Controls follow the session's status through `sessionControls`.
- */
-export function sessionMenuItems(session: SessionMenuFacts | null): AgentMenuItem[] {
-  const blocked = session === null ? NO_SESSION_REASON : null;
-  const folderBlocked = blocked ?? (session?.cwd ? null : FOLDER_UNKNOWN_REASON);
-  const deleteBlocked = blocked ?? (session?.holdsWork ? HOLDS_WORK_REASON : null);
-  const controls: SessionControlSet | null =
-    session === null ? null : sessionControls(session.status);
-  const controlItems = CONTROL_ITEMS.filter(
-    (control) => controls === null || controls[control.flag],
-  );
+/** The same items, with the first one opening a new group. */
+function withGroupStart(items: readonly AgentMenuItem[]): AgentMenuItem[] {
+  return items.map((entry, index) => (index === 0 ? { ...entry, startsGroup: true } : entry));
+}
+
+/** The maximize item for a menu opened from a drawer header; none otherwise. */
+function maximizeItems(drawer: DrawerView | null): AgentMenuItem[] {
+  if (drawer === null) return [];
   return [
-    menuItem({
-      id: 'info',
-      label: 'Xem thông tin',
-      action: { kind: 'sessionTab', tab: 'info' },
-      blockedBy: blocked,
-    }),
-    menuItem({ id: 'rename', label: 'Đổi tên…', action: { kind: 'rename' }, blockedBy: blocked }),
-    menuItem({
-      id: 'copy-cwd',
-      label: 'Sao chép thư mục làm việc',
-      action: { kind: 'copy', what: 'cwd' },
-      blockedBy: folderBlocked,
-    }),
-    menuItem({
-      id: 'copy-code',
-      label: 'Sao chép mã phiên',
-      action: { kind: 'copy', what: 'sessionCode' },
-      blockedBy: blocked,
-    }),
-    menuItem({
-      id: 'tab-log',
-      label: 'Mở Log',
-      action: { kind: 'sessionTab', tab: 'log' },
-      blockedBy: blocked,
-      startsGroup: true,
-    }),
-    menuItem({
-      id: 'tab-commands',
-      label: 'Mở Lệnh',
-      action: { kind: 'sessionTab', tab: 'commands' },
-      blockedBy: blocked,
-    }),
-    menuItem({
-      id: 'tab-terminal',
-      label: 'Mở Terminal',
-      action: { kind: 'sessionTab', tab: 'terminal' },
-      blockedBy: blocked,
-    }),
-    ...controlItems.map((control, index) =>
-      menuItem({
-        id: `control-${control.action}`,
-        label: control.label,
-        action: { kind: 'control', action: control.action },
-        blockedBy: blocked,
-        danger: control.danger,
-        startsGroup: index === 0,
-      }),
-    ),
-    menuItem({
-      id: 'control-delete',
-      label: 'Xoá phiên…',
-      action: { kind: 'control', action: 'delete' },
-      blockedBy: deleteBlocked,
-      danger: true,
-      startsGroup: controlItems.length === 0,
+    item({
+      id: 'maximize',
+      label: drawer.maximized ? 'Thu nhỏ' : 'Phóng to',
+      action: { kind: 'maximize' },
     }),
   ];
 }
 
-/** The items for a herdr agent. `folder` is the pane's working folder, null when unknown. */
-export function herdrMenuItems(folder: string | null): AgentMenuItem[] {
+/**
+ * The session items: identity, the drawer tabs, the controls its status allows,
+ * then the two danger items. A control the status does not allow is not listed.
+ */
+export function sessionMenuItems(
+  session: SessionMenuFacts,
+  drawer: DrawerView | null,
+): AgentMenuItem[] {
+  const controls = sessionControls(session.status);
+  const allowedControls = CONTROL_ITEMS.filter((control) => controls[control.flag]).map((control) =>
+    item({
+      id: `control-${control.action}`,
+      label: control.label,
+      action: { kind: 'control', action: control.action },
+    }),
+  );
+  const killItems = controls.kill
+    ? [
+        item({
+          id: 'control-kill',
+          label: 'Tắt phiên',
+          action: { kind: 'control', action: 'kill' },
+          danger: true,
+        }),
+      ]
+    : [];
+  const deleteItem = item({
+    id: 'control-delete',
+    label: 'Xoá phiên…',
+    action: { kind: 'control', action: 'delete' },
+    danger: true,
+    disabled: session.holdsWork,
+    hint: session.holdsWork ? HOLDS_WORK_HINT : null,
+    title: session.holdsWork ? HOLDS_WORK_REASON : null,
+  });
   return [
-    menuItem({
-      id: 'info',
-      label: 'Xem thông tin',
-      action: { kind: 'herdrTab', tab: 'info' },
-      blockedBy: null,
+    item({ id: 'info', label: 'Xem thông tin', action: { kind: 'sessionTab', tab: 'info' } }),
+    item({ id: 'rename', label: 'Đổi tên…', action: { kind: 'rename' } }),
+    item({
+      id: 'copy-code',
+      label: 'Sao chép mã phiên',
+      action: { kind: 'copy', what: 'sessionCode' },
     }),
-    menuItem({ id: 'rename', label: 'Đổi tên…', action: { kind: 'rename' }, blockedBy: null }),
-    menuItem({
-      id: 'screen',
-      label: 'Xem màn hình',
-      action: { kind: 'herdrTab', tab: 'screen' },
-      blockedBy: null,
-      startsGroup: true,
+    ...(session.cwd === null
+      ? []
+      : [
+          item({
+            id: 'copy-cwd',
+            label: 'Sao chép thư mục làm việc',
+            action: { kind: 'copy', what: 'cwd' },
+          }),
+        ]),
+    ...withGroupStart([
+      item({ id: 'tab-log', label: 'Mở Log', action: { kind: 'sessionTab', tab: 'log' } }),
+      item({
+        id: 'tab-commands',
+        label: 'Mở Lệnh',
+        action: { kind: 'sessionTab', tab: 'commands' },
+      }),
+      item({
+        id: 'tab-terminal',
+        label: 'Mở Terminal',
+        action: { kind: 'sessionTab', tab: 'terminal' },
+      }),
+      ...maximizeItems(drawer),
+    ]),
+    ...withGroupStart(allowedControls),
+    ...withGroupStart([...killItems, deleteItem]),
+  ];
+}
+
+/** The task items a task card offers: its detail, its contract when it has one, its code. */
+function taskMenuItems(task: TaskMenuFacts): AgentMenuItem[] {
+  return [
+    item({ id: 'task-open', label: 'Xem chi tiết', action: { kind: 'openTask' } }),
+    ...(task.contractId === null
+      ? []
+      : [
+          item({
+            id: 'task-contract',
+            label: 'Xem Contract',
+            action: { kind: 'openContract', contractId: task.contractId },
+          }),
+        ]),
+    item({
+      id: 'copy-task',
+      label: 'Sao chép mã việc',
+      action: { kind: 'copy', what: 'taskCode' },
     }),
-    menuItem({ id: 'focus', label: 'Mở trong herdr', action: { kind: 'focus' }, blockedBy: null }),
-    menuItem({
-      id: 'copy-cwd',
-      label: 'Sao chép thư mục',
-      action: { kind: 'copy', what: 'cwd' },
-      blockedBy: folder ? null : FOLDER_UNKNOWN_REASON,
-      startsGroup: true,
+  ];
+}
+
+/**
+ * The items for a task card: the task's own, then its session's when a session
+ * runs it. A drawer opened on a task with no session still offers maximize.
+ */
+export function taskCardMenuItems(
+  task: TaskMenuFacts,
+  session: SessionMenuFacts | null,
+  drawer: DrawerView | null,
+): AgentMenuItem[] {
+  const own = taskMenuItems(task);
+  if (session === null) return [...own, ...withGroupStart(maximizeItems(drawer))];
+  return [...own, ...withGroupStart(sessionMenuItems(session, drawer))];
+}
+
+/**
+ * A planning card's items: its Director session when it has one, then cancelling the
+ * prompt. The cancel opens its group only after another item, so no separator sits on top.
+ */
+export function planningMenuItems(hasSession: boolean): AgentMenuItem[] {
+  const cancel = item({
+    id: 'planning-cancel',
+    label: 'Huỷ prompt này…',
+    action: { kind: 'cancelPrompt' },
+    danger: true,
+  });
+  if (!hasSession) return [cancel];
+  return [
+    item({ id: 'planning-session', label: 'Xem phiên Giám đốc', action: { kind: 'openSession' } }),
+    { ...cancel, startsGroup: true },
+  ];
+}
+
+/** The items for a herdr agent: its views, its pane actions, then copies and maximize. */
+export function herdrMenuItems(folder: string | null, drawer: DrawerView | null): AgentMenuItem[] {
+  return [
+    item({ id: 'info', label: 'Xem thông tin', action: { kind: 'herdrTab', tab: 'info' } }),
+    item({ id: 'rename', label: 'Đổi tên…', action: { kind: 'rename' } }),
+    ...withGroupStart([
+      item({ id: 'screen', label: 'Xem màn hình', action: { kind: 'herdrTab', tab: 'screen' } }),
+      item({ id: 'read', label: 'Đọc lại màn hình', action: { kind: 'readScreen' } }),
+      item({ id: 'focus', label: 'Mở trong herdr', action: { kind: 'focus' } }),
+    ]),
+    ...withGroupStart([
+      ...(folder === null
+        ? []
+        : [
+            item({
+              id: 'copy-cwd',
+              label: 'Sao chép thư mục',
+              action: { kind: 'copy', what: 'cwd' },
+            }),
+          ]),
+      item({
+        id: 'copy-pane',
+        label: 'Sao chép pane id',
+        action: { kind: 'copy', what: 'paneId' },
+      }),
+      ...maximizeItems(drawer),
+    ]),
+  ];
+}
+
+/** The items for a project header: fold or open it, copy its path, switch the board, clean up. */
+export function projectMenuItems(project: ProjectMenuFacts): AgentMenuItem[] {
+  return [
+    item({
+      id: 'toggle',
+      label: project.collapsed ? 'Mở rộng' : 'Thu gọn',
+      action: { kind: 'toggleProject' },
     }),
-    menuItem({
-      id: 'copy-pane',
-      label: 'Sao chép pane id',
-      action: { kind: 'copy', what: 'paneId' },
-      blockedBy: null,
-    }),
+    ...(project.path === null
+      ? []
+      : [
+          item({
+            id: 'copy-path',
+            label: 'Sao chép đường dẫn',
+            action: { kind: 'copy', what: 'path' },
+          }),
+        ]),
+    ...withGroupStart(
+      project.switchTo === null
+        ? []
+        : [
+            item({
+              id: 'open-board',
+              label: 'Mở thư mục này trên bảng',
+              action: { kind: 'openBoardFolder' },
+            }),
+          ],
+    ),
+    ...withGroupStart(
+      project.cleanable.length === 0
+        ? []
+        : [
+            item({
+              id: 'clean',
+              label: `Dọn ${project.cleanable.length} phiên lỗi…`,
+              action: { kind: 'cleanErrored' },
+              danger: true,
+            }),
+          ],
+    ),
   ];
 }
 

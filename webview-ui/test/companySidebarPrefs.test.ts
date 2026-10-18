@@ -12,6 +12,7 @@ import {
   readSidebarPrefs,
   SIDEBAR_PREFS_KEY,
   type SidebarStorage,
+  toggleProjectKey,
   type TypingTarget,
   writeSidebarPrefs,
 } from '../src/company/sidebarPrefs.js';
@@ -28,7 +29,11 @@ class MemoryStorage implements SidebarStorage {
   }
 }
 
-const DEFAULTS = { collapsed: false, width: COMPANY_SIDEBAR_DEFAULT_WIDTH_PX };
+const DEFAULTS = {
+  collapsed: false,
+  width: COMPANY_SIDEBAR_DEFAULT_WIDTH_PX,
+  collapsedProjects: [],
+};
 
 describe('clampSidebarWidth', () => {
   it('keeps the width inside the grip range', () => {
@@ -64,21 +69,67 @@ describe('readSidebarPrefs', () => {
     expect(readSidebarPrefs(storage)).toEqual({
       collapsed: true,
       width: COMPANY_SIDEBAR_DEFAULT_WIDTH_PX,
+      collapsedProjects: [],
     });
   });
 
   it('reads back what was written, with the width clamped', () => {
     const storage = new MemoryStorage();
-    writeSidebarPrefs(storage, { collapsed: true, width: 99_999 });
+    writeSidebarPrefs(storage, { collapsed: true, width: 99_999, collapsedProjects: [] });
 
     expect(readSidebarPrefs(storage)).toEqual({
       collapsed: true,
       width: COMPANY_SIDEBAR_MAX_WIDTH_PX,
+      collapsedProjects: [],
     });
+  });
+
+  it('reads back the folded project keys without blanks or repeats', () => {
+    const storage = new MemoryStorage();
+    writeSidebarPrefs(storage, {
+      collapsed: false,
+      width: 300,
+      collapsedProjects: ['board:/a', 'board:/a', '', 'herdr:r1'],
+    });
+
+    expect(readSidebarPrefs(storage).collapsedProjects).toEqual(['board:/a', 'herdr:r1']);
+  });
+
+  it('keeps at most 200 folded project keys', () => {
+    const storage = new MemoryStorage();
+    const keys = Array.from({ length: 250 }, (_, index) => `board:/p${index}`);
+    writeSidebarPrefs(storage, { collapsed: false, width: 300, collapsedProjects: keys });
+
+    expect(readSidebarPrefs(storage).collapsedProjects).toHaveLength(200);
+  });
+
+  it('reads an empty list when the stored keys are not a list', () => {
+    const storage = new MemoryStorage();
+    storage.setItem(
+      SIDEBAR_PREFS_KEY,
+      JSON.stringify({ collapsed: false, width: 300, collapsedProjects: 'board:/a' }),
+    );
+
+    expect(readSidebarPrefs(storage).collapsedProjects).toEqual([]);
   });
 
   it('writes nothing when there is no storage', () => {
     expect(() => writeSidebarPrefs(null, DEFAULTS)).not.toThrow();
+  });
+});
+
+describe('toggleProjectKey', () => {
+  it('folds a project that is open and opens one that is folded', () => {
+    expect(toggleProjectKey([], 'board:/a')).toEqual(['board:/a']);
+    expect(toggleProjectKey(['board:/a', 'herdr:r1'], 'board:/a')).toEqual(['herdr:r1']);
+  });
+
+  it('leaves the list it was given unchanged', () => {
+    const keys = ['board:/a'];
+
+    toggleProjectKey(keys, 'herdr:r1');
+
+    expect(keys).toEqual(['board:/a']);
   });
 });
 

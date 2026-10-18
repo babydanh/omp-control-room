@@ -1,36 +1,41 @@
 /**
  * DetailDrawer: the one thing the user has open, slid in from the right.
  *
- * It shows a board subject (a task, a session) or something opened from the
- * board or the sidebar: the contract to approve, a question, the workspace
- * files, a herdr agent. Closing slides it away. The last subject stays mounted
- * until the slide ends, so the content does not blank mid-motion.
+ * It shows a board subject (a task, a session, a herdr agent) or something
+ * opened from the board or the sidebar: the contract to decide, a question, the
+ * workspace files. Its header keeps the title, the status and a close control;
+ * every other action is in the menu the header opens on a right-click or the
+ * menu key, and a double-click on the header toggles maximize. Closing slides
+ * it away. The last subject stays mounted until the slide ends, so the content
+ * does not blank mid-motion.
  */
 
 import type {
   CSSProperties,
+  Dispatch,
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
+  SetStateAction,
 } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
-import { workingFolder } from '../agentInfoView.js';
+import {
+  type AgentMenuRequest,
+  type AgentMenuSubject,
+  agentMenuTriggers,
+  type DrawerView,
+} from '../agentMenu.js';
 import type { BoardCard, BoardLane } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
-import { copyText } from '../clipboard.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_DRAWER_MIN_WIDTH_PX, COMPANY_DRAWER_SLIDE_MS } from '../constants.js';
 import {
   clampDrawerWidth,
   type DrawerPrefs,
-  type DrawerStorage,
   drawerWidthForKey,
   drawerWidthLimit,
-  readDrawerPrefs,
-  writeDrawerPrefs,
 } from '../drawerPrefs.js';
-import { shortModelName } from '../drawerView.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
 import { questionProvenance } from '../questionProvenance.js';
 import {
@@ -39,12 +44,11 @@ import {
   type OpenedSubject,
   pendingContract,
 } from '../selection.js';
-import { sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
+import { contractStatusLabel, sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
 import { AttemptRow } from './AttemptRow.js';
 import { ContractPanel } from './ContractPanel.js';
 import { HerdrPanel } from './HerdrPanel.js';
 import { QuestionPanel } from './QuestionPanel.js';
-import { SessionActions } from './SessionActions.js';
 import { SessionBody } from './SessionBody.js';
 import { TaskReport } from './TaskReport.js';
 import { WorkspaceFileBrowser } from './WorkspaceFileBrowser.js';
@@ -64,11 +68,24 @@ export interface DetailDrawerProps {
   /** The herdr panel's tab, held by the board so a menu can open it on Thông tin. */
   herdrTab: HerdrDrawerTab;
   onHerdrTab: (tab: HerdrDrawerTab) => void;
+  /** The drawer's remembered shape: its width and whether it is maximized. */
+  prefs: DrawerPrefs;
+  onPrefsChange: Dispatch<SetStateAction<DrawerPrefs>>;
+  /** Opens the menu the header's subject offers. */
+  onMenu: (request: AgentMenuRequest) => void;
 }
 
-type ContentProps = Omit<DetailDrawerProps, 'subject' | 'onClose'> & { subject: DrawerSubject };
+type ContentProps = Omit<DetailDrawerProps, 'subject' | 'onClose' | 'prefs' | 'onPrefsChange'> & {
+  subject: DrawerSubject;
+};
 
-export function DetailDrawer({ subject, onClose, ...rest }: DetailDrawerProps) {
+export function DetailDrawer({
+  subject,
+  onClose,
+  prefs,
+  onPrefsChange,
+  ...rest
+}: DetailDrawerProps) {
   const subjectKey = subject === null ? null : drawerSubjectKey(subject);
   const [retained, setRetained] = useState<DrawerSubject | null>(subject);
   if (subject !== null && (retained === null || drawerSubjectKey(retained) !== subjectKey)) {
@@ -82,19 +99,16 @@ export function DetailDrawer({ subject, onClose, ...rest }: DetailDrawerProps) {
     return () => window.clearTimeout(timer);
   }, [open]);
 
-  const [prefs, setPrefs] = useState<DrawerPrefs>(() => readDrawerPrefs(browserDrawerStorage()));
   const viewportWidth = useViewportWidth();
   const dragStart = useRef<{ pointerId: number; x: number; width: number } | null>(null);
-  // Every change is kept, so the width a reader dragged to is there on the next open.
-  useEffect(() => {
-    writeDrawerPrefs(browserDrawerStorage(), prefs);
-  }, [prefs]);
 
   if (retained === null) return null;
   const heading = headingFor(rest.state, retained, rest.lanes);
   const width = clampDrawerWidth(prefs.width, viewportWidth);
   const limit = drawerWidthLimit(viewportWidth);
-  const model = heading.session ? shortModelName(heading.session.model) : '';
+  const menuSubject = drawerMenuSubject(rest.lanes, retained, prefs.maximized);
+  const headerTriggers =
+    menuSubject === null ? null : agentMenuTriggers<HTMLElement>(menuSubject, rest.onMenu);
   const motion = {
     transitionDuration: `${COMPANY_DRAWER_SLIDE_MS}ms`,
     animationDuration: `${COMPANY_DRAWER_SLIDE_MS}ms`,
@@ -113,7 +127,7 @@ export function DetailDrawer({ subject, onClose, ...rest }: DetailDrawerProps) {
     if (start === null || start.pointerId !== event.pointerId) return;
     // The handle sits on the drawer's left edge, so dragging left widens the drawer.
     const next = clampDrawerWidth(start.width + (start.x - event.clientX), viewportWidth);
-    setPrefs((current) => ({ ...current, width: next }));
+    onPrefsChange((current) => ({ ...current, width: next }));
   }
 
   function onGripPointerUp(event: ReactPointerEvent<HTMLDivElement>): void {
@@ -124,7 +138,7 @@ export function DetailDrawer({ subject, onClose, ...rest }: DetailDrawerProps) {
     const next = drawerWidthForKey(width, event.key, event.shiftKey, viewportWidth);
     if (next === null) return;
     event.preventDefault();
-    setPrefs((current) => ({ ...current, width: next }));
+    onPrefsChange((current) => ({ ...current, width: next }));
   }
 
   return (
@@ -154,48 +168,34 @@ export function DetailDrawer({ subject, onClose, ...rest }: DetailDrawerProps) {
           className="company-drawer-grip"
         />
       )}
-      <header className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-border px-3.5 py-2.5">
+      <header
+        data-testid="drawer-header"
+        onDoubleClick={() =>
+          onPrefsChange((current) => ({ ...current, maximized: !current.maximized }))
+        }
+        {...(headerTriggers ?? {})}
+        className="flex select-none items-center justify-between gap-3 border-b border-border px-3.5 py-2.5"
+      >
         <div className="flex min-w-0 items-center gap-2">
-          <h2 className="min-w-0 truncate text-lg font-semibold text-text">{heading.title}</h2>
+          <h2 className="min-w-0 truncate text-[15px] font-semibold leading-snug text-text">
+            {heading.title}
+          </h2>
           {heading.status && (
             <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-2xs text-text-muted">
               {heading.status}
             </span>
           )}
-          {model !== '' && (
-            <span
-              className="min-w-0 truncate text-2xs text-text-muted"
-              title={heading.session?.model}
-            >
-              {model}
-            </span>
-          )}
-          {heading.session?.folder && <CopyFolderButton folder={heading.session.folder} />}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
-          {heading.session && (
-            <SessionActions
-              client={rest.client}
-              state={rest.state}
-              sessionId={heading.session.id}
-            />
-          )}
-          <button
-            type="button"
-            onClick={() => setPrefs((current) => ({ ...current, maximized: !current.maximized }))}
-            aria-pressed={prefs.maximized}
-            className="shrink-0 cursor-pointer rounded-[5px] border border-border px-2.5 py-1 text-2xs text-text-muted hover:border-accent hover:text-text"
-          >
-            {prefs.maximized ? 'thu nhỏ' : 'phóng to'}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="shrink-0 cursor-pointer rounded-[5px] border border-border px-2.5 py-1 text-2xs text-text-muted hover:border-accent hover:text-text"
-          >
-            đóng
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          onDoubleClick={(event) => event.stopPropagation()}
+          aria-label="Đóng chi tiết"
+          title="Đóng"
+          className="shrink-0 cursor-pointer rounded-[5px] px-1.5 py-0.5 text-sm leading-none text-text-muted hover:bg-btn-hover hover:text-text"
+        >
+          ✕
+        </button>
       </header>
       <div className="flex min-h-0 flex-1 flex-col overflow-auto">
         <DrawerContent {...rest} subject={retained} />
@@ -242,7 +242,7 @@ function DrawerContent(props: ContentProps) {
         />
       );
     case 'contract':
-      return <ContractSubject client={client} state={state} />;
+      return <ContractSubject client={client} state={state} contractId={subject.contractId} />;
     case 'question':
       return <QuestionSubject client={client} state={state} questionId={subject.questionId} />;
     case 'files':
@@ -257,20 +257,10 @@ function DrawerContent(props: ContentProps) {
   }
 }
 
-/** The session a drawer header acts on, and what the header shows of it. */
-interface HeaderSession {
-  id: string;
-  /** The model it runs: the effective one when the provider changed it, else the requested one. */
-  model: string;
-  /** The folder it works in, or null when nothing reports one. */
-  folder: string | null;
-}
-
+/** The title and status a drawer header shows for its subject. */
 interface Heading {
   title: string;
   status: string | null;
-  /** The session in view, or null when the subject has none. */
-  session: HeaderSession | null;
 }
 
 function headingFor(
@@ -281,20 +271,15 @@ function headingFor(
   switch (subject.kind) {
     case 'task': {
       const card = findCard(lanes, subject.taskId);
-      if (card === undefined) return { title: 'Việc', status: null, session: null };
-      return {
-        title: `${card.code} · ${card.title}`,
-        status: taskStatusLabel(card.status),
-        session: headerSession(state, card.session?.id ?? null),
-      };
+      if (card === undefined) return { title: 'Việc', status: null };
+      return { title: `${card.code} · ${card.title}`, status: taskStatusLabel(card.status) };
     }
     case 'session': {
       const session = state.sessions[subject.sessionId];
-      if (session === undefined) return { title: 'Phiên', status: null, session: null };
+      if (session === undefined) return { title: 'Phiên', status: null };
       return {
         title: session.name.trim() === '' ? session.code : `${session.code} · ${session.name}`,
         status: sessionStatusLabel(session.status),
-        session: headerSession(state, subject.sessionId),
       };
     }
     case 'herdr': {
@@ -302,31 +287,48 @@ function headingFor(
       return {
         title: agent?.name ?? 'herdr',
         status: agent ? HERDR_TONE_LABELS[herdrToneFor(agent.status)] : null,
-        session: null,
       };
     }
-    case 'contract':
-      return { title: 'Kế hoạch chờ duyệt', status: null, session: null };
+    case 'contract': {
+      if (subject.contractId === null) return { title: 'Kế hoạch chờ duyệt', status: null };
+      const contract = state.contracts[subject.contractId];
+      if (contract === undefined) return { title: 'Kế hoạch', status: null };
+      return { title: `Kế hoạch ${contract.code}`, status: contractStatusLabel(contract.status) };
+    }
     case 'question':
-      return { title: 'Câu hỏi chờ trả lời', status: null, session: null };
+      return { title: 'Câu hỏi chờ trả lời', status: null };
     case 'files':
-      return { title: 'Tệp trong workspace', status: null, session: null };
+      return { title: 'Tệp trong workspace', status: null };
   }
 }
 
-/** What a header shows of a session: its model, and the folder it works in. */
-function headerSession(state: CompanyViewState, sessionId: string | null): HeaderSession | null {
-  if (sessionId === null) return null;
-  const session = state.sessions[sessionId];
-  if (session === undefined) return null;
-  const info = state.sessionInfos[sessionId];
-  // Until a session's info is collected, the workspace it was started in stands in for its folder.
-  const folder = (info === undefined ? null : workingFolder(info)) ?? state.settings?.workspacePath;
-  return {
-    id: sessionId,
-    model: session.effectiveModel || session.requestedModel,
-    folder: folder || null,
-  };
+/**
+ * The menu a drawer header opens: the subject the drawer shows, carrying the
+ * drawer's own state. A contract, a question or the files have no menu.
+ */
+function drawerMenuSubject(
+  lanes: readonly BoardLane[],
+  subject: DrawerSubject,
+  maximized: boolean,
+): AgentMenuSubject | null {
+  const drawer: DrawerView = { maximized };
+  switch (subject.kind) {
+    case 'task':
+      return {
+        kind: 'task',
+        taskId: subject.taskId,
+        sessionId: findCard(lanes, subject.taskId)?.session?.id ?? null,
+        drawer,
+      };
+    case 'session':
+      return { kind: 'session', sessionId: subject.sessionId, drawer };
+    case 'herdr':
+      return { kind: 'herdr', paneId: subject.paneId, drawer };
+    case 'contract':
+    case 'question':
+    case 'files':
+      return null;
+  }
 }
 
 function findCard(lanes: readonly BoardLane[], taskId: string): BoardCard | undefined {
@@ -423,18 +425,41 @@ function TaskFacts({ card }: { card: BoardCard }) {
   );
 }
 
-function ContractSubject({ client, state }: { client: CompanyClient; state: CompanyViewState }) {
-  const contract = pendingContract(state);
+function ContractSubject({
+  client,
+  state,
+  contractId,
+}: {
+  client: CompanyClient;
+  state: CompanyViewState;
+  contractId: string | null;
+}) {
+  const contract =
+    contractId === null ? pendingContract(state) : (state.contracts[contractId] ?? null);
   if (contract === null) {
-    return <p className="p-3 text-2xs text-text-muted">Không còn kế hoạch nào chờ duyệt.</p>;
+    return (
+      <p className="p-3 text-2xs text-text-muted">
+        {contractId === null
+          ? 'Không còn kế hoạch nào chờ duyệt.'
+          : 'Kế hoạch này không còn trên bảng.'}
+      </p>
+    );
   }
+  // Only a plan that awaits the user's decision offers the decision; any other plan reads on its own.
+  const decidable = contract.status === 'awaiting_approval';
   return (
     <ContractPanel
       contract={contract}
       verificationProfiles={state.settings?.verificationProfiles ?? {}}
       evidence={Object.values(state.evidence)}
-      onApprove={(revision) => client.decideContract(contract.id, revision, 'approve')}
-      onReject={(revision) => client.decideContract(contract.id, revision, 'reject')}
+      onApprove={
+        decidable
+          ? (revision) => client.decideContract(contract.id, revision, 'approve')
+          : undefined
+      }
+      onReject={
+        decidable ? (revision) => client.decideContract(contract.id, revision, 'reject') : undefined
+      }
     />
   );
 }
@@ -472,51 +497,4 @@ function useViewportWidth(): number {
     return () => window.removeEventListener('resize', onResize);
   }, []);
   return width;
-}
-
-/**
- * The webview's localStorage, or null when the host refuses access to it. A
- * refused store means the drawer simply does not remember its shape.
- */
-function browserDrawerStorage(): DrawerStorage | null {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-type CopyOutcome = 'idle' | 'copied' | 'failed';
-
-const COPY_FEEDBACK_MS = 1500;
-
-const COPY_OUTCOME_LABEL: Readonly<Record<CopyOutcome, string>> = {
-  idle: 'Chép thư mục',
-  copied: 'Đã chép',
-  failed: 'Không chép được',
-};
-
-/** Copies the folder a session works in. Its full path sits in the title, not the header. */
-function CopyFolderButton({ folder }: { folder: string }) {
-  const [outcome, setOutcome] = useState<CopyOutcome>('idle');
-  useEffect(() => {
-    if (outcome === 'idle') return undefined;
-    const timer = window.setTimeout(() => setOutcome('idle'), COPY_FEEDBACK_MS);
-    return () => window.clearTimeout(timer);
-  }, [outcome]);
-
-  async function copy(): Promise<void> {
-    setOutcome((await copyText(folder)) ? 'copied' : 'failed');
-  }
-
-  return (
-    <button
-      type="button"
-      onClick={() => void copy()}
-      title={folder}
-      className="shrink-0 cursor-pointer rounded-[5px] border border-border px-2 py-0.5 text-2xs text-text-muted hover:border-accent hover:text-text"
-    >
-      {COPY_OUTCOME_LABEL[outcome]}
-    </button>
-  );
 }

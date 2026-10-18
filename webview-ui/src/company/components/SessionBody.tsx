@@ -21,11 +21,9 @@ import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { defaultDrawerTab } from '../drawerView.js';
 import { questionProvenance } from '../questionProvenance.js';
 import { companyRoleLabel } from '../roleProfiles.js';
-import { sessionControls } from '../sessionActions.js';
 import { DRAWER_TAB_LABELS, sessionStatusLabel } from '../statusLabels.js';
 import { contextOccupancy } from '../usageView.js';
 import { SessionInfoTab } from './AgentInfoTab.js';
-import { CompanyButton } from './CompanyButton.js';
 import { QuestionPanel } from './QuestionPanel.js';
 import { CommandsTab, SessionLogTab } from './SessionLog.js';
 import { TaskReport } from './TaskReport.js';
@@ -97,7 +95,6 @@ export function SessionBody({
 
   const tab = choice.tab ?? defaultDrawerTab(session.status);
 
-  const controls = sessionControls(session.status);
   const attempts: Attempt[] = Object.values(state.attempts).filter((attempt) =>
     taskId === null ? attempt.sessionId === sessionId : attempt.taskId === taskId,
   );
@@ -127,28 +124,6 @@ export function SessionBody({
             {session.nativeSessionPath ? ` (${session.nativeSessionPath})` : ''}
           </p>
         )}
-        <div className="mt-1 flex flex-wrap gap-1">
-          {controls.pause && (
-            <CompanyButton size="sm" onClick={() => client.controlSession(sessionId, 'pause')}>
-              Tạm dừng
-            </CompanyButton>
-          )}
-          {controls.resume && (
-            <CompanyButton size="sm" onClick={() => client.controlSession(sessionId, 'resume')}>
-              Tiếp tục
-            </CompanyButton>
-          )}
-          {controls.restart && (
-            <CompanyButton size="sm" onClick={() => client.controlSession(sessionId, 'restart')}>
-              Khởi động lại
-            </CompanyButton>
-          )}
-          {controls.archive && (
-            <CompanyButton size="sm" onClick={() => client.controlSession(sessionId, 'archive')}>
-              Lưu trữ
-            </CompanyButton>
-          )}
-        </div>
       </div>
 
       <nav aria-label="Phần của phiên" className="flex flex-wrap gap-1 border-b border-border px-2">

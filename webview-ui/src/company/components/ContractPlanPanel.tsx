@@ -157,16 +157,18 @@ export function ContractPlanPanel({
         </section>
       )}
 
-      <footer className="flex gap-2">
-        <CompanyButton
-          variant="accent"
-          disabled={!view.canApprove}
-          onClick={() => onApprove?.(view.revision)}
-        >
-          Duyệt và chạy
-        </CompanyButton>
-        <CompanyButton onClick={() => onReject?.(view.revision)}>Từ chối</CompanyButton>
-      </footer>
+      {onApprove !== undefined && onReject !== undefined && (
+        <footer className="flex gap-2">
+          <CompanyButton
+            variant="accent"
+            disabled={!view.canApprove}
+            onClick={() => onApprove(view.revision)}
+          >
+            Duyệt và chạy
+          </CompanyButton>
+          <CompanyButton onClick={() => onReject(view.revision)}>Từ chối</CompanyButton>
+        </footer>
+      )}
     </div>
   );
 }

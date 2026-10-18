@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isReplayableClientMessage } from '../../core/src/messageDelivery.js';
 import {
+  type AgentMenuItem,
   type AgentMenuSubject,
   agentMenuTriggers,
   herdrMenuItems,
@@ -10,8 +11,12 @@ import {
   MENU_MARGIN_PX,
   type MenuTarget,
   placeMenu,
+  planningMenuItems,
+  projectMenuItems,
+  type SessionMenuFacts,
   sessionMenuItems,
   sessionNameProblem,
+  taskCardMenuItems,
 } from '../src/company/agentMenu.js';
 import { copyText } from '../src/company/clipboard.js';
 import {
@@ -23,18 +28,23 @@ import {
 } from '../src/company/companyMessages.js';
 import { HOLDS_WORK_REASON } from '../src/company/sessionActions.js';
 
-const NO_SESSION_REASON = 'Chưa có phiên nào để thao tác.';
-const FOLDER_UNKNOWN_REASON = 'Chưa rõ thư mục làm việc.';
+/** True when every danger item sits after the rest, so the menu ends in its red items. */
+function dangerIsSuffix(items: readonly AgentMenuItem[]): boolean {
+  const firstDanger = items.findIndex((entry) => entry.danger);
+  return firstDanger === -1 || items.slice(firstDanger).every((entry) => entry.danger);
+}
+
+const BUSY_SESSION: SessionMenuFacts = { status: 'busy', cwd: '/work', holdsWork: false };
 
 describe('sessionMenuItems', () => {
-  it('lists the session actions, then the controls its status allows', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: false });
+  it('lists the session actions, the controls its status allows, then the danger items', () => {
+    const items = sessionMenuItems(BUSY_SESSION, null);
 
     expect(items.map((item) => item.label)).toEqual([
       'Xem thông tin',
       'Đổi tên…',
-      'Sao chép thư mục làm việc',
       'Sao chép mã phiên',
+      'Sao chép thư mục làm việc',
       'Mở Log',
       'Mở Lệnh',
       'Mở Terminal',
@@ -43,25 +53,22 @@ describe('sessionMenuItems', () => {
       'Tắt phiên',
       'Xoá phiên…',
     ]);
-    expect(items.every((item) => !item.disabled)).toBe(true);
   });
 
   it('offers resume and restart for a parked session; delete is listed for every status', () => {
-    const parked = sessionMenuItems({ status: 'parked', cwd: '/work', holdsWork: false });
-    const parkedControls = parked.filter((item) => item.action.kind === 'control');
-    expect(parkedControls.map((item) => item.label)).toEqual([
-      'Tiếp tục',
-      'Khởi động lại',
-      'Xoá phiên…',
-    ]);
+    const parked = sessionMenuItems({ ...BUSY_SESSION, status: 'parked' }, null);
+    expect(
+      parked.filter((item) => item.action.kind === 'control').map((item) => item.label),
+    ).toEqual(['Tiếp tục', 'Khởi động lại', 'Xoá phiên…']);
 
-    const archived = sessionMenuItems({ status: 'archived', cwd: '/work', holdsWork: false });
-    const archivedControls = archived.filter((item) => item.action.kind === 'control');
-    expect(archivedControls.map((item) => item.label)).toEqual(['Xoá phiên…']);
+    const archived = sessionMenuItems({ ...BUSY_SESSION, status: 'archived' }, null);
+    expect(
+      archived.filter((item) => item.action.kind === 'control').map((item) => item.label),
+    ).toEqual(['Xoá phiên…']);
   });
 
-  it('marks the kill and delete controls as dangerous and maps each to its action', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: false });
+  it('maps each control to its action and keeps kill and delete as the danger items', () => {
+    const items = sessionMenuItems(BUSY_SESSION, null);
 
     expect(items.find((item) => item.label === 'Dừng lượt')).toMatchObject({
       danger: false,
@@ -79,64 +86,221 @@ describe('sessionMenuItems', () => {
       'Tắt phiên',
       'Xoá phiên…',
     ]);
+    expect(dangerIsSuffix(items)).toBe(true);
   });
 
-  it('starts a group at the log tabs and at the first control', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: false });
-    const starts = items.filter((item) => item.startsGroup).map((item) => item.label);
+  it('opens a group at the log tabs, the first control and the danger items', () => {
+    const items = sessionMenuItems(BUSY_SESSION, null);
 
-    expect(starts).toEqual(['Mở Log', 'Dừng lượt']);
+    expect(items.filter((item) => item.startsGroup).map((item) => item.label)).toEqual([
+      'Mở Log',
+      'Dừng lượt',
+      'Tắt phiên',
+    ]);
+  });
+
+  it('offers maximize only from a drawer header, labelled for the drawer state', () => {
+    const open = sessionMenuItems(BUSY_SESSION, { maximized: false });
+    expect(open.find((item) => item.label === 'Phóng to')?.action).toEqual({ kind: 'maximize' });
+
+    const maximized = sessionMenuItems(BUSY_SESSION, { maximized: true });
+    expect(maximized.some((item) => item.label === 'Thu nhỏ')).toBe(true);
+
+    const fromSidebar = sessionMenuItems(BUSY_SESSION, null);
+    expect(fromSidebar.some((item) => item.action.kind === 'maximize')).toBe(false);
   });
 
   it('offers interrupt only while a turn runs', () => {
-    const idle = sessionMenuItems({ status: 'idle', cwd: '/work', holdsWork: false });
+    const idle = sessionMenuItems({ ...BUSY_SESSION, status: 'idle' }, null);
     expect(idle.some((item) => item.label === 'Dừng lượt')).toBe(false);
 
-    const busy = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: false });
+    const busy = sessionMenuItems(BUSY_SESSION, null);
     expect(busy.some((item) => item.label === 'Dừng lượt')).toBe(true);
   });
 
-  it('disables delete with the reason while the session holds work', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: true });
+  it('refuses delete with its hint and reason while the session holds work', () => {
+    const items = sessionMenuItems({ ...BUSY_SESSION, holdsWork: true }, null);
 
     expect(items.find((item) => item.id === 'control-delete')).toMatchObject({
       disabled: true,
-      reason: HOLDS_WORK_REASON,
+      hint: 'đang giữ việc',
+      title: HOLDS_WORK_REASON,
     });
   });
 
   it('enables delete for a session that holds no work', () => {
-    const items = sessionMenuItems({ status: 'parked', cwd: '/work', holdsWork: false });
+    const items = sessionMenuItems({ ...BUSY_SESSION, status: 'parked' }, null);
 
-    expect(items.find((item) => item.id === 'control-delete')).toMatchObject({ disabled: false });
-  });
-
-  it('shows every item disabled when the subject holds no session', () => {
-    const items = sessionMenuItems(null);
-
-    expect(items.every((item) => item.disabled)).toBe(true);
-    expect(items.every((item) => item.reason === NO_SESSION_REASON)).toBe(true);
-    expect(items.map((item) => item.label)).toContain('Lưu trữ');
-    expect(items.map((item) => item.label)).toContain('Xoá phiên…');
-  });
-
-  it('disables only the folder copy when the folder is not known', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: null, holdsWork: false });
-
-    expect(items.find((item) => item.id === 'copy-cwd')).toMatchObject({
-      disabled: true,
-      reason: FOLDER_UNKNOWN_REASON,
+    expect(items.find((item) => item.id === 'control-delete')).toMatchObject({
+      disabled: false,
+      hint: null,
     });
+  });
+
+  it('omits the folder copy when the session has no folder', () => {
+    const items = sessionMenuItems({ ...BUSY_SESSION, cwd: null }, null);
+
+    expect(items.some((item) => item.label === 'Sao chép thư mục làm việc')).toBe(false);
     expect(items.find((item) => item.id === 'copy-code')).toMatchObject({ disabled: false });
   });
 });
 
+describe('taskCardMenuItems', () => {
+  it("puts the task's own items first and the session's after a group break", () => {
+    const items = taskCardMenuItems({ code: 'T1', contractId: 'c1' }, BUSY_SESSION, {
+      maximized: false,
+    });
+
+    expect(items.slice(0, 3).map((item) => item.label)).toEqual([
+      'Xem chi tiết',
+      'Xem Contract',
+      'Sao chép mã việc',
+    ]);
+    expect(items[3]).toMatchObject({ label: 'Xem thông tin', startsGroup: true });
+  });
+
+  it('offers no Contract item when the board holds no Contract for the task', () => {
+    const items = taskCardMenuItems({ code: 'T1', contractId: null }, null, null);
+
+    expect(items.some((item) => item.label === 'Xem Contract')).toBe(false);
+  });
+
+  it('offers only its own items and maximize for a task with no session', () => {
+    const items = taskCardMenuItems({ code: 'T1', contractId: null }, null, { maximized: false });
+
+    expect(items.map((item) => item.label)).toEqual([
+      'Xem chi tiết',
+      'Sao chép mã việc',
+      'Phóng to',
+    ]);
+    expect(items[2]).toMatchObject({ startsGroup: true });
+  });
+});
+
+describe('planningMenuItems', () => {
+  it('offers only the cancel, as a danger item, for a prompt with no session', () => {
+    const items = planningMenuItems(false);
+
+    expect(items.map((item) => item.label)).toEqual(['Huỷ prompt này…']);
+    expect(items[0]).toMatchObject({ danger: true, startsGroup: false });
+  });
+
+  it('lists the Director session, then the cancel after a group break', () => {
+    const items = planningMenuItems(true);
+
+    expect(items.map((item) => item.label)).toEqual(['Xem phiên Giám đốc', 'Huỷ prompt này…']);
+    expect(items[1]).toMatchObject({ danger: true, startsGroup: true });
+  });
+});
+
+describe('projectMenuItems', () => {
+  const project = {
+    key: 'b:/a',
+    name: 'a',
+    path: '/a',
+    collapsed: false,
+    switchTo: null,
+    cleanable: [],
+  };
+
+  it('folds an open project and copies its path', () => {
+    expect(projectMenuItems(project).map((item) => item.label)).toEqual([
+      'Thu gọn',
+      'Sao chép đường dẫn',
+    ]);
+  });
+
+  it('opens a folded project', () => {
+    expect(projectMenuItems({ ...project, collapsed: true })[0]?.label).toBe('Mở rộng');
+  });
+
+  it('offers the board switch only for a folder that is not active', () => {
+    const inactive = projectMenuItems({ ...project, switchTo: '/b' });
+    expect(inactive.find((item) => item.label === 'Mở thư mục này trên bảng')).toMatchObject({
+      startsGroup: true,
+    });
+    expect(projectMenuItems(project).some((item) => item.id === 'open-board')).toBe(false);
+  });
+
+  it('ends with cleanup of errored sessions as the danger item', () => {
+    const items = projectMenuItems({ ...project, cleanable: ['s1', 's2'] });
+
+    expect(items[items.length - 1]).toMatchObject({
+      label: 'Dọn 2 phiên lỗi…',
+      danger: true,
+    });
+    expect(dangerIsSuffix(items)).toBe(true);
+  });
+
+  it('omits the path copy when the project has no path', () => {
+    expect(
+      projectMenuItems({ ...project, path: null }).some((item) => item.id === 'copy-path'),
+    ).toBe(false);
+  });
+});
+
+describe('menu rules', () => {
+  const menus: Array<[string, AgentMenuItem[]]> = [
+    ['session', sessionMenuItems(BUSY_SESSION, { maximized: false })],
+    ['task with session', taskCardMenuItems({ code: 'T1', contractId: 'c1' }, BUSY_SESSION, null)],
+    ['task without session', taskCardMenuItems({ code: 'T1', contractId: null }, null, null)],
+    ['planning with session', planningMenuItems(true)],
+    ['planning without session', planningMenuItems(false)],
+    ['herdr', herdrMenuItems('/repo', { maximized: false })],
+    [
+      'project',
+      projectMenuItems({
+        key: 'b:/a',
+        name: 'a',
+        path: '/a',
+        collapsed: false,
+        switchTo: '/b',
+        cleanable: ['s1'],
+      }),
+    ],
+  ];
+
+  it.each(menus)('%s disables nothing except a refused delete', (_name, items) => {
+    expect(items.filter((item) => item.disabled).map((item) => item.id)).toEqual(
+      items.some((item) => item.id === 'control-delete' && item.disabled) ? ['control-delete'] : [],
+    );
+  });
+
+  it.each(menus)('%s shows a hint only beside a refused delete', (_name, items) => {
+    expect(items.filter((item) => item.hint !== null).map((item) => item.id)).toEqual(
+      items.some((item) => item.id === 'control-delete' && item.disabled) ? ['control-delete'] : [],
+    );
+  });
+
+  it.each(menus)('%s ends in its danger items', (_name, items) => {
+    expect(dangerIsSuffix(items)).toBe(true);
+  });
+
+  it.each(menus)('%s never opens a group with its first item', (_name, items) => {
+    expect(items[0]?.startsGroup).toBe(false);
+  });
+
+  it.each(menus)('%s carries no filler line about a missing session', (_name, items) => {
+    expect(items.some((item) => item.label.includes('Chưa có'))).toBe(false);
+  });
+});
+
+describe('herdr and session actions moved into the menu', () => {
+  it('keeps the pane actions that used to sit on the drawer', () => {
+    const labels = herdrMenuItems('/repo', null).map((item) => item.label);
+
+    expect(labels).toContain('Mở trong herdr');
+    expect(labels).toContain('Đọc lại màn hình');
+  });
+});
+
 describe('herdrMenuItems', () => {
-  it('lists the herdr actions in order', () => {
-    expect(herdrMenuItems('/repo').map((item) => item.label)).toEqual([
+  it('lists the herdr views, the pane actions, then the copies', () => {
+    expect(herdrMenuItems('/repo', null).map((item) => item.label)).toEqual([
       'Xem thông tin',
       'Đổi tên…',
       'Xem màn hình',
+      'Đọc lại màn hình',
       'Mở trong herdr',
       'Sao chép thư mục',
       'Sao chép pane id',
@@ -144,7 +308,7 @@ describe('herdrMenuItems', () => {
   });
 
   it('maps the info and screen items to the drawer tabs', () => {
-    const items = herdrMenuItems('/repo');
+    const items = herdrMenuItems('/repo', null);
 
     expect(items.find((item) => item.id === 'info')?.action).toEqual({
       kind: 'herdrTab',
@@ -156,11 +320,16 @@ describe('herdrMenuItems', () => {
     });
   });
 
-  it('disables the folder copy when herdr reports no folder', () => {
-    expect(herdrMenuItems(null).find((item) => item.id === 'copy-cwd')).toMatchObject({
-      disabled: true,
-      reason: FOLDER_UNKNOWN_REASON,
-    });
+  it('omits the folder copy when herdr reports no folder', () => {
+    expect(herdrMenuItems(null, null).some((item) => item.label === 'Sao chép thư mục')).toBe(
+      false,
+    );
+  });
+
+  it('offers maximize from the drawer header', () => {
+    expect(
+      herdrMenuItems('/repo', { maximized: false }).some((item) => item.label === 'Phóng to'),
+    ).toBe(true);
   });
 });
 
@@ -225,7 +394,7 @@ describe('placeMenu', () => {
 });
 
 describe('agentMenuTriggers', () => {
-  const subject: AgentMenuSubject = { kind: 'herdr', paneId: 'p1' };
+  const subject: AgentMenuSubject = { kind: 'herdr', paneId: 'p1', drawer: null };
 
   it('opens at the pointer on a right click and cancels the native menu', () => {
     const open = vi.fn();

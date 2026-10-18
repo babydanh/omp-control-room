@@ -1,12 +1,11 @@
 /**
- * agentSidebarView: the sidebar's rows, the herdr repo groups, the rail's
- * entries and the header counts, as pure data.
+ * agentSidebarView: the sidebar's rows, the herdr repo groups and the header
+ * counts, as pure data. The project tree and the collapsed rail are built from
+ * these in agentTree.ts.
  *
  * Every session the server knows appears under its role, and every herdr agent
  * under one repo group. A row that waits on the user sorts first and never sits
- * in the parked group, so nothing waiting for a click is out of sight. The rail
- * is the same model reduced to one badge per agent, so collapsing the sidebar
- * never drops an agent from view.
+ * in the parked group, so nothing waiting for a click is out of sight.
  */
 
 import {
@@ -133,14 +132,6 @@ export type HerdrGroup =
   | { kind: 'hidden' }
   | { kind: 'unavailable'; message: string }
   | { kind: 'ready'; repos: HerdrRepoGroup[] };
-
-/** One thing the collapsed rail draws, top to bottom. */
-export type RailEntry =
-  | { kind: 'session'; row: AgentRow }
-  | { kind: 'pane'; row: HerdrRow }
-  | { kind: 'repo'; key: string; label: string }
-  | { kind: 'parked'; count: number }
-  | { kind: 'break' };
 
 /** How many agents are in each live state, companies and herdr together. */
 export interface ActivityCounts {
@@ -356,40 +347,6 @@ function countTone(counts: ActivityCounts, tone: AgentTone | HerdrTone): void {
   if (tone === 'working' || tone === 'needs' || tone === 'idle' || tone === 'error') {
     counts[tone] += 1;
   }
-}
-
-/**
- * The rail, top to bottom: sessions that wait on the user first, then each
- * role's other live sessions in role order, then one "+N" badge for every parked
- * session, then the herdr repos. A break separates each block that has entries;
- * a repo tag opens each repo's panes.
- */
-export function buildRail(groups: readonly AgentRoleGroup[], herdr: HerdrGroup): RailEntry[] {
-  const blocks: RailEntry[][] = [];
-  const waiting = groups.flatMap((group) => group.active.filter((row) => row.needsYou));
-  if (waiting.length > 0) {
-    blocks.push(waiting.map((row): RailEntry => ({ kind: 'session', row })));
-  }
-  for (const group of groups) {
-    const rows = group.active.filter((row) => !row.needsYou);
-    if (rows.length > 0) {
-      blocks.push(rows.map((row): RailEntry => ({ kind: 'session', row })));
-    }
-  }
-  const parked = groups.reduce((sum, group) => sum + group.parked.length, 0);
-  if (parked > 0) blocks.push([{ kind: 'parked', count: parked }]);
-  if (herdr.kind === 'ready' && herdr.repos.length > 0) {
-    blocks.push(herdr.repos.flatMap(repoEntries));
-  }
-  const separator: RailEntry = { kind: 'break' };
-  return blocks.flatMap((block, index): RailEntry[] =>
-    index === 0 ? block : [separator, ...block],
-  );
-}
-
-function repoEntries(repo: HerdrRepoGroup): RailEntry[] {
-  const header: RailEntry = { kind: 'repo', key: repo.key, label: repo.label };
-  return [header, ...repo.rows.map((row): RailEntry => ({ kind: 'pane', row }))];
 }
 
 /** "PA-S0002" reads as "S2": the session's letter and its number, without zero padding. */

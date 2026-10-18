@@ -18,7 +18,10 @@ describe('drawerSubjectFor', () => {
       selection: { sessionId: worker.id, taskId: work.id, tab: null },
     };
 
-    expect(drawerSubjectFor(state, { kind: 'contract' })).toEqual({ kind: 'contract' });
+    expect(drawerSubjectFor(state, { kind: 'contract', contractId: 'c1' })).toEqual({
+      kind: 'contract',
+      contractId: 'c1',
+    });
   });
 
   it('shows the selected task first, then the selected session, else nothing', () => {
@@ -72,7 +75,8 @@ describe('drawerSubjectKey', () => {
       { kind: 'session', sessionId: 's1' },
       { kind: 'herdr', paneId: 'p1' },
       { kind: 'question', questionId: 'q1' },
-      { kind: 'contract' },
+      { kind: 'contract', contractId: null },
+      { kind: 'contract', contractId: 'c1' },
       { kind: 'files' },
     ];
 
@@ -86,5 +90,10 @@ describe('drawerSubjectKey', () => {
       drawerSubjectKey({ kind: 'session', sessionId: 'same' }),
     );
     expect(drawerSubjectKey({ kind: 'task', taskId: 't1' })).toBe('task:t1');
+  });
+
+  it('keys a contract by its id, and an unsaved plan apart from every saved one', () => {
+    expect(drawerSubjectKey({ kind: 'contract', contractId: 'c1' })).toBe('contract:c1');
+    expect(drawerSubjectKey({ kind: 'contract', contractId: null })).toBe('contract:pending');
   });
 });

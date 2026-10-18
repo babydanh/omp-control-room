@@ -16,6 +16,8 @@ import {
 export interface SidebarPrefs {
   collapsed: boolean;
   width: number;
+  /** Keys of the projects the user folded: a board folder's key or a herdr group's. */
+  collapsedProjects: string[];
 }
 
 export const SIDEBAR_PREFS_KEY = 'omp.company.sidebar';
@@ -42,9 +44,13 @@ export interface TypingTarget {
   matches(selector: string): boolean;
 }
 
+/** The most folded project keys kept; a stored list longer than this is cut short. */
+const MAX_COLLAPSED_PROJECTS = 200;
+
 const DEFAULT_PREFS: SidebarPrefs = {
   collapsed: false,
   width: COMPANY_SIDEBAR_DEFAULT_WIDTH_PX,
+  collapsedProjects: [],
 };
 
 /** The width clamped to the grip's range; anything not a number takes the default. */
@@ -56,26 +62,47 @@ export function clampSidebarWidth(width: number): number {
   );
 }
 
+function defaultPrefs(): SidebarPrefs {
+  return { ...DEFAULT_PREFS, collapsedProjects: [] };
+}
+
+/** The stored project keys, as strings, without blanks or duplicates, and bounded. */
+function keyList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const keys = value.filter((key): key is string => typeof key === 'string' && key !== '');
+  return [...new Set(keys)].slice(0, MAX_COLLAPSED_PROJECTS);
+}
+
 export function readSidebarPrefs(storage: SidebarStorage | null): SidebarPrefs {
   const raw = storage?.getItem(SIDEBAR_PREFS_KEY) ?? null;
-  if (raw === null) return { ...DEFAULT_PREFS };
+  if (raw === null) return defaultPrefs();
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    return { ...DEFAULT_PREFS };
+    return defaultPrefs();
   }
-  if (typeof parsed !== 'object' || parsed === null) return { ...DEFAULT_PREFS };
+  if (typeof parsed !== 'object' || parsed === null) return defaultPrefs();
   const collapsed = 'collapsed' in parsed && parsed.collapsed === true;
   const width = 'width' in parsed && typeof parsed.width === 'number' ? parsed.width : Number.NaN;
-  return { collapsed, width: clampSidebarWidth(width) };
+  const folded = 'collapsedProjects' in parsed ? parsed.collapsedProjects : [];
+  return { collapsed, width: clampSidebarWidth(width), collapsedProjects: keyList(folded) };
 }
 
 export function writeSidebarPrefs(storage: SidebarStorage | null, prefs: SidebarPrefs): void {
   storage?.setItem(
     SIDEBAR_PREFS_KEY,
-    JSON.stringify({ collapsed: prefs.collapsed, width: clampSidebarWidth(prefs.width) }),
+    JSON.stringify({
+      collapsed: prefs.collapsed,
+      width: clampSidebarWidth(prefs.width),
+      collapsedProjects: keyList(prefs.collapsedProjects),
+    }),
   );
+}
+
+/** The folded project keys with `key` added when it is open, or removed when it is folded. */
+export function toggleProjectKey(keys: readonly string[], key: string): string[] {
+  return keys.includes(key) ? keys.filter((entry) => entry !== key) : [...keys, key];
 }
 
 /** Ctrl+B (⌘B on macOS) with no Shift or Alt: the sidebar's toggle. */

@@ -145,6 +145,17 @@
     /* Body text on the board; anything without its own size reads at this. */
     font-size: var(--text-base);
 
+    /* Crisp text on the dark ink; optimised shaping keeps Vietnamese diacritics clean. */
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+
+    /* Project colour ticks in the sidebar and rail, one per board folder in order. */
+    --company-project-0: #4fc1ff;
+    --company-project-1: #89d185;
+    --company-project-2: #d7ba7d;
+    --company-project-3: #c586c0;
+    --company-project-4: #ce9178;
+
     /* Ink and amber: the board's palette, scoped here so the office UI keeps the
        tokens above. Warning is the red that marks something waiting on the user;
        danger is the deeper red of a failed run. */
@@ -475,6 +486,13 @@
   to {
     translate: 0 0;
   }
+}
+
+/* Status dots cross-fade between tones, so a status change reads as motion, not a jump. */
+.company-ui .company-dot {
+  transition:
+    background-color 240ms ease-out,
+    box-shadow 240ms ease-out;
 }
 
 /* Reduced motion switches off every company animation and transition, so the
