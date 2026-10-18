@@ -32,12 +32,20 @@ export type ServerMessage =
   | FloorTilesLoaded
   | WallTilesLoaded
   | CarpetTilesLoaded
+  | OfficeAccess
   | SettingsLoaded
+  | BypassPermissionsUpdated
   | HooksStatus
   | HooksConsentRequest
   | ExternalAssetDirectoriesUpdated
   | AreaMappingsLoaded
-  | WorkspaceFolders
+  | DirectoriesLoaded
+  | DirectorySaved
+  | DirectoryRejected
+  | DirectorySuggestions
+  | TerminalAvailability
+  | TerminalSessionOpened
+  | TerminalSessionClosed
   | AgentDiagnostics
   | CompanySnapshotMessage
   | CompanyStateChangedMessage
@@ -82,6 +90,11 @@ export type ClientMessage =
   | RemoveExternalAssetDirectory
   | SaveAreaMappings
   | SetShowAreas
+  | SetBypassPermissions
+  | SetShowHostDirectories
+  | SaveDirectory
+  | RemoveDirectory
+  | RequestDirectorySuggestions
   | RequestDiagnostics
   | CompanySnapshotRequestMessage
   | CompanyPromptSubmitMessage
@@ -121,7 +134,7 @@ export interface ProviderCapabilities {
 export interface AgentCreated {
   type: 'agentCreated';
   id: number;
-  folderName?: string;
+  directoryName?: string;
   isExternal?: boolean;
   palette?: number;
   hueShift?: number;
@@ -141,7 +154,7 @@ export interface ExistingAgents {
   type: 'existingAgents';
   agents: number[];
   agentMeta: Record<string, AgentSeatMeta>;
-  folderNames: Record<string, string>;
+  directoryNames: Record<string, string>;
   externalAgents: Record<string, boolean>;
 }
 
@@ -311,6 +324,11 @@ export interface CarpetTilesLoaded {
   sets: string[][][][];
 }
 
+export interface OfficeAccess {
+  type: 'officeAccess';
+  readOnly: boolean;
+}
+
 export interface SettingsLoaded {
   type: 'settingsLoaded';
   soundEnabled: boolean;
@@ -323,6 +341,13 @@ export interface SettingsLoaded {
   hooksInfoShown: boolean;
   externalAssetDirectories: string[];
   showAreas: boolean;
+  bypassPermissions: boolean;
+  showHostDirectories: boolean;
+}
+
+export interface BypassPermissionsUpdated {
+  type: 'bypassPermissionsUpdated';
+  enabled: boolean;
 }
 
 export interface HooksStatus {
@@ -348,14 +373,50 @@ export interface AreaMappingsLoaded {
   mappings: Record<string, string[]>;
 }
 
-export interface WorkspaceFolders {
-  type: 'workspaceFolders';
-  folders: WorkspaceFolder[];
+export interface DirectoriesLoaded {
+  type: 'directoriesLoaded';
+  directories: Directory[];
 }
 
-export interface WorkspaceFolder {
+export interface Directory {
   name: string;
   path: string;
+  source: DirectorySource;
+}
+
+export type DirectorySource = 'user' | 'host';
+
+export interface DirectorySaved {
+  type: 'directorySaved';
+  directory: Directory;
+}
+
+export interface DirectoryRejected {
+  type: 'directoryRejected';
+  path: string;
+  reason: string;
+}
+
+export interface DirectorySuggestions {
+  type: 'directorySuggestions';
+  paths: string[];
+}
+
+export interface TerminalAvailability {
+  type: 'terminalAvailability';
+  available: boolean;
+  reason?: string;
+}
+
+export interface TerminalSessionOpened {
+  type: 'terminalSessionOpened';
+  agentId: number;
+}
+
+export interface TerminalSessionClosed {
+  type: 'terminalSessionClosed';
+  agentId: number;
+  exitCode?: number;
 }
 
 export interface AgentDiagnostics {
@@ -401,12 +462,12 @@ export interface RoleProfile {
   requestedModel: string;
   thinking: string;
   workflowFingerprint: string;
-  toolsPolicy: AnonymousSchema_205;
+  toolsPolicy: AnonymousSchema_226;
 }
 
 export type CompanyRole = 'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
-export type AnonymousSchema_205 = 'read-only' | 'scoped-write' | 'verification-only' | 'omp';
+export type AnonymousSchema_226 = 'read-only' | 'scoped-write' | 'verification-only' | 'omp';
 
 export interface VerificationProfile {
   id: string;
@@ -456,7 +517,7 @@ export interface Contract {
   acceptance: AcceptanceCriterion[];
   architectureReviews?: CompanyArchitectureReview[];
   relatedFiles?: RelatedWorkspaceFile[];
-  status: AnonymousSchema_319;
+  status: AnonymousSchema_340;
 }
 
 export interface Requirement {
@@ -464,13 +525,13 @@ export interface Requirement {
   promptId: string;
   fragmentIds: string[];
   text: string;
-  kind: AnonymousSchema_246;
-  status: AnonymousSchema_247;
+  kind: AnonymousSchema_267;
+  status: AnonymousSchema_268;
 }
 
-export type AnonymousSchema_246 = 'goal' | 'constraint' | 'context';
+export type AnonymousSchema_267 = 'goal' | 'constraint' | 'context';
 
-export type AnonymousSchema_247 = 'open' | 'clarification' | 'planned' | 'satisfied' | 'blocked';
+export type AnonymousSchema_268 = 'open' | 'clarification' | 'planned' | 'satisfied' | 'blocked';
 
 export interface Phase {
   id: string;
@@ -493,9 +554,9 @@ export interface Task {
   writeScopes: WriteScope[];
   sharedResources: string[];
   acceptance: string[];
-  executionMode: AnonymousSchema_281;
+  executionMode: AnonymousSchema_302;
   sessionId?: string;
-  status: AnonymousSchema_283;
+  status: AnonymousSchema_304;
   attemptIds: string[];
   routeReason: string;
   relatedFiles?: RelatedWorkspaceFile[];
@@ -503,27 +564,27 @@ export interface Task {
 
 export interface ReadScope {
   path: string;
-  kind: AnonymousSchema_269;
-  operations: AnonymousSchema_271[];
+  kind: AnonymousSchema_290;
+  operations: AnonymousSchema_292[];
 }
 
-export type AnonymousSchema_269 = 'file' | 'directory';
+export type AnonymousSchema_290 = 'file' | 'directory';
 
-export type AnonymousSchema_271 = 'read' | 'list' | 'search';
+export type AnonymousSchema_292 = 'read' | 'list' | 'search';
 
 export interface WriteScope {
   path: string;
-  kind: AnonymousSchema_274;
-  operations: AnonymousSchema_276[];
+  kind: AnonymousSchema_295;
+  operations: AnonymousSchema_297[];
 }
 
-export type AnonymousSchema_274 = 'file' | 'directory';
+export type AnonymousSchema_295 = 'file' | 'directory';
 
-export type AnonymousSchema_276 = 'create' | 'modify';
+export type AnonymousSchema_297 = 'create' | 'modify';
 
-export type AnonymousSchema_281 = 'inline' | 'subagent' | 'session';
+export type AnonymousSchema_302 = 'inline' | 'subagent' | 'session';
 
-export type AnonymousSchema_283 =
+export type AnonymousSchema_304 =
   | 'planned'
   | 'ready'
   | 'running'
@@ -537,43 +598,43 @@ export type AnonymousSchema_283 =
 
 export interface RelatedWorkspaceFile {
   path: string;
-  relation: AnonymousSchema_289;
+  relation: AnonymousSchema_310;
   reason?: string;
   artifactId?: string;
 }
 
-export type AnonymousSchema_289 = 'source' | 'changed' | 'test' | 'config' | 'evidence';
+export type AnonymousSchema_310 = 'source' | 'changed' | 'test' | 'config' | 'evidence';
 
 export interface AcceptanceCriterion {
   id: string;
   requirementIds: string[];
   description: string;
-  kind: AnonymousSchema_303;
+  kind: AnonymousSchema_324;
   required: boolean;
 }
 
-export type AnonymousSchema_303 = 'command' | 'surface' | 'review';
+export type AnonymousSchema_324 = 'command' | 'surface' | 'review';
 
 export interface CompanyArchitectureReview {
   revision: number;
-  verdict: AnonymousSchema_307;
+  verdict: AnonymousSchema_328;
   issues: CompanyArchitectureIssue[];
   advisorNotes: string[];
   reviewedAt: string;
 }
 
-export type AnonymousSchema_307 = 'approve' | 'changes_requested';
+export type AnonymousSchema_328 = 'approve' | 'changes_requested';
 
 export interface CompanyArchitectureIssue {
-  severity: AnonymousSchema_309;
+  severity: AnonymousSchema_330;
   requirementIds: string[];
   evidence: string[];
   fix: string;
 }
 
-export type AnonymousSchema_309 = 'P0' | 'P1' | 'P2' | 'P3';
+export type AnonymousSchema_330 = 'P0' | 'P1' | 'P2' | 'P3';
 
-export type AnonymousSchema_319 =
+export type AnonymousSchema_340 =
   | 'draft'
   | 'clarifying'
   | 'architecture_review'
@@ -605,17 +666,17 @@ export interface Question {
   taskId?: string;
   runEpoch: number;
   nativeToolCallId?: string;
-  kind: AnonymousSchema_339;
+  kind: AnonymousSchema_360;
   title: string;
   questions: QuestionPrompt[];
   actionDigest?: string;
-  status: AnonymousSchema_350;
+  status: AnonymousSchema_371;
   answer?: Record<string, any>;
   createdAt: string;
   resolvedAt?: string;
 }
 
-export type AnonymousSchema_339 = 'clarification' | 'technical_choice' | 'approval';
+export type AnonymousSchema_360 = 'clarification' | 'technical_choice' | 'approval';
 
 export interface QuestionPrompt {
   id: string;
@@ -630,14 +691,14 @@ export interface QuestionOption {
   description?: string;
 }
 
-export type AnonymousSchema_350 = 'pending' | 'answered' | 'rejected' | 'cancelled' | 'expired';
+export type AnonymousSchema_371 = 'pending' | 'answered' | 'rejected' | 'cancelled' | 'expired';
 
 export interface QuotaSnapshot {
   provider: string;
   accountLabel?: string;
   windows: QuotaWindow[];
   fetchedAt: string;
-  status: AnonymousSchema_364;
+  status: AnonymousSchema_385;
 }
 
 export interface QuotaWindow {
@@ -648,7 +709,7 @@ export interface QuotaWindow {
   reportedUnit: string;
 }
 
-export type AnonymousSchema_364 =
+export type AnonymousSchema_385 =
   'available' | 'unsupported' | 'unauthenticated' | 'error' | 'stale';
 
 export interface CompanyDiagnostics {
@@ -672,7 +733,7 @@ export interface Attempt {
   runEpoch: number;
   startedAt: string;
   endedAt?: string;
-  status: AnonymousSchema_383;
+  status: AnonymousSchema_404;
   changes: WorkspaceChange[];
   evidenceIds: string[];
   qaVerdict?: Record<string, any>;
@@ -680,16 +741,16 @@ export interface Attempt {
   error?: string;
 }
 
-export type AnonymousSchema_383 = 'running' | 'passed' | 'failed' | 'interrupted' | 'blocked';
+export type AnonymousSchema_404 = 'running' | 'passed' | 'failed' | 'interrupted' | 'blocked';
 
 export interface WorkspaceChange {
   path: string;
-  kind: AnonymousSchema_386;
+  kind: AnonymousSchema_407;
   summary: string;
   diffArtifactId?: string;
 }
 
-export type AnonymousSchema_386 = 'create' | 'modify' | 'delete';
+export type AnonymousSchema_407 = 'create' | 'modify' | 'delete';
 
 export interface VerificationEvidence {
   id: string;
@@ -737,7 +798,7 @@ export interface UsageRecord {
   cacheWrite: number;
   costUsd?: number;
   timestamp: string;
-  source: AnonymousSchema_436;
+  source: AnonymousSchema_457;
   availability: string;
   provenance: UsageProvenance;
   toolCallId?: string;
@@ -747,7 +808,7 @@ export interface UsageRecord {
   totalTokens?: number;
 }
 
-export type AnonymousSchema_436 = 'provider' | 'native_session';
+export type AnonymousSchema_457 = 'provider' | 'native_session';
 
 export type UsageProvenance = 'own_turn' | 'native_child' | 'child_aggregate';
 
@@ -840,14 +901,14 @@ export interface CompanySession {
   nativeSessionPath?: string;
   agentId?: number;
   runEpoch: number;
-  status: AnonymousSchema_489;
+  status: AnonymousSchema_510;
   activeTaskId?: string;
   lastUsedAt: string;
   contextSnapshot?: Record<string, any>;
   handoffArtifactId?: string;
 }
 
-export type AnonymousSchema_489 =
+export type AnonymousSchema_510 =
   | 'parked'
   | 'starting'
   | 'idle'
@@ -923,12 +984,12 @@ export interface CompanyCounters {
 }
 
 export interface CompanyRemoveChange {
-  entity: AnonymousSchema_521;
+  entity: AnonymousSchema_542;
   op: 'remove';
   id: string;
 }
 
-export type AnonymousSchema_521 =
+export type AnonymousSchema_542 =
   | 'prompt'
   | 'contract'
   | 'task'
@@ -970,7 +1031,7 @@ export interface CompanySessionLogMessage {
 export interface CompanySessionLogEntry {
   seq: number;
   at: string;
-  kind: AnonymousSchema_544;
+  kind: AnonymousSchema_565;
   runEpoch: number;
   taskId?: string;
   text: string;
@@ -979,7 +1040,7 @@ export interface CompanySessionLogEntry {
   ok?: boolean;
 }
 
-export type AnonymousSchema_544 =
+export type AnonymousSchema_565 =
   'text' | 'tool' | 'command' | 'verdict' | 'question' | 'state' | 'error';
 
 export interface HerdrAgentsMessage {
@@ -993,7 +1054,7 @@ export interface HerdrAgent {
   paneId: string;
   name?: string;
   kind: string;
-  status: AnonymousSchema_558;
+  status: AnonymousSchema_579;
   cwd?: string;
   title?: string;
   workspaceId: string;
@@ -1004,7 +1065,7 @@ export interface HerdrAgent {
   focused?: boolean;
 }
 
-export type AnonymousSchema_558 = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
+export type AnonymousSchema_579 = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
 
 export interface HerdrScreenMessage {
   type: 'herdrScreen';
@@ -1030,19 +1091,19 @@ export interface AgentInfo {
   tools?: AgentToolInfo[];
   skills?: AgentSkillInfo[];
   toolUsage?: AgentToolUsage[];
-  collectedFrom: AnonymousSchema_592;
+  collectedFrom: AnonymousSchema_613;
   collectedAt: string;
   note?: string;
 }
 
 export interface AgentToolInfo {
   name: string;
-  source: AnonymousSchema_582;
+  source: AnonymousSchema_603;
   mcpServer?: string;
   active: boolean;
 }
 
-export type AnonymousSchema_582 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
+export type AnonymousSchema_603 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
 
 export interface AgentSkillInfo {
   name: string;
@@ -1055,7 +1116,7 @@ export interface AgentToolUsage {
   count: number;
 }
 
-export type AnonymousSchema_592 = 'live' | 'transcript' | 'herdr';
+export type AnonymousSchema_613 = 'live' | 'transcript' | 'herdr';
 
 export interface HerdrInfoMessage {
   type: 'herdrInfo';
@@ -1141,12 +1202,12 @@ export interface CompanyFileListMessage {
 export interface CompanyFileEntry {
   name: string;
   path: string;
-  kind: AnonymousSchema_643;
+  kind: AnonymousSchema_664;
   sizeBytes?: number;
   modifiedAt?: string;
 }
 
-export type AnonymousSchema_643 = 'file' | 'directory';
+export type AnonymousSchema_664 = 'file' | 'directory';
 
 export interface CompanyFileReadMessage {
   type: 'companyFileRead';
@@ -1158,14 +1219,14 @@ export interface CompanyFileContent {
   path: string;
   totalBytes: number;
   offset: number;
-  encoding: AnonymousSchema_651;
+  encoding: AnonymousSchema_672;
   text?: string;
   dataBase64?: string;
   mediaType?: string;
   truncated: boolean;
 }
 
-export type AnonymousSchema_651 = 'utf8' | 'base64';
+export type AnonymousSchema_672 = 'utf8' | 'base64';
 
 export interface CompanyAttachmentUploadedMessage {
   type: 'companyAttachmentUploaded';
@@ -1213,8 +1274,7 @@ export interface WebviewReady {
 
 export interface LaunchAgent {
   type: 'launchAgent';
-  folderPath?: string;
-  bypassPermissions?: boolean;
+  directoryPath?: string;
 }
 
 export interface FocusAgent {
@@ -1318,6 +1378,32 @@ export interface SetShowAreas {
   enabled: boolean;
 }
 
+export interface SetBypassPermissions {
+  type: 'setBypassPermissions';
+  enabled: boolean;
+}
+
+export interface SetShowHostDirectories {
+  type: 'setShowHostDirectories';
+  enabled: boolean;
+}
+
+export interface SaveDirectory {
+  type: 'saveDirectory';
+  name: string;
+  path: string;
+  previousPath?: string;
+}
+
+export interface RemoveDirectory {
+  type: 'removeDirectory';
+  path: string;
+}
+
+export interface RequestDirectorySuggestions {
+  type: 'requestDirectorySuggestions';
+}
+
 export interface RequestDiagnostics {
   type: 'requestDiagnostics';
 }
@@ -1338,25 +1424,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_733;
-  mode?: AnonymousSchema_734;
+  delivery: AnonymousSchema_764;
+  mode?: AnonymousSchema_765;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_733 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_764 = 'prompt' | 'steer' | 'follow_up';
 
-export type AnonymousSchema_734 = 'chat' | 'company';
+export type AnonymousSchema_765 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_740;
+  decision: AnonymousSchema_771;
   note?: string;
 }
 
-export type AnonymousSchema_740 = 'approve' | 'reject';
+export type AnonymousSchema_771 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1369,7 +1455,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_752;
+  decision?: AnonymousSchema_783;
 }
 
 export interface QuestionAnswer {
@@ -1378,17 +1464,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_752 = 'approve_once' | 'reject';
+export type AnonymousSchema_783 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_757;
+  action: AnonymousSchema_788;
 }
 
-export type AnonymousSchema_757 =
+export type AnonymousSchema_788 =
   'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
 
 export interface CompanyPromptCancelMessage {

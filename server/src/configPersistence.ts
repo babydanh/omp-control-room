@@ -14,6 +14,11 @@ export interface AdapterSettings {
   hooksInfoShown: boolean;
   showAreas: boolean;
   areaMappings: Record<string, string[]>;
+  /** Permission posture for every launch on this host (the CLI's skip-permissions flag). */
+  bypassPermissions: boolean;
+  /** Whether the host's own Directories (VS Code's workspace folders, standalone's
+   *  start directory) are listed in the launch drawer. Off by default. */
+  showHostDirectories: boolean;
 }
 
 /** All keys in AdapterSettings. Used by adapters to map `pixel-agents.foo` → `foo`.
@@ -29,6 +34,8 @@ export const ADAPTER_SETTING_KEYS = [
   'hooksInfoShown',
   'showAreas',
   'areaMappings',
+  'bypassPermissions',
+  'showHostDirectories',
 ] as const;
 
 export type AdapterSettingKey = (typeof ADAPTER_SETTING_KEYS)[number];
@@ -41,6 +48,14 @@ export type ConfigNamespace = 'vscode' | 'standalone';
  *  "Not Now" needs to know the preference is its to take back (a Settings toggle never records consent). Absent =
  *  unanswered, the ask is still open. */
 export type HooksConsentState = 'granted' | 'declined';
+/**
+ * A user-defined Directory as persisted. Only what the user chose is stored:
+ * `source` is always `user` for these (see directories.ts).
+ */
+export interface UserDirectory {
+  name: string;
+  path: string;
+}
 
 /** Most recent Company workspace folders kept in config.json; the board lists them after the open ones. */
 export const RECENT_COMPANY_WORKSPACES_LIMIT = 10;
@@ -61,6 +76,9 @@ export interface PixelAgentsConfig {
    *  RECENT_COMPANY_WORKSPACES_LIMIT. Machine-wide like the consent above: a
    *  folder is a fact about this machine, not a per-adapter setting. */
   recentCompanyWorkspaces: string[];
+  /** User-defined Directories. Machine-wide by decision: a Directory defined
+   *  from the phone shows up in VS Code and vice versa. */
+  directories: UserDirectory[];
 }
 
 const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
@@ -72,6 +90,8 @@ const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
   hooksInfoShown: false,
   showAreas: false,
   areaMappings: {},
+  bypassPermissions: false,
+  showHostDirectories: false,
 };
 
 function getConfigFilePath(): string {
@@ -116,24 +136,48 @@ function parseRecentCompanyWorkspaces(raw: unknown): string[] {
 }
 
 /**
- * Coerce a loose object into `Record<string, string[]>`, dropping any entries whose value is not an array of strings.
- * Returns `{}` if the input isn't an object. Used to defensively load folder→area mappings from config.json, which
- * may have been hand-edited or written by an older build.
+ * Coerce a loose object into `Record<string, string[]>`, dropping any entries
+ * whose value is not an array of strings. Returns `{}` if the input isn't an
+ * object. Used to defensively load Directory→area mappings from config.json,
+ * which may have been hand-edited or written by an older build.
  */
 export function parseAreaMappings(raw: unknown): Record<string, string[]> {
   if (!raw || typeof raw !== 'object') {
     return {};
   }
   const out: Record<string, string[]> = {};
-  for (const [folder, labels] of Object.entries(raw as Record<string, unknown>)) {
-    if (typeof folder !== 'string') {
+  for (const [directory, labels] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof directory !== 'string') {
       continue;
     }
     if (!Array.isArray(labels)) {
       continue;
     }
     const filtered = labels.filter((l): l is string => typeof l === 'string');
-    out[folder] = filtered;
+    out[directory] = filtered;
+  }
+  return out;
+}
+
+/**
+ * Coerce a loose value into `UserDirectory[]`, dropping anything that isn't an
+ * object with a string name and a string path. Same defensive posture as
+ * parseAreaMappings: config.json is hand-editable and may predate this field.
+ */
+export function parseUserDirectories(raw: unknown): UserDirectory[] {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  const out: UserDirectory[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') {
+      continue;
+    }
+    const { name, path: dirPath } = entry as { name?: unknown; path?: unknown };
+    if (typeof name !== 'string' || typeof dirPath !== 'string' || dirPath.length === 0) {
+      continue;
+    }
+    out.push({ name, path: dirPath });
   }
   return out;
 }
@@ -169,6 +213,26 @@ function parseAdapterSettings(raw: unknown): AdapterSettings {
     showAreas:
       typeof obj.showAreas === 'boolean' ? obj.showAreas : DEFAULT_ADAPTER_SETTINGS.showAreas,
     areaMappings: parseAreaMappings(obj.areaMappings),
+    bypassPermissions:
+      typeof obj.bypassPermissions === 'boolean'
+        ? obj.bypassPermissions
+        : DEFAULT_ADAPTER_SETTINGS.bypassPermissions,
+    showHostDirectories:
+      typeof obj.showHostDirectories === 'boolean'
+        ? obj.showHostDirectories
+        : DEFAULT_ADAPTER_SETTINGS.showHostDirectories,
+  };
+}
+
+function emptyConfig(): PixelAgentsConfig {
+  return {
+    vscode: { ...DEFAULT_ADAPTER_SETTINGS },
+    standalone: { ...DEFAULT_ADAPTER_SETTINGS },
+    externalAssetDirectories: [],
+    hooksConsent: {},
+    hooksEnabled: {},
+    recentCompanyWorkspaces: [],
+    directories: [],
   };
 }
 
@@ -176,14 +240,7 @@ export function readConfig(): PixelAgentsConfig {
   const filePath = getConfigFilePath();
   try {
     if (!fs.existsSync(filePath)) {
-      return {
-        vscode: { ...DEFAULT_ADAPTER_SETTINGS },
-        standalone: { ...DEFAULT_ADAPTER_SETTINGS },
-        externalAssetDirectories: [],
-        hooksConsent: {},
-        hooksEnabled: {},
-        recentCompanyWorkspaces: [],
-      };
+      return emptyConfig();
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(raw) as Partial<PixelAgentsConfig>;
@@ -196,17 +253,11 @@ export function readConfig(): PixelAgentsConfig {
       hooksConsent: parseHooksConsent(parsed.hooksConsent),
       hooksEnabled: parseHooksEnabled(parsed.hooksEnabled),
       recentCompanyWorkspaces: parseRecentCompanyWorkspaces(parsed.recentCompanyWorkspaces),
+      directories: parseUserDirectories(parsed.directories),
     };
   } catch (err) {
     console.error('[Pixel Agents] Failed to read config file:', err);
-    return {
-      vscode: { ...DEFAULT_ADAPTER_SETTINGS },
-      standalone: { ...DEFAULT_ADAPTER_SETTINGS },
-      externalAssetDirectories: [],
-      hooksConsent: {},
-      hooksEnabled: {},
-      recentCompanyWorkspaces: [],
-    };
+    return emptyConfig();
   }
 }
 
@@ -309,7 +360,13 @@ export function resetHooksConfig(): void {
   writeConfig(cfg);
 }
 
-export function writeConfig(config: PixelAgentsConfig): void {
+/**
+ * Atomically write the shared config. Never throws (most callers are
+ * fire-and-forget settings writes that degrade to a console error); returns
+ * whether the write landed, for callers whose success is reported to the user
+ * — a Directory save must not be announced as saved when it never hit the disk.
+ */
+export function writeConfig(config: PixelAgentsConfig): boolean {
   const filePath = getConfigFilePath();
   const dir = path.dirname(filePath);
   try {
@@ -320,8 +377,10 @@ export function writeConfig(config: PixelAgentsConfig): void {
     const tmpPath = filePath + '.tmp';
     fs.writeFileSync(tmpPath, json, 'utf-8');
     fs.renameSync(tmpPath, filePath);
+    return true;
   } catch (err) {
     console.error('[Pixel Agents] Failed to write config file:', err);
+    return false;
   }
 }
 

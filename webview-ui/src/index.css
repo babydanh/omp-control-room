@@ -114,6 +114,14 @@
   body,
   #root {
     @apply m-0 w-full h-full overflow-hidden font-ui text-base text-text;
+    /* Mobile Safari: 100% tracks the shifting URL-bar viewport; dvh follows
+       the dynamic viewport so the board hugs the real bottom edge. */
+    height: 100dvh;
+    /* No rubber-banding: the board owns all scrolling. */
+    overscroll-behavior: none;
+    /* Whatever peeks out during overscroll or keyboard transitions must match
+       the board, never browser-white. */
+    background: var(--color-bg-dark);
   }
 }
 
@@ -251,6 +259,13 @@
   /* Pulsing dot animation (DebugView, ToolOverlay) */
   .pixel-pulse {
     animation: pixel-pulse 1.5s ease-in-out infinite;
+  }
+
+  /* Top-anchored floating chrome (the connection pill). In a home-screen PWA
+     with viewport-fit=cover the page starts under the status bar, so the
+     offset includes the safe-area inset; env() is 0 in a plain tab. */
+  .mobile-safe-top {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
   }
 
   /* Pixel-style thin scrollbar utility — used by the Area card folder list

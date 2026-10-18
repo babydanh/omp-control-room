@@ -9,6 +9,7 @@ import {
   TRANSPORT_DISCONNECTED_ERROR,
 } from '../../../core/src/messageDelivery.js';
 import type { ClientMessage, ServerMessage } from '../../../core/src/messages.js';
+import { reconnectDelayMs } from './reconnectBackoff.js';
 import type { MessageTransport, TransportState } from './types.js';
 
 /**
@@ -146,9 +147,9 @@ export class WebSocketTransport implements MessageTransport {
   }
 
   private scheduleReconnect(): void {
-    // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
-    const delay = Math.min(1000 * 2 ** this.reconnectAttempts, 30000);
+    const delay = reconnectDelayMs(this.reconnectAttempts);
     this.reconnectAttempts++;
+
     console.log(
       `[Transport] WebSocket reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`,
     );

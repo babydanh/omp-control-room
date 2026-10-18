@@ -62,7 +62,9 @@ if ($LASTEXITCODE -ne 0) { Fail 'tailscale serve chưa chạy được (xem dòn
 
 $url = "https://$dns/"
 if ($Token) { $url = "${url}?token=$Token" }
+Write-Host "`nBẮT BUỘC: board phải được chạy với --allowed-host $dns, nếu không qua link này chỉ xem được, không ra lệnh được." -ForegroundColor Yellow
+Write-Host "  Ví dụ: node dist\cli.js --workspace <thư mục> --port $Port --allowed-host $dns"
 Write-Host "`nXONG. Trên điện thoại/máy khác: cài app Tailscale, đăng nhập CÙNG tài khoản, rồi mở:" -ForegroundColor Green
 Write-Host "  $url" -ForegroundColor Yellow
 if (-not $Token) { Write-Host '  (thêm ?token=... lấy từ link board in ra khi khởi động; thiếu token thì chỉ xem, không ra lệnh được)' }
-Write-Host 'Token đổi mỗi lần board khởi động lại. Tắt chia sẻ: chạy script với -Off.'
+Write-Host 'Token được lưu cố định (đổi bằng --rotate-token khi khởi động board). Tắt chia sẻ: chạy script với -Off.'

@@ -50,3 +50,7 @@ export const TERMINAL_FONT_SIZE_PX = 13;
 export const TERMINAL_SCROLLBACK_LINES = 5000;
 /** Largest single input chunk, matching COMPANY_TERMINAL_INPUT_MAX_BYTES. */
 export const TERMINAL_INPUT_CHUNK_MAX_BYTES = 8 * 1024;
+
+// ── WebSocket reconnect ──────────────────────────────────────
+/** Reconnect backoff ladder for the /ws transport (transport/reconnectBackoff.ts). The last rung repeats. */
+export const WS_RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000] as const;
