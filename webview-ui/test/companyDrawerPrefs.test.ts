@@ -29,7 +29,7 @@ function memoryStorage(
 
 describe('drawerWidthLimit', () => {
   it('leaves the visible lanes their room beside the drawer', () => {
-    expect(drawerWidthLimit(1920)).toBe(1480);
+    expect(drawerWidthLimit(1920)).toBe(1376);
   });
 
   it('never goes below the minimum width', () => {
@@ -51,7 +51,7 @@ describe('clampDrawerWidth', () => {
   });
 
   it('caps a width at the room the board leaves', () => {
-    expect(clampDrawerWidth(2000, 1000)).toBe(560);
+    expect(clampDrawerWidth(2000, 1000)).toBe(456);
   });
 
   it('takes the default width for a width that is not finite', () => {
@@ -73,13 +73,13 @@ describe('effectiveDrawerWidth', () => {
     expect(effectiveDrawerWidth(null, 2000)).toBe(560);
   });
 
-  it('caps the default at the room two lanes leave, as on a 1024 viewport beside the sidebar', () => {
-    expect(effectiveDrawerWidth(null, 724)).toBe(284);
+  it('keeps the minimum when two lanes leave no room on a 1024 viewport', () => {
+    expect(effectiveDrawerWidth(null, 724)).toBe(280);
   });
 
   it('keeps a width the user dragged to, within the room the board leaves', () => {
     expect(effectiveDrawerWidth(700, 1268)).toBe(700);
-    expect(effectiveDrawerWidth(900, 1268)).toBe(828);
+    expect(effectiveDrawerWidth(900, 1268)).toBe(724);
   });
 });
 
@@ -99,12 +99,12 @@ describe('drawerWidthForKey', () => {
 
   it('stops at the minimum and at the room the board leaves', () => {
     expect(drawerWidthForKey(330, 'ArrowRight', true, 1920)).toBe(280);
-    expect(drawerWidthForKey(1700, 'ArrowLeft', true, 1920)).toBe(1480);
+    expect(drawerWidthForKey(1700, 'ArrowLeft', true, 1920)).toBe(1376);
   });
 
   it('jumps to the minimum on Home and to the limit on End', () => {
     expect(drawerWidthForKey(600, 'Home', false, 1920)).toBe(280);
-    expect(drawerWidthForKey(600, 'End', false, 1920)).toBe(1480);
+    expect(drawerWidthForKey(600, 'End', false, 1920)).toBe(1376);
   });
 
   it('answers no other key', () => {

@@ -18,13 +18,15 @@
  */
 
 import type { CompanySessionSummary, HerdrAgent } from '../../../core/src/company.js';
+import type { CompanySessionLogEntry } from '../../../core/src/messages.js';
 import type { AgentTone } from './agentSidebarView.js';
 import { herdrSummary, pendingQuestionSessionIds, repoPlacement } from './agentSidebarView.js';
-import type { CompanyViewState, HerdrView } from './companyState.js';
+import type { CompanyViewState, HerdrScreenView, HerdrView } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
 import { HERDR_TONE_LABELS, type HerdrTone, herdrToneFor } from './herdrView.js';
 import { companyRoleLabel } from './roleProfiles.js';
 import { sessionStatusLabel } from './statusLabels.js';
+import { parseAnsiScreen } from './terminalScreen.js';
 
 /** What an agent card stands for: a herdr pane, or a company session. */
 export type AgentCardSubject =
@@ -45,6 +47,12 @@ export interface AgentBoardCard {
   title: string;
   /** The status word the card prints. */
   statusLabel: string;
+  /** The git branch a pane works on; null when herdr reported none, and for a session. */
+  branch: string | null;
+  /** The newest lines the agent printed or logged, oldest first; at most two. */
+  activity: string[];
+  /** When the agent last changed, as an ISO time; null when none is known. */
+  updatedAt: string | null;
 }
 
 /**
@@ -75,7 +83,35 @@ function sessionTone(
   return null;
 }
 
-function herdrCard(agent: HerdrAgent): AgentBoardCard | null {
+/** How many lines of recent activity a card shows. */
+const ACTIVITY_LINES = 2;
+
+/** Collapse a line to single spaces and bound its length for a card. */
+function collapseSpaces(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().slice(0, 240);
+}
+
+/** A pane's newest non-empty screen lines, plain text, oldest first. */
+function recentScreenLines(text: string | undefined): string[] {
+  if (text === undefined) return [];
+  const lines = parseAnsiScreen(text).map((line) =>
+    collapseSpaces(line.map((segment) => segment.text).join('')),
+  );
+  return lines.filter((line) => line !== '').slice(-ACTIVITY_LINES);
+}
+
+/** A session's newest logged lines of text, oldest first. */
+function recentLogLines(entries: readonly CompanySessionLogEntry[]): string[] {
+  const lines: string[] = [];
+  for (let i = entries.length - 1; i >= 0 && lines.length < ACTIVITY_LINES; i--) {
+    const entry: CompanySessionLogEntry | undefined = entries[i];
+    const line = collapseSpaces(entry?.text ?? '');
+    if (line !== '') lines.unshift(line);
+  }
+  return lines;
+}
+
+function herdrCard(agent: HerdrAgent, screen: HerdrScreenView | undefined): AgentBoardCard | null {
   const tone = herdrToneFor(agent.status);
   const lane = laneForTone(tone);
   if (lane === null) return null;
@@ -88,12 +124,16 @@ function herdrCard(agent: HerdrAgent): AgentBoardCard | null {
     project: repoPlacement(agent).label,
     title: herdrSummary(agent.title, agent.cwd)?.text ?? `${agent.kind} · ${agent.paneId}`,
     statusLabel: HERDR_TONE_LABELS[tone],
+    branch: agent.branch || null,
+    activity: recentScreenLines(screen?.text),
+    updatedAt: screen?.at ?? null,
   };
 }
 
 function sessionCard(
   session: CompanySessionSummary,
   questioning: ReadonlySet<string>,
+  entries: readonly CompanySessionLogEntry[],
 ): AgentBoardCard | null {
   const tone = sessionTone(session, questioning);
   const lane = tone === null ? null : laneForTone(tone);
@@ -107,6 +147,9 @@ function sessionCard(
     project: session.code,
     title: session.name,
     statusLabel: tone === 'needs' ? HERDR_TONE_LABELS.needs : sessionStatusLabel(session.status),
+    branch: null,
+    activity: recentLogLines(entries),
+    updatedAt: session.lastUsedAt,
   };
 }
 
@@ -128,7 +171,7 @@ function herdrCards(herdr: HerdrView): AgentBoardCard[] {
   if (!herdr.loaded || !herdr.available) return [];
   const cards: AgentBoardCard[] = [];
   for (const agent of herdr.agents) {
-    const card = herdrCard(agent);
+    const card = herdrCard(agent, herdr.screens[agent.paneId]);
     if (card !== null) cards.push(card);
   }
   return cards;
@@ -146,7 +189,7 @@ export function buildAgentCards(
   const cards = herdrCards(state.herdr);
   for (const session of Object.values(state.sessions)) {
     if (carded.has(session.id)) continue;
-    const card = sessionCard(session, questioning);
+    const card = sessionCard(session, questioning, state.sessionLogs[session.id]?.entries ?? []);
     if (card !== null) cards.push(card);
   }
   return cards.sort(compareAgentCards);

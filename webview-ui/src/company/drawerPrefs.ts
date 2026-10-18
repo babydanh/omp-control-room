@@ -14,7 +14,7 @@ import {
   COMPANY_DRAWER_MIN_WIDTH_PX,
   COMPANY_DRAWER_RESIZE_LARGE_STEP_PX,
   COMPANY_DRAWER_RESIZE_STEP_PX,
-  COMPANY_LANE_MIN_WIDTH_PX,
+  COMPANY_LANE_WIDTH_PX,
   COMPANY_LANES_VISIBLE_MIN,
 } from './constants.js';
 
@@ -49,7 +49,7 @@ export const DEFAULT_DRAWER_PREFS: DrawerPrefs = {
  */
 export function drawerWidthLimit(boardWidth: number): number {
   const room = Number.isFinite(boardWidth)
-    ? Math.floor(boardWidth) - COMPANY_LANES_VISIBLE_MIN * COMPANY_LANE_MIN_WIDTH_PX
+    ? Math.floor(boardWidth) - COMPANY_LANES_VISIBLE_MIN * COMPANY_LANE_WIDTH_PX
     : 0;
   return Math.max(COMPANY_DRAWER_MIN_WIDTH_PX, room);
 }

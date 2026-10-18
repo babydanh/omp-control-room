@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import type { HerdrAgent } from '../../core/src/company.js';
-import type { CompanyPromptSummary, ServerMessage } from '../../core/src/messages.js';
+import type {
+  CompanyPromptSummary,
+  CompanySessionLogEntry,
+  ServerMessage,
+} from '../../core/src/messages.js';
 import { type AgentBoardCard, buildAgentCards } from '../src/company/agentBoard.js';
 import { buildBoardLanes } from '../src/company/boardView.js';
 import { applyCompanyMessage, type CompanyViewState } from '../src/company/companyState.js';
@@ -40,6 +44,11 @@ function laneByKey(cards: AgentBoardCard[]): Record<string, string> {
   return Object.fromEntries(cards.map((card): [string, string] => [card.key, card.lane]));
 }
 
+/** A session log entry with a fixed time and run; only its seq and text vary. */
+function logEntry(seq: number, text: string): CompanySessionLogEntry {
+  return { seq, at: '2026-10-02T10:19:00.000Z', kind: 'text', runEpoch: 1, text };
+}
+
 describe('herdr panes as agent cards', () => {
   it('shows working, blocked and done panes in their lanes and leaves idle and unknown ones out', () => {
     const state = withHerdr(stateFrom(), [
@@ -73,6 +82,39 @@ describe('herdr panes as agent cards', () => {
     const state = withHerdr(stateFrom(), [herdrAgent({ paneId: 'p-9', title: undefined })]);
 
     expect(buildAgentCards(state, new Set())[0]?.title).toBe('claude · p-9');
+  });
+
+  it('carries the pane branch, its newest screen lines and when the screen last changed', () => {
+    const state = withHerdr(stateFrom(), [herdrAgent({ paneId: 'p-2', branch: 'feat/cards' })]);
+    const withScreen: CompanyViewState = {
+      ...state,
+      herdr: {
+        ...state.herdr,
+        screens: {
+          'p-2': {
+            paneId: 'p-2',
+            text: 'build ok\n\n\nrunning tests\n',
+            at: '2026-10-02T10:05:00.000Z',
+          },
+        },
+      },
+    };
+
+    expect(buildAgentCards(withScreen, new Set())[0]).toMatchObject({
+      branch: 'feat/cards',
+      activity: ['build ok', 'running tests'],
+      updatedAt: '2026-10-02T10:05:00.000Z',
+    });
+  });
+
+  it('leaves branch, activity and update time empty when herdr has sent none', () => {
+    const state = withHerdr(stateFrom(), [herdrAgent({ paneId: 'p-3' })]);
+
+    expect(buildAgentCards(state, new Set())[0]).toMatchObject({
+      branch: null,
+      activity: [],
+      updatedAt: null,
+    });
   });
 
   it('draws no herdr cards while herdr is unavailable', () => {
@@ -112,6 +154,28 @@ describe('company sessions as agent cards', () => {
       key: 'session:s-busy',
       lane: 'needs_input',
       statusLabel: HERDR_TONE_LABELS.needs,
+    });
+  });
+
+  it('shows the newest logged lines of a session and when it was last used', () => {
+    const state = applyCompanyMessage(
+      stateFrom({ sessions: [session({ id: 's-log', lastUsedAt: '2026-10-02T10:20:00.000Z' })] }),
+      {
+        type: 'companySessionLog',
+        sessionId: 's-log',
+        replay: true,
+        entries: [
+          logEntry(1, 'reading the spec'),
+          logEntry(2, '   '),
+          logEntry(3, 'writing   the fix'),
+        ],
+      } satisfies ServerMessage,
+    ).state;
+
+    expect(buildAgentCards(state, new Set())[0]).toMatchObject({
+      branch: null,
+      activity: ['reading the spec', 'writing the fix'],
+      updatedAt: '2026-10-02T10:20:00.000Z',
     });
   });
 

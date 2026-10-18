@@ -7,12 +7,12 @@
  * the same render, before the flight measures where the card came to rest.
  */
 
-import { COMPANY_LANE_MIN_WIDTH_PX, COMPANY_LANE_STRIP_WIDTH_PX } from './constants.js';
+import { COMPANY_LANE_STRIP_WIDTH_PX, COMPANY_LANE_WIDTH_PX } from './constants.js';
 
-/** One lane column's flex share and floor, as CSS for the lanes row. */
+/** One lane column's width and flex rule, as CSS for the lanes row. */
 export interface LaneColumnStyle {
   flex: string;
-  minWidth: number;
+  width: number;
 }
 
 /** A lane is a strip when it holds nothing and its reader has not opened it. */
@@ -21,12 +21,10 @@ export function isLaneCollapsed(count: number, opened: boolean): boolean {
 }
 
 /**
- * A strip keeps a fixed width. An open lane takes an equal share of the row's
- * remaining width and never shrinks below its minimum, so the row scrolls
- * sideways rather than squeezing a lane.
+ * A lane column never stretches. A strip and an open lane each keep their own
+ * fixed width; spare width stays empty on the row's right.
  */
 export function laneColumnStyle(collapsed: boolean): LaneColumnStyle {
-  return collapsed
-    ? { flex: `0 0 ${COMPANY_LANE_STRIP_WIDTH_PX}px`, minWidth: COMPANY_LANE_STRIP_WIDTH_PX }
-    : { flex: '1 1 0', minWidth: COMPANY_LANE_MIN_WIDTH_PX };
+  const width = collapsed ? COMPANY_LANE_STRIP_WIDTH_PX : COMPANY_LANE_WIDTH_PX;
+  return { flex: `0 0 ${width}px`, width };
 }

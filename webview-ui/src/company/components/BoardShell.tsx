@@ -11,7 +11,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type AgentMenuRequest, type SessionMenuTab } from '../agentMenu.js';
-import { herdrGroup, sleepingRows } from '../agentSidebarView.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
 import { COMPANY_RAIL_WIDTH_PX, COMPANY_SIDEBAR_OVERLAY_MAX_PX } from '../constants.js';
@@ -36,7 +35,6 @@ import {
 } from '../sidebarPrefs.js';
 import { useCompanyState } from '../useCompanyState.js';
 import { useMediaQuery } from '../useMediaQuery.js';
-import { useNow } from '../useNow.js';
 import { useSessionLogBackfill } from '../useSessionLogBackfill.js';
 import { AgentContextMenu } from './AgentContextMenu.js';
 import { AgentRail } from './AgentRail.js';
@@ -94,8 +92,6 @@ export function BoardShell({ client }: BoardShellProps) {
   );
 
   const lanes = useMemo(() => buildBoardLanes(state), [state]);
-  const now = useNow();
-  const sleeping = useMemo(() => sleepingRows(herdrGroup(state.herdr, now)), [state.herdr, now]);
   const pendingQuestions = useMemo(
     () => Object.values(state.questions).filter((question) => question.status === 'pending'),
     [state.questions],
@@ -283,8 +279,6 @@ export function BoardShell({ client }: BoardShellProps) {
             onSelectSession={selectSession}
             onSelectTask={selectTask}
             onOpenHerdr={openHerdr}
-            onOpenSleeping={openSleeping}
-            sleeping={sleeping}
             selectedPaneId={selectedPaneId}
             selectedSessionId={selectedSessionId}
             onMenu={openMenu}

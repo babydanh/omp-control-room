@@ -66,7 +66,10 @@ export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5" data-testid="board-workspace">
+    <div
+      className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5"
+      data-testid="board-workspace"
+    >
       {workspaces !== null && workspaces.length > 0 ? (
         <select
           aria-label="Thư mục đang làm việc"
@@ -83,7 +86,10 @@ export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
           ))}
         </select>
       ) : (
-        <span className="text-2xs text-text" title={state.settings?.workspacePath ?? undefined}>
+        <span
+          className="min-w-0 max-w-[260px] truncate text-2xs text-text"
+          title={state.settings?.workspacePath ?? undefined}
+        >
           {state.settings?.workspacePath ?? 'đang chờ máy chủ…'}
         </span>
       )}
@@ -123,7 +129,7 @@ export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
       )}
       {opening && <span className="text-2xs text-text-muted">Đang mở thư mục…</span>}
       {message !== null && (
-        <span role="alert" className="text-2xs text-warning">
+        <span role="alert" className="break-all text-2xs text-warning">
           {message}
         </span>
       )}

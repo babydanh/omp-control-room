@@ -19,10 +19,10 @@ describe('isLaneCollapsed', () => {
 
 describe('laneColumnStyle', () => {
   it('gives a strip a fixed 40px column that does not grow', () => {
-    expect(laneColumnStyle(true)).toEqual({ flex: '0 0 40px', minWidth: 40 });
+    expect(laneColumnStyle(true)).toEqual({ flex: '0 0 40px', width: 40 });
   });
 
-  it('shares the row among open lanes, each with a 220px floor', () => {
-    expect(laneColumnStyle(false)).toEqual({ flex: '1 1 0', minWidth: 220 });
+  it('gives an open lane a fixed 272px column that does not stretch', () => {
+    expect(laneColumnStyle(false)).toEqual({ flex: '0 0 272px', width: 272 });
   });
 });

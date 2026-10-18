@@ -27,6 +27,7 @@
 import {
   type ChangeEvent,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -39,6 +40,7 @@ import type { OmpSessionEntry } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient } from '../companyClient.js';
 import { composerInputHeight } from '../composerHeight.js';
+import { composerStorage, readComposerHeight, writeComposerHeight } from '../composerPrefs.js';
 import {
   chatRoute,
   companyRoute,
@@ -90,19 +92,41 @@ export interface PromptComposerProps {
   client: CompanyClient;
 }
 
+/** One line's height, the padding and border around it, and the height the text needs. */
+interface BoxMetrics {
+  rowPx: number;
+  chromePx: number;
+  fitPx: number;
+}
+
+/** A handle drag in progress: where the pointer began, the box's height then, its metrics. */
+interface ResizeDrag {
+  startY: number;
+  startPx: number;
+  metrics: BoxMetrics;
+}
+
 /**
- * Size the composer's text box to its text: one row when empty, a row more for each
- * line, and at most COMPOSER_MAX_ROWS rows before it scrolls. The box is set to `auto`
- * first, so deleted lines shrink it back.
+ * Measure the box against its text. The box is set to `auto` first, so the text's own
+ * height is what gets measured; the caller sets the height afterwards.
  */
-function fitTextarea(el: HTMLTextAreaElement | null): void {
-  if (el === null) return;
+function measureBox(el: HTMLTextAreaElement): BoxMetrics {
   el.style.height = 'auto';
   const style = getComputedStyle(el);
   const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
-  const chrome = border + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
-  const fit = el.scrollHeight + border;
-  el.style.height = `${composerInputHeight(fit, parseFloat(style.lineHeight), chrome)}px`;
+  const chromePx = border + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  return { rowPx: parseFloat(style.lineHeight), chromePx, fitPx: el.scrollHeight + border };
+}
+
+/**
+ * Size the composer's text box to its text: at least COMPOSER_MIN_ROWS rows, a row more for
+ * each line up to COMPOSER_MAX_ROWS rows, where it scrolls. A height the user dragged the box
+ * to is the floor it keeps.
+ */
+function fitTextarea(el: HTMLTextAreaElement | null, savedPx: number | null): void {
+  if (el === null) return;
+  const { rowPx, chromePx, fitPx } = measureBox(el);
+  el.style.height = `${composerInputHeight(fitPx, rowPx, chromePx, savedPx)}px`;
 }
 
 export function PromptComposer({ client }: PromptComposerProps) {
@@ -113,6 +137,11 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const [picker, setPicker] = useState<ComposerPicker | null>(null);
   const [highlight, setHighlight] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  /** The height the user dragged the box to, or null when it has never been dragged. */
+  const [savedHeight, setSavedHeight] = useState<number | null>(() =>
+    readComposerHeight(composerStorage()),
+  );
+  const resizeRef = useRef<ResizeDrag | null>(null);
 
   const selectedSession =
     state.selection.sessionId === null ? null : (state.sessions[state.selection.sessionId] ?? null);
@@ -133,13 +162,14 @@ export function PromptComposer({ client }: PromptComposerProps) {
     if (state.modelCatalog.length === 0) client.requestModelCatalog();
   }, [client, state.modelCatalog.length]);
 
-  // Grow the box with its text. Wrapping changes with the window width, so re-measure on resize too.
-  useLayoutEffect(() => fitTextarea(inputRef.current), [draft.text]);
+  // Grow the box with its text, never shorter than the height the user dragged it to.
+  // Wrapping changes with the window width, so re-measure on resize too.
+  useLayoutEffect(() => fitTextarea(inputRef.current, savedHeight), [draft.text, savedHeight]);
   useEffect(() => {
-    const refit = () => fitTextarea(inputRef.current);
+    const refit = () => fitTextarea(inputRef.current, savedHeight);
     window.addEventListener('resize', refit);
     return () => window.removeEventListener('resize', refit);
-  }, []);
+  }, [savedHeight]);
 
   // OMP's status line names the model as `provider/id`
   // (builtin-modes.ts:456-459). A model the server holds but this catalog does
@@ -370,6 +400,53 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
   const error = draft.error?.message ?? draft.error?.errorCode ?? null;
 
+  // The handle on the box's top edge. Dragging up makes the box taller; the height is clamped
+  // to the rows and to the text, and it is remembered when the drag ends.
+  function startResize(event: ReactPointerEvent<HTMLDivElement>): void {
+    const el = inputRef.current;
+    if (el === null) return;
+    const startPx = el.getBoundingClientRect().height;
+    const metrics = measureBox(el);
+    el.style.height = `${startPx}px`;
+    resizeRef.current = { startY: event.clientY, startPx, metrics };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function moveResize(event: ReactPointerEvent<HTMLDivElement>): void {
+    const drag = resizeRef.current;
+    const el = inputRef.current;
+    if (drag === null || el === null) return;
+    const { rowPx, chromePx, fitPx } = drag.metrics;
+    const wantedPx = drag.startPx + (drag.startY - event.clientY);
+    el.style.height = `${composerInputHeight(fitPx, rowPx, chromePx, wantedPx)}px`;
+  }
+
+  function endResize(): void {
+    const el = inputRef.current;
+    if (resizeRef.current === null || el === null) return;
+    resizeRef.current = null;
+    rememberHeight(el);
+  }
+
+  // Arrow keys move the handle one row at a time, so the box can be sized without a mouse.
+  function nudgeResize(event: KeyboardEvent<HTMLDivElement>): void {
+    const el = inputRef.current;
+    const step = event.key === 'ArrowUp' ? 1 : event.key === 'ArrowDown' ? -1 : 0;
+    if (el === null || step === 0) return;
+    event.preventDefault();
+    const currentPx = el.getBoundingClientRect().height;
+    const { rowPx, chromePx, fitPx } = measureBox(el);
+    el.style.height = `${composerInputHeight(fitPx, rowPx, chromePx, currentPx + step * rowPx)}px`;
+    rememberHeight(el);
+  }
+
+  /** Keep the box's current height as the floor it grows from, here and after a reload. */
+  function rememberHeight(el: HTMLTextAreaElement): void {
+    const px = Math.round(el.getBoundingClientRect().height);
+    setSavedHeight(px);
+    writeComposerHeight(composerStorage(), px);
+  }
+
   return (
     <section className="border-t border-border bg-bg px-2 py-1" data-testid="prompt-composer">
       {rows.length > 0 && (
@@ -434,6 +511,22 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
       {resumeView !== null && <OmpSessionPicker view={resumeView} onChoose={resumeEntry} />}
 
+      <div
+        role="separator"
+        aria-orientation="horizontal"
+        aria-label="Kéo để đổi chiều cao ô nhập"
+        tabIndex={0}
+        title="Kéo để đổi chiều cao · Mũi tên lên hoặc xuống để chỉnh"
+        data-testid="prompt-resize"
+        onPointerDown={startResize}
+        onPointerMove={moveResize}
+        onPointerUp={endResize}
+        onPointerCancel={endResize}
+        onKeyDown={nudgeResize}
+        className="flex h-1.5 cursor-row-resize touch-none items-center justify-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+      >
+        <span aria-hidden="true" className="h-0.5 w-8 rounded-full bg-border" />
+      </div>
       <div className="flex items-end gap-1.5">
         <textarea
           ref={inputRef}

@@ -115,14 +115,20 @@ export const COMPANY_DRAWER_DEFAULT_WIDTH_PX = 560;
 /** An unresized drawer takes this share of the board, at most the default width. */
 export const COMPANY_DRAWER_DEFAULT_SHARE = 0.4;
 
-/** The narrowest a lane with work gets; the lanes row scrolls sideways instead of squeezing it. */
-export const COMPANY_LANE_MIN_WIDTH_PX = 220;
+/**
+ * An open lane's fixed column width, wide enough for a card's repo, branch,
+ * title and activity. Spare width stays empty on the row's right.
+ */
+export const COMPANY_LANE_WIDTH_PX = 272;
 
 /** A lane with no cards collapses to a strip this wide, so the lanes with work get the room. */
 export const COMPANY_LANE_STRIP_WIDTH_PX = 40;
 
-/** The composer's text box grows one row per line of text, up to this many rows, then scrolls. */
-export const COMPOSER_MAX_ROWS = 8;
+/** The composer's text box idles at this many rows and grows with its text. */
+export const COMPOSER_MIN_ROWS = 4;
+
+/** The most rows the composer's text box grows to before it scrolls. */
+export const COMPOSER_MAX_ROWS = 12;
 
 /** How many lanes stay visible beside a docked drawer. */
 export const COMPANY_LANES_VISIBLE_MIN = 2;

@@ -25,16 +25,13 @@
  * An agent with work of its own and no task card (a herdr pane, or a company
  * session) shows as a dashed card after the task cards. Clicking it opens that
  * agent; hovering previews its terminal, and right-click opens its menu.
- *
- * Hibernated sessions sit in a lane after the others, and that lane folds to a strip while
- * it is empty. A card there opens the session's drawer, where it can be woken.
  */
 
 import { useRef, useState } from 'react';
 
 import type { AgentBoardCard, AgentCardSubject } from '../agentBoard.js';
 import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
-import { type SleepingRow, sleepingTooltip } from '../agentSidebarView.js';
+import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS, type CompanyLaneId } from '../constants.js';
@@ -44,6 +41,7 @@ import { taskStatusLabel } from '../statusLabels.js';
 import type { PreviewTarget } from '../terminalPreview.js';
 import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
 import { useFlightLayout } from '../useFlightLayout.js';
+import { useNow } from '../useNow.js';
 import { StatusDot } from './StatusDot.js';
 
 export interface CompanyBoardProps {
@@ -55,10 +53,6 @@ export interface CompanyBoardProps {
   onSelectSession: (sessionId: string) => void;
   /** Opens the drawer on a herdr pane's agent card. */
   onOpenHerdr: (paneId: string) => void;
-  /** Opens a hibernated session's drawer, where it can be woken. */
-  onOpenSleeping: (paneId: string) => void;
-  /** The hibernated sessions, most recently slept first. */
-  sleeping: readonly SleepingRow[];
   /** The herdr pane and session the drawer shows, so their agent cards read as pressed. */
   selectedPaneId: string | null;
   selectedSessionId: string | null;
@@ -249,7 +243,8 @@ function TaskCard({
 /**
  * An agent with work of its own and no task card: a herdr pane or a company
  * session. Its card is dashed, so it never reads as the company's own work. The
- * lane already names its status, so the card shows only the repo and the title.
+ * lane already names its status, so the card prints no status word. It shows the
+ * project and branch, the title, the newest activity, and when it last changed.
  */
 function AgentCard({
   card,
@@ -257,12 +252,14 @@ function AgentCard({
   selected,
   onOpen,
   onMenu,
+  now,
 }: {
   card: AgentBoardCard;
   index: number;
   selected: boolean;
   onOpen: () => void;
   onMenu: (request: AgentMenuRequest) => void;
+  now: number;
 }) {
   const { subject } = card;
   const triggers = agentMenuTriggers<HTMLButtonElement>(
@@ -276,6 +273,7 @@ function AgentCard({
       ? { kind: 'herdr', paneId: subject.paneId }
       : { kind: 'session', sessionId: subject.sessionId };
   const actions = useTerminalPreview();
+  const updated = card.updatedAt === null ? null : relativeTimeVi(card.updatedAt, now);
   return (
     <button
       type="button"
@@ -289,15 +287,28 @@ function AgentCard({
       data-flight-key={card.key}
       data-lane={card.lane}
       data-index={index}
-      className="company-card flex w-full cursor-pointer items-start gap-1.5 border-dashed p-2 text-left"
+      className="company-card flex w-full cursor-pointer flex-col gap-1 border-dashed p-2 text-left"
     >
-      <span className="mt-1 flex shrink-0">
-        <StatusDot tone={card.tone} />
+      <span className="flex min-w-0 items-center gap-1.5">
+        <span className="flex shrink-0">
+          <StatusDot tone={card.tone} />
+        </span>
+        <span className="min-w-0 flex-1 truncate text-2xs text-text-muted">{card.project}</span>
+        {card.branch !== null && (
+          <span className="min-w-0 max-w-[45%] truncate rounded-full border border-border px-1.5 text-2xs text-text-muted">
+            {card.branch}
+          </span>
+        )}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-2xs text-text-muted">{card.project}</span>
-        <span className="block truncate text-sm font-medium text-text">{card.title}</span>
+      <span className="line-clamp-3 break-normal text-sm font-medium leading-[1.3] text-text">
+        {card.title}
       </span>
+      {card.activity.length > 0 && (
+        <span className="line-clamp-2 break-normal text-2xs text-text-muted">
+          {card.activity.join(' · ')}
+        </span>
+      )}
+      {updated !== null && <span className="text-2xs text-text-muted">cập nhật {updated}</span>}
     </button>
   );
 }
@@ -333,136 +344,6 @@ function LaneStrip({
   );
 }
 
-/**
- * A hibernated session on the board: dashed like an agent card, with the sleep glyph and
- * when it slept. Its click opens the drawer, where it can be woken; its menu offers the wake.
- */
-function SleepingCard({
-  row,
-  index,
-  selected,
-  onOpen,
-  onMenu,
-}: {
-  row: SleepingRow;
-  index: number;
-  selected: boolean;
-  onOpen: () => void;
-  onMenu: (request: AgentMenuRequest) => void;
-}) {
-  const triggers = agentMenuTriggers<HTMLButtonElement>(
-    { kind: 'sleeping', paneId: row.paneId, drawer: null },
-    onMenu,
-  );
-  const actions = useTerminalPreview();
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      {...triggers}
-      {...previewTriggers(actions, { kind: 'herdr', paneId: row.paneId })}
-      aria-pressed={selected}
-      title={sleepingTooltip(row)}
-      data-testid="sleeping-card"
-      data-flight-key={`sleeping:${row.paneId}`}
-      data-lane="sleeping"
-      data-index={index}
-      className="company-card flex w-full cursor-pointer items-start gap-1.5 border-dashed p-2 text-left opacity-75"
-    >
-      <span aria-hidden="true" className="mt-0.5 shrink-0 text-xs">
-        💤
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-2xs text-text-muted">{row.repo.label}</span>
-        <span className="block truncate text-sm font-medium text-text">{row.name}</span>
-        {row.sleptLabel !== null && (
-          <span className="block truncate text-2xs text-text-muted">{row.sleptLabel}</span>
-        )}
-      </span>
-    </button>
-  );
-}
-
-/**
- * The sleeping lane, after the board's lanes. It folds to a strip while it holds nothing and
- * its reader has not opened it, the same rule as an empty task lane.
- */
-function SleepingLane({
-  sleeping,
-  selectedPaneId,
-  onOpen,
-  onMenu,
-}: {
-  sleeping: readonly SleepingRow[];
-  selectedPaneId: string | null;
-  onOpen: (paneId: string) => void;
-  onMenu: (request: AgentMenuRequest) => void;
-}) {
-  const [opened, setOpened] = useState(false);
-  const count = sleeping.length;
-  const collapsed = isLaneCollapsed(count, opened);
-  return (
-    <section
-      aria-label="Ngủ đông"
-      data-testid="company-lane-sleeping"
-      data-lane="sleeping"
-      data-collapsed={collapsed}
-      className="company-lane"
-      style={laneColumnStyle(collapsed)}
-    >
-      {collapsed ? (
-        <button
-          type="button"
-          onClick={() => setOpened(true)}
-          title="Mở cột Ngủ đông"
-          className="flex h-full w-full cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-btn-hover hover:text-text"
-        >
-          <span aria-hidden="true">💤</span>
-          <span className="text-2xs font-semibold text-text">{count}</span>
-          <span className="flex-1 whitespace-nowrap text-xs [writing-mode:vertical-rl]">
-            Ngủ đông
-          </span>
-          <span className="sr-only">Không có phiên nào ngủ đông.</span>
-        </button>
-      ) : (
-        <>
-          <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1">
-            <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
-              <span className="min-w-0">💤 Ngủ đông</span>
-              <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
-            </h3>
-            <p className="truncate text-xs text-text-muted">Mở một phiên để đánh thức</p>
-          </header>
-          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
-            {count === 0 && (
-              <div className="flex flex-col items-start gap-1 px-1">
-                <p className="text-xs text-text-muted">Không có phiên nào ngủ đông.</p>
-                <button
-                  type="button"
-                  onClick={() => setOpened(false)}
-                  className="cursor-pointer text-2xs text-text-muted hover:text-text"
-                >
-                  Thu gọn cột
-                </button>
-              </div>
-            )}
-            {sleeping.map((row, index) => (
-              <SleepingCard
-                key={row.paneId}
-                row={row}
-                index={index}
-                selected={row.paneId === selectedPaneId}
-                onOpen={() => onOpen(row.paneId)}
-                onMenu={onMenu}
-              />
-            ))}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
 export function CompanyBoard({
   lanes,
   flow,
@@ -470,14 +351,13 @@ export function CompanyBoard({
   onSelectTask,
   onSelectSession,
   onOpenHerdr,
-  onOpenSleeping,
-  sleeping,
   selectedPaneId,
   selectedSessionId,
   onMenu,
 }: CompanyBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   useFlightLayout(boardRef);
+  const now = useNow();
   // Empty lanes the reader opened from their strip. A lane with cards is open whatever this holds.
   const [openedLanes, setOpenedLanes] = useState<ReadonlySet<CompanyLaneId>>(() => new Set());
 
@@ -568,6 +448,7 @@ export function CompanyBoard({
                         key={agent.key}
                         card={agent}
                         index={lane.cards.length + drafts.length + index}
+                        now={now}
                         selected={
                           agent.subject.kind === 'herdr'
                             ? agent.subject.paneId === selectedPaneId
@@ -583,12 +464,6 @@ export function CompanyBoard({
             </section>
           );
         })}
-        <SleepingLane
-          sleeping={sleeping}
-          selectedPaneId={selectedPaneId}
-          onOpen={onOpenSleeping}
-          onMenu={onMenu}
-        />
       </div>
     </div>
   );
