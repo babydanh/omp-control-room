@@ -22,14 +22,16 @@ export interface OmpSessionPickerProps {
 export function OmpSessionPicker({ view, onChoose }: OmpSessionPickerProps) {
   return (
     <ul
-      className="mb-1 max-h-40 overflow-auto rounded-[6px] border border-border"
+      className="mb-1 max-h-40 overflow-auto rounded-(--company-radius-md) border border-hairline bg-raised p-1"
       data-testid="resume-picker"
     >
       {view.kind === 'loading' && (
         <li className="px-2 py-1 text-2xs text-text-muted">Đang tải danh sách phiên…</li>
       )}
       {view.kind === 'failed' && (
-        <li className="px-2 py-1 text-2xs text-warning">{view.message}</li>
+        <li className="rounded-(--company-radius-sm) bg-warning/12 px-2 py-1 text-2xs text-warning">
+          {view.message}
+        </li>
       )}
       {view.kind === 'ready' && view.entries.length === 0 && (
         <li className="px-2 py-1 text-2xs text-text-muted">
@@ -42,7 +44,7 @@ export function OmpSessionPicker({ view, onChoose }: OmpSessionPickerProps) {
             <button
               type="button"
               onClick={() => onChoose(entry)}
-              className="flex w-full cursor-pointer items-baseline gap-2 px-2 py-1 text-left text-2xs text-text-muted hover:text-text"
+              className="flex w-full cursor-pointer items-baseline gap-2 rounded-(--company-radius-sm) px-2 py-1 text-left text-2xs text-text-muted hover:bg-hover hover:text-text"
             >
               <span className="min-w-0 flex-1 truncate text-text">{resumeRowTitle(entry)}</span>
               <span className="shrink-0">{formatUpdatedAt(entry.updatedAt)}</span>

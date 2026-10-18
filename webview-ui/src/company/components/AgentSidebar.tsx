@@ -61,10 +61,10 @@ type PanelPresentation = Extract<SidebarPresentation, 'docked' | 'overlay' | 'sh
 
 /** Classes for each shape; the docked and overlay widths come from the drag width. */
 const PRESENTATION_CLASS: Record<PanelPresentation, string> = {
-  docked: 'relative h-full',
-  overlay: 'absolute inset-y-0 left-0 z-30 h-full',
+  docked: 'relative h-full bg-panel',
+  overlay: 'absolute inset-y-0 left-0 z-30 h-full bg-panel',
   sheet:
-    'fixed top-0 left-0 z-40 h-dvh w-[min(88vw,360px)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',
+    'fixed top-0 left-0 z-40 h-dvh w-[min(88vw,360px)] bg-raised border border-hairline pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',
 };
 
 export interface AgentSidebarProps {
@@ -196,7 +196,7 @@ export function AgentSidebar({
     <aside
       aria-label="Đàn agent"
       data-testid="agent-sidebar"
-      className={`flex shrink-0 flex-col border-r border-border bg-bg-dark ${PRESENTATION_CLASS[presentation]}`}
+      className={`flex shrink-0 flex-col ${PRESENTATION_CLASS[presentation]}`}
       style={presentation === 'sheet' ? undefined : { width: `${width}px` }}
       onPointerDown={onSheetPointerDown}
       onPointerUp={onSheetPointerUp}
@@ -204,7 +204,7 @@ export function AgentSidebar({
         sheetSwipe.current = null;
       }}
     >
-      <header className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
+      <header className="flex items-center justify-between gap-2 px-2.5 py-2">
         <h2 className="text-xs font-semibold text-text-muted">Đàn agent · {total}</h2>
         <button
           type="button"
@@ -229,7 +229,7 @@ export function AgentSidebar({
         <p
           role="status"
           data-testid="role-notice"
-          className="border-t border-border px-2 py-1 text-xs text-text-muted"
+          className="mx-2 mb-2 rounded-(--company-radius-md) bg-raised px-2 py-1 text-xs text-text-muted"
         >
           {notice}
         </p>
@@ -247,18 +247,14 @@ function ProjectSection({ project, view }: { project: ProjectNode; view: TreeVie
     view.onMenu,
   );
   return (
-    <section
-      aria-label={project.name}
-      data-testid={`project-${project.key}`}
-      className="border-b border-border"
-    >
+    <section aria-label={project.name} data-testid={`project-${project.key}`} className="pb-2">
       <button
         type="button"
         aria-expanded={!project.collapsed}
         onClick={() => view.onToggleProject(project.key)}
         {...triggers}
         title={project.tooltip}
-        className="flex w-full min-w-0 cursor-pointer items-center gap-2 px-2.5 py-2 text-left hover:bg-btn-hover"
+        className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-(--company-radius-sm) px-2.5 py-2 text-left hover:bg-hover"
       >
         <span aria-hidden="true" className="w-3 shrink-0 text-2xs text-text-muted">
           <Icon name={project.collapsed ? 'chevron-right' : 'chevron-down'} />
@@ -268,13 +264,13 @@ function ProjectSection({ project, view }: { project: ProjectNode; view: TreeVie
           className="h-4 w-[3px] shrink-0 rounded-full"
           style={{ backgroundColor: `var(--company-project-${project.tone})` }}
         />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
+        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-secondary">
           {project.name}
         </span>
         {project.branch !== null && (
           <span
             title={project.branch}
-            className="max-w-[40%] min-w-0 shrink truncate rounded-[3px] border border-border px-1 font-mono text-2xs text-status-active"
+            className="max-w-[40%] min-w-0 shrink truncate rounded-(--company-radius-sm) bg-raised px-1 font-mono text-2xs text-status-active"
           >
             {project.branch}
           </span>
@@ -293,7 +289,7 @@ function ProjectBody({ project, view }: { project: ProjectNode; view: TreeView }
   if (project.kind === 'herdr') {
     return (
       <>
-        <ul className="ml-4 border-l border-border pb-1 pl-1">
+        <ul className="ml-4 pb-1 pl-1">
           {project.panes.map((row, index) => (
             <li key={row.paneId}>
               <HerdrRowButton
@@ -332,11 +328,11 @@ function ProjectBody({ project, view }: { project: ProjectNode; view: TreeView }
     );
   }
   return (
-    <div className="ml-4 border-l border-border pb-1 pl-1">
+    <div className="ml-4 pb-1 pl-1">
       {project.groups.map((group, index) => (
         <Fragment key={group.role}>
           {index > 0 && project.groups[index - 1]?.role === 'chat' && group.role !== 'chat' && (
-            <div role="separator" className="mx-1 my-1 border-t border-border" />
+            <div role="separator" className="mx-1 h-2" />
           )}
           <RoleSection group={group} profile={view.profileOf(group.role)} view={view} />
         </Fragment>
@@ -361,7 +357,7 @@ function WorkspaceSessions({
   const [showParked, setShowParked] = useState(false);
   const empty = folder.live.length === 0 && folder.parked.length === 0;
   return (
-    <div className="ml-4 border-l border-border pb-1 pl-1">
+    <div className="ml-4 pb-1 pl-1">
       {view.switchingPath === folder.path && (
         <p className="px-2 py-1 text-xs text-text-muted">Đang chuyển sang thư mục này…</p>
       )}
@@ -437,7 +433,7 @@ function HerdrBlock({
   return (
     <div data-testid="agent-group-herdr">
       <h3 className="flex items-baseline gap-2 px-2.5 pb-1 pt-2">
-        <span className="text-sm font-semibold text-text">Herdr</span>
+        <span className="text-sm font-semibold text-text-secondary">Herdr</span>
         <span className="text-xs text-status-active">{herdrRowCount(herdr)} agent</span>
       </h3>
       {repos.map((project) => (
@@ -467,7 +463,7 @@ function RoleSection({
         onClick={() => view.onToggleEdit(group.role)}
         aria-expanded={editing}
         title="Bấm để đổi model và mức suy nghĩ của vai này"
-        className={`flex w-full min-w-0 cursor-pointer items-center gap-2 border-l-4 px-2 pb-1 pt-1.5 text-left hover:bg-btn-hover disabled:cursor-default disabled:hover:bg-transparent ${ROLE_EDGE_CLASS[group.role]}`}
+        className={`flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-(--company-radius-sm) px-2 pb-1 pt-1.5 text-left hover:bg-hover disabled:cursor-default disabled:hover:bg-transparent ${ROLE_EDGE_CLASS[group.role]}`}
       >
         <span className="shrink-0 text-sm font-semibold text-text">{group.label}</span>
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-status-active">
@@ -599,7 +595,7 @@ function AgentRowButton({
       data-flight-key={`session:${row.sessionId}`}
       data-lane={lane}
       data-index={index}
-      className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
+      className={`flex w-full cursor-pointer items-start gap-2 rounded-(--company-radius-sm) px-2 py-1.5 text-left hover:bg-hover ${selected ? 'company-selected' : ''}`}
     >
       <span className="flex h-4 w-3 shrink-0 items-center justify-center">
         <StatusDot tone={row.tone} />
@@ -652,7 +648,7 @@ function HerdrRowButton({
       data-flight-key={`pane:${row.paneId}`}
       data-lane={lane}
       data-index={index}
-      className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
+      className={`flex w-full cursor-pointer items-start gap-2 rounded-(--company-radius-sm) px-2 py-1.5 text-left hover:bg-hover ${selected ? 'company-selected' : ''}`}
     >
       <span className="flex h-4 w-3 shrink-0 items-center justify-center">
         <StatusDot tone={row.tone} />
@@ -665,7 +661,7 @@ function HerdrRowButton({
           {row.branch !== null && (
             <span
               title={row.worktreeRoot ?? row.branch}
-              className="min-w-0 max-w-[40%] shrink truncate rounded-[3px] border border-border px-1 font-mono text-2xs text-status-active"
+              className="min-w-0 max-w-[40%] shrink truncate rounded-(--company-radius-sm) bg-raised px-1 font-mono text-2xs text-status-active"
             >
               {row.branch}
             </span>
@@ -686,7 +682,7 @@ function SleepingGroup({ rows, view }: { rows: readonly SleepingRow[]; view: Tre
   const [open, setOpen] = useState(true);
   if (rows.length === 0) return null;
   return (
-    <div className="ml-4 border-l border-border pb-1 pl-1" data-testid="sleeping-group">
+    <div className="ml-4 pb-1 pl-1" data-testid="sleeping-group">
       <button
         type="button"
         aria-expanded={open}
@@ -746,7 +742,7 @@ function SleepingRowButton({
       data-flight-key={`sleeping:${row.paneId}`}
       data-lane={`sleeping:${row.repo.key}`}
       data-index={index}
-      className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
+      className={`flex w-full cursor-pointer items-start gap-2 rounded-(--company-radius-sm) px-2 py-1.5 text-left hover:bg-hover ${selected ? 'company-selected' : ''}`}
     >
       <span
         aria-hidden="true"

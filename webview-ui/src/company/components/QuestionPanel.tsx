@@ -56,12 +56,15 @@ function PromptRow({
   };
 
   return (
-    <fieldset className="mb-3 rounded-[6px] border border-border p-2">
+    <fieldset className="mb-3 p-2">
       <legend className="px-2 text-sm text-text">{prompt.question}</legend>
       {prompt.options.map((option, index) => {
         const checked = picked.indices.includes(index);
         return (
-          <label key={option.label} className="flex cursor-pointer items-start gap-2 text-sm">
+          <label
+            key={option.label}
+            className={`flex cursor-pointer items-start gap-2 rounded-(--company-radius-sm) px-2 py-1 text-sm ${checked ? 'company-selected' : 'hover:bg-hover'}`}
+          >
             <input
               type={prompt.multi ? 'checkbox' : 'radio'}
               checked={checked}
@@ -88,7 +91,7 @@ function PromptRow({
             onChange({ ...selection, [prompt.id]: { ...picked, text: event.target.value } })
           }
           rows={2}
-          className="w-full rounded-[4px] border border-border bg-bg-dark p-1 text-sm text-text"
+          className="w-full rounded-(--company-radius-sm) bg-raised p-1 text-sm text-text"
         />
       </label>
     </fieldset>
@@ -145,14 +148,11 @@ export function QuestionPanel({ question, onAnswer, provenance }: QuestionPanelP
     <section
       aria-label={questionHeadline(question)}
       data-testid="question-panel"
-      className="rounded-[6px] border border-warning bg-bg-dark p-3"
+      className="rounded-(--company-radius-md) bg-warning/12 p-3"
     >
       <h3 className="mb-2 text-sm text-warning">{questionHeadline(question)}</h3>
       {provenance !== undefined && (
-        <p
-          className="mb-2 rounded-[5px] border border-warning p-1 text-2xs text-warning"
-          data-testid="question-provenance"
-        >
+        <p className="mb-2 text-2xs text-warning" data-testid="question-provenance">
           {questionProvenanceNote(provenance)}
         </p>
       )}
@@ -162,7 +162,7 @@ export function QuestionPanel({ question, onAnswer, provenance }: QuestionPanelP
       {question.status !== 'pending' ? (
         <div className="flex flex-col gap-2">
           {question.questions.map((prompt) => (
-            <div key={prompt.id} className="rounded-[6px] border border-border p-2">
+            <div key={prompt.id} className="rounded-(--company-radius-md) bg-raised p-2">
               <p className="text-xs text-text">{prompt.question}</p>
               {prompt.options.length > 0 && (
                 <ul className="mt-1 list-disc pl-4 text-2xs text-text-muted">

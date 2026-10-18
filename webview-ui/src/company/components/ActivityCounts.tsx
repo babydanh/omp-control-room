@@ -22,7 +22,7 @@ export function ActivityChips({ counts }: { counts: ActivityCounts }) {
     <p
       aria-label="Tóm tắt hoạt động"
       data-testid="activity-counts"
-      className="flex flex-wrap gap-x-3 gap-y-1 border-b border-border px-2.5 py-1.5 text-2xs text-text-muted"
+      className="flex flex-wrap gap-x-3 gap-y-1 px-2.5 py-1.5 text-2xs text-text-muted"
     >
       {shownKeys(counts).map((key) => (
         <span key={key} className="inline-flex items-center gap-1.5">
@@ -37,10 +37,7 @@ export function ActivityChips({ counts }: { counts: ActivityCounts }) {
 
 export function ActivityStack({ counts }: { counts: ActivityCounts }) {
   return (
-    <div
-      data-testid="rail-counts"
-      className="flex flex-col items-center gap-1 border-b border-border px-1 py-2 text-2xs"
-    >
+    <div data-testid="rail-counts" className="flex flex-col items-center gap-1 px-1 py-2 text-2xs">
       {shownKeys(counts).map((key) => (
         <span
           key={key}

@@ -19,7 +19,7 @@ const SIZE_CLASS: Record<CompanyButtonSize, string> = {
 };
 
 /**
- * Company-scoped button with a 1px rounded frame. The shared `Button` keeps the
+ * Company-scoped button: a raised fill and no edge. The shared `Button` keeps the
  * 2px pixel frame, which clashes with the company chrome.
  */
 export function CompanyButton({

@@ -35,14 +35,17 @@ export function companyRoleLabel(role: string): string {
   return ROLE_LABELS[role as CompanyRole] ?? role;
 }
 
-/** Left-edge colour that marks a role on a card and in the role strip. */
+/**
+ * The role's mark on a card or a rail strip: a company-edge class plus one
+ * company-edge-* colour class from index.css. It draws a bar on the leading edge.
+ */
 export const ROLE_EDGE_CLASS: Record<CompanyRole, string> = {
-  chat: 'border-l-orchid',
-  director: 'border-l-accent-bright',
-  advisor: 'border-l-status-permission',
-  worker: 'border-l-status-active',
-  qa: 'border-l-status-success',
-  judge: 'border-l-warning',
+  chat: 'company-edge company-edge-chat',
+  director: 'company-edge company-edge-director',
+  advisor: 'company-edge company-edge-advisor',
+  worker: 'company-edge company-edge-worker',
+  qa: 'company-edge company-edge-qa',
+  judge: 'company-edge company-edge-judge',
 };
 
 /** The profile the server has for a role, if it declared one. */

@@ -117,17 +117,17 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
         )}
       </div>
 
-      <nav aria-label="Phần của agent herdr" className="flex gap-1 border-b border-border">
+      <nav aria-label="Phần của agent herdr" className="flex gap-1">
         {HERDR_TABS.map((entry) => (
           <button
             key={entry}
             type="button"
             onClick={() => onTabChange(entry)}
             aria-current={tab === entry}
-            className={`-mb-px cursor-pointer border-b-2 px-2 py-1.5 text-2xs ${
+            className={`relative cursor-pointer px-2 py-1.5 text-2xs ${
               tab === entry
-                ? 'border-accent text-text'
-                : 'border-transparent text-text-muted hover:text-text'
+                ? 'text-text after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-accent'
+                : 'text-text-muted hover:text-text'
             }`}
           >
             {HERDR_DRAWER_TAB_LABELS[entry]}
@@ -161,7 +161,7 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
             {screen ? (
               <HerdrScreenView lines={screenLines} />
             ) : (
-              <p className="rounded-[6px] border border-border bg-bg p-2 text-2xs text-text-muted">
+              <p className="rounded-(--company-radius-sm) bg-well p-2 text-2xs text-text-muted">
                 Chưa đọc màn hình.
               </p>
             )}
@@ -179,7 +179,7 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
               placeholder="Gửi lời nhắc tới agent…"
-              className="min-w-0 flex-1 rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text"
+              className="min-w-0 flex-1 rounded-(--company-radius-sm) bg-raised px-2 py-1 text-2xs text-text"
             />
             <CompanyButton type="submit" size="sm" disabled={draft.trim() === ''}>
               Gửi
@@ -199,7 +199,7 @@ function HerdrScreenView({ lines }: { lines: readonly ScreenLine[] }) {
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="min-h-0 min-w-0 flex-1 overflow-auto rounded-[6px] border border-border p-2"
+      className="min-h-0 min-w-0 flex-1 overflow-auto rounded-(--company-radius-sm) bg-well p-2"
     >
       <ScreenView testId="herdr-screen" lines={lines} />
     </div>

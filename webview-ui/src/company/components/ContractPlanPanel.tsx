@@ -68,10 +68,7 @@ export function ContractPlanPanel({
         <ul className="flex flex-col gap-1 text-sm">
           {view.goals.map((goal) => (
             <li key={goal.id} className="flex items-start gap-2">
-              <span
-                aria-hidden="true"
-                className={goal.covered ? 'text-[var(--pixel-accent)]' : 'text-warning'}
-              >
+              <span aria-hidden="true" className={goal.covered ? 'text-accent' : 'text-warning'}>
                 {goal.covered ? '[x]' : '[ ]'}
               </span>
               <span className="text-text-primary">{goal.text}</span>
@@ -90,7 +87,7 @@ export function ContractPlanPanel({
           </h3>
           <ul className="flex flex-col gap-2">
             {phase.tasks.map((task) => (
-              <li key={task.code} className="rounded-[6px] border border-[var(--pixel-border)] p-2">
+              <li key={task.code} className="rounded-(--company-radius-md) p-2">
                 <div className="flex items-baseline justify-between gap-2 text-sm">
                   <span className="text-text-primary">
                     <span className="text-text-muted">{task.code}</span> {task.title}
@@ -127,7 +124,7 @@ export function ContractPlanPanel({
                 <span
                   className={
                     criterion.state === 'passed'
-                      ? 'text-[var(--pixel-accent)]'
+                      ? 'text-accent'
                       : criterion.state === 'failed'
                         ? 'text-warning'
                         : 'text-text-muted'
@@ -146,7 +143,7 @@ export function ContractPlanPanel({
       {!view.canApprove && (
         <section
           aria-label="Vì sao chưa thể phê duyệt"
-          className="rounded-[6px] border border-warning p-2"
+          className="rounded-(--company-radius-md) bg-warning/12 p-2"
         >
           <h3 className="mb-1 text-xs font-semibold text-warning">Chưa sẵn sàng phê duyệt</h3>
           <ul className="list-inside list-disc text-sm text-text-primary">

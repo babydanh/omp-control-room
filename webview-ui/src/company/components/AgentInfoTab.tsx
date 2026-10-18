@@ -157,7 +157,7 @@ function AgentInfoView({ info, failure, fallbackCwd, onRefresh }: AgentInfoViewP
 
 function InfoSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="flex flex-col gap-1.5 border-t border-border pt-2">
+    <section className="flex flex-col gap-1.5">
       <h3 className="text-sm font-semibold text-text">{title}</h3>
       {children}
     </section>
@@ -179,7 +179,7 @@ function FilterBox({
       value={value}
       onChange={(event) => onChange(event.target.value)}
       placeholder={label}
-      className="rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text"
+      className="rounded-(--company-radius-sm) bg-raised px-2 py-1 text-2xs text-text"
     />
   );
 }
@@ -233,7 +233,7 @@ function ToolsSection({
             {group.tools.map((tool) => (
               <li
                 key={tool.name}
-                className={`rounded-[3px] border px-1.5 py-0.5 font-mono ${tool.active ? 'border-accent text-text' : 'border-border text-text-muted'}`}
+                className={`rounded-(--company-radius-sm) px-1.5 py-0.5 font-mono ${tool.active ? 'bg-accent/12 text-text' : 'bg-raised text-text-muted'}`}
               >
                 {tool.name}
               </li>
@@ -300,10 +300,7 @@ function SkillsSection({
       {skills.length === 0 && <p className="text-text-muted">Không có skill nào khớp bộ lọc.</p>}
       <ul className="flex flex-col gap-1">
         {skills.map((skill) => (
-          <li
-            key={skill.name}
-            className={`rounded-[5px] border px-2 py-1 ${skill.used ? 'border-accent' : 'border-transparent'}`}
-          >
+          <li key={skill.name} className="px-2 py-1">
             <span className={skill.used ? 'font-semibold text-text' : 'text-text-muted'}>
               {skill.name}
             </span>
@@ -327,9 +324,9 @@ function UsageSection({ info }: { info: AgentInfo }) {
       {bars.map((bar) => (
         <div key={bar.name} className="flex items-center gap-2">
           <span className="w-[40%] min-w-0 truncate font-mono text-text">{bar.name}</span>
-          <span className="relative h-2 min-w-0 flex-1 rounded-[2px] bg-btn-bg">
+          <span className="relative h-2 min-w-0 flex-1 rounded-full bg-raised">
             <span
-              className="absolute inset-y-0 left-0 rounded-[2px] bg-accent"
+              className="absolute inset-y-0 left-0 rounded-full bg-accent"
               style={{ width: `${bar.share * 100}%` }}
             />
           </span>

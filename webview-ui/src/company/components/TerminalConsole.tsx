@@ -177,8 +177,8 @@ export function TerminalConsole({
   }, [overflow, onOverflow]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between border-b border-border px-3 py-1 text-xs">
+    <div className="flex h-full min-h-0 flex-col rounded-(--company-radius-md) bg-well p-3">
+      <div className="flex items-center justify-between pb-2 text-xs">
         <span className="text-text-muted">
           {sessionId.slice(0, 8)} &middot; kỳ {runEpoch}
         </span>

@@ -95,6 +95,13 @@
   --color-btn-hover: var(--color-btn-hover);
   --color-active-bg: var(--color-active-bg);
   --color-accent-bright: var(--color-accent-bright);
+  --color-panel: var(--color-panel);
+  --color-raised: var(--color-raised);
+  --color-hover: var(--color-hover);
+  --color-selected: var(--color-selected);
+  --color-well: var(--color-well);
+  --color-hairline: var(--color-hairline);
+  --color-text-secondary: var(--color-text-secondary);
   --color-reset-text: var(--color-reset-text);
   --color-danger: var(--color-danger);
   --color-warning: var(--color-warning);
@@ -126,6 +133,16 @@
 }
 
 @layer components {
+  /**
+   * Company board: regions separate by tone, not lines. Sources: Zed One Dark
+   * (surface, element, border.variant), Claude desktop's theme extract (darker content
+   * pane, white-alpha hover), Orca's style guide (hairline only as the default seam),
+   * opencode's weak and strong border pair. Decisions: canvas, panel, raised, then
+   * hover and selected overlays; one hairline where two same-tone surfaces meet; radii
+   * 6/10/14px; text in three tiers at 4.5:1 or better; selected = tint plus 2px accent
+   * bar; focus = 2px accent outline; no soft shadows, so floating layers lift by tone.
+   * DeepSeek: no primary-source tokens found, so not cited.
+   */
   /**
    * Compact type scale for the Company surface.
    *
@@ -164,22 +181,29 @@
     --company-project-3: #c586c0;
     --company-project-4: #ce9178;
 
-    /* Ink and amber: the board's palette, scoped here so the office UI keeps the
-       tokens above. Warning is the red that marks something waiting on the user;
-       danger is the red of a failed run. Text clears 4.5:1 on every board surface,
-       and borders, marks and focus rings clear 3:1; companyContrast.test.ts holds
-       the palette to both. */
-    --color-bg: #141417;
-    --color-bg-dark: #1b1b20;
+    /* Surfaces step up in tone instead of drawing lines: canvas, then panel (lanes,
+       sidebar, drawer), then raised (cards, fields, menus), with hover and selected as
+       overlays. The well is darker than panel, for terminal screens. Text clears 4.5:1
+       on every surface and borders and focus rings clear 3:1; companyContrast.test.ts
+       holds the palette to both. Ink and amber: warning is the red that marks something
+       waiting on the user; danger is the red of a failed run. */
+    --color-bg: #121215;
+    --color-panel: #18181e;
+    --color-raised: #22222a;
+    --color-hover: #2c2c35;
+    --color-selected: #2e2818;
+    --color-well: #09090c;
+    --color-bg-dark: var(--color-well);
     --color-bg-thumb: #33333c;
+    /* The one hairline: a seam where two same-tone surfaces meet. Decorative. */
+    --color-hairline: #2b2b35;
+    /* Scrollbar thumbs and other edges that must read at 3:1 on their surface. */
     --color-border: #707080;
     --color-accent: #f2a33a;
     --color-accent-bright: #ffc266;
     --color-text: #ebe7df;
+    --color-text-secondary: #c9c6bf;
     --color-text-muted: #a3a1aa;
-    --color-btn-bg: #222228;
-    --color-btn-hover: #2c2c35;
-    --color-active-bg: #3a2b12;
     --color-danger: #ff7088;
     --color-warning: #ff6159;
     --color-status-permission: #a98bff;
@@ -187,11 +211,10 @@
     --color-status-success: #5fd38d;
     --color-orchid: #c792ea;
     --color-idle: #9a9aa6;
-    /* Board surfaces: a lane's column, a card on it, and the card's edge. */
-    --color-lane: #15161b;
-    --color-card: #0f1013;
-    --color-card-line: #707080;
-    --color-card-hover: #9494a0;
+    /* Corner radii: 6px for controls and chips, 10px for cards and rows, 14px for lanes. */
+    --company-radius-sm: 6px;
+    --company-radius-md: 10px;
+    --company-radius-lg: 14px;
   }
 
   /* The office canvas and its overlays draw over the artwork, so they keep the
@@ -366,17 +389,16 @@
     outline-offset: -2px;
   }
 
-  /* Lanes: each column takes its accent from data-lane, which sets the top rule
-     and tints the header. */
+  /* Lanes are panel-tone columns with no border. The header is plain text: the
+     lane's icon takes the lane colour, then the name and a count. A collapsed lane
+     keeps its narrow strip, tone only. data-lane sets the lane colour. */
   .company-lane {
     --lane-color: var(--color-idle);
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    border: 1px solid var(--color-border);
-    border-top: 3px solid var(--lane-color);
-    border-radius: 7px;
-    background: var(--color-lane);
+    border-radius: var(--company-radius-lg);
+    background: var(--color-panel);
   }
   .company-lane[data-lane='planned'] {
     --lane-color: #a98bff;
@@ -399,41 +421,93 @@
   .company-lane[data-lane='failed'] {
     --lane-color: #d14249;
   }
-  .company-lane-head {
-    border-radius: 4px 4px 0 0;
-    background: color-mix(in srgb, var(--lane-color) 14%, var(--color-lane));
-  }
 
-  /* Cards sit on the card surface; hover lightens the edge, and the selected
-     card takes the accent. */
+  /* Cards are raised tone with no edge. Hover fills one step lighter; the
+     selected card takes a 2px accent outline drawn inside its box. */
   .company-card {
-    border: 1px solid var(--color-card-line);
-    border-radius: 6px;
-    background: var(--color-card);
-    transition: border-color 120ms ease;
+    border-radius: var(--company-radius-md);
+    background: var(--color-raised);
+    transition: background-color 120ms ease;
   }
   .company-card:hover {
-    border-color: var(--color-card-hover);
+    background: var(--color-hover);
   }
   .company-card[aria-pressed='true'] {
-    border-color: var(--color-accent);
+    outline: 2px solid var(--color-accent);
+    outline-offset: -2px;
   }
 
-  /* The board's own buttons. The shared Button keeps the office's 2px square frame. */
+  /* A selected row: a tonal fill with a 2px accent bar on its leading edge. The
+     bar is a pseudo-element (::after, so it paints over a role bar) and the row
+     keeps no border. */
+  .company-selected {
+    position: relative;
+    background: var(--color-selected);
+  }
+  .company-selected::after {
+    content: '';
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 0;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--color-accent);
+  }
+
+  /* A role mark: a 2px bar on the leading edge in the role's colour, in place of
+     the old coloured left border. ROLE_EDGE_CLASS (roleProfiles.ts) names one
+     company-edge-* colour class below. */
+  .company-edge {
+    position: relative;
+  }
+  .company-edge::before {
+    content: '';
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 0;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--edge-color, var(--color-idle));
+  }
+  .company-edge-chat {
+    --edge-color: var(--color-orchid);
+  }
+  .company-edge-director {
+    --edge-color: var(--color-accent-bright);
+  }
+  .company-edge-advisor {
+    --edge-color: var(--color-status-permission);
+  }
+  .company-edge-worker {
+    --edge-color: var(--color-status-active);
+  }
+  .company-edge-qa {
+    --edge-color: var(--color-status-success);
+  }
+  .company-edge-judge {
+    --edge-color: var(--color-warning);
+  }
+  .company-edge-pane {
+    --edge-color: var(--color-text-muted);
+  }
+
+  /* Buttons sit on a raised fill with no edge. Ghost buttons show no fill until
+     hovered; the accent button is the one filled call to action in a flow. */
   .company-btn {
     cursor: pointer;
-    border: 1px solid var(--color-border);
-    border-radius: 5px;
-    background: var(--color-btn-bg);
+    border-radius: var(--company-radius-sm);
+    background: var(--color-raised);
     padding: 4px 10px;
     font-size: var(--text-sm);
     color: var(--color-text);
     transition:
-      border-color 120ms ease,
+      background-color 120ms ease,
       transform 80ms ease;
   }
   .company-btn:hover:not(:disabled) {
-    border-color: var(--color-accent);
+    background: var(--color-hover);
   }
   .company-btn:active:not(:disabled) {
     transform: scale(0.97);
@@ -446,13 +520,19 @@
     padding: 6px 14px;
     font-size: var(--text-base);
   }
+  .company-btn-ghost {
+    background: transparent;
+    color: var(--color-text-secondary);
+  }
+  .company-btn-ghost:hover:not(:disabled) {
+    background: var(--color-hover);
+    color: var(--color-text);
+  }
   .company-btn-accent {
-    border-color: var(--color-accent);
     background: var(--color-accent);
     color: var(--color-bg);
   }
   .company-btn-accent:hover:not(:disabled) {
-    border-color: var(--color-accent-bright);
     background: var(--color-accent-bright);
   }
 }
@@ -523,37 +603,35 @@
 /* Icon-only and text ghost controls: muted until hovered, with no layout shift. */
 .company-icon-btn {
   cursor: pointer;
-  border-radius: 5px;
+  border-radius: var(--company-radius-sm);
   color: var(--color-text-muted);
   transition:
     color 120ms ease,
     background-color 120ms ease;
 }
 .company-icon-btn:hover:not(:disabled) {
-  background: var(--color-btn-hover);
+  background: var(--color-hover);
   color: var(--color-text);
 }
 
-/* A filter-style toggle. aria-pressed carries its state, and the look follows it. */
+/* A filter-style toggle: text on the surface, a tonal fill when pressed.
+   aria-pressed carries its state, and the look follows it. */
 .company-toggle {
   cursor: pointer;
-  border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: var(--company-radius-sm);
   padding: 2px 10px;
   font-size: var(--text-2xs);
   color: var(--color-text-muted);
   transition:
-    border-color 120ms ease,
-    color 120ms ease,
-    background-color 120ms ease;
+    background-color 120ms ease,
+    color 120ms ease;
 }
 .company-toggle:hover {
-  border-color: var(--color-accent);
+  background: var(--color-hover);
   color: var(--color-text);
 }
 .company-toggle[aria-pressed='true'] {
-  border-color: var(--color-accent);
-  background: var(--color-active-bg);
+  background: var(--color-selected);
   color: var(--color-text);
 }
 

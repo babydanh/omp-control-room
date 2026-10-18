@@ -93,7 +93,10 @@ export function SleepingPanel({ client, state, paneId }: SleepingPanelProps) {
       </div>
 
       {notice && (
-        <p role="alert" className="text-2xs text-warning">
+        <p
+          role="alert"
+          className="rounded-(--company-radius-sm) bg-warning/12 px-2 py-1 text-2xs text-warning"
+        >
           {notice}
         </p>
       )}
@@ -105,7 +108,7 @@ export function SleepingPanel({ client, state, paneId }: SleepingPanelProps) {
           maxLength={WAKE_PROMPT_MAX_CHARS}
           onChange={(event) => setDraft(event.target.value)}
           placeholder="Lời nhắc khi đánh thức (không bắt buộc)"
-          className="min-w-0 flex-1 rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text"
+          className="min-w-0 flex-1 rounded-(--company-radius-sm) bg-raised px-2 py-1 text-2xs text-text"
         />
         <CompanyButton type="submit" size="sm" disabled={waking}>
           {waking ? 'Đang đánh thức…' : 'Đánh thức'}

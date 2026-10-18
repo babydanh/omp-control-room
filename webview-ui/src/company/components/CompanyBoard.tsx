@@ -23,7 +23,7 @@
  * because status is the server's to change.
  *
  * An agent with work of its own and no task card (a herdr pane, or a company
- * session) shows as a dashed card after the task cards. Clicking it opens that
+ * session) shows as a card after the task cards. Clicking it opens that
  * agent; hovering previews its terminal, and right-click opens its menu.
  */
 
@@ -132,7 +132,7 @@ function PlanningCard({
       data-flight-key={`prompt:${prompt.promptId}`}
       data-lane="planned"
       data-index={index}
-      className={`company-card w-full border-dashed border-l-4 p-2 text-left ${prompt.session === null ? 'cursor-default' : 'cursor-pointer'} ${ROLE_EDGE_CLASS.director}`}
+      className={`company-card w-full p-2 text-left ${prompt.session === null ? 'cursor-default' : 'cursor-pointer'} ${ROLE_EDGE_CLASS.director}`}
     >
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         {prompt.preview}
@@ -155,7 +155,7 @@ function FlowStrip({ flow }: { flow: BoardFlow }) {
   const limit = flow.runningLimit === null ? '?' : String(flow.runningLimit);
   return (
     <div
-      className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-3 py-1.5 text-2xs"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-1.5 text-2xs"
       data-testid="board-flow"
     >
       <span className="text-text">
@@ -224,7 +224,7 @@ function TaskCard({
   onSelect: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
-  const edge = card.session ? ROLE_EDGE_CLASS[card.session.role] : 'border-l-border';
+  const edge = card.session ? ROLE_EDGE_CLASS[card.session.role] : '';
   const actions = useTerminalPreview();
   const previewTarget: PreviewTarget | null = card.session
     ? { kind: 'session', sessionId: card.session.id }
@@ -247,7 +247,7 @@ function TaskCard({
       data-flight-key={`task:${card.taskId}`}
       data-lane={card.lane}
       data-index={index}
-      className={`company-card w-full cursor-pointer border-l-4 p-2 text-left ${edge} ${card.sentBack ? 'company-sent-back' : ''}`}
+      className={`company-card w-full cursor-pointer p-2 text-left ${edge} ${card.sentBack ? 'company-sent-back' : ''}`}
     >
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         <span className="font-mono text-2xs text-text-muted">{card.code}</span> {card.title}
@@ -259,7 +259,7 @@ function TaskCard({
 
 /**
  * An agent with work of its own and no task card: a herdr pane or a company
- * session. Its card is dashed, so it never reads as the company's own work. The
+ * session. Its status dot and project line set it apart from the company's own work. The
  * lane already names its status, so the card prints no status word. It shows the
  * project and branch, the title, the newest activity, and when it last changed.
  */
@@ -305,7 +305,7 @@ function AgentCard({
       data-flight-key={card.key}
       data-lane={card.lane}
       data-index={index}
-      className="company-card flex w-full cursor-pointer flex-col gap-1 border-dashed p-2 text-left"
+      className="company-card flex w-full cursor-pointer flex-col gap-1 p-2 text-left"
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <span className="flex shrink-0">
@@ -313,7 +313,7 @@ function AgentCard({
         </span>
         <span className="min-w-0 flex-1 truncate text-2xs text-text-muted">{card.project}</span>
         {card.branch !== null && (
-          <span className="min-w-0 max-w-[45%] truncate rounded-full border border-border px-1.5 text-2xs text-text-muted">
+          <span className="min-w-0 max-w-[45%] truncate rounded-full bg-panel px-1.5 text-2xs text-text-muted">
             {card.branch}
           </span>
         )}
@@ -331,7 +331,7 @@ function AgentCard({
 
 /**
  * An empty lane folded to a strip: its mark, its count and its name, read top to
- * bottom. The lane's colour rule runs along the strip's top edge. A click opens the
+ * bottom. The lane's colour tints its mark. A click opens the
  * lane. The words stay in the DOM for screen readers and text search.
  */
 function LaneStrip({
@@ -348,9 +348,9 @@ function LaneStrip({
       type="button"
       onClick={onOpen}
       title={`Mở cột ${lane.label}`}
-      className="flex h-full w-full cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-btn-hover hover:text-text"
+      className="flex h-full w-full cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-hover hover:text-text"
     >
-      <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-sm" />
+      <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-sm text-[var(--lane-color)]" />
       <span className="text-2xs font-semibold text-text">{count}</span>
       <span className="flex-1 whitespace-nowrap text-xs [writing-mode:vertical-rl]">
         {lane.label}
@@ -480,10 +480,11 @@ export function CompanyBoard({
           <LaneStrip lane={lane} count={count} onOpen={() => toggleLane(lane.id)} />
         ) : (
           <>
-            <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1">
+            <header className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
               <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
                 <span className="min-w-0">
-                  <Icon name={COMPANY_LANE_ICONS[lane.id]} /> {lane.label}
+                  <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-[var(--lane-color)]" />{' '}
+                  {lane.label}
                 </span>
                 <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
               </h3>
@@ -565,7 +566,7 @@ export function CompanyBoard({
                 aria-pressed={lane.id === shownLane}
                 aria-label={`${lane.label}, ${count} việc`}
                 onClick={() => setPickedLane(lane.id)}
-                className="touch-target flex min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[5px] border border-border px-1 py-1 text-2xs text-text-muted aria-pressed:border-accent aria-pressed:bg-active-bg aria-pressed:text-text"
+                className="touch-target flex min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[var(--company-radius-sm)] px-1 py-1 text-2xs text-text-muted hover:bg-hover aria-pressed:bg-selected aria-pressed:text-text"
               >
                 <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-sm" />
                 <span className="font-semibold tabular-nums text-text">{count}</span>

@@ -75,8 +75,8 @@ function StatusChip({ row }: { row: OmpSessionRow }) {
       title={described.basis}
       className={
         row.statusObserved
-          ? 'shrink-0 border-2 border-border px-1 text-2xs text-text'
-          : 'shrink-0 border-2 border-border px-1 text-2xs text-text-muted'
+          ? 'shrink-0 rounded-(--company-radius-sm) bg-raised px-1 text-2xs text-text'
+          : 'shrink-0 px-1 text-2xs text-text-muted'
       }
     >
       {described.label}
@@ -92,7 +92,7 @@ function SessionRow({ row, onSelect }: { row: OmpSessionRow; onSelect?: (id: str
       data-testid="omp-session-row"
       data-session-id={row.id}
       data-depth={row.depth}
-      className="flex flex-col gap-1 border-b-2 border-border py-2 last:border-b-0"
+      className="flex flex-col gap-1 py-2"
     >
       <div className="flex items-center gap-2" style={{ paddingLeft: row.depth * INDENT_PX }}>
         <button
@@ -140,8 +140,8 @@ export function OmpSessionPanel({
   const rows = flattenOmpSessionForest(buildOmpSessionForest(records));
 
   return (
-    <section className="pixel-panel flex min-h-0 flex-col" data-testid="omp-session-panel">
-      <header className="border-b-2 border-border p-2">
+    <section className="flex min-h-0 flex-col" data-testid="omp-session-panel">
+      <header className="p-2">
         <div className="flex items-baseline justify-between gap-2">
           <h3 className="text-sm text-text">Các phiên OMP</h3>
           <span className="text-2xs text-text-muted">
@@ -156,7 +156,7 @@ export function OmpSessionPanel({
 
       {error !== null && (
         <p
-          className="border-b-2 border-border p-2 text-2xs text-danger"
+          className="m-2 rounded-(--company-radius-md) bg-danger/12 p-2 text-2xs text-danger"
           data-testid="omp-session-error"
         >
           {error}

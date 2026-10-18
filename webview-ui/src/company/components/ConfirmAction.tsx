@@ -35,7 +35,12 @@ export function ConfirmAction({
         >
           {confirmLabel}
         </CompanyButton>
-        <CompanyButton size="sm" disabled={disabled} onClick={onCancel}>
+        <CompanyButton
+          size="sm"
+          className="company-btn-ghost"
+          disabled={disabled}
+          onClick={onCancel}
+        >
           Quay lại
         </CompanyButton>
       </div>

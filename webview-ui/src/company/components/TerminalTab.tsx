@@ -73,7 +73,7 @@ export function TerminalTab({ client, state, sessionId, jump }: TerminalTabProps
   return (
     <div className="flex h-full min-h-0 flex-col">
       {jump !== null && missedSeq === jump.seq && <JumpMissNote output={jump.output} />}
-      <div className="min-h-0 flex-1">
+      <div className="min-h-0 flex-1 p-2">
         <TerminalConsole
           sessionId={sessionId}
           attached={terminal?.attached ?? false}
@@ -96,7 +96,7 @@ export function TerminalTab({ client, state, sessionId, jump }: TerminalTabProps
 function JumpMissNote({ output }: { output: string | null }) {
   const wrap = useContext(WrapLinesContext);
   return (
-    <div className="min-w-0 shrink-0 border-b border-border px-3 py-2 text-2xs text-text-muted">
+    <div className="min-w-0 shrink-0 px-2 py-2 text-2xs text-text-muted">
       <p>Lệnh này không còn trong bộ đệm terminal.</p>
       {output ? (
         <pre className={`mt-1 max-h-40 overflow-auto font-mono ${textWrapClass(wrap)}`}>

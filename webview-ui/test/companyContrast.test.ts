@@ -10,6 +10,7 @@ import {
   contrastRatio,
   mixColours,
   parseHex,
+  relativeLuminance,
   type Rgb,
 } from '../src/company/contrast.js';
 
@@ -34,14 +35,6 @@ function laneColours(): Map<string, Rgb> {
     (match): [string, Rgb] => [match[1] ?? '', parseHex(match[2] ?? '')],
   );
   return new Map(entries);
-}
-
-/** The share of the lane colour the lane head's fill mixes in, read from the stylesheet. */
-function laneHeadMixPercent(): number {
-  const match = /\.company-lane-head \{[^}]*?color-mix\(in srgb, var\(--lane-color\) (\d+)%/.exec(
-    css,
-  );
-  return Number(match?.[1] ?? Number.NaN);
 }
 
 interface Pair {
@@ -83,11 +76,12 @@ function shortfalls(pairs: readonly Pair[]): string[] {
   });
 }
 
-const SURFACES = ['bg', 'bg-dark', 'lane', 'card', 'btn-bg', 'btn-hover', 'active-bg'];
+const SURFACES = ['bg', 'panel', 'raised', 'hover', 'selected', 'well'];
 
 // Every colour the board sets as text, on every surface the text can sit on.
 const TEXT_COLOURS = [
   'text',
+  'text-secondary',
   'text-muted',
   'accent',
   'accent-bright',
@@ -100,27 +94,31 @@ const TEXT_COLOURS = [
   'orchid',
 ];
 
-// Borders and focus rings on the surfaces they outline: a control's fill and the page beneath.
-const EDGE_COLOURS = ['border', 'card-line', 'card-hover', 'accent'];
-const EDGE_SURFACES = ['bg', 'bg-dark', 'lane', 'card', 'btn-bg'];
+// Focus rings, selection marks and scrollbar thumbs, on the surfaces they sit on.
+const EDGE_COLOURS = ['border', 'accent'];
+const EDGE_SURFACES = ['bg', 'panel', 'raised', 'well'];
 
-// Status dots and marks drawn on the page surfaces.
+// Status dots, role marks and lane colours drawn on the page surfaces.
 const MARK_COLOURS = [
   'idle',
   'status-active',
   'status-success',
   'status-permission',
+  'accent-bright',
   'warning',
   'danger',
   'orchid',
+  'text-muted',
 ];
-const PAGE_SURFACES = ['bg', 'bg-dark', 'lane', 'card'];
+const PAGE_SURFACES = ['bg', 'panel', 'raised'];
+
+// A hairline is decorative: it marks a seam between same-tone surfaces, so it only has to be seen.
+const HAIRLINE_MIN = 1.2;
 
 describe('board contrast tokens', () => {
   it('reads the board tokens and lane colours from the stylesheet', () => {
     expect(tokens.size).toBeGreaterThan(20);
     expect(laneColours().size).toBe(7);
-    expect(laneHeadMixPercent()).toBeGreaterThan(0);
   });
 
   it('keeps every board text colour at 4.5:1 or better on every surface', () => {
@@ -128,7 +126,7 @@ describe('board contrast tokens', () => {
     expect(shortfalls(pairs)).toEqual([]);
   });
 
-  it('keeps borders and focus rings at 3:1 or better against their surfaces', () => {
+  it('keeps focus rings and scrollbar thumbs at 3:1 or better on their surfaces', () => {
     const pairs = crossPairs(EDGE_COLOURS, EDGE_SURFACES, CONTRAST_GRAPHIC_MIN);
     expect(shortfalls(pairs)).toEqual([]);
   });
@@ -146,18 +144,31 @@ describe('board contrast tokens', () => {
     expect(shortfalls([...marks, ...laneMarks])).toEqual([]);
   });
 
-  it('keeps each lane heading and owner line at 4.5:1 on the tinted lane head', () => {
-    const percent = laneHeadMixPercent() / 100;
-    const heads = Array.from(laneColours()).flatMap(([id, colour]) => {
-      const head = mixColours(colour, token('lane'), percent);
-      return ['text', 'text-muted', 'status-active'].map((foreground) => ({
-        label: `lane ${id} head: ${foreground}`,
-        foreground: token(foreground),
-        background: head,
-        minimum: CONTRAST_TEXT_MIN,
-      }));
-    });
-    expect(shortfalls(heads)).toEqual([]);
+  it('keeps the hairline visible as a seam between same-tone surfaces', () => {
+    expect(shortfalls(crossPairs(['hairline'], ['bg', 'panel'], HAIRLINE_MIN))).toEqual([]);
+  });
+
+  it('steps the surfaces up in tone from the well to the hover fill', () => {
+    const order = ['well', 'bg', 'panel', 'raised', 'hover'];
+    for (let index = 1; index < order.length; index++) {
+      const lower = order[index - 1] ?? '';
+      const upper = order[index] ?? '';
+      expect(relativeLuminance(token(upper)), `${upper} above ${lower}`).toBeGreaterThan(
+        relativeLuminance(token(lower)),
+      );
+    }
+  });
+
+  it('declares the three corner radii the board uses: 6, 10 and 14 pixels', () => {
+    const radii = Array.from(css.matchAll(/--company-radius-(sm|md|lg): (\d+)px;/g), (match) => [
+      match[1],
+      Number(match[2]),
+    ]);
+    expect(radii).toEqual([
+      ['sm', 6],
+      ['md', 10],
+      ['lg', 14],
+    ]);
   });
 });
 

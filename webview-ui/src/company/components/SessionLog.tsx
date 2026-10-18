@@ -92,7 +92,7 @@ export function SessionLogTab({
         role="log"
         aria-label="Nhật ký phiên"
         data-testid="session-log"
-        className="min-h-0 flex-1 overflow-y-auto border-t border-border p-2"
+        className="min-h-0 flex-1 overflow-y-auto p-2"
       >
         {replaying && <p className="text-2xs text-text-muted">Đang tải nhật ký…</p>}
         {!replaying && entries.length === 0 && writing === null && running === null && (
@@ -104,10 +104,7 @@ export function SessionLogTab({
           ))}
         </ol>
         {(running !== null || writing !== null) && (
-          <div
-            data-testid="session-live"
-            className="mt-2 flex flex-col gap-1 border-t border-border pt-2 text-2xs"
-          >
+          <div data-testid="session-live" className="mt-2 flex flex-col gap-1 pt-2 text-2xs">
             {running !== null && <p className="text-status-active">Đang chạy công cụ {running}</p>}
             {writing !== null && (
               <p className={`min-w-0 text-text ${textWrapClass(wrap)}`}>
@@ -180,7 +177,7 @@ function CommandRow({
   const [expanded, setExpanded] = useState(false);
   const wrap = useContext(WrapLinesContext);
   return (
-    <li className="company-fade-in min-w-0 rounded-[6px] border border-border p-2">
+    <li className="company-fade-in company-card min-w-0 p-2">
       <button
         type="button"
         aria-expanded={live ? undefined : expanded}
@@ -200,7 +197,7 @@ function CommandRow({
           </p>
           {output !== null ? (
             <pre
-              className={`mt-1 max-h-60 overflow-auto rounded-[5px] bg-bg p-1 text-2xs text-text ${textWrapClass(wrap)}`}
+              className={`mt-1 max-h-60 overflow-auto rounded-(--company-radius-sm) bg-well p-2 text-2xs text-text ${textWrapClass(wrap)}`}
             >
               {output}
             </pre>

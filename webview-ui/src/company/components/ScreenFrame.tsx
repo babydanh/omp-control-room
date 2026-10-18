@@ -14,6 +14,10 @@ export function ScreenFrame({ children }: { children: ReactNode }) {
   const wrap = useContext(WrapLinesContext);
   const clip = wrap ? 'overflow-hidden' : 'overflow-x-auto overflow-y-hidden';
   return (
-    <div className={`flex min-h-0 min-w-0 flex-1 flex-col justify-end ${clip}`}>{children}</div>
+    <div
+      className={`flex min-h-0 min-w-0 flex-1 flex-col justify-end rounded-(--company-radius-md) bg-well p-3 ${clip}`}
+    >
+      {children}
+    </div>
   );
 }

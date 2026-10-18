@@ -40,7 +40,7 @@ import { Icon } from './Icon.js';
 import { type DotTone, StatusDot } from './StatusDot.js';
 
 /** Herdr panes have no role; their badges take a neutral edge. */
-const PANE_EDGE_CLASS = 'border-l-text-muted';
+const PANE_EDGE_CLASS = 'company-edge company-edge-pane';
 
 export interface AgentRailProps {
   state: CompanyViewState;
@@ -85,7 +85,7 @@ export function AgentRail({
     <aside
       aria-label="Đàn agent (thu gọn)"
       data-testid="agent-rail"
-      className="flex h-full shrink-0 flex-col items-center border-r border-border bg-bg-dark"
+      className="flex h-full shrink-0 flex-col items-center bg-panel"
       style={{ width: `${COMPANY_RAIL_WIDTH_PX}px` }}
     >
       <button
@@ -93,7 +93,7 @@ export function AgentRail({
         onClick={onExpand}
         aria-label="Mở rộng đàn agent"
         title="Mở rộng đàn agent (Ctrl+B)"
-        className="touch-target flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center text-2xs text-text-muted hover:text-text"
+        className="company-icon-btn touch-target flex h-9 w-9 shrink-0 items-center justify-center text-2xs"
       >
         <Icon name="chevron-right" />
       </button>
@@ -185,7 +185,7 @@ function RailEntryView({
         <div
           data-testid={`rail-summary-${entry.project.key}`}
           title={`${entry.project.name}: ${projectAgentTotal(entry.project.counts)} agent`}
-          className="flex h-8 w-[84px] shrink-0 flex-col items-center justify-center rounded-[5px] border border-dashed border-border text-2xs text-text-muted"
+          className="flex h-8 w-[84px] shrink-0 flex-col items-center justify-center rounded-(--company-radius-sm) bg-raised text-2xs text-text-muted"
         >
           <span>{projectAgentTotal(entry.project.counts)} agent</span>
           {entry.project.counts.needs > 0 && (
@@ -264,13 +264,13 @@ function RailEntryView({
           aria-label={`${entry.count} agent đã tạm trữ`}
           title={`${entry.count} agent tạm trữ · mở rộng để xem`}
           data-testid="rail-parked"
-          className="touch-target flex h-8 w-[84px] shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-dashed border-border text-2xs text-text-muted hover:text-text"
+          className="touch-target flex h-8 w-[84px] shrink-0 cursor-pointer items-center justify-center rounded-(--company-radius-sm) bg-raised text-2xs text-text-muted hover:bg-hover hover:text-text"
         >
           +{entry.count} tạm trữ
         </button>
       );
     case 'break':
-      return <hr className="my-1 w-16 border-border" />;
+      return <div aria-hidden="true" className="h-2" />;
   }
 }
 
@@ -299,7 +299,7 @@ function ProjectMarker({
       data-flight-key={`project:${project.key}`}
       data-lane="rail"
       data-index={index}
-      className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 px-1.5 pt-1 text-left hover:bg-btn-hover"
+      className="flex w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-(--company-radius-sm) px-1.5 pt-1 text-left hover:bg-hover"
     >
       <span
         aria-hidden="true"
@@ -365,7 +365,7 @@ function RailBadge({
       data-flight-key={flightKey}
       data-lane="rail"
       data-index={index}
-      className={`relative flex h-11 w-[84px] shrink-0 cursor-pointer flex-col items-start justify-center rounded-[5px] border-l-4 pl-2 pr-4 text-left hover:bg-btn-hover ${edgeClass} ${selected ? 'bg-btn-bg ring-1 ring-accent' : ''}`}
+      className={`relative flex h-11 w-[84px] shrink-0 cursor-pointer flex-col items-start justify-center rounded-(--company-radius-sm) pl-2 pr-4 text-left hover:bg-hover ${edgeClass} ${selected ? 'company-selected' : ''}`}
     >
       <span className="w-full truncate font-mono text-xs text-text">{label}</span>
       <span className="w-full truncate text-xs text-text-muted">{sub}</span>
@@ -414,7 +414,7 @@ function RailSleepingBadge({
       data-flight-key={`sleeping:${row.paneId}`}
       data-lane="rail"
       data-index={index}
-      className={`relative flex h-11 w-[84px] shrink-0 cursor-pointer flex-col items-start justify-center rounded-[5px] border-l-4 border-dashed border-l-text-muted pl-2 pr-4 text-left hover:bg-btn-hover ${selected ? 'bg-btn-bg ring-1 ring-accent' : ''}`}
+      className={`relative flex h-11 w-[84px] shrink-0 cursor-pointer flex-col items-start justify-center rounded-(--company-radius-sm) pl-2 pr-4 text-left hover:bg-hover ${PANE_EDGE_CLASS} ${selected ? 'company-selected' : ''}`}
     >
       <span className="w-full truncate font-mono text-xs text-text">
         <Icon name="moon" /> {paneShortCode(row.paneId)}

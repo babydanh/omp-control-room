@@ -169,7 +169,7 @@ export function DetailDrawer({
       data-maximized={prefs.maximized}
       data-presentation={presentation}
       style={style}
-      className={`company-drawer z-30 flex min-w-0 flex-col border-l border-border bg-bg ${open ? 'company-drawer-in' : 'pointer-events-none translate-x-full'}`}
+      className={`company-drawer z-30 flex min-w-0 flex-col border-l border-hairline bg-panel ${open ? 'company-drawer-in' : 'pointer-events-none translate-x-full'}`}
     >
       {presentation === 'docked' && (
         <div
@@ -194,7 +194,7 @@ export function DetailDrawer({
           onPrefsChange((current) => ({ ...current, maximized: !current.maximized }))
         }
         {...(headerTriggers ?? {})}
-        className="flex select-none items-center gap-3 border-b border-border px-3.5 py-2.5"
+        className="flex select-none items-center gap-3 px-3.5 py-2.5"
       >
         {presentation === 'fullscreen' && (
           <button
@@ -202,7 +202,7 @@ export function DetailDrawer({
             onClick={onClose}
             onDoubleClick={(event) => event.stopPropagation()}
             aria-label="Quay lại danh sách"
-            className="company-icon-btn touch-target shrink-0 px-2 text-sm"
+            className="company-btn company-btn-ghost touch-target shrink-0 px-2 text-sm"
           >
             <Icon name="chevron-left" className="mr-1" />
             Quay lại
@@ -213,7 +213,7 @@ export function DetailDrawer({
             {heading.title}
           </h2>
           {heading.status && (
-            <span className="shrink-0 rounded-full border border-border px-2 py-0.5 text-2xs text-text-muted">
+            <span className="shrink-0 rounded-full bg-raised px-2 py-0.5 text-2xs text-text-muted">
               {heading.status}
             </span>
           )}
@@ -225,14 +225,14 @@ export function DetailDrawer({
             onDoubleClick={(event) => event.stopPropagation()}
             aria-label="Đóng chi tiết"
             title="Đóng"
-            className="company-icon-btn touch-target shrink-0 px-1.5 text-sm"
+            className="company-btn company-btn-ghost touch-target shrink-0 px-1.5 text-sm"
           >
             <Icon name="close" />
           </button>
         )}
       </header>
       {wrapToggleShown && (
-        <div className="flex justify-end border-b border-border px-3.5 py-1">
+        <div className="flex justify-end px-3.5 py-1">
           <button
             type="button"
             aria-pressed={!prefs.wrapLines}
@@ -458,7 +458,7 @@ function TaskSubject({
 
 function TaskFacts({ card }: { card: BoardCard }) {
   return (
-    <section className="m-2.5 flex flex-col gap-2 rounded-[6px] border border-border bg-bg-dark p-2.5 text-2xs">
+    <section className="m-2.5 flex flex-col gap-2 rounded-(--company-radius-md) bg-raised p-2.5 text-2xs">
       <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1.5">
         <dt className="text-text-muted">Trạng thái</dt>
         <dd className="text-text">{taskStatusLabel(card.status)}</dd>

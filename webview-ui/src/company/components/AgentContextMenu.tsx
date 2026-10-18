@@ -534,10 +534,10 @@ export function AgentContextMenu({
       data-testid="agent-menu"
       tabIndex={-1}
       onKeyDown={onMenuKeyDown}
-      className="fixed z-50 min-w-[220px] max-w-[min(280px,calc(100vw-16px))] rounded-[6px] border border-border bg-bg-dark py-1 text-xs text-text"
+      className="fixed z-50 min-w-[220px] max-w-[min(280px,calc(100vw-16px))] rounded-(--company-radius-md) border border-hairline bg-raised py-1 text-xs text-text"
       style={{ left: position.x, top: position.y }}
     >
-      <div className="border-b border-border px-3 py-1.5">
+      <div className="px-3 pt-1.5 pb-2">
         <p className="truncate font-semibold text-text">{header.title}</p>
         {header.subtitle !== '' && (
           <p className="truncate text-2xs text-text-muted">{header.subtitle}</p>
@@ -565,7 +565,7 @@ export function AgentContextMenu({
               onKeyDown={(event) => {
                 if (event.key === 'Escape') setMode('menu');
               }}
-              className="rounded-[5px] border border-border bg-bg px-2 py-1 text-xs text-text"
+              className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text"
             />
           </label>
           <p id="agent-rename-hint" className="text-2xs text-text-muted">
@@ -601,7 +601,7 @@ export function AgentContextMenu({
       {notice !== null && (
         <p
           role="status"
-          className={`border-t border-border px-3 py-1.5 ${notice.failed ? 'text-danger' : 'text-text-muted'}`}
+          className={`mt-1 px-3 py-1.5 ${notice.failed ? 'text-danger' : 'text-text-muted'}`}
         >
           {notice.text}
         </p>
@@ -620,11 +620,11 @@ function MenuItemButton({
   const tone = item.disabled
     ? 'cursor-default text-text-muted'
     : item.danger
-      ? 'text-danger hover:bg-btn-hover focus:bg-btn-hover'
-      : 'text-text hover:bg-btn-hover focus:bg-btn-hover';
+      ? 'text-danger hover:bg-hover focus-visible:bg-hover'
+      : 'text-text hover:bg-hover focus-visible:bg-hover';
   return (
     <>
-      {item.startsGroup && <div role="separator" className="my-1 border-t border-border" />}
+      {item.startsGroup && <div role="separator" className="my-1" />}
       <button
         type="button"
         role="menuitem"

@@ -95,7 +95,7 @@ export function WorkspaceFileBrowser({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="workspace-browser">
-      <header className="border-b border-border p-2">
+      <header className="p-2">
         <p className="truncate text-2xs text-text-muted" title={workspacePath}>
           {workspacePath || 'không có không gian làm việc'}
         </p>
@@ -103,7 +103,7 @@ export function WorkspaceFileBrowser({
       </header>
 
       {artifact && artifactText && (
-        <section className="border-b border-border p-2" aria-label="Tệp đính kèm">
+        <section className="p-2" aria-label="Tệp đính kèm">
           <div className="flex items-center justify-between">
             <h3 className="text-xs font-semibold text-text-muted">Tệp đính kèm</h3>
             <CompanyButton size="sm" onClick={onClearArtifact}>
@@ -116,7 +116,7 @@ export function WorkspaceFileBrowser({
             {!artifact.eof && ' (vẫn đang tải)'}
             {artifactText.clipped && ' (đang hiển thị các trang đầu)'}
           </p>
-          <pre className="mt-1 max-h-64 overflow-auto rounded-[6px] border border-border bg-bg-dark p-2 text-2xs whitespace-pre-wrap text-text">
+          <pre className="mt-1 max-h-64 overflow-auto rounded-(--company-radius-md) bg-well p-2 text-2xs whitespace-pre-wrap text-text">
             {artifactText.text}
           </pre>
         </section>
@@ -131,7 +131,7 @@ export function WorkspaceFileBrowser({
           <li key={entry.path}>
             <button
               type="button"
-              className="flex w-full cursor-pointer items-baseline justify-between gap-2 px-2 py-1 text-left text-sm text-text hover:bg-btn-hover"
+              className="flex w-full cursor-pointer items-baseline justify-between gap-2 rounded-(--company-radius-sm) px-2 py-1 text-left text-sm text-text hover:bg-hover"
               onClick={() => {
                 if (entry.kind === 'directory') {
                   setPath(entry.path);
@@ -153,7 +153,7 @@ export function WorkspaceFileBrowser({
       </ul>
 
       {openFile !== null && (
-        <section className="border-t border-border p-2" aria-label={`Tệp ${openFile}`}>
+        <section className="p-2" aria-label={`Tệp ${openFile}`}>
           <div className="flex items-center justify-between">
             <h3 className="truncate text-xs text-text">{openFile}</h3>
             <CompanyButton size="sm" onClick={() => setOpenFile(null)}>
@@ -173,7 +173,7 @@ export function WorkspaceFileBrowser({
               <p className="text-2xs text-text-muted">
                 đang hiển thị {described.byteLength} trong tổng số {described.totalBytes} byte
               </p>
-              <pre className="mt-1 max-h-64 overflow-auto rounded-[6px] border border-border bg-bg-dark p-2 text-2xs whitespace-pre-wrap text-text">
+              <pre className="mt-1 max-h-64 overflow-auto rounded-(--company-radius-md) bg-well p-2 text-2xs whitespace-pre-wrap text-text">
                 {described.text}
               </pre>
             </>

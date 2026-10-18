@@ -20,9 +20,12 @@ export interface WorkspaceSwitcherProps {
   state: CompanyViewState;
 }
 
-/** The class every control in the switcher shares: a small outlined button. */
+/** The class every control in the switcher shares: a small ghost button, no edge. */
 const CONTROL_CLASS =
-  'touch-target cursor-pointer rounded-[5px] border border-border px-2.5 py-1 text-2xs text-text-muted hover:border-accent hover:text-text disabled:cursor-default disabled:opacity-50';
+  'touch-target company-btn-ghost cursor-pointer rounded-(--company-radius-sm) px-2.5 py-1 text-2xs disabled:cursor-default disabled:opacity-50';
+/** The one affirmative action in the switcher: the filled accent button. */
+const ACTION_CLASS =
+  'touch-target company-btn-accent cursor-pointer rounded-(--company-radius-sm) px-2.5 py-1 text-2xs disabled:cursor-default disabled:opacity-50';
 
 export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
   const [typing, setTyping] = useState(false);
@@ -77,10 +80,15 @@ export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
           value={active?.path ?? ''}
           disabled={opening}
           onChange={(event) => openFolder(event.target.value)}
-          className="min-w-0 max-w-[min(260px,100%)] rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text disabled:opacity-50"
+          className="min-w-0 max-w-[min(260px,100%)] cursor-pointer rounded-(--company-radius-sm) bg-transparent px-2 py-1 text-2xs text-text hover:bg-hover disabled:opacity-50"
         >
           {workspaces.map((entry) => (
-            <option key={entry.path} value={entry.path} title={entry.path}>
+            <option
+              key={entry.path}
+              value={entry.path}
+              title={entry.path}
+              className="bg-raised text-text"
+            >
               {workspaceName(entry.path)} · {workspaceActivity(entry)}
             </option>
           ))}
@@ -105,9 +113,9 @@ export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
             onKeyDown={(event) => {
               if (event.key === 'Escape') setTyping(false);
             }}
-            className="w-[260px] rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text"
+            className="w-[260px] rounded-(--company-radius-sm) bg-raised px-2 py-1 text-2xs text-text"
           />
-          <button type="submit" disabled={opening} className={CONTROL_CLASS}>
+          <button type="submit" disabled={opening} className={ACTION_CLASS}>
             Mở
           </button>
           <button type="button" onClick={() => setTyping(false)} className={CONTROL_CLASS}>

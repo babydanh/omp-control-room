@@ -240,7 +240,7 @@ export function BoardShell({ client }: BoardShellProps) {
         onToggleFiles={toggleFiles}
       />
       {state.needsSnapshot && (
-        <p className="border-b border-warning px-3 py-1 text-2xs text-warning">
+        <p className="bg-warning/12 px-3 py-1.5 text-2xs text-warning">
           Có thay đổi đã bị bỏ sót; đang chờ một bản chụp mới từ máy chủ.
         </p>
       )}
@@ -248,7 +248,7 @@ export function BoardShell({ client }: BoardShellProps) {
         <p
           role="status"
           data-testid="workspace-selection-notice"
-          className="border-b border-warning px-3 py-1 text-2xs text-warning"
+          className="bg-warning/12 px-3 py-1.5 text-2xs text-warning"
         >
           {state.workspaceSelectionNotice}
         </p>

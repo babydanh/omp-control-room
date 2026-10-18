@@ -16,7 +16,7 @@ export interface AttentionBarProps {
 }
 
 const ITEM_CLASS =
-  'touch-target flex cursor-pointer items-center gap-2 rounded-[5px] border border-warning bg-bg-dark px-2 py-1 text-left text-2xs text-text hover:border-accent';
+  'touch-target flex cursor-pointer items-center gap-2 rounded-full bg-warning/12 px-3 py-1 text-left text-2xs text-text hover:bg-warning/20';
 
 export function AttentionBar({
   contract,
@@ -26,10 +26,7 @@ export function AttentionBar({
 }: AttentionBarProps) {
   if (contract === null && questions.length === 0) return null;
   return (
-    <div
-      className="flex flex-wrap gap-2 border-b border-border px-3 py-2"
-      data-testid="attention-bar"
-    >
+    <div className="flex flex-wrap gap-2 px-3 py-2" data-testid="attention-bar">
       {contract && (
         <button type="button" className={ITEM_CLASS} onClick={onOpenContract}>
           <span className="text-warning">Chờ duyệt</span>

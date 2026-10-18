@@ -33,7 +33,7 @@ export interface BoardTopBarProps {
  * query classes hide the ones that no longer fit.
  */
 const CHIP_CLASS =
-  'min-w-0 max-w-full truncate rounded-full border border-border px-2 py-0.5 text-2xs text-text-muted';
+  'min-w-0 max-w-full truncate rounded-full bg-raised px-2 py-0.5 text-2xs text-text-muted';
 
 /** The catalog chip: loading until the server has answered, then how many models are usable. */
 function CatalogStatus({ state }: { state: CompanyViewState }) {
@@ -110,7 +110,7 @@ export function BoardTopBar({
   if (mode === 'phone') {
     return (
       <>
-        <header className="flex items-center gap-2 border-b border-border px-2 py-1.5">
+        <header className="flex items-center gap-2 px-2 py-1.5">
           <button
             type="button"
             onClick={onToggleSidebar}
@@ -138,7 +138,7 @@ export function BoardTopBar({
         {menuOpen && (
           <div
             id="company-status-menu"
-            className="flex flex-col items-start gap-2 border-b border-border bg-bg-dark px-2 py-2"
+            className="mx-2 mb-1 flex flex-col items-start gap-2 rounded-[var(--company-radius-md)] bg-raised px-2 py-2"
           >
             <div className="flex w-full flex-wrap gap-1.5">
               <StatusChips state={state} compact={false} />
@@ -161,7 +161,7 @@ export function BoardTopBar({
   }
 
   return (
-    <header className="flex items-center gap-3 border-b border-border px-3 py-2">
+    <header className="flex items-center gap-3 px-3 py-2">
       <h1 className="shrink-0 text-base text-text">OMP Board</h1>
       <WorkspaceSwitcher client={client} state={state} />
       <span className="@container flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">

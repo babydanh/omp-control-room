@@ -12,7 +12,6 @@ import type { ReactNode, RefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import { TERMINAL_THEME } from '../../constants.js';
 import { sleepingName } from '../agentSidebarView.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
@@ -226,13 +225,12 @@ function PreviewPanel({
     <div
       aria-hidden="true"
       data-testid="terminal-preview"
-      className="company-fade-in pointer-events-none fixed z-40 flex flex-col overflow-hidden rounded-[6px] border border-border shadow-pixel"
+      className="company-fade-in pointer-events-none fixed z-40 flex flex-col overflow-hidden rounded-(--company-radius-md) border border-hairline bg-raised"
       style={{
         left: box.left,
         top: box.top,
         width: box.width,
         height: box.height,
-        backgroundColor: TERMINAL_THEME.background,
       }}
     >
       {target.kind === 'herdr' ? (
@@ -363,7 +361,7 @@ function LogTailPreview({
 
 function PreviewHeader({ title, note }: { title: string; note: string }) {
   return (
-    <header className="flex shrink-0 items-baseline justify-between gap-2 border-b border-border px-2 py-1 text-2xs">
+    <header className="flex shrink-0 items-baseline justify-between gap-2 px-2 py-1.5 text-2xs">
       <span className="min-w-0 truncate font-mono text-text">{title}</span>
       <span className="shrink-0 text-text-muted">{note}</span>
     </header>

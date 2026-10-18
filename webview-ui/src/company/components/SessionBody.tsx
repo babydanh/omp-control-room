@@ -122,7 +122,7 @@ export function SessionBody({
 
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="session-body">
-      <div className="border-b border-border px-3 py-2.5">
+      <div className="px-3 py-2.5">
         <p className="text-2xs text-text-muted">
           {session.code} &middot; {sessionStatusLabel(session.status)} &middot;{' '}
           {companyRoleLabel(session.role)} &middot; kỳ {session.runEpoch}
@@ -142,17 +142,17 @@ export function SessionBody({
         )}
       </div>
 
-      <nav aria-label="Phần của phiên" className="flex flex-wrap gap-1 border-b border-border px-2">
+      <nav aria-label="Phần của phiên" className="flex flex-wrap gap-1 px-2">
         {TABS.map((entry) => (
           <button
             key={entry}
             type="button"
             onClick={() => setStored({ ...choice, tab: entry })}
             aria-current={tab === entry}
-            className={`-mb-px cursor-pointer border-b-2 px-2 py-1.5 text-2xs ${
+            className={`relative cursor-pointer px-2 py-1.5 text-2xs ${
               tab === entry
-                ? 'border-accent text-text'
-                : 'border-transparent text-text-muted hover:text-text'
+                ? 'text-text after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-accent'
+                : 'text-text-muted hover:text-text'
             }`}
           >
             {DRAWER_TAB_LABELS[entry]}
@@ -230,7 +230,7 @@ function SessionQuestions({
         .map((question) => (
           <div
             key={question.id}
-            className="flex items-center justify-between gap-2 rounded-[6px] border border-warning p-2 text-2xs"
+            className="flex items-center justify-between gap-2 rounded-(--company-radius-md) bg-warning/12 p-2 text-2xs"
           >
             <span className="min-w-0 truncate text-text">{question.title}</span>
             <button

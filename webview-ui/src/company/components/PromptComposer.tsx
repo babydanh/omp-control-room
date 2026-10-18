@@ -449,12 +449,12 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
   return (
     <section
-      className="border-t border-border bg-bg px-2 pt-1 pb-[max(4px,env(safe-area-inset-bottom))]"
+      className="bg-bg px-2 pt-1 pb-[max(4px,env(safe-area-inset-bottom))]"
       data-testid="prompt-composer"
     >
       {rows.length > 0 && (
         <ul
-          className="mb-1 max-h-40 overflow-auto rounded-[6px] border border-border"
+          className="mb-1 max-h-40 overflow-auto rounded-[var(--company-radius-md)] border border-hairline bg-raised"
           data-testid="prompt-completions"
         >
           {rows.map((row, index) => (
@@ -463,7 +463,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
                 type="button"
                 onClick={() => accept(row)}
                 className={`block w-full cursor-pointer px-2 py-1 text-left text-2xs ${
-                  index === active ? 'bg-bg-dark text-text' : 'text-text-muted'
+                  index === active ? 'company-selected text-text' : 'text-text-muted hover:bg-hover'
                 }`}
               >
                 {row.kind === 'command' ? (
@@ -486,7 +486,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
       {modelCommand !== null && (
         <ul
-          className="mb-1 max-h-40 overflow-auto rounded-[6px] border border-border"
+          className="mb-1 max-h-40 overflow-auto rounded-[var(--company-radius-md)] border border-hairline bg-raised"
           data-testid="model-picker"
         >
           {state.modelCatalog.length === 0 && (
@@ -542,7 +542,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           placeholder="Nhập tin nhắn · / để gõ lệnh"
           aria-label="Tin nhắn"
           data-testid="prompt-input"
-          className="min-w-0 flex-1 resize-none rounded-[6px] border border-border bg-bg-dark px-2 py-1 text-sm leading-5 text-text"
+          className="min-w-0 flex-1 resize-none rounded-[var(--company-radius-md)] bg-raised px-3 py-2 text-sm leading-5 text-text"
         />
         <CompanyButton
           size="sm"
@@ -574,7 +574,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           tabIndex={0}
           title={COMPOSER_HINTS}
           aria-label={COMPOSER_HINTS}
-          className="ml-auto shrink-0 cursor-help rounded-full border border-border px-1.5"
+          className="ml-auto shrink-0 cursor-help rounded-full bg-raised px-1.5"
         >
           ?
         </span>

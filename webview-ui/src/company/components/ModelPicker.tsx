@@ -40,7 +40,7 @@ export function ModelPicker({ profile, catalog, onPick }: ModelPickerProps) {
 
   return (
     <div
-      className="flex flex-col gap-[6px] rounded-[6px] border border-accent bg-bg-dark p-[8px] text-2xs"
+      className="flex flex-col gap-[6px] rounded-(--company-radius-md) border border-hairline bg-raised p-[8px] text-2xs"
       data-testid="model-picker"
     >
       <input
@@ -48,7 +48,7 @@ export function ModelPicker({ profile, catalog, onPick }: ModelPickerProps) {
         value={query}
         onChange={(event) => setQuery(event.target.value)}
         placeholder="Tìm model (vd: opus, gpt, haiku)…"
-        className="rounded-[4px] border border-border bg-bg p-1 text-text"
+        className="rounded-(--company-radius-sm) bg-bg p-1 text-text"
       />
       <ul className="max-h-[260px] overflow-auto">
         {rows.map((entry) => (
@@ -61,8 +61,8 @@ export function ModelPicker({ profile, catalog, onPick }: ModelPickerProps) {
               }}
               className={
                 entry.id === modelId
-                  ? 'w-full cursor-pointer bg-active-bg px-1 text-left text-text'
-                  : 'w-full cursor-pointer px-1 text-left text-text-muted hover:text-text'
+                  ? 'company-selected w-full cursor-pointer rounded-(--company-radius-sm) px-1 text-left text-text'
+                  : 'w-full cursor-pointer rounded-(--company-radius-sm) px-1 text-left text-text-muted hover:bg-hover hover:text-text'
               }
             >
               {entry.id}
@@ -77,7 +77,7 @@ export function ModelPicker({ profile, catalog, onPick }: ModelPickerProps) {
           value={thinking}
           onChange={(event) => setThinking(event.target.value)}
           disabled={levels.length === 0}
-          className="rounded-[4px] border border-border bg-bg p-1 text-text"
+          className="rounded-(--company-radius-sm) bg-bg p-1 text-text"
         >
           {levels.length === 0 && <option value={thinking}>{thinking || 'model không có'}</option>}
           {levels.map((level) => (

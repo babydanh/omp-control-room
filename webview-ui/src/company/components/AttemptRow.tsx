@@ -15,7 +15,7 @@ export interface AttemptRowProps {
 
 export function AttemptRow({ attempt, evidence, onOpenArtifact }: AttemptRowProps) {
   return (
-    <div className="rounded-[6px] border border-border p-2">
+    <div className="rounded-(--company-radius-md) p-2">
       <p className="text-2xs text-text">
         lượt chạy {attempt.id.slice(0, 8)} &middot; {attemptStatusLabel(attempt.status)}
         {attempt.error ? ` · ${attempt.error}` : ''}

@@ -19,7 +19,7 @@ const DOT_CLASS: Readonly<Record<Exclude<DotTone, 'working'>, string>> = {
   idle: 'bg-idle',
   error: 'bg-danger',
   done: 'bg-status-success',
-  parked: 'border border-text-muted bg-transparent',
+  parked: 'bg-text-muted/40',
   unknown: 'bg-idle',
 };
 
