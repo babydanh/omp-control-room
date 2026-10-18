@@ -35,6 +35,7 @@ import type {
   WorkerTaskResultOutput,
   WorkspaceChangeInput,
 } from './companyCoordinator.js';
+import { COMPANY_SESSION_NAME_MAX_LENGTH } from './companyCoordinator.js';
 import {
   answerQuestion as answerQuestionTransition,
   approveContract,
@@ -1172,6 +1173,29 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
         }
         throw error;
       }
+    });
+  }
+
+  /**
+   * Rename one managed session. The name is validated here as well as at the wire,
+   * so no caller can store an empty or oversized label as durable state.
+   */
+  async renameSession(id: string, name: string): Promise<void> {
+    await this.serialize(async () => {
+      this.assertOwner();
+      this.assertStarted();
+      const current = this.state.sessions[id];
+      if (!current) throw new CompanyError('session_not_found', `Unknown session: ${id}`);
+      const trimmed = name.trim();
+      if (trimmed.length === 0 || trimmed.length > COMPANY_SESSION_NAME_MAX_LENGTH) {
+        throw new CompanyError(
+          'session_name_invalid',
+          `Tên phiên phải từ 1 đến ${COMPANY_SESSION_NAME_MAX_LENGTH} ký tự.`,
+        );
+      }
+      if (trimmed === current.name) return;
+      const updated: CompanySession = { ...current, name: trimmed };
+      await this.commit(this.makeEvent([{ entity: 'session', op: 'put', id, value: updated }]));
     });
   }
 

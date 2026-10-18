@@ -15,6 +15,7 @@ import type {
   CompanyCoordinator,
   CompanySessionAction,
 } from '../src/company/companyCoordinator.js';
+import { COMPANY_SESSION_NAME_MAX_LENGTH } from '../src/company/companyCoordinator.js';
 import type { CompanyStore } from '../src/company/companyStore.js';
 import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
 
@@ -73,6 +74,7 @@ function fakeCoordinator(overrides: Partial<CompanyCoordinator> = {}): {
     decideContract: track('decideContract'),
     answerQuestion: track('answerQuestion'),
     controlSession: track('controlSession'),
+    renameSession: track('renameSession'),
     updateSettings: track('updateSettings'),
     submitTaskResult: async () => {
       throw new Error('Native task results are not browser commands.');
@@ -158,6 +160,8 @@ function companyCommands(): Record<string, Record<string, unknown>> {
     companyFileListRequest: { requestId: randomUUID(), path: '' },
     companyFileReadRequest: { requestId: randomUUID(), path: 'README.md', offset: 0 },
     companySessionLogRequest: { requestId: randomUUID(), sessionId: randomUUID(), limit: 10 },
+    companySessionRename: { requestId: randomUUID(), sessionId: randomUUID(), name: 'Tên mới' },
+    companySessionInfoRequest: { requestId: randomUUID(), sessionId: randomUUID() },
     companyAttachmentUpload: {
       requestId: randomUUID(),
       fileName: 'shot.png',
@@ -221,6 +225,16 @@ describe('company client commands', () => {
       workspaceRoot: workspace,
       terminal: fakeTerminal(),
       modelCatalog: async () => [],
+      sessionInfo: async (sessionId) => {
+        calls.push({ method: 'sessionInfo', args: [sessionId] });
+        return {
+          cwd: workspace,
+          launchCwd: workspace,
+          collectedFrom: 'transcript',
+          collectedAt: '2026-01-01T00:00:00.000Z',
+          toolUsage: [],
+        };
+      },
     };
   });
 
@@ -247,6 +261,7 @@ describe('company client commands', () => {
       'companyFileListRequest',
       'companyFileReadRequest',
       'companySessionLogRequest',
+      'companySessionInfoRequest',
     ]);
     for (const [type, msg] of Object.entries(commands)) {
       if (readOnly.has(type)) continue;
@@ -382,6 +397,50 @@ describe('company client commands', () => {
     // The epoch the client saw travels with the control, so a restart can
     // invalidate a control aimed at the previous run.
     expect(byMethod.get('controlSession')?.args).toEqual([sessionId, 'restart', 5]);
+  });
+
+  it('renames a session with a trimmed name and answers an info request with the owner description', async () => {
+    const sessionId = randomUUID();
+    const renameId = randomUUID();
+    handleCompanyCommand(
+      { type: 'companySessionRename', requestId: renameId, sessionId, name: '  Triển khai API  ' },
+      send,
+      context(),
+    );
+    await vi.waitFor(() => expect(results()).toHaveLength(1));
+    expect(results()[0]).toMatchObject({ requestId: renameId, ok: true });
+    expect(calls).toContainEqual({ method: 'renameSession', args: [sessionId, 'Triển khai API'] });
+
+    outbox = [];
+    const infoId = randomUUID();
+    handleCompanyCommand(
+      { type: 'companySessionInfoRequest', requestId: infoId, sessionId },
+      send,
+      context({ executionAllowed: false }),
+    );
+    await vi.waitFor(() => expect(replies('companySessionInfo')).toHaveLength(1));
+    expect(replies('companySessionInfo')[0]).toMatchObject({
+      requestId: infoId,
+      sessionId,
+      info: { collectedFrom: 'transcript', toolUsage: [] },
+    });
+    expect(calls).toContainEqual({ method: 'sessionInfo', args: [sessionId] });
+  });
+
+  it('refuses a session rename whose trimmed name is empty or over the limit', async () => {
+    const sessionId = randomUUID();
+    const tooLong = 'x'.repeat(COMPANY_SESSION_NAME_MAX_LENGTH + 1);
+    for (const name of ['   ', tooLong]) {
+      outbox = [];
+      handleCompanyCommand(
+        { type: 'companySessionRename', requestId: randomUUID(), sessionId, name },
+        send,
+        context(),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: false, errorCode: 'invalid_session_rename' });
+    }
+    expect(calls.some((call) => call.method === 'renameSession')).toBe(false);
   });
 
   it('surfaces a rejected coordinator decision instead of reporting success', async () => {

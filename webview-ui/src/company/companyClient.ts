@@ -255,6 +255,14 @@ export class CompanyClient {
     return this.send(commands.sessionLogRequest(commands.newRequestId(), sessionId));
   }
 
+  /**
+   * Ask for a session's agent info. The answer is a companySessionInfo; a refusal is a
+   * companyCommandResult under the handle's requestId.
+   */
+  requestSessionInfo(sessionId: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.sessionInfoRequest(requestId, sessionId));
+  }
+
   // ── Writes ───────────────────────────────────────────────────────────────
 
   submitPrompt(): SendOutcome {
@@ -308,6 +316,14 @@ export class CompanyClient {
     return this.send(commands.sessionControl(commands.newRequestId(), sessionId, runEpoch, action));
   }
 
+  /**
+   * Rename a session. The verdict is a companyCommandResult under the handle's requestId;
+   * a refused send is reported on the handle itself.
+   */
+  renameSession(sessionId: string, name: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.sessionRename(requestId, sessionId, name));
+  }
+
   updateRoleProfiles(roleProfiles: Record<string, RoleProfile>): SendOutcome {
     return this.send(commands.settingsUpdate(commands.newRequestId(), roleProfiles));
   }
@@ -315,29 +331,41 @@ export class CompanyClient {
   // ── Herdr ────────────────────────────────────────────────────────────────
 
   /**
-   * Every herdr command mints its own requestId. A read answers with a
-   * herdrScreen carrying it; the other commands answer with a
-   * companyCommandResult under it.
+   * Every command that expects an answer mints its own requestId, so the answer
+   * can be matched back to it. A read answers with its own reply message; the
+   * other commands answer with a companyCommandResult under the requestId.
    */
-  private herdrCommand(build: (requestId: string) => ClientMessage): CompanyCommandHandle {
+  private command(build: (requestId: string) => ClientMessage): CompanyCommandHandle {
     const requestId = commands.newRequestId();
     return { requestId, ...this.send(build(requestId)) };
   }
 
   herdrRead(paneId: string, lines = HERDR_SCREEN_LINES): CompanyCommandHandle {
-    return this.herdrCommand((requestId) => commands.herdrRead(requestId, paneId, lines));
+    return this.command((requestId) => commands.herdrRead(requestId, paneId, lines));
   }
 
   herdrPrompt(paneId: string, text: string): CompanyCommandHandle {
-    return this.herdrCommand((requestId) => commands.herdrPrompt(requestId, paneId, text));
+    return this.command((requestId) => commands.herdrPrompt(requestId, paneId, text));
   }
 
   herdrKeys(paneId: string, keys: HerdrKey[]): CompanyCommandHandle {
-    return this.herdrCommand((requestId) => commands.herdrKeys(requestId, paneId, keys));
+    return this.command((requestId) => commands.herdrKeys(requestId, paneId, keys));
   }
 
   herdrFocus(paneId: string): CompanyCommandHandle {
-    return this.herdrCommand((requestId) => commands.herdrFocus(requestId, paneId));
+    return this.command((requestId) => commands.herdrFocus(requestId, paneId));
+  }
+
+  herdrRename(paneId: string, name: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.herdrRename(requestId, paneId, name));
+  }
+
+  /**
+   * Ask for an agent's info. The answer is a herdrInfo; a refusal is a
+   * companyCommandResult under the handle's requestId.
+   */
+  requestHerdrInfo(paneId: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.herdrInfoRequest(requestId, paneId));
   }
 
   private terminalLease(sessionId: string, runEpoch: number): string | null {

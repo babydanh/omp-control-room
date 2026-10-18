@@ -46,6 +46,8 @@ export type ServerMessage =
   | CompanySessionLogMessage
   | HerdrAgentsMessage
   | HerdrScreenMessage
+  | CompanySessionInfoMessage
+  | HerdrInfoMessage
   | CompanyModelCatalogMessage
   | CompanyArtifactPageMessage
   | CompanyFileListMessage
@@ -91,10 +93,14 @@ export type ClientMessage =
   | CompanyFileReadRequestMessage
   | CompanyAttachmentUploadMessage
   | CompanySessionLogRequestMessage
+  | CompanySessionRenameMessage
+  | CompanySessionInfoRequestMessage
   | HerdrReadMessage
   | HerdrPromptMessage
   | HerdrKeysMessage
   | HerdrFocusMessage
+  | HerdrRenameMessage
+  | HerdrInfoRequestMessage
   | TerminalAttachMessage
   | TerminalInputMessage
   | TerminalResizeMessage
@@ -1001,6 +1007,56 @@ export interface HerdrScreenMessage {
   at: string;
 }
 
+export interface CompanySessionInfoMessage {
+  type: 'companySessionInfo';
+  requestId: string;
+  sessionId: string;
+  info: AgentInfo;
+}
+
+export interface AgentInfo {
+  cwd?: string;
+  launchCwd?: string;
+  model?: string;
+  thinking?: string;
+  sessionFile?: string;
+  tools?: AgentToolInfo[];
+  skills?: AgentSkillInfo[];
+  toolUsage?: AgentToolUsage[];
+  collectedFrom: AnonymousSchema_591;
+  collectedAt: string;
+  note?: string;
+}
+
+export interface AgentToolInfo {
+  name: string;
+  source: AnonymousSchema_581;
+  mcpServer?: string;
+  active: boolean;
+}
+
+export type AnonymousSchema_581 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
+
+export interface AgentSkillInfo {
+  name: string;
+  description?: string;
+  used: boolean;
+}
+
+export interface AgentToolUsage {
+  name: string;
+  count: number;
+}
+
+export type AnonymousSchema_591 = 'live' | 'transcript' | 'herdr';
+
+export interface HerdrInfoMessage {
+  type: 'herdrInfo';
+  requestId: string;
+  paneId: string;
+  info: AgentInfo;
+}
+
 export interface CompanyModelCatalogMessage {
   type: 'companyModelCatalog';
   requestId: string;
@@ -1041,12 +1097,12 @@ export interface CompanyFileListMessage {
 export interface CompanyFileEntry {
   name: string;
   path: string;
-  kind: AnonymousSchema_595;
+  kind: AnonymousSchema_621;
   sizeBytes?: number;
   modifiedAt?: string;
 }
 
-export type AnonymousSchema_595 = 'file' | 'directory';
+export type AnonymousSchema_621 = 'file' | 'directory';
 
 export interface CompanyFileReadMessage {
   type: 'companyFileRead';
@@ -1058,14 +1114,14 @@ export interface CompanyFileContent {
   path: string;
   totalBytes: number;
   offset: number;
-  encoding: AnonymousSchema_603;
+  encoding: AnonymousSchema_629;
   text?: string;
   dataBase64?: string;
   mediaType?: string;
   truncated: boolean;
 }
 
-export type AnonymousSchema_603 = 'utf8' | 'base64';
+export type AnonymousSchema_629 = 'utf8' | 'base64';
 
 export interface CompanyAttachmentUploadedMessage {
   type: 'companyAttachmentUploaded';
@@ -1238,22 +1294,22 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_685;
+  delivery: AnonymousSchema_711;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_685 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_711 = 'prompt' | 'steer' | 'follow_up';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_691;
+  decision: AnonymousSchema_717;
   note?: string;
 }
 
-export type AnonymousSchema_691 = 'approve' | 'reject';
+export type AnonymousSchema_717 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1266,7 +1322,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_703;
+  decision?: AnonymousSchema_729;
 }
 
 export interface QuestionAnswer {
@@ -1275,17 +1331,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_703 = 'approve_once' | 'reject';
+export type AnonymousSchema_729 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_708;
+  action: AnonymousSchema_734;
 }
 
-export type AnonymousSchema_708 = 'pause' | 'resume' | 'kill' | 'restart' | 'archive';
+export type AnonymousSchema_734 = 'pause' | 'resume' | 'kill' | 'restart' | 'archive';
 
 export interface CompanySettingsUpdateMessage {
   type: 'companySettingsUpdate';
@@ -1335,6 +1391,19 @@ export interface CompanySessionLogRequestMessage {
   limit?: number;
 }
 
+export interface CompanySessionRenameMessage {
+  type: 'companySessionRename';
+  requestId: string;
+  sessionId: string;
+  name: string;
+}
+
+export interface CompanySessionInfoRequestMessage {
+  type: 'companySessionInfoRequest';
+  requestId: string;
+  sessionId: string;
+}
+
 export interface HerdrReadMessage {
   type: 'herdrRead';
   requestId: string;
@@ -1373,6 +1442,19 @@ export type HerdrKey =
 
 export interface HerdrFocusMessage {
   type: 'herdrFocus';
+  requestId: string;
+  paneId: string;
+}
+
+export interface HerdrRenameMessage {
+  type: 'herdrRename';
+  requestId: string;
+  paneId: string;
+  name: string;
+}
+
+export interface HerdrInfoRequestMessage {
+  type: 'herdrInfoRequest';
   requestId: string;
   paneId: string;
 }

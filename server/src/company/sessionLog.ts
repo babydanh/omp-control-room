@@ -97,6 +97,41 @@ export async function readSessionLog(
   return entries.slice(Math.max(0, entries.length - limit));
 }
 
+/** Prefix of the `text` a `read` of a skill logs, so the skill name stays in the log. */
+export const SKILL_READ_LOG_PREFIX = 'skill://';
+
+/** Tool calls one session made, counted from its durable log. */
+export interface SessionToolTally {
+  /** Calls per tool name, `read` included. */
+  readonly tools: ReadonlyMap<string, number>;
+  /** Reads per skill name, from `read` calls of a `skill://` URL. */
+  readonly skills: ReadonlyMap<string, number>;
+}
+
+/**
+ * Count one session's tool calls from its log, the one record that survives a
+ * restart. A call is its start entry, which has no `ok`; a failed call is also
+ * logged on its end with `ok: false`, so those are skipped and each call counts
+ * once. A log trimmed for size counts only the entries it still keeps.
+ */
+export async function tallySessionTools(
+  directory: string,
+  sessionId: string,
+): Promise<SessionToolTally> {
+  const entries = await readSessionLog(directory, sessionId, Number.MAX_SAFE_INTEGER);
+  const tools = new Map<string, number>();
+  const skills = new Map<string, number>();
+  for (const entry of entries) {
+    if (entry.kind !== 'tool' || entry.ok !== undefined || entry.toolName === undefined) continue;
+    tools.set(entry.toolName, (tools.get(entry.toolName) ?? 0) + 1);
+    if (entry.toolName === 'read' && entry.text.startsWith(SKILL_READ_LOG_PREFIX)) {
+      const skill = entry.text.slice(SKILL_READ_LOG_PREFIX.length);
+      if (skill.length > 0) skills.set(skill, (skills.get(skill) ?? 0) + 1);
+    }
+  }
+  return { tools, skills };
+}
+
 export class SessionLog {
   private readonly directory: string;
   private readonly now: () => string;

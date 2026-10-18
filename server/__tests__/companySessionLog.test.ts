@@ -10,6 +10,7 @@ import {
   readSessionLog,
   SessionLog,
   sessionLogDirectory,
+  tallySessionTools,
 } from '../src/company/sessionLog.js';
 
 const NOW = '2026-01-01T00:00:00.000Z';
@@ -248,5 +249,45 @@ describe('session log', () => {
     const first = seqs[0] ?? 0;
     expect(first).toBeGreaterThan(0);
     expect(seqs).toEqual(Array.from({ length: seqs.length }, (_, index) => first + index));
+  });
+
+  // The runtime logs a skill read as `skill://<name>`, the name the extension reported.
+  it('tallies each tool call once from its start entry, and each skill read by its name', async () => {
+    const log = newLog();
+    log.record('s1', {
+      kind: 'tool',
+      runEpoch: 1,
+      toolName: 'read',
+      text: 'skill://brand',
+    });
+    log.record('s1', {
+      kind: 'tool',
+      runEpoch: 1,
+      toolName: 'read',
+      text: 'skill://brand',
+    });
+    log.record('s1', { kind: 'tool', runEpoch: 1, toolName: 'read', text: 'src/app.ts' });
+    log.record('s1', { kind: 'tool', runEpoch: 1, toolName: 'read', text: 'skill://' });
+    log.record('s1', { kind: 'tool', runEpoch: 1, toolName: 'bash', text: 'ls' });
+    // The end of a failed call repeats the call; it must not count twice.
+    log.record('s1', { kind: 'tool', runEpoch: 1, toolName: 'bash', text: 'ls', ok: false });
+    await log.drain();
+
+    const tally = await tallySessionTools(directory, 's1');
+
+    expect(tally.tools).toEqual(
+      new Map([
+        ['read', 4],
+        ['bash', 1],
+      ]),
+    );
+    expect(tally.skills).toEqual(new Map([['brand', 2]]));
+  });
+
+  it('tallies an unknown session as no calls', async () => {
+    const tally = await tallySessionTools(directory, 'never-ran');
+
+    expect(tally.tools.size).toBe(0);
+    expect(tally.skills.size).toBe(0);
   });
 });

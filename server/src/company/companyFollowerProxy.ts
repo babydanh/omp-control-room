@@ -33,6 +33,7 @@
 import { randomUUID } from 'node:crypto';
 
 import type {
+  AgentInfo,
   CompanyDiagnostics,
   CompanyModelCatalogEntry,
   CompanyPrompt,
@@ -73,6 +74,8 @@ export const COMPANY_HOST_COMMANDS = {
   decideContract: 'company.contract.decide',
   answerQuestion: 'company.question.answer',
   controlSession: 'company.session.control',
+  renameSession: 'company.session.rename',
+  sessionInfo: 'company.session.info',
   updateSettings: 'company.settings.update',
   terminalAttach: 'terminal.attach',
   terminalWrite: 'terminal.write',
@@ -220,6 +223,7 @@ export const COMPANY_HOST_MUTATING_COMMANDS: Readonly<Record<string, true>> = {
   'company.contract.decide': true,
   'company.question.answer': true,
   'company.session.control': true,
+  'company.session.rename': true,
   'company.settings.update': true,
   'terminal.attach': true,
   'terminal.write': true,
@@ -326,6 +330,16 @@ export class CompanyFollowerProxy {
     const value = await this.send(COMPANY_HOST_COMMANDS.modelCatalog);
     if (!Array.isArray(value)) throw hostError('owner_protocol_error');
     return value as CompanyModelCatalogEntry[];
+  }
+
+  /** One managed session's description, as the owner's live run or its record reports it. */
+  async sessionInfo(sessionId: string): Promise<AgentInfo> {
+    const value = await this.send(COMPANY_HOST_COMMANDS.sessionInfo, { id: sessionId });
+    if (!isFrameObject(value) || typeof value['collectedAt'] !== 'string') {
+      throw hostError('owner_protocol_error');
+    }
+    // The owner builds this from its own typed description; only the envelope is checked here.
+    return value as unknown as AgentInfo;
   }
 
   /**
@@ -619,6 +633,12 @@ export class CompanyFollowerProxy {
           throw hostError('command_invalid');
         }
         await proxy.send(COMPANY_HOST_COMMANDS.controlSession, { id, action, runEpoch });
+      },
+
+      async renameSession(id: string, name: string): Promise<void> {
+        if (typeof id !== 'string' || id.length === 0) throw hostError('command_invalid');
+        if (typeof name !== 'string') throw hostError('command_invalid');
+        await proxy.send(COMPANY_HOST_COMMANDS.renameSession, { id, name });
       },
 
       async updateSettings(roleProfiles: Record<string, RoleProfile>): Promise<void> {

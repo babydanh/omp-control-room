@@ -14,11 +14,13 @@
  * board says so instead of quietly showing stale cards.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
+import { type AgentMenuRequest, type SessionMenuTab } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
 import { COMPANY_SIDEBAR_OVERLAY_MAX_PX } from '../constants.js';
+import type { HerdrDrawerTab } from '../herdrView.js';
 import {
   type DrawerSubject,
   drawerSubjectFor,
@@ -39,6 +41,7 @@ import {
 import { useCompanyState } from '../useCompanyState.js';
 import { useMediaQuery } from '../useMediaQuery.js';
 import { useSessionLogBackfill } from '../useSessionLogBackfill.js';
+import { AgentContextMenu } from './AgentContextMenu.js';
 import { AgentRail } from './AgentRail.js';
 import { AgentSidebar } from './AgentSidebar.js';
 import { AttentionBar } from './AttentionBar.js';
@@ -69,6 +72,13 @@ export function BoardShell({ client }: BoardShellProps) {
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<SidebarPrefs>(() => readSidebarPrefs(browserSidebarStorage()));
+  const [herdrTab, setHerdrTab] = useState<HerdrDrawerTab>('screen');
+  const [menu, setMenu] = useState<(AgentMenuRequest & { token: number }) | null>(null);
+  // Each open gets a new token, so the menu remounts and starts from its first view.
+  const openMenu = useCallback((request: AgentMenuRequest) => {
+    setMenu((current) => ({ ...request, token: (current?.token ?? 0) + 1 }));
+  }, []);
+  const closeMenu = useCallback(() => setMenu(null), []);
   const overlay = useMediaQuery(`(max-width: ${COMPANY_SIDEBAR_OVERLAY_MAX_PX}px)`);
 
   const lanes = useMemo(() => buildBoardLanes(state), [state]);
@@ -119,8 +129,14 @@ export function BoardShell({ client }: BoardShellProps) {
     client.select(selectionForTask(state, taskId));
   }
 
-  function openHerdr(paneId: string): void {
+  function openHerdr(paneId: string, tab: HerdrDrawerTab = 'screen'): void {
     setOpened({ kind: 'herdr', paneId });
+    setHerdrTab(tab);
+  }
+
+  function openSessionTab(sessionId: string, tab: SessionMenuTab): void {
+    setOpened(null);
+    client.select({ ...selectionForSession(state, sessionId), tab });
   }
 
   function closeDrawer(): void {
@@ -172,6 +188,7 @@ export function BoardShell({ client }: BoardShellProps) {
             onExpand={toggleSidebar}
             onSelectSession={selectSession}
             onOpenHerdr={openHerdr}
+            onMenu={openMenu}
           />
         ) : (
           <AgentSidebar
@@ -187,6 +204,7 @@ export function BoardShell({ client }: BoardShellProps) {
             onCollapse={toggleSidebar}
             onSelectSession={selectSession}
             onOpenHerdr={openHerdr}
+            onMenu={openMenu}
           />
         )}
         <CompanyBoard
@@ -195,6 +213,7 @@ export function BoardShell({ client }: BoardShellProps) {
           planning={planningPrompts(state)}
           onSelectSession={selectSession}
           onSelectTask={selectTask}
+          onMenu={openMenu}
         />
         <DetailDrawer
           client={client}
@@ -209,9 +228,22 @@ export function BoardShell({ client }: BoardShellProps) {
           }}
           onClearArtifact={() => setArtifactId(null)}
           onClose={closeDrawer}
+          herdrTab={herdrTab}
+          onHerdrTab={setHerdrTab}
         />
       </div>
       <PromptComposer client={client} />
+      {menu !== null && (
+        <AgentContextMenu
+          key={menu.token}
+          client={client}
+          state={state}
+          request={menu}
+          onClose={closeMenu}
+          onSessionTab={openSessionTab}
+          onHerdrTab={openHerdr}
+        />
+      )}
     </div>
   );
 }

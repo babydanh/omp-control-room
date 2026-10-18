@@ -28,3 +28,15 @@ export function viewCommandResult(
     revision: message.revision,
   };
 }
+
+/**
+ * The notice for a command the board could not send or the server refused, or
+ * null when it went through. The server's own message is shown before its code.
+ */
+export function failureNotice(
+  outcome: Pick<CommandResultView, 'ok' | 'errorCode' | 'message'> | undefined,
+  fallback: string,
+): string | null {
+  if (outcome === undefined || outcome.ok) return null;
+  return outcome.message ?? outcome.errorCode ?? fallback;
+}

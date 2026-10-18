@@ -50,6 +50,7 @@ import * as net from 'node:net';
 import * as path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 
+import type { AgentToolInfo } from '../../../core/src/company.js';
 import { CompanyError } from './companyError.js';
 import { COMPANY_ATTACHMENT_MAX_BYTES } from './constants.js';
 import type { OmpModelDescriptor } from './modelCatalog.js';
@@ -123,6 +124,21 @@ export const OMP_BRIDGE_MAX_PENDING_MODEL_REQUESTS = 4;
 /** Deadline for one catalog read; the runtime answers it synchronously. */
 export const OMP_BRIDGE_CATALOG_TIMEOUT_MS = 15_000;
 
+/** Describe reads held at once; beyond this the caller is told, not queued. */
+export const OMP_BRIDGE_MAX_PENDING_INFO_REQUESTS = 4;
+
+/** Deadline for one describe read; the extension answers it synchronously. */
+export const OMP_BRIDGE_INFO_TIMEOUT_MS = 5_000;
+
+/** Tools or skills one describe answer may carry; the extension caps at this count. */
+export const OMP_BRIDGE_MAX_INFO_ITEMS = 500;
+
+/** Longest name, model, thinking or description text one describe answer may carry. */
+const OMP_BRIDGE_MAX_INFO_TEXT = 300;
+
+/** Longest working-directory or session-file path one describe answer may carry. */
+const OMP_BRIDGE_MAX_INFO_PATH = 4096;
+
 /**
  * One catalog read from the native runtime, stamped with the run that produced
  * it so a caller holding it across a restart can refuse it as stale.
@@ -131,6 +147,26 @@ export interface OmpBridgeModelCatalog {
   readonly sessionId: string;
   readonly runEpoch: number;
   readonly models: readonly OmpModelDescriptor[];
+}
+
+/** One loaded skill as the native session reports it. */
+export interface OmpBridgeSessionSkill {
+  readonly name: string;
+  readonly description?: string;
+}
+
+/**
+ * What the live native session has loaded, read at call time. The host keeps it
+ * as reported; skill usage is not part of it, because only the durable session
+ * log knows which skills ran.
+ */
+export interface OmpBridgeSessionDescription {
+  readonly cwd: string;
+  readonly model?: string;
+  readonly thinking?: string;
+  readonly sessionFile?: string;
+  readonly tools: readonly AgentToolInfo[];
+  readonly skills: readonly OmpBridgeSessionSkill[];
 }
 
 /**
@@ -326,6 +362,8 @@ export type OmpBridgeEvent =
       readonly toolCallId: string;
       readonly toolName: string;
       readonly isError?: boolean;
+      /** The skill a `read` of `skill://<name>` loads; set only on a start event for such a read. */
+      readonly skill?: string;
     }
   | {
       /** Raw provider usage for one finished assistant message. */
@@ -455,6 +493,14 @@ export interface OmpBridgeHandle {
    * fail closed, because an empty catalog would read as "you have no models".
    */
   requestModelCatalog(): Promise<OmpBridgeModelCatalog>;
+  /**
+   * Ask the live native session what it has loaded: working directory, model,
+   * thinking level, session file, every registered tool with its source and
+   * active flag, and every skill. A pull at call time, like the model catalog.
+   * It rejects rather than answering empty, so a missing registry or another
+   * run's answer never reads as "this session has no tools".
+   */
+  requestSessionInfo(): Promise<OmpBridgeSessionDescription>;
   dispose(): Promise<void>;
 }
 
@@ -504,6 +550,10 @@ const ERROR_TEXT = {
   catalog_malformed:
     'the native session answered the model catalog request with an unusable catalog',
   catalog_unavailable: 'the native runtime model catalog is unavailable',
+  info_busy: 'the native session already has as many describe reads in flight',
+  info_timeout: 'the native session did not describe itself in time',
+  info_malformed: 'the native session described itself with an unusable answer',
+  info_unavailable: 'the native runtime does not expose its loaded tools and skills',
   catalog_capability_missing:
     'this OMP session exposes no model query, so the runtime catalog cannot be read',
   catalog_too_large: 'the runtime model list does not fit one catalog answer',
@@ -937,11 +987,111 @@ interface PendingCatalog {
   readonly reject: (error: Error) => void;
 }
 
+/** One outstanding describe read, waiting for the authenticated extension. */
+interface PendingInfo {
+  readonly timer: NodeJS.Timeout;
+  readonly resolve: (description: OmpBridgeSessionDescription) => void;
+  readonly reject: (error: Error) => void;
+}
+
 /** One prompt waiting for the extension to report whether OMP took it. */
 interface PendingPrompt {
   readonly timer: NodeJS.Timeout;
   readonly resolve: () => void;
   readonly reject: (error: Error) => void;
+}
+
+/** Narrow a text field to the bounded, non-empty string the describe answer promises. */
+function isBoundedText(value: unknown, limit: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= limit;
+}
+
+/** Map a reported tool source onto the company's closed set, or refuse it. */
+function toolSourceOf(value: unknown): AgentToolInfo['source'] | null {
+  switch (value) {
+    case 'builtin':
+    case 'extension':
+    case 'mcp':
+    case 'sdk':
+    case 'other':
+      return value;
+    default:
+      return null;
+  }
+}
+
+/**
+ * Validate one describe answer. Every field is checked against the caps this
+ * module publishes, and one bad field refuses the whole answer: a partly
+ * trusted tool list would read as a complete one.
+ */
+function parseSessionDescription(value: unknown): OmpBridgeSessionDescription | null {
+  if (!isFrameObject(value)) return null;
+  const cwd = value['cwd'];
+  const model = value['model'];
+  const thinking = value['thinking'];
+  const sessionFile = value['sessionFile'];
+  if (!isBoundedText(cwd, OMP_BRIDGE_MAX_INFO_PATH)) return null;
+  if (model !== undefined && !isBoundedText(model, OMP_BRIDGE_MAX_INFO_TEXT)) return null;
+  if (thinking !== undefined && !isBoundedText(thinking, OMP_BRIDGE_MAX_INFO_TEXT)) return null;
+  if (sessionFile !== undefined && !isBoundedText(sessionFile, OMP_BRIDGE_MAX_INFO_PATH)) {
+    return null;
+  }
+  const tools = parseSessionTools(value['tools']);
+  const skills = parseSessionSkills(value['skills']);
+  if (tools === null || skills === null) return null;
+  return {
+    cwd,
+    ...(typeof model === 'string' ? { model } : {}),
+    ...(typeof thinking === 'string' ? { thinking } : {}),
+    ...(typeof sessionFile === 'string' ? { sessionFile } : {}),
+    tools,
+    skills,
+  };
+}
+
+function parseSessionTools(value: unknown): AgentToolInfo[] | null {
+  if (!Array.isArray(value)) return null;
+  const entries: readonly unknown[] = value;
+  if (entries.length > OMP_BRIDGE_MAX_INFO_ITEMS) return null;
+  const tools: AgentToolInfo[] = [];
+  for (const entry of entries) {
+    if (!isFrameObject(entry)) return null;
+    const name = entry['name'];
+    const source = toolSourceOf(entry['source']);
+    const mcpServer = entry['mcpServer'];
+    const active = entry['active'];
+    if (!isBoundedText(name, OMP_BRIDGE_MAX_INFO_TEXT) || source === null) return null;
+    if (typeof active !== 'boolean') return null;
+    if (mcpServer !== undefined && !isBoundedText(mcpServer, OMP_BRIDGE_MAX_INFO_TEXT)) {
+      return null;
+    }
+    tools.push({
+      name,
+      source,
+      ...(typeof mcpServer === 'string' ? { mcpServer } : {}),
+      active,
+    });
+  }
+  return tools;
+}
+
+function parseSessionSkills(value: unknown): OmpBridgeSessionSkill[] | null {
+  if (!Array.isArray(value)) return null;
+  const entries: readonly unknown[] = value;
+  if (entries.length > OMP_BRIDGE_MAX_INFO_ITEMS) return null;
+  const skills: OmpBridgeSessionSkill[] = [];
+  for (const entry of entries) {
+    if (!isFrameObject(entry)) return null;
+    const name = entry['name'];
+    const description = entry['description'];
+    if (!isBoundedText(name, OMP_BRIDGE_MAX_INFO_TEXT)) return null;
+    if (description !== undefined && !isBoundedText(description, OMP_BRIDGE_MAX_INFO_TEXT)) {
+      return null;
+    }
+    skills.push({ name, ...(typeof description === 'string' ? { description } : {}) });
+  }
+  return skills;
 }
 
 /**
@@ -972,6 +1122,8 @@ class OmpBridge implements OmpBridgeHandle {
   private readonly pendingCatalogs = new Map<string, PendingCatalog>();
   private readonly pendingPrompts = new Map<string, PendingPrompt>();
   private catalogCounter = 0;
+  private readonly pendingInfos = new Map<string, PendingInfo>();
+  private infoCounter = 0;
   private readonly handshakeTimer: NodeJS.Timeout;
   private socket: net.Socket | undefined;
   private authenticated = false;
@@ -1197,6 +1349,89 @@ class OmpBridge implements OmpBridgeHandle {
       this.settleCatalogError(id, code, message);
     }
   }
+
+  /**
+   * Ask the live native session what it has loaded. Rejects rather than
+   * answering empty: a missing registry, a malformed answer or another run's
+   * answer must never read as "this session has no tools".
+   */
+  async requestSessionInfo(): Promise<OmpBridgeSessionDescription> {
+    // The bound is checked before the write so an over-subscribed caller learns
+    // immediately instead of joining a queue that will not be drained.
+    if (this.pendingInfos.size >= OMP_BRIDGE_MAX_PENDING_INFO_REQUESTS) {
+      throw new CompanyError('omp_session_info_busy', ERROR_TEXT.info_busy);
+    }
+    const socket = this.liveSocket();
+    const id = `info-${++this.infoCounter}`;
+    return new Promise<OmpBridgeSessionDescription>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.settleInfoError(id, 'omp_session_info_timeout', ERROR_TEXT.info_timeout);
+      }, OMP_BRIDGE_INFO_TIMEOUT_MS);
+      timer.unref?.();
+      this.pendingInfos.set(id, { timer, resolve, reject });
+      try {
+        socket.write(
+          `${JSON.stringify({
+            v: OMP_BRIDGE_PROTOCOL_VERSION,
+            t: 'info_request',
+            id,
+            sessionId: this.sessionId,
+            runEpoch: this.runEpoch,
+          })}\n`,
+        );
+      } catch {
+        this.settleInfoError(id, 'omp_bridge_disconnected', ERROR_TEXT.disconnected);
+      }
+    });
+  }
+
+  /** Answer one describe read from the authenticated extension. */
+  private receiveInfoResult(frame: Record<string, unknown>): void {
+    const id = frame['id'];
+    if (!isNonEmptyString(id) || !this.pendingInfos.has(id)) return;
+    // Identity is checked before the payload: an answer stamped for another run
+    // is not this run's description, whatever it contains.
+    if (frame['sessionId'] !== this.sessionId || frame['runEpoch'] !== this.runEpoch) {
+      this.reportError('omp_bridge_stale_run_identity', ERROR_TEXT.stale_run_identity);
+      this.settleInfoError(id, 'omp_bridge_stale_run_identity', ERROR_TEXT.stale_run_identity);
+      return;
+    }
+    if (frame['ok'] !== true) {
+      const error = isFrameObject(frame['error']) ? frame['error'] : {};
+      const code = isNonEmptyString(error['code']) ? error['code'] : 'omp_session_info_unavailable';
+      const message = isNonEmptyString(error['message'])
+        ? error['message']
+        : ERROR_TEXT.info_unavailable;
+      this.settleInfoError(id, code, message);
+      return;
+    }
+    const description = parseSessionDescription(frame['info']);
+    if (description === null) {
+      this.reportError('omp_bridge_malformed_frame', ERROR_TEXT.info_malformed);
+      this.settleInfoError(id, 'omp_session_info_malformed', ERROR_TEXT.info_malformed);
+      return;
+    }
+    const pending = this.pendingInfos.get(id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingInfos.delete(id);
+    pending.resolve(description);
+  }
+
+  private settleInfoError(id: string, code: string, message: string): void {
+    const pending = this.pendingInfos.get(id);
+    if (!pending) return;
+    clearTimeout(pending.timer);
+    this.pendingInfos.delete(id);
+    pending.reject(new CompanyError(code, message));
+  }
+
+  /** Release every describe read still waiting when the channel goes away. */
+  private failPendingInfos(code: string, message: string): void {
+    for (const id of [...this.pendingInfos.keys()]) {
+      this.settleInfoError(id, code, message);
+    }
+  }
   onEvent(handler: OmpBridgeEventHandler): () => void {
     this.handlers.add(handler);
     return () => {
@@ -1369,6 +1604,7 @@ class OmpBridge implements OmpBridgeHandle {
       );
     }
     this.failPendingCatalogs('omp_bridge_disconnected', ERROR_TEXT.disconnected);
+    this.failPendingInfos('omp_bridge_disconnected', ERROR_TEXT.disconnected);
     this.failPendingPrompts('omp_bridge_disconnected', ERROR_TEXT.disconnected);
 
     if (!this.authenticated) {
@@ -1424,6 +1660,7 @@ class OmpBridge implements OmpBridgeHandle {
       );
     }
     this.failPendingCatalogs('omp_bridge_disconnected', ERROR_TEXT.disconnected);
+    this.failPendingInfos('omp_bridge_disconnected', ERROR_TEXT.disconnected);
     this.failPendingPrompts('omp_bridge_disconnected', ERROR_TEXT.disconnected);
     this.reportError('omp_bridge_disconnected', ERROR_TEXT.disconnected);
   }
@@ -1470,6 +1707,10 @@ class OmpBridge implements OmpBridgeHandle {
     }
     if (type === 'models_result') {
       this.receiveModelsResult(value);
+      return;
+    }
+    if (type === 'info_result') {
+      this.receiveInfoResult(value);
       return;
     }
     if (type === 'event') {

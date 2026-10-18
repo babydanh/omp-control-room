@@ -14,7 +14,7 @@ import { WAIT_REASON_LABELS } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_DRAWER_SLIDE_MS } from '../constants.js';
-import { HERDR_TONE_LABELS, herdrToneFor } from '../herdrView.js';
+import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
 import { questionProvenance } from '../questionProvenance.js';
 import {
   type DrawerSubject,
@@ -43,6 +43,9 @@ export interface DetailDrawerProps {
   onOpenArtifact: (artifactId: string) => void;
   onClearArtifact: () => void;
   onClose: () => void;
+  /** The herdr panel's tab, held by the board so a menu can open it on Thông tin. */
+  herdrTab: HerdrDrawerTab;
+  onHerdrTab: (tab: HerdrDrawerTab) => void;
 }
 
 type ContentProps = Omit<DetailDrawerProps, 'subject' | 'onClose'> & { subject: DrawerSubject };
@@ -129,7 +132,15 @@ function DrawerContent(props: ContentProps) {
         />
       );
     case 'herdr':
-      return <HerdrPanel client={client} state={state} paneId={subject.paneId} />;
+      return (
+        <HerdrPanel
+          client={client}
+          state={state}
+          paneId={subject.paneId}
+          tab={props.herdrTab}
+          onTabChange={props.onHerdrTab}
+        />
+      );
     case 'contract':
       return <ContractSubject client={client} state={state} />;
     case 'question':

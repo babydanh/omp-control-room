@@ -81,6 +81,7 @@ class FakeRuntime implements CompanyRuntime {
   readonly detached: string[] = [];
   readonly written: string[] = [];
   readonly resized: string[] = [];
+  readonly described: string[] = [];
   private leases = 0;
 
   readonly effects: WorkspaceCompanyCoordinatorEffects;
@@ -140,6 +141,18 @@ class FakeRuntime implements CompanyRuntime {
         this.detached.push(`${sessionId}:${runEpoch}`);
         this.viewers.delete(`${sessionId}:${runEpoch}`);
       },
+    };
+  }
+
+  /** Records which session was described; this fake holds no native session to read. */
+  async sessionInfo(sessionId: string) {
+    this.described.push(sessionId);
+    return {
+      cwd: '/fake/workspace',
+      launchCwd: '/fake/workspace',
+      collectedFrom: 'transcript' as const,
+      collectedAt: '2026-10-02T00:00:00.000Z',
+      toolUsage: [],
     };
   }
 

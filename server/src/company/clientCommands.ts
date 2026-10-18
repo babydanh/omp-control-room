@@ -28,6 +28,7 @@
 import { createHash } from 'node:crypto';
 
 import type {
+  AgentInfo,
   CompanyModelCatalogEntry,
   PromptAttachment,
   QuestionAnswerInput,
@@ -46,6 +47,7 @@ import type {
   CompanySessionAction,
   ContractDecision,
 } from './companyCoordinator.js';
+import { COMPANY_SESSION_NAME_MAX_LENGTH } from './companyCoordinator.js';
 import type { CompanyStore } from './companyStore.js';
 import {
   COMPANY_ARTIFACT_PAGE_BYTES,
@@ -105,6 +107,8 @@ export interface CompanyCommandServices {
   terminal: CompanyTerminalGateway | null;
   /** Model catalog for the UI; resolves availability, never credentials. */
   modelCatalog(): Promise<CompanyModelCatalogEntry[]>;
+  /** One managed session's description; a live run is asked, otherwise its record answers. */
+  sessionInfo(sessionId: string): Promise<AgentInfo>;
 }
 
 export interface CompanyCommandContext {
@@ -142,6 +146,8 @@ const HERDR_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'herdrPrompt',
   'herdrKeys',
   'herdrFocus',
+  'herdrRename',
+  'herdrInfoRequest',
 ]);
 const HERDR_NOT_LINKED_MESSAGE = 'Máy chủ này chưa kết nối herdr.';
 const HERDR_NOT_LINKED_ROSTER: HerdrAgentsMessage = {
@@ -175,6 +181,8 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyContractDecision',
   'companyQuestionAnswer',
   'companySessionControl',
+  'companySessionRename',
+  'companySessionInfoRequest',
   'companySettingsUpdate',
   'companyModelCatalogRequest',
   'companyArtifactRequest',
@@ -191,11 +199,13 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
 const READ_ONLY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySnapshotRequest',
   'herdrRead',
+  'herdrInfoRequest',
   'companyModelCatalogRequest',
   'companyArtifactRequest',
   'companyFileListRequest',
   'companyFileReadRequest',
   'companySessionLogRequest',
+  'companySessionInfoRequest',
 ]);
 
 export function isCompanyCommand(msg: Record<string, unknown>): boolean {
@@ -335,6 +345,12 @@ async function run(
       case 'companySessionControl':
         await controlSession(msg, requestId, services, send);
         return;
+      case 'companySessionRename':
+        await renameSession(msg, requestId, services, send);
+        return;
+      case 'companySessionInfoRequest':
+        await sessionInfo(msg, requestId, services, send);
+        return;
       case 'companySettingsUpdate':
         await updateSettings(msg, requestId, services, send);
         return;
@@ -431,6 +447,19 @@ async function herdrCommand(
         await herdr.focus(paneId);
         ok(send, requestId);
         return;
+      case 'herdrRename': {
+        const name = stringField(msg, 'name');
+        if (name === null) {
+          fail(send, requestId, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
+          return;
+        }
+        await herdr.rename(paneId, name);
+        ok(send, requestId);
+        return;
+      }
+      case 'herdrInfoRequest':
+        send({ type: 'herdrInfo', requestId, paneId, info: await herdr.info(paneId) });
+        return;
       default:
         fail(send, requestId, 'company_unsupported_command', `Không hỗ trợ: ${String(msg.type)}`);
     }
@@ -514,6 +543,52 @@ async function answerQuestion(
   }
   await services.coordinator.answerQuestion(answer as unknown as QuestionAnswerInput);
   ok(send, stringField(answer, 'requestId') ?? requestIdOf(msg));
+}
+
+async function renameSession(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const sessionId = stringField(msg, 'sessionId');
+  const name = (stringField(msg, 'name') ?? '').trim();
+  if (
+    sessionId === null ||
+    !isSessionLogId(sessionId) ||
+    name.length === 0 ||
+    name.length > COMPANY_SESSION_NAME_MAX_LENGTH
+  ) {
+    fail(
+      send,
+      requestId,
+      'invalid_session_rename',
+      `Cần có sessionId hợp lệ và tên từ 1 đến ${COMPANY_SESSION_NAME_MAX_LENGTH} ký tự.`,
+    );
+    return;
+  }
+  await services.coordinator.renameSession(sessionId, name);
+  ok(send, requestId);
+}
+
+async function sessionInfo(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const sessionId = stringField(msg, 'sessionId');
+  if (sessionId === null || !isSessionLogId(sessionId)) {
+    fail(send, requestId, 'invalid_session_info_request', 'Cần có sessionId hợp lệ.');
+    return;
+  }
+  const info = await services.sessionInfo(sessionId);
+  send({
+    type: 'companySessionInfo',
+    requestId: requestId ?? FALLBACK_REQUEST_ID,
+    sessionId,
+    info,
+  });
 }
 
 async function controlSession(

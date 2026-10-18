@@ -126,6 +126,8 @@ components:
         - $ref: '#/components/schemas/CompanySessionLogMessage'
         - $ref: '#/components/schemas/HerdrAgentsMessage'
         - $ref: '#/components/schemas/HerdrScreenMessage'
+        - $ref: '#/components/schemas/CompanySessionInfoMessage'
+        - $ref: '#/components/schemas/HerdrInfoMessage'
         - $ref: '#/components/schemas/CompanyModelCatalogMessage'
         - $ref: '#/components/schemas/CompanyArtifactPageMessage'
         - $ref: '#/components/schemas/CompanyFileListMessage'
@@ -175,11 +177,15 @@ components:
         - $ref: '#/components/schemas/CompanyFileReadRequestMessage'
         - $ref: '#/components/schemas/CompanyAttachmentUploadMessage'
         - $ref: '#/components/schemas/CompanySessionLogRequestMessage'
+        - $ref: '#/components/schemas/CompanySessionRenameMessage'
+        - $ref: '#/components/schemas/CompanySessionInfoRequestMessage'
         # Herdr (privileged; drives the user's herdr server)
         - $ref: '#/components/schemas/HerdrReadMessage'
         - $ref: '#/components/schemas/HerdrPromptMessage'
         - $ref: '#/components/schemas/HerdrKeysMessage'
         - $ref: '#/components/schemas/HerdrFocusMessage'
+        - $ref: '#/components/schemas/HerdrRenameMessage'
+        - $ref: '#/components/schemas/HerdrInfoRequestMessage'
         # Native terminal
         - $ref: '#/components/schemas/TerminalAttachMessage'
         - $ref: '#/components/schemas/TerminalInputMessage'
@@ -3121,6 +3127,71 @@ components:
           type: string
           maxLength: 64
 
+    CompanySessionRenameMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, sessionId, name]
+      properties:
+        type:
+          const: companySessionRename
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 60
+
+    CompanySessionInfoRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, sessionId]
+      properties:
+        type:
+          const: companySessionInfoRequest
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+
+    HerdrRenameMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId, name]
+      properties:
+        type:
+          const: herdrRename
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+        name:
+          type: string
+          description: herdr agent names match [a-z][a-z0-9_-]{0,31}; the server validates.
+          minLength: 1
+          maxLength: 32
+
+    HerdrInfoRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId]
+      properties:
+        type:
+          const: herdrInfoRequest
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+
     TerminalAttachMessage:
       type: object
       additionalProperties: false
@@ -3406,6 +3477,120 @@ components:
         at:
           type: string
           format: date-time
+
+    AgentToolInfo:
+      type: object
+      additionalProperties: false
+      required: [name, source, active]
+      properties:
+        name:
+          type: string
+        source:
+          type: string
+          enum: [builtin, extension, mcp, sdk, other]
+        mcpServer:
+          type: string
+          description: The MCP server a tool fronts, when it is an MCP tool.
+        active:
+          type: boolean
+          description: Whether the tool is in the session's active set right now.
+
+    AgentSkillInfo:
+      type: object
+      additionalProperties: false
+      required: [name, used]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        used:
+          type: boolean
+          description: Whether the session read this skill.
+
+    AgentToolUsage:
+      type: object
+      additionalProperties: false
+      required: [name, count]
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+          minimum: 0
+
+    AgentInfo:
+      type: object
+      additionalProperties: false
+      required: [collectedFrom, collectedAt]
+      description: What an agent is set up with and has been doing; every list is optional because each source knows only part of it.
+      properties:
+        cwd:
+          type: string
+          description: Where the agent works now (the foreground process's directory when known).
+        launchCwd:
+          type: string
+          description: The directory the agent was started in, when it differs from cwd.
+        model:
+          type: string
+        thinking:
+          type: string
+        sessionFile:
+          type: string
+        tools:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentToolInfo'
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSkillInfo'
+        toolUsage:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/AgentToolUsage'
+        collectedFrom:
+          type: string
+          enum: [live, transcript, herdr]
+          description: live = asked the running OMP; transcript = read its session file; herdr = only what herdr knows.
+        collectedAt:
+          type: string
+          format: date-time
+        note:
+          type: string
+          description: Why some of the info is missing.
+
+    CompanySessionInfoMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, sessionId, info]
+      properties:
+        type:
+          const: companySessionInfo
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        info:
+          $ref: '#/components/schemas/AgentInfo'
+
+    HerdrInfoMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId, info]
+      properties:
+        type:
+          const: herdrInfo
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+        info:
+          $ref: '#/components/schemas/AgentInfo'
 
     CompanyModelCatalogMessage:
       type: object

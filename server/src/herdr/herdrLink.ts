@@ -4,11 +4,19 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import type {
+  AgentInfo as BoardAgentInfo,
   HerdrAgent,
   HerdrAgentsMessage,
   HerdrKey,
   HerdrScreenMessage,
 } from '../../../core/src/messages.js';
+import { jsonField } from './jsonField.js';
+import {
+  OMP_TAIL_BYTES,
+  ompAgentFields,
+  type OmpTranscriptSummary,
+  readOmpTranscript,
+} from './ompTranscript.js';
 
 /** Protocol generation this board speaks; herdr reports it in `ping`. */
 export const HERDR_PROTOCOL_VERSION = 22;
@@ -37,10 +45,17 @@ const HERDR_KEY_SET: Record<HerdrKey, true> = {
 /** Pane ids look like `wA:p2`; this keeps arbitrary client strings out of herdr targets. */
 const PANE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/;
 
+/** herdr agent names: lowercase, starting with a letter, at most 32 characters. */
+const HERDR_AGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
+/** Executables omp runs as: `omp` or `omp.exe`. */
+const OMP_PROCESS_PATTERN = /^omp(\.exe)?$/i;
+
 const REQUEST_TIMEOUT_MS = 5_000;
 const READ_TIMEOUT_MS = 15_000;
 const PROMPT_TIMEOUT_MS = 10_000;
 const GIT_TIMEOUT_MS = 5_000;
+/** Upper bound for reading one omp transcript, so a slow disk cannot stall the board. */
+const OMP_TRANSCRIPT_TIMEOUT_MS = 5_000;
 /** A checkout lookup, even a negative one, is reused this long before git runs again. */
 const GIT_CACHE_TTL_MS = 30_000;
 /** Coalesces bursts of pane events into one `agent.list`. */
@@ -73,6 +88,15 @@ const INVALID_PROMPT_MESSAGE = 'Nội dung prompt không được để trống.
 const PROMPT_TOO_LARGE_MESSAGE = 'Nội dung prompt quá dài (tối đa 32 KiB).';
 const INVALID_KEYS_MESSAGE = 'Danh sách phím không hợp lệ.';
 const INVALID_LINES_MESSAGE = 'Số dòng cần đọc phải từ 1 đến 2000.';
+const INVALID_AGENT_NAME_MESSAGE =
+  'Tên agent chỉ gồm chữ thường a-z, số, "_" hoặc "-", bắt đầu bằng chữ cái và tối đa 32 ký tự.';
+const NOTE_NOT_OMP = 'Agent này không chạy omp, nên chỉ có thư mục làm việc từ herdr.';
+const NOTE_NO_SESSION_PATH = 'omp chưa báo đường dẫn transcript, nên chỉ có thông tin từ herdr.';
+const NOTE_NO_TRANSCRIPT = 'Không đọc được transcript của omp, nên chỉ có thông tin từ herdr.';
+const NOTE_TRANSCRIPT_SLOW = 'Đọc transcript của omp quá lâu, nên chỉ có thông tin từ herdr.';
+const NOTE_TRUNCATED =
+  `Phiên quá dài: số lần dùng công cụ và kỹ năng chỉ tính ${OMP_TAIL_BYTES / (1024 * 1024)} MB ` +
+  'cuối của transcript.';
 
 export type HerdrErrorCode =
   | 'invalid_request'
@@ -145,6 +169,10 @@ export interface HerdrLink {
   prompt(paneId: string, text: string): Promise<void>;
   keys(paneId: string, keys: readonly HerdrKey[]): Promise<void>;
   focus(paneId: string): Promise<void>;
+  /** Renames the agent in a pane; the name must match herdr's agent-name pattern. */
+  rename(paneId: string, name: string): Promise<void>;
+  /** Where the agent in a pane runs, and what omp reports about it. Read-only. */
+  info(paneId: string): Promise<BoardAgentInfo>;
 }
 
 export function isHerdrPaneId(value: unknown): value is string {
@@ -277,6 +305,17 @@ interface GitCheckout {
   worktreeRoot: string;
 }
 
+/** A transcript read yields its summary, or the note that explains why herdr facts stand alone. */
+type TranscriptRead = { readonly summary: OmpTranscriptSummary } | { readonly note: string };
+
+/** Facts gathered for `info`; any may be missing, and the result still holds what is known. */
+interface AgentInfoFacts {
+  readonly rosterCwd?: string;
+  readonly foregroundCwd?: string;
+  readonly read: TranscriptRead;
+  readonly collectedAt: string;
+}
+
 const MEMBERSHIP_SUBSCRIPTIONS: readonly HerdrSubscription[] = [
   { type: 'pane.created' },
   { type: 'pane.closed' },
@@ -380,6 +419,67 @@ class HerdrLinkImpl implements HerdrLink {
   async focus(paneId: string): Promise<void> {
     assertPaneId(paneId);
     await this.call('agent.focus', { target: paneId });
+  }
+
+  async rename(paneId: string, name: string): Promise<void> {
+    assertPaneId(paneId);
+    assertAgentName(name);
+    await this.call('agent.rename', { target: paneId, name });
+    // Reconcile now: the new name may not reach the roster through a pane event.
+    if (this.running) this.scheduleRefresh();
+  }
+
+  async info(paneId: string): Promise<BoardAgentInfo> {
+    assertPaneId(paneId);
+    const listed = findListedAgent(await this.call('agent.list', {}), paneId);
+    const [foregroundCwd, read] = await Promise.all([
+      this.foregroundCwd(paneId),
+      this.readTranscript(listed),
+    ]);
+    return composeAgentInfo({
+      rosterCwd: nonEmptyString(jsonField(listed, 'cwd')),
+      foregroundCwd,
+      read,
+      collectedAt: new Date().toISOString(),
+    });
+  }
+
+  /** Working directory of the pane's foreground process; `undefined` when herdr cannot say. */
+  private async foregroundCwd(paneId: string): Promise<string | undefined> {
+    try {
+      return foregroundProcessCwd(await this.call('pane.process_info', { pane_id: paneId }));
+    } catch (error) {
+      // The roster cwd stands in when herdr cannot describe the pane's processes.
+      if (error instanceof HerdrError) return undefined;
+      throw error;
+    }
+  }
+
+  /** Reads the agent's omp transcript under a deadline; every failure becomes a note instead. */
+  private async readTranscript(listed: unknown): Promise<TranscriptRead> {
+    if (jsonField(listed, 'agent') !== 'omp') return { note: NOTE_NOT_OMP };
+    const session = jsonField(listed, 'agent_session');
+    const file =
+      jsonField(session, 'kind') === 'path'
+        ? nonEmptyString(jsonField(session, 'value'))
+        : undefined;
+    if (file === undefined) return { note: NOTE_NO_SESSION_PATH };
+    const reading: Promise<TranscriptRead> = readOmpTranscript(file).then(
+      (summary) => ({ summary }),
+      () => ({ note: NOTE_NO_TRANSCRIPT }),
+    );
+    let cancelDeadline: () => void = () => undefined;
+    const deadline = new Promise<TranscriptRead>((resolve) => {
+      cancelDeadline = this.scheduler.schedule(
+        () => resolve({ note: NOTE_TRANSCRIPT_SLOW }),
+        OMP_TRANSCRIPT_TIMEOUT_MS,
+      );
+    });
+    try {
+      return await Promise.race([reading, deadline]);
+    } finally {
+      cancelDeadline();
+    }
   }
 
   private async connect(): Promise<void> {
@@ -968,4 +1068,78 @@ function assertLines(lines: number): void {
   if (!Number.isInteger(lines) || lines < 1 || lines > HERDR_MAX_READ_LINES) {
     throw new HerdrError('invalid_request', INVALID_LINES_MESSAGE);
   }
+}
+
+/** Finds an agent's `agent.list` entry by pane; a pane with no agent is reported as not found. */
+function findListedAgent(result: unknown, paneId: string): unknown {
+  const list = jsonField(result, 'agents');
+  if (!Array.isArray(list)) throw new HerdrError('herdr_rejected', INVALID_REPLY_MESSAGE);
+  const listed = (list as readonly unknown[]).find(
+    (entry) => jsonField(entry, 'pane_id') === paneId,
+  );
+  if (listed === undefined) throw new HerdrError('agent_not_found', AGENT_NOT_FOUND_MESSAGE);
+  return listed;
+}
+
+/**
+ * The cwd of the foreground process where the agent runs. An omp process wins over other
+ * foreground processes, such as the shell that started it.
+ */
+function foregroundProcessCwd(result: unknown): string | undefined {
+  const processes = jsonField(jsonField(result, 'process_info'), 'foreground_processes');
+  if (!Array.isArray(processes)) return undefined;
+  let fallback: string | undefined;
+  for (const entry of processes as readonly unknown[]) {
+    const cwd = nonEmptyString(jsonField(entry, 'cwd'));
+    if (cwd === undefined) continue;
+    if (OMP_PROCESS_PATTERN.test(executableBase(entry))) return cwd;
+    fallback ??= cwd;
+  }
+  return fallback;
+}
+
+/** Last path segment of the process name, or of argv[0] when the name is missing. */
+function executableBase(entry: unknown): string {
+  const argv = jsonField(entry, 'argv');
+  const first = Array.isArray(argv) ? (argv as readonly unknown[])[0] : undefined;
+  const command = nonEmptyString(jsonField(entry, 'name')) ?? nonEmptyString(first) ?? '';
+  return command.split(/[\\/]/).pop() ?? '';
+}
+
+/** One spelling per directory: slash style, trailing separators, and drive-letter case do not matter. */
+function comparablePath(value: string): string {
+  const unified = value.replace(/\\/g, '/').replace(/\/+$/, '');
+  return /^[a-z]:/i.test(unified) ? unified.toLowerCase() : unified;
+}
+
+function assertAgentName(name: string): void {
+  if (!HERDR_AGENT_NAME_PATTERN.test(name)) {
+    throw new HerdrError('invalid_request', INVALID_AGENT_NAME_MESSAGE);
+  }
+}
+
+/**
+ * Builds the board's view of one agent. `cwd` is where its process runs now; `launchCwd` is
+ * the directory herdr started it in, reported only when it differs.
+ */
+function composeAgentInfo(facts: AgentInfoFacts): BoardAgentInfo {
+  const cwd = facts.foregroundCwd ?? facts.rosterCwd;
+  const roster = facts.rosterCwd;
+  const launchCwd =
+    roster !== undefined && cwd !== undefined && comparablePath(roster) !== comparablePath(cwd)
+      ? roster
+      : undefined;
+  const base: BoardAgentInfo = {
+    collectedFrom: 'herdr',
+    collectedAt: facts.collectedAt,
+    ...(cwd === undefined ? {} : { cwd }),
+    ...(launchCwd === undefined ? {} : { launchCwd }),
+  };
+  if (!('summary' in facts.read)) return { ...base, note: facts.read.note };
+  return {
+    ...base,
+    ...ompAgentFields(facts.read.summary),
+    collectedFrom: 'transcript',
+    ...(facts.read.summary.truncated ? { note: NOTE_TRUNCATED } : {}),
+  };
 }

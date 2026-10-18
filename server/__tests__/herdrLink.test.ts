@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs/promises';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -356,6 +357,40 @@ async function herdrFailure(task: Promise<unknown>): Promise<HerdrError> {
     throw error;
   }
   throw new Error('expected herdr to reject');
+}
+
+/** Runs `body` in a fresh temporary directory that is removed afterwards. */
+async function withTempDir(body: (dir: string) => Promise<void>): Promise<void> {
+  const dir = path.join(os.tmpdir(), `omp-herdr-${randomUUID()}`);
+  try {
+    await body(dir);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** Writes an omp transcript as JSON lines and returns the file's absolute path. */
+async function writeTranscript(
+  dir: string,
+  entries: readonly Record<string, unknown>[],
+): Promise<string> {
+  await fs.mkdir(dir, { recursive: true });
+  const file = path.join(dir, 'session.jsonl');
+  await fs.writeFile(file, `${entries.map((entry) => JSON.stringify(entry)).join('\n')}\n`);
+  return file;
+}
+
+/** A `pane.process_info` result whose foreground group holds the given processes. */
+function processInfo(processes: readonly Record<string, unknown>[]): Record<string, unknown> {
+  return {
+    type: 'pane_process_info',
+    process_info: {
+      foreground_process_group_id: 1,
+      foreground_processes: processes,
+      shell_pid: 1,
+      pane_id: 'wA:p2',
+    },
+  };
 }
 
 describe('herdr socket resolution', () => {
@@ -921,5 +956,177 @@ describe('HerdrLink against a herdr socket', () => {
     await done;
     expect(git.callsIn(repoRoot)).toBe(2);
     expect(git.callsIn(outside)).toBe(2);
+  });
+
+  it('renames an agent with a herdr-valid name, targeting its pane', async () => {
+    fake.reply('agent.rename', () => ({ type: 'ok' }));
+
+    await link.rename('wA:p2', 'reviewer_2');
+
+    expect(fake.requestsTo('agent.rename')).toEqual([
+      { method: 'agent.rename', params: { target: 'wA:p2', name: 'reviewer_2' } },
+    ]);
+  });
+
+  it('refuses names herdr would reject before sending anything', async () => {
+    for (const name of ['', 'Reviewer', '2agent', 'my agent', 'a'.repeat(33), 'bạn']) {
+      expect((await herdrFailure(link.rename('wA:p2', name))).code).toBe('invalid_request');
+    }
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('maps a pane that vanished during a rename to agent_not_found', async () => {
+    fake.reply('agent.rename', () => {
+      throw new ReplyError('agent_not_found');
+    });
+
+    expect((await herdrFailure(link.rename('wA:p9', 'reviewer'))).code).toBe('agent_not_found');
+  });
+
+  it('describes an omp agent from its transcript, with the cwd it runs in now', async () => {
+    await withTempDir(async (dir) => {
+      const file = await writeTranscript(dir, [
+        { type: 'session', version: 3, id: 's1', cwd: 'V:\\repo' },
+        { type: 'model_change', model: 'anthropic/claude-haiku-5-5' },
+        { type: 'thinking_level_change', thinkingLevel: 'high' },
+        {
+          type: 'message',
+          message: {
+            role: 'assistant',
+            provider: 'anthropic',
+            model: 'claude-opus-5-5',
+            requestControls: {
+              tools: {
+                declared: ['read', 'bash', 'mcp__openviking_write'],
+                deferred: [],
+                active: ['read', 'bash'],
+              },
+            },
+            content: [
+              { type: 'toolCall', id: 't1', name: 'read', arguments: { path: 'skill://lavish' } },
+              { type: 'toolCall', id: 't2', name: 'mcp__openviking_write', arguments: {} },
+              { type: 'toolCall', id: 't3', name: 'bash', arguments: {} },
+              { type: 'toolCall', id: 't4', name: 'bash', arguments: {} },
+            ],
+          },
+        },
+      ]);
+      fake.reply('agent.list', () => ({
+        agents: [
+          agentInfo({
+            cwd: 'V:\\repo',
+            agent_session: { agent: 'omp', kind: 'path', value: file },
+          }),
+        ],
+      }));
+      fake.reply('pane.process_info', () =>
+        processInfo([
+          { name: 'cmd.exe', argv: ['cmd.exe'], cwd: 'V:\\repo\\' },
+          { name: 'omp.exe', argv: ['omp'], cwd: 'V:\\repo\\sub' },
+        ]),
+      );
+
+      const info = await link.info('wA:p2');
+
+      expect(info).toMatchObject({
+        collectedFrom: 'transcript',
+        cwd: 'V:\\repo\\sub',
+        launchCwd: 'V:\\repo',
+        model: 'anthropic/claude-opus-5-5',
+        thinking: 'high',
+        sessionFile: file,
+        skills: [{ name: 'lavish', used: true }],
+        toolUsage: [
+          { name: 'bash', count: 2 },
+          { name: 'mcp__openviking_write', count: 1 },
+          { name: 'read', count: 1 },
+        ],
+      });
+      expect(info.tools).toEqual([
+        { name: 'bash', source: 'builtin', active: true },
+        { name: 'mcp__openviking_write', source: 'mcp', mcpServer: 'openviking', active: false },
+        { name: 'read', source: 'builtin', active: true },
+      ]);
+      expect(info).not.toHaveProperty('note');
+    });
+  });
+
+  it('keeps the roster cwd when herdr cannot describe the pane processes', async () => {
+    fake.reply('agent.list', () => ({ agents: [agentInfo({ cwd: 'C:/repo' })] }));
+    fake.reply('pane.process_info', () => {
+      throw new ReplyError('pane_not_found');
+    });
+
+    const info = await link.info('wA:p2');
+
+    expect(info).toMatchObject({ collectedFrom: 'herdr', cwd: 'C:/repo' });
+    expect(info).not.toHaveProperty('launchCwd');
+  });
+
+  it('reports no launch cwd when the foreground directory is the same one', async () => {
+    fake.reply('agent.list', () => ({ agents: [agentInfo({ cwd: 'V:\\repo' })] }));
+    fake.reply('pane.process_info', () =>
+      processInfo([{ name: 'cmd.exe', argv: ['cmd.exe'], cwd: 'v:\\repo\\' }]),
+    );
+
+    const info = await link.info('wA:p2');
+
+    expect(info.cwd).toBe('v:\\repo\\');
+    expect(info).not.toHaveProperty('launchCwd');
+  });
+
+  it('reports only herdr facts for an agent that is not omp', async () => {
+    fake.reply('agent.list', () => ({ agents: [agentInfo({ agent: 'claude', cwd: 'V:\\repo' })] }));
+
+    expect(await link.info('wA:p2')).toMatchObject({
+      collectedFrom: 'herdr',
+      cwd: 'V:\\repo',
+      note: 'Agent này không chạy omp, nên chỉ có thư mục làm việc từ herdr.',
+    });
+  });
+
+  it('explains when omp has not reported a transcript path', async () => {
+    fake.reply('agent.list', () => ({ agents: [agentInfo({ cwd: 'V:\\repo' })] }));
+
+    expect(await link.info('wA:p2')).toMatchObject({
+      collectedFrom: 'herdr',
+      note: 'omp chưa báo đường dẫn transcript, nên chỉ có thông tin từ herdr.',
+    });
+  });
+
+  it('explains when the omp transcript cannot be read', async () => {
+    await withTempDir(async (dir) => {
+      const file = path.join(dir, 'gone.jsonl');
+      fake.reply('agent.list', () => ({
+        agents: [agentInfo({ cwd: 'V:\\repo', agent_session: { kind: 'path', value: file } })],
+      }));
+
+      expect(await link.info('wA:p2')).toMatchObject({
+        collectedFrom: 'herdr',
+        note: 'Không đọc được transcript của omp, nên chỉ có thông tin từ herdr.',
+      });
+    });
+  });
+
+  it('reports a pane that is no longer listed as not found', async () => {
+    fake.reply('agent.list', () => ({ agents: [agentInfo({ pane_id: 'wA:p7' })] }));
+
+    expect((await herdrFailure(link.info('wA:p2'))).code).toBe('agent_not_found');
+  });
+
+  it('disarms the transcript deadline once the transcript has been read', async () => {
+    await withTempDir(async (dir) => {
+      const file = await writeTranscript(dir, [
+        { type: 'model_change', model: 'anthropic/claude-opus-5-5' },
+      ]);
+      fake.reply('agent.list', () => ({
+        agents: [agentInfo({ agent_session: { kind: 'path', value: file } })],
+      }));
+
+      await link.info('wA:p2');
+
+      // Every call and the transcript read have settled, so no 5 s timer may stay armed.
+      expect(scheduler.liveCount(5_000)).toBe(0);
+    });
   });
 });

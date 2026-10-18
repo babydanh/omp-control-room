@@ -31,6 +31,14 @@ export const HERDR_TONE_LABELS: Readonly<Record<HerdrTone, string>> = {
   unknown: 'không rõ',
 };
 
+/** The herdr drawer's two tabs: the live screen, and what the agent is running. */
+export type HerdrDrawerTab = 'screen' | 'info';
+
+export const HERDR_DRAWER_TAB_LABELS: Readonly<Record<HerdrDrawerTab, string>> = {
+  screen: 'Màn hình',
+  info: 'Thông tin',
+};
+
 /** Sort rank: what needs the user first, then what is moving, then the rest. */
 export const HERDR_TONE_RANK: Readonly<Record<HerdrTone, number>> = {
   needs: 0,

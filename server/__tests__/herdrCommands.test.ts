@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type {
+  AgentInfo,
   HerdrAgentsMessage,
   HerdrScreenMessage,
   ServerMessage,
@@ -18,6 +19,12 @@ const ROSTER: HerdrAgentsMessage = {
 
 const SCREEN_TEXT = 'màn hình';
 
+const INFO: AgentInfo = {
+  cwd: 'D:\\',
+  collectedFrom: 'herdr',
+  collectedAt: '2026-01-01T00:00:00.000Z',
+};
+
 function stubLink(overrides: Partial<HerdrLink> = {}): HerdrLink {
   return {
     start: vi.fn(),
@@ -34,6 +41,8 @@ function stubLink(overrides: Partial<HerdrLink> = {}): HerdrLink {
     prompt: vi.fn(async (): Promise<void> => undefined),
     keys: vi.fn(async (): Promise<void> => undefined),
     focus: vi.fn(async (): Promise<void> => undefined),
+    rename: vi.fn(async (): Promise<void> => undefined),
+    info: vi.fn(async (): Promise<AgentInfo> => INFO),
     ...overrides,
   };
 }
@@ -67,7 +76,13 @@ function recorder() {
   const waiting: Array<(message: ServerMessage) => void> = [];
   const send = (message: ServerMessage): void => {
     sent.push(message);
-    if (message.type !== 'companyCommandResult' && message.type !== 'herdrScreen') return;
+    if (
+      message.type !== 'companyCommandResult' &&
+      message.type !== 'herdrScreen' &&
+      message.type !== 'herdrInfo'
+    ) {
+      return;
+    }
     const resolve = waiting.shift();
     if (resolve) resolve(message);
     else queued.push(message);
@@ -84,7 +99,14 @@ function recorder() {
 
 describe('herdr board commands', () => {
   it('registers herdr commands with the company dispatcher', () => {
-    for (const type of ['herdrRead', 'herdrPrompt', 'herdrKeys', 'herdrFocus']) {
+    for (const type of [
+      'herdrRead',
+      'herdrPrompt',
+      'herdrKeys',
+      'herdrFocus',
+      'herdrRename',
+      'herdrInfoRequest',
+    ]) {
       expect(isCompanyCommand({ type })).toBe(true);
     }
   });
@@ -347,5 +369,97 @@ describe('herdr board commands', () => {
       errorCode: 'invalid_request',
       message: 'Yêu cầu herdr không hợp lệ.',
     });
+  });
+
+  it('refuses a rename without a name before reaching herdr', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrRename', requestId: 'n-3', paneId: 'wA:p2' },
+      rec.send,
+      context({ herdr }),
+    );
+
+    expect(await rec.next()).toMatchObject({
+      type: 'companyCommandResult',
+      requestId: 'n-3',
+      ok: false,
+      errorCode: 'invalid_request',
+    });
+    expect(herdr.rename).not.toHaveBeenCalled();
+  });
+
+  it('renames an agent and acknowledges the request', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrRename', requestId: 'n-2', paneId: 'wA:p2', name: 'reviewer_2' },
+      rec.send,
+      context({ herdr }),
+    );
+
+    expect(await rec.next()).toEqual({ type: 'companyCommandResult', requestId: 'n-2', ok: true });
+    expect(herdr.rename).toHaveBeenCalledWith('wA:p2', 'reviewer_2');
+  });
+
+  it('refuses a rename in an untrusted workspace', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrRename', requestId: 'n-4', paneId: 'wA:p2', name: 'reviewer' },
+      rec.send,
+      context({ executionAllowed: false, herdr }),
+    );
+
+    expect(await rec.next()).toMatchObject({
+      type: 'companyCommandResult',
+      requestId: 'n-4',
+      ok: false,
+      errorCode: 'workspace_untrusted',
+    });
+    expect(herdr.rename).not.toHaveBeenCalled();
+  });
+
+  it('answers an info request with the link facts, even in an untrusted workspace', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrInfoRequest', requestId: 'i-1', paneId: 'wA:p2' },
+      rec.send,
+      context({ executionAllowed: false, herdr }),
+    );
+
+    expect(await rec.next()).toEqual({
+      type: 'herdrInfo',
+      requestId: 'i-1',
+      paneId: 'wA:p2',
+      info: INFO,
+    });
+    expect(herdr.info).toHaveBeenCalledWith('wA:p2');
+  });
+
+  it('refuses rename and info requests from an unprivileged socket', async () => {
+    const herdr = stubLink();
+    const messages: Record<string, unknown>[] = [
+      { type: 'herdrRename', requestId: 'u-2', paneId: 'wA:p2', name: 'reviewer' },
+      { type: 'herdrInfoRequest', requestId: 'u-3', paneId: 'wA:p2' },
+    ];
+
+    for (const message of messages) {
+      const rec = recorder();
+      handleCompanyCommand(message, rec.send, context({ privileged: false, herdr }));
+      expect(await rec.next()).toMatchObject({
+        type: 'companyCommandResult',
+        ok: false,
+        errorCode: 'forbidden',
+      });
+    }
+
+    expect(herdr.rename).not.toHaveBeenCalled();
+    expect(herdr.info).not.toHaveBeenCalled();
   });
 });

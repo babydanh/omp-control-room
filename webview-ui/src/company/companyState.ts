@@ -26,6 +26,7 @@
  */
 
 import type {
+  AgentInfo,
   Attempt,
   CompanyCounters,
   CompanyDiagnostics,
@@ -96,7 +97,8 @@ export interface CompanySelection {
  * a click that means "show me the question it is blocked on" has to survive
  * the drawer being re-rendered by an unrelated company message.
  */
-export type CompanyDrawerTab = 'terminal' | 'log' | 'commands' | 'questions' | 'usage' | 'report';
+export type CompanyDrawerTab =
+  'terminal' | 'log' | 'commands' | 'questions' | 'usage' | 'report' | 'info';
 
 export const EMPTY_SELECTION: CompanySelection = { sessionId: null, taskId: null, tab: null };
 
@@ -194,10 +196,12 @@ export interface HerdrView {
   agents: HerdrAgent[];
   /** Latest screen per pane; a late reply older than the one held is dropped. */
   screens: Record<string, HerdrScreenView>;
+  /** Latest agent info per pane; a late reply older than the one held is dropped. */
+  infos: Record<string, AgentInfo>;
 }
 
 export function emptyHerdrView(): HerdrView {
-  return { loaded: false, available: false, reason: null, agents: [], screens: {} };
+  return { loaded: false, available: false, reason: null, agents: [], screens: {}, infos: {} };
 }
 
 export interface CompanyViewState {
@@ -233,6 +237,8 @@ export interface CompanyViewState {
   prompt: PromptDraftState;
   /** Session logs keyed by session id; a log survives the drawer closing. */
   sessionLogs: Record<string, SessionLogView>;
+  /** Latest agent info per session; a late reply older than the one held is dropped. */
+  sessionInfos: Record<string, AgentInfo>;
   herdr: HerdrView;
 }
 
@@ -264,6 +270,7 @@ export function emptyCompanyState(): CompanyViewState {
     selection: EMPTY_SELECTION,
     prompt: EMPTY_PROMPT_DRAFT,
     sessionLogs: {},
+    sessionInfos: {},
     herdr: emptyHerdrView(),
   };
 }
@@ -313,14 +320,17 @@ export function mergeSessionLog(
   };
 }
 
-/** A removed session keeps no log: drop logs for sessions the snapshot no longer lists. */
-function pruneSessionLogs(
-  logs: Record<string, SessionLogView>,
-  sessions: Record<string, SessionView>,
-): Record<string, SessionLogView> {
-  const kept: Record<string, SessionLogView> = {};
-  for (const [sessionId, log] of Object.entries(logs)) {
-    if (sessions[sessionId] !== undefined) kept[sessionId] = log;
+/**
+ * Keeps the entries whose key still names a live thing. A removed session or pane takes
+ * its per-entity data with it.
+ */
+function keepLive<T>(
+  records: Record<string, T>,
+  isLive: (key: string) => boolean,
+): Record<string, T> {
+  const kept: Record<string, T> = {};
+  for (const [key, value] of Object.entries(records)) {
+    if (isLive(key)) kept[key] = value;
   }
   return kept;
 }
@@ -354,6 +364,29 @@ function applyHerdrScreen(
   };
 }
 
+/**
+ * Keeps the newer of a held agent info and an incoming one. Info is a measurement taken
+ * at `collectedAt`, so a reply measured earlier than the one held is a late answer and is
+ * dropped. A held info with an unreadable time is replaced; an incoming one with an
+ * unreadable time never displaces a readable one.
+ */
+function withNewerInfo(
+  infos: Record<string, AgentInfo>,
+  key: string,
+  incoming: AgentInfo,
+): Record<string, AgentInfo> {
+  const held = infos[key];
+  if (held !== undefined && isOlderInfo(incoming, held)) return infos;
+  return { ...infos, [key]: incoming };
+}
+
+function isOlderInfo(incoming: AgentInfo, held: AgentInfo): boolean {
+  const heldAt = Date.parse(held.collectedAt);
+  if (Number.isNaN(heldAt)) return false;
+  const incomingAt = Date.parse(incoming.collectedAt);
+  return Number.isNaN(incomingAt) || incomingAt < heldAt;
+}
+
 function applySnapshot(state: CompanyViewState, snapshot: CompanySnapshot): CompanyViewState {
   // A Contract embeds its tasks; the snapshot's own task list is the
   // authoritative one, and the embedded copies fill any task it omits.
@@ -383,7 +416,8 @@ function applySnapshot(state: CompanyViewState, snapshot: CompanySnapshot): Comp
     evidence: snapshot.evidence === undefined ? state.evidence : indexById(snapshot.evidence),
     reports: snapshot.reports === undefined ? state.reports : indexReports(snapshot.reports),
     usage: snapshot.usage === undefined ? state.usage : indexUsage(snapshot.usage),
-    sessionLogs: pruneSessionLogs(state.sessionLogs, sessions),
+    sessionLogs: keepLive(state.sessionLogs, (sessionId) => sessions[sessionId] !== undefined),
+    sessionInfos: keepLive(state.sessionInfos, (sessionId) => sessions[sessionId] !== undefined),
   };
 }
 
@@ -407,7 +441,9 @@ function applyChange(state: CompanyViewState, change: CompanyPutChange | Company
         delete sessions[change.id];
         const sessionLogs = { ...state.sessionLogs };
         delete sessionLogs[change.id];
-        return { ...state, sessions, sessionLogs };
+        const sessionInfos = { ...state.sessionInfos };
+        delete sessionInfos[change.id];
+        return { ...state, sessions, sessionLogs, sessionInfos };
       }
       case 'question': {
         const questions = { ...state.questions };
@@ -747,6 +783,11 @@ export function applyCompanyMessage(
           ),
         },
       });
+    case 'companySessionInfo':
+      return unchanged({
+        ...state,
+        sessionInfos: withNewerInfo(state.sessionInfos, message.sessionId, message.info),
+      });
     case 'herdrAgents':
       return unchanged({
         ...state,
@@ -756,10 +797,21 @@ export function applyCompanyMessage(
           available: message.available,
           reason: message.reason ?? null,
           agents: [...message.agents],
+          infos: keepLive(state.herdr.infos, (paneId) =>
+            message.agents.some((agent) => agent.paneId === paneId),
+          ),
         },
       });
     case 'herdrScreen':
       return unchanged({ ...state, herdr: applyHerdrScreen(state.herdr, message) });
+    case 'herdrInfo':
+      return unchanged({
+        ...state,
+        herdr: {
+          ...state.herdr,
+          infos: withNewerInfo(state.herdr.infos, message.paneId, message.info),
+        },
+      });
     case 'terminalAttached': {
       const previous =
         state.terminals[message.sessionId] ?? newTerminalView(message.sessionId, message.runEpoch);

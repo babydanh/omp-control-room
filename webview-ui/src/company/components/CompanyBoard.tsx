@@ -23,6 +23,7 @@
 
 import { useLayoutEffect, useRef } from 'react';
 
+import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS } from '../constants.js';
@@ -38,6 +39,7 @@ export interface CompanyBoardProps {
   planning: readonly PlanningPrompt[];
   onSelectTask: (taskId: string) => void;
   onSelectSession: (sessionId: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }
 
 /** How loud a card's status line is. Red marks a card that needs the user or failed. */
@@ -136,16 +138,23 @@ function TaskCard({
   card,
   index,
   onSelect,
+  onMenu,
 }: {
   card: BoardCard;
   index: number;
   onSelect: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
   const edge = card.session ? ROLE_EDGE_CLASS[card.session.role] : 'border-l-border';
+  const triggers = agentMenuTriggers<HTMLButtonElement>(
+    { kind: 'session', sessionId: card.session?.id ?? null },
+    onMenu,
+  );
   return (
     <button
       type="button"
       onClick={onSelect}
+      {...triggers}
       aria-pressed={card.selected}
       data-testid={`task-card-${card.code}`}
       data-task-id={card.taskId}
@@ -205,6 +214,7 @@ export function CompanyBoard({
   planning,
   onSelectTask,
   onSelectSession,
+  onMenu,
 }: CompanyBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const flightRef = useRef<ReadonlyMap<string, FlightMemory>>(new Map());
@@ -265,6 +275,7 @@ export function CompanyBoard({
                     card={card}
                     index={index}
                     onSelect={() => onSelectTask(card.taskId)}
+                    onMenu={onMenu}
                   />
                 ))}
               </div>

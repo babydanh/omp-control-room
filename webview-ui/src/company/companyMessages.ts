@@ -40,6 +40,8 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   companyFileRead: true,
   companyAttachmentUploaded: true,
   companySessionLog: true,
+  companySessionInfo: true,
+  herdrInfo: true,
   herdrAgents: true,
   herdrScreen: true,
   terminalAttached: true,
@@ -172,6 +174,14 @@ export function sessionLogRequest(requestId: string, sessionId: string): ClientM
   return { type: 'companySessionLogRequest', requestId, sessionId };
 }
 
+export function sessionRename(requestId: string, sessionId: string, name: string): ClientMessage {
+  return { type: 'companySessionRename', requestId, sessionId, name };
+}
+
+export function sessionInfoRequest(requestId: string, sessionId: string): ClientMessage {
+  return { type: 'companySessionInfoRequest', requestId, sessionId };
+}
+
 export function herdrRead(requestId: string, paneId: string, lines: number): ClientMessage {
   return { type: 'herdrRead', requestId, paneId, lines };
 }
@@ -186,6 +196,14 @@ export function herdrKeys(requestId: string, paneId: string, keys: HerdrKey[]): 
 
 export function herdrFocus(requestId: string, paneId: string): ClientMessage {
   return { type: 'herdrFocus', requestId, paneId };
+}
+
+export function herdrRename(requestId: string, paneId: string, name: string): ClientMessage {
+  return { type: 'herdrRename', requestId, paneId, name };
+}
+
+export function herdrInfoRequest(requestId: string, paneId: string): ClientMessage {
+  return { type: 'herdrInfoRequest', requestId, paneId };
 }
 
 /** The catalog entry a `companyModelCatalog` reply resolves to. */

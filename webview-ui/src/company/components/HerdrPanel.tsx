@@ -12,31 +12,34 @@ import type { FormEvent } from 'react';
 import { useEffect, useState } from 'react';
 
 import type { HerdrKey } from '../../../../core/src/messages.js';
+import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { HERDR_SCREEN_POLL_MS } from '../constants.js';
 import {
   HERDR_CHOICE_KEYS,
+  HERDR_DRAWER_TAB_LABELS,
   HERDR_TONE_LABELS,
+  type HerdrDrawerTab,
   herdrNeedsScreenPolling,
   herdrToneFor,
 } from '../herdrView.js';
 import { formatLogTime } from '../sessionLogView.js';
+import { HerdrInfoTab } from './AgentInfoTab.js';
 import { CompanyButton } from './CompanyButton.js';
+
+const HERDR_TABS = ['screen', 'info'] as const satisfies readonly HerdrDrawerTab[];
 
 export interface HerdrPanelProps {
   client: CompanyClient;
   state: CompanyViewState;
   paneId: string;
+  /** The tab the panel shows. The drawer owns it, so a request for the info tab survives. */
+  tab: HerdrDrawerTab;
+  onTabChange: (tab: HerdrDrawerTab) => void;
 }
 
-/** The notice for a command the board could not send, or null when it went out. */
-function sendFailure(handle: CompanyCommandHandle): string | null {
-  if (handle.ok) return null;
-  return handle.message ?? handle.errorCode ?? 'Không gửi được.';
-}
-
-export function HerdrPanel({ client, state, paneId }: HerdrPanelProps) {
+export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPanelProps) {
   const agent = state.herdr.agents.find((entry) => entry.paneId === paneId);
   const status = agent?.status;
   const screen = state.herdr.screens[paneId];
@@ -44,13 +47,14 @@ export function HerdrPanel({ client, state, paneId }: HerdrPanelProps) {
   const [sentPrompt, setSentPrompt] = useState<string | null>(null);
   const [lastRequest, setLastRequest] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
-  const polling = status !== undefined && herdrNeedsScreenPolling(status);
+  const polling = tab === 'screen' && status !== undefined && herdrNeedsScreenPolling(status);
 
-  // Read the screen when the panel opens and whenever the agent's status moves.
+  // Read the screen while the screen tab is open, and whenever the agent's status moves.
   useEffect(() => {
+    if (tab !== 'screen') return undefined;
     const handle = client.herdrRead(paneId);
-    setLocalNotice(sendFailure(handle));
-  }, [client, paneId, status]);
+    setLocalNotice(failureNotice(handle, 'Không gửi được.'));
+  }, [client, paneId, status, tab]);
 
   useEffect(() => {
     if (!polling) return undefined;
@@ -70,15 +74,11 @@ export function HerdrPanel({ client, state, paneId }: HerdrPanelProps) {
   }, [promptOutcome]);
 
   const lastOutcome = lastRequest === null ? undefined : state.commandResults[lastRequest];
-  const notice =
-    localNotice ??
-    (lastOutcome && !lastOutcome.ok
-      ? (lastOutcome.message ?? lastOutcome.errorCode ?? 'Máy chủ từ chối lệnh này.')
-      : null);
+  const notice = localNotice ?? failureNotice(lastOutcome, 'Máy chủ từ chối lệnh này.');
 
   function track(handle: CompanyCommandHandle): void {
     setLastRequest(handle.requestId);
-    setLocalNotice(sendFailure(handle));
+    setLocalNotice(failureNotice(handle, 'Không gửi được.'));
   }
 
   function sendKey(key: HerdrKey): void {
@@ -112,55 +112,84 @@ export function HerdrPanel({ client, state, paneId }: HerdrPanelProps) {
         )}
       </div>
 
-      <div className="flex flex-wrap gap-1">
-        <CompanyButton size="sm" onClick={() => track(client.herdrFocus(paneId))}>
-          Mở trong herdr
-        </CompanyButton>
-        <CompanyButton size="sm" onClick={() => track(client.herdrRead(paneId))}>
-          Đọc lại màn hình
-        </CompanyButton>
-      </div>
+      <nav aria-label="Phần của agent herdr" className="flex gap-1 border-b border-border">
+        {HERDR_TABS.map((entry) => (
+          <button
+            key={entry}
+            type="button"
+            onClick={() => onTabChange(entry)}
+            aria-current={tab === entry}
+            className={`-mb-px cursor-pointer border-b-2 px-2 py-1.5 text-2xs ${
+              tab === entry
+                ? 'border-accent text-text'
+                : 'border-transparent text-text-muted hover:text-text'
+            }`}
+          >
+            {HERDR_DRAWER_TAB_LABELS[entry]}
+          </button>
+        ))}
+      </nav>
 
-      {agent.status === 'blocked' && (
-        <div className="flex flex-wrap gap-1" role="group" aria-label="Phím gửi tới agent">
-          {HERDR_CHOICE_KEYS.map((choice) => (
-            <CompanyButton key={choice.key} size="sm" onClick={() => sendKey(choice.key)}>
-              {choice.label}
-            </CompanyButton>
-          ))}
-        </div>
-      )}
-
-      <div className="flex min-h-0 flex-1 flex-col gap-1">
-        {screen && (
-          <p className="text-2xs text-text-muted">màn hình lúc {formatLogTime(screen.at)}</p>
-        )}
-        <pre
-          data-testid="herdr-screen"
-          className="min-h-0 flex-1 overflow-auto whitespace-pre rounded-[6px] border border-border bg-bg p-2 text-2xs text-text"
-        >
-          {screen ? screen.text : 'Chưa đọc màn hình.'}
-        </pre>
-      </div>
-
-      {notice && (
-        <p role="alert" className="text-2xs text-warning">
-          {notice}
-        </p>
-      )}
-
-      <form onSubmit={sendPrompt} className="flex gap-1">
-        <input
-          aria-label="Gửi lời nhắc tới agent"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Gửi lời nhắc tới agent…"
-          className="min-w-0 flex-1 rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text"
+      {tab === 'info' ? (
+        <HerdrInfoTab
+          client={client}
+          state={state}
+          paneId={paneId}
+          fallbackCwd={agent.cwd ?? null}
         />
-        <CompanyButton type="submit" size="sm" disabled={draft.trim() === ''}>
-          Gửi
-        </CompanyButton>
-      </form>
+      ) : (
+        <>
+          <div className="flex flex-wrap gap-1">
+            <CompanyButton size="sm" onClick={() => track(client.herdrFocus(paneId))}>
+              Mở trong herdr
+            </CompanyButton>
+            <CompanyButton size="sm" onClick={() => track(client.herdrRead(paneId))}>
+              Đọc lại màn hình
+            </CompanyButton>
+          </div>
+
+          {agent.status === 'blocked' && (
+            <div className="flex flex-wrap gap-1" role="group" aria-label="Phím gửi tới agent">
+              {HERDR_CHOICE_KEYS.map((choice) => (
+                <CompanyButton key={choice.key} size="sm" onClick={() => sendKey(choice.key)}>
+                  {choice.label}
+                </CompanyButton>
+              ))}
+            </div>
+          )}
+
+          <div className="flex min-h-0 flex-1 flex-col gap-1">
+            {screen && (
+              <p className="text-2xs text-text-muted">màn hình lúc {formatLogTime(screen.at)}</p>
+            )}
+            <pre
+              data-testid="herdr-screen"
+              className="min-h-0 flex-1 overflow-auto whitespace-pre rounded-[6px] border border-border bg-bg p-2 text-2xs text-text"
+            >
+              {screen ? screen.text : 'Chưa đọc màn hình.'}
+            </pre>
+          </div>
+
+          {notice && (
+            <p role="alert" className="text-2xs text-warning">
+              {notice}
+            </p>
+          )}
+
+          <form onSubmit={sendPrompt} className="flex gap-1">
+            <input
+              aria-label="Gửi lời nhắc tới agent"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              placeholder="Gửi lời nhắc tới agent…"
+              className="min-w-0 flex-1 rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text"
+            />
+            <CompanyButton type="submit" size="sm" disabled={draft.trim() === ''}>
+              Gửi
+            </CompanyButton>
+          </form>
+        </>
+      )}
     </div>
   );
 }

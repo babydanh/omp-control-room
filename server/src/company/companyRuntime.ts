@@ -32,6 +32,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import type {
+  AgentInfo,
+  AgentToolUsage,
   Attempt,
   CompanyArchitectureIssue,
   CompanyChange,
@@ -153,10 +155,17 @@ export interface CompanySupervisorPort {
   dispose(options?: { shutdownGraceMs?: number }): Promise<ShutdownReport>;
 }
 
+import { type OmpAgentFields, ompAgentFields, readOmpTranscript } from '../herdr/ompTranscript.js';
 import { PtyClient, type PtyClientOptions } from './ptyClient.js';
 import { buildRolePacket, roleBriefForProfile, roleBriefText } from './roleBriefs.js';
 import { Scheduler } from './scheduler.js';
-import { SessionLog, sessionLogDirectory, type SessionLogInput } from './sessionLog.js';
+import {
+  SessionLog,
+  sessionLogDirectory,
+  type SessionLogInput,
+  SKILL_READ_LOG_PREFIX,
+  tallySessionTools,
+} from './sessionLog.js';
 import { sessionHoldsRunner, SessionPool } from './sessionPool.js';
 import type { UsageLedger } from './usageService.js';
 import { discoverVerificationProfiles } from './verificationDiscovery.js';
@@ -184,6 +193,37 @@ const ARTIFACT_PAGE_BYTES = 256 * 1024;
 
 /** The tail of a verification command's output kept in the session log. */
 const SESSION_LOG_OUTPUT_TAIL_BYTES = 1200;
+
+/** Most tool-usage rows one session description carries. */
+const AGENT_TOOL_USAGE_LIMIT = 50;
+
+/** Longest skill name a `read` may log under its own `skill://` text. */
+const SKILL_NAME_LOG_LIMIT = 300;
+
+/** Note on a description the live process could not answer, read from the omp transcript. */
+const SESSION_INFO_TRANSCRIPT_NOTE =
+  'Không hỏi trực tiếp được phiên, nên số liệu lấy từ transcript omp đã lưu. Danh sách kỹ năng chỉ gồm các kỹ năng đã được đọc trong transcript.';
+
+/** Note on a description that rests on the company record alone. */
+const SESSION_INFO_RECORD_NOTE =
+  'Không hỏi trực tiếp được phiên và không đọc được transcript omp, nên chỉ có số liệu từ bản ghi công ty.';
+
+/** The most-used tools first, bounded to what one session description carries. */
+function toolUsageOf(counts: ReadonlyMap<string, number>): AgentToolUsage[] {
+  return [...counts]
+    .map(([name, count]) => ({ name, count }))
+    .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name))
+    .slice(0, AGENT_TOOL_USAGE_LIMIT);
+}
+
+/** Board fields an omp transcript supplies, or `undefined` when it cannot be read. */
+async function readTranscriptFields(sessionFile: string): Promise<OmpAgentFields | undefined> {
+  try {
+    return ompAgentFields(await readOmpTranscript(sessionFile));
+  } catch {
+    return undefined;
+  }
+}
 
 /** A native image, as the bridge accepts it: canonical base64 of raw bytes. */
 type BridgeImage = { mimeType: string; data: string };
@@ -239,6 +279,12 @@ export interface CompanyRuntime {
   readonly effects: WorkspaceCompanyCoordinatorEffects;
   readonly terminal: CompanyTerminalGateway;
   modelCatalog(): Promise<CompanyModelCatalogEntry[]>;
+  /**
+   * What one managed session has loaded: working directory, model, thinking,
+   * session file, tools with source and active flag, skills with read status, and
+   * tool usage counts. Read-only; an unknown session is `session_not_found`.
+   */
+  sessionInfo(sessionId: string): Promise<AgentInfo>;
   /**
    * Machine-check one Contract-declared environment prerequisite.
    *
@@ -726,6 +772,63 @@ class NativeCompanyRuntime implements CompanyRuntime {
       sessionId: director.sessionId,
       runEpoch: director.runEpoch,
     });
+  }
+
+  /**
+   * What one managed session has loaded, for the board's session panel. A live
+   * run is asked directly, so its model, thinking level, tools and skills are
+   * what the process holds now. Without one, the answer falls back to the
+   * durable record and says so. Tool and skill use always comes from the session
+   * log, so it survives a restart either way.
+   */
+  async sessionInfo(sessionId: string): Promise<AgentInfo> {
+    const session = this.state().sessions[sessionId];
+    if (session === undefined) {
+      throw new CompanyError('session_not_found', `Unknown session: ${sessionId}`);
+    }
+    const tally = await tallySessionTools(sessionLogDirectory(this.store.namespaceDir), sessionId);
+    const toolUsage = toolUsageOf(tally.tools);
+    const collectedAt = this.deps.now();
+    const run = this.runs.get(sessionId);
+    if (run !== undefined) {
+      try {
+        const live = await run.runner.requestSessionInfo(run.runEpoch);
+        const sessionFile = live.sessionFile ?? session.nativeSessionPath;
+        return {
+          cwd: live.cwd,
+          launchCwd: this.store.workspacePath,
+          ...(live.model === undefined ? {} : { model: live.model }),
+          ...(live.thinking === undefined ? {} : { thinking: live.thinking }),
+          ...(sessionFile === undefined ? {} : { sessionFile }),
+          tools: [...live.tools],
+          skills: live.skills.map((skill) => ({
+            name: skill.name,
+            ...(skill.description === undefined ? {} : { description: skill.description }),
+            used: tally.skills.has(skill.name),
+          })),
+          toolUsage,
+          collectedFrom: 'live',
+          collectedAt,
+        };
+      } catch {
+        // The live answer is refused or unreachable; the durable record still answers.
+      }
+    }
+    const sessionFile = session.nativeSessionPath;
+    const transcript =
+      sessionFile === undefined ? undefined : await readTranscriptFields(sessionFile);
+    return {
+      cwd: this.store.workspacePath,
+      launchCwd: this.store.workspacePath,
+      model: transcript?.model ?? session.effectiveModel ?? session.requestedModel,
+      ...(transcript?.thinking === undefined ? {} : { thinking: transcript.thinking }),
+      ...(sessionFile === undefined ? {} : { sessionFile }),
+      ...(transcript === undefined ? {} : { tools: transcript.tools, skills: transcript.skills }),
+      toolUsage,
+      collectedFrom: 'transcript',
+      collectedAt,
+      note: transcript === undefined ? SESSION_INFO_RECORD_NOTE : SESSION_INFO_TRANSCRIPT_NOTE,
+    };
   }
 
   /** The newest live Director, which is the only run allowed to answer a catalog. */
@@ -1484,10 +1587,15 @@ class NativeCompanyRuntime implements CompanyRuntime {
     if (event['phase'] === 'start') {
       const started = readString(event, 'toolName') ?? 'unknown';
       run.liveTools.set(toolCallId, started);
+      // A `read` of a skill URL is logged under the skill's name, so skill use is
+      // counted from the durable log like every other tool call.
+      const declared = started === 'read' ? readString(event, 'skill') : undefined;
+      const skill =
+        declared !== undefined && declared.length <= SKILL_NAME_LOG_LIMIT ? declared : undefined;
       this.logEntry(run.sessionId, run.runEpoch, {
         kind: 'tool',
         toolName: started,
-        text: started,
+        text: skill === undefined ? started : `${SKILL_READ_LOG_PREFIX}${skill}`,
       });
       return;
     }

@@ -37,6 +37,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import type {
+  AgentInfo,
   CompanyModelCatalogEntry,
   QuestionAnswerInput,
   RoleProfile,
@@ -53,6 +54,7 @@ import {
 } from './companyBroker.js';
 import {
   COMPANY_SESSION_ACTIONS,
+  COMPANY_SESSION_NAME_MAX_LENGTH,
   type CompanySessionAction,
   CONTRACT_DECISIONS,
   type ContractDecision,
@@ -577,6 +579,7 @@ export interface CompanyHostDispatcherOptions {
   readonly coordinator: () => WorkspaceCompanyCoordinator;
   readonly terminal: () => CompanyTerminalGateway;
   readonly modelCatalog: () => Promise<CompanyModelCatalogEntry[]>;
+  readonly sessionInfo: (sessionId: string) => Promise<AgentInfo>;
   readonly authority: CompanyHostAuthority;
   readonly events: OwnerEventRegistry;
   readonly isDisposed: () => boolean;
@@ -661,6 +664,9 @@ export function createCompanyHostDispatcher(
       case COMPANY_HOST_COMMANDS.modelCatalog:
         return options.modelCatalog();
 
+      case COMPANY_HOST_COMMANDS.sessionInfo:
+        return options.sessionInfo(readBoundedString(body, 'id', MAX_ID_LENGTH));
+
       case COMPANY_HOST_COMMANDS.submitPrompt: {
         const input = readObject(body, 'input');
         const text = input['text'];
@@ -726,6 +732,13 @@ export function createCompanyHostDispatcher(
         await withCompanyCode(() =>
           options.coordinator().controlSession(id, action as CompanySessionAction, runEpoch),
         );
+        return null;
+      }
+
+      case COMPANY_HOST_COMMANDS.renameSession: {
+        const id = readBoundedString(body, 'id', MAX_ID_LENGTH);
+        const name = readBoundedString(body, 'name', COMPANY_SESSION_NAME_MAX_LENGTH);
+        await withCompanyCode(() => options.coordinator().renameSession(id, name));
         return null;
       }
 
@@ -996,6 +1009,10 @@ async function openOwnerCompanyHost(
           if (!runtime) throw companyHostError('model_catalog_unavailable');
           return runtime.modelCatalog();
         },
+        sessionInfo: (sessionId) => {
+          if (!runtime) throw companyHostError('owner_unavailable');
+          return runtime.sessionInfo(sessionId);
+        },
         authority,
         events,
         isDisposed: () => disposed,
@@ -1053,6 +1070,7 @@ async function openOwnerCompanyHost(
       options.clientId ?? COMPANY_HOST_LOCAL_CLIENT,
     ),
     modelCatalog: () => ownerRuntime.modelCatalog(),
+    sessionInfo: (sessionId) => ownerRuntime.sessionInfo(sessionId),
   };
 
   return {
@@ -1120,6 +1138,7 @@ async function openFollowerCompanyHost(
       workspaceRoot: store.workspacePath,
       terminal: proxy.terminal,
       modelCatalog: () => proxy.modelCatalog(),
+      sessionInfo: (sessionId) => proxy.sessionInfo(sessionId),
     },
     async dispose(): Promise<void> {
       if (disposed) return;

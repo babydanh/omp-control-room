@@ -20,7 +20,10 @@ import type {
   CompanyStateEvidenceAdditionalProperty,
   CompanyStateUsageIndexAdditionalPropertyItem,
 } from '../../core/src/messages.js';
-import type { CompanySessionAction } from '../src/company/companyCoordinator.js';
+import {
+  COMPANY_SESSION_NAME_MAX_LENGTH,
+  type CompanySessionAction,
+} from '../src/company/companyCoordinator.js';
 import { applyCompanyEvent } from '../src/company/companyState.js';
 import type { CompanyStore as CompanyStoreType } from '../src/company/companyStore.js';
 import type { ContractDraftProposal } from '../src/company/contractDraft.js';
@@ -497,6 +500,48 @@ describe('WorkspaceCompanyCoordinator', () => {
     expect(actions).toEqual([5, 6]);
     expect(usage.currentRunEpoch(initial.id)).toBe(6);
     expect(coordinator.snapshot().sessions[0]).toMatchObject({ runEpoch: 6, status: 'stopped' });
+    await coordinator.dispose();
+  });
+
+  it('renames a session to its trimmed name, persists it, and refuses an empty, oversized, or unknown target', async () => {
+    const store = await CompanyStore.open(workspace);
+    let state = await store.load();
+    const initial = session('session-a', 4);
+    const seed = event(state, { entity: 'session', op: 'put', id: initial.id, value: initial });
+    await store.commit(seed);
+    state = applyCompanyEvent(state, seed);
+    const coordinator = new WorkspaceCompanyCoordinator({
+      store,
+      state,
+      usageLedger: new UsageLedger(),
+      isOwner: () => true,
+      now: () => now,
+      effects: effects(),
+    });
+    await coordinator.start();
+
+    await coordinator.renameSession(initial.id, '  Triển khai API  ');
+    expect(coordinator.snapshot().sessions[0]).toMatchObject({
+      id: initial.id,
+      name: 'Triển khai API',
+    });
+    expect((await store.load()).sessions[initial.id]).toMatchObject({ name: 'Triển khai API' });
+
+    // A rename to the name already stored commits nothing.
+    const beforeNoop = await store.load();
+    await coordinator.renameSession(initial.id, 'Triển khai API');
+    expect(await store.load()).toEqual(beforeNoop);
+
+    await expect(coordinator.renameSession(initial.id, '   ')).rejects.toMatchObject({
+      code: 'session_name_invalid',
+    });
+    await expect(
+      coordinator.renameSession(initial.id, 'x'.repeat(COMPANY_SESSION_NAME_MAX_LENGTH + 1)),
+    ).rejects.toMatchObject({ code: 'session_name_invalid' });
+    await expect(coordinator.renameSession(randomUUID(), 'Khác')).rejects.toMatchObject({
+      code: 'session_not_found',
+    });
+    expect(coordinator.snapshot().sessions[0]).toMatchObject({ name: 'Triển khai API' });
     await coordinator.dispose();
   });
 

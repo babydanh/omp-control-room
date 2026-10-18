@@ -81,6 +81,7 @@ function fakeBridge(options: OmpBridgeOptions, ready: Promise<void> = Promise.re
     sendPrompt,
     abort,
     requestModelCatalog,
+    requestSessionInfo: vi.fn(async () => ({ cwd: 'C:/workspace', tools: [], skills: [] })),
     answerQuestion: vi.fn(async () => undefined),
     cancelQuestion: vi.fn(async () => undefined),
     onEvent(handler) {

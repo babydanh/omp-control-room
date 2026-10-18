@@ -23,6 +23,7 @@ import { companyRoleLabel } from '../roleProfiles.js';
 import { sessionControls } from '../sessionActions.js';
 import { DRAWER_TAB_LABELS, sessionStatusLabel } from '../statusLabels.js';
 import { contextOccupancy } from '../usageView.js';
+import { SessionInfoTab } from './AgentInfoTab.js';
 import { CompanyButton } from './CompanyButton.js';
 import { QuestionPanel } from './QuestionPanel.js';
 import { CommandsTab, SessionLogTab } from './SessionLog.js';
@@ -37,6 +38,7 @@ const TABS = [
   'questions',
   'usage',
   'report',
+  'info',
 ] as const satisfies readonly CompanyDrawerTab[];
 
 export interface SessionBodyProps {
@@ -64,7 +66,7 @@ export function SessionBody({
   // re-render of this body.
   useEffect(() => {
     if (state.selection.tab) setTab(state.selection.tab);
-  }, [state.selection.tab]);
+  }, [state.selection]);
 
   // The server keeps the log on disk; live entries only cover what happened
   // since this page connected, so opening a session asks for its history.
@@ -179,6 +181,7 @@ export function SessionBody({
         {tab === 'report' && (
           <TaskReport state={state} taskId={reportTaskId} onOpenArtifact={onOpenArtifact} />
         )}
+        {tab === 'info' && <SessionInfoTab client={client} state={state} sessionId={sessionId} />}
       </div>
     </section>
   );

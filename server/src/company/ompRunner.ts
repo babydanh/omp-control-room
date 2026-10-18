@@ -13,6 +13,7 @@ import {
   type OmpBridgeOptions,
   type OmpBridgeRpcHandler,
   type OmpBridgeSendPrompt,
+  type OmpBridgeSessionDescription,
 } from './ompBridge.js';
 import type { PtyClient } from './ptyClient.js';
 import type { PtyHostEvent, PtySpawnIdentity, PtySpawnSpec } from './ptyHost.js';
@@ -179,6 +180,16 @@ export class OmpRunner {
   async requestModelCatalog(runEpoch: number): Promise<OmpBridgeModelCatalog> {
     this.assertActiveEpoch(runEpoch);
     return this.requireBridge().requestModelCatalog();
+  }
+
+  /**
+   * Reads what the live native session has loaded. Same fail-closed rules as the
+   * catalog read: a stale epoch or a stopped run is refused before the bridge is
+   * touched, and the answer is handed back exactly as the bridge validated it.
+   */
+  async requestSessionInfo(runEpoch: number): Promise<OmpBridgeSessionDescription> {
+    this.assertActiveEpoch(runEpoch);
+    return this.requireBridge().requestSessionInfo();
   }
 
   async dispose(): Promise<void> {

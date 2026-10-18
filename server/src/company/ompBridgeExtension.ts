@@ -111,6 +111,8 @@ interface OmpContext {
   ) => Promise<OmpNativeToolResult>;
   /** Whether an interactive surface exists; a headless run has no dialog. */
   hasUI?: boolean;
+  /** Current model (`ExtensionContext.model`); undefined until one is selected. */
+  model?: { id?: unknown; provider?: unknown };
 }
 
 // ── Native model catalog ──────────────────────────────────────
@@ -385,6 +387,14 @@ interface OmpApi {
     content: string | (OmpTextContent | OmpImageContent)[],
     options?: { deliverAs?: string },
   ): void;
+  /** Names of the tools OMP exposes to the model right now. */
+  getActiveTools?(): unknown;
+  /** Every registered tool with its `sourceInfo`, as OMP's `getAllTools()` returns them. */
+  getAllTools?(): unknown;
+  /** Slash commands, including one `source: 'skill'` entry per loaded skill. */
+  getCommands?(): unknown;
+  /** Current thinking level, when one is set. */
+  getThinkingLevel?(): unknown;
 }
 
 // ── Frame readers (host frames are external input) ──────────────
@@ -415,6 +425,87 @@ function readObject(
 ): Record<string, unknown> | undefined {
   const value = source[key];
   return isFrameObject(value) ? value : undefined;
+}
+
+/** Longest name, model or description text one describe answer carries. */
+const DESCRIBE_TEXT_LIMIT = 300;
+/** Tools and skills one describe answer carries; the host enforces the same cap. */
+const DESCRIBE_ITEM_LIMIT = 500;
+const SKILL_URL_PREFIX = 'skill://';
+const SKILL_COMMAND_PREFIX = 'skill:';
+const MCP_TOOL_PREFIX = 'mcp__';
+
+/** One tool the native session has registered, as the host reports it. */
+interface DescribedTool {
+  name: string;
+  source: 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
+  mcpServer?: string;
+  active: boolean;
+}
+
+/** One loaded skill. */
+interface DescribedSkill {
+  name: string;
+  description?: string;
+}
+
+/** Everything the describe answer carries about one native session. */
+interface SessionDescription {
+  cwd: string;
+  model?: string;
+  thinking?: string;
+  sessionFile?: string;
+  tools: DescribedTool[];
+  skills: DescribedSkill[];
+}
+
+function asList(value: unknown): readonly unknown[] | undefined {
+  return Array.isArray(value) ? value : undefined;
+}
+
+function clampText(value: string): string {
+  return value.slice(0, DESCRIBE_TEXT_LIMIT);
+}
+
+/** Source class of one registered tool; a tool with no metadata named `mcp__…` is MCP. */
+function describedSource(tool: Record<string, unknown>, name: string): DescribedTool['source'] {
+  const sourceInfo = readObject(tool, 'sourceInfo');
+  const declared = sourceInfo === undefined ? undefined : readString(sourceInfo, 'source');
+  if (declared === undefined) return name.startsWith(MCP_TOOL_PREFIX) ? 'mcp' : 'other';
+  switch (declared) {
+    case 'builtin':
+    case 'extension':
+    case 'mcp':
+    case 'sdk':
+      return declared;
+    default:
+      return 'other';
+  }
+}
+
+/**
+ * MCP server of one tool. Metadata wins when OMP supplies it; otherwise the
+ * server comes from the canonical `mcp__<server>_<tool>` name. OMP sanitizes the
+ * server into that prefix, so a server whose name holds `-` or `_` is only
+ * recovered up to its first separator.
+ */
+function describedMcpServer(tool: Record<string, unknown>, name: string): string | undefined {
+  const declared = readString(tool, 'mcpServerName');
+  if (declared !== undefined && declared.length > 0) return clampText(declared);
+  if (!name.startsWith(MCP_TOOL_PREFIX)) return undefined;
+  const rest = name.slice(MCP_TOOL_PREFIX.length);
+  const cut = rest.indexOf('_');
+  return cut > 0 ? clampText(rest.slice(0, cut)) : undefined;
+}
+
+/** Skill a `read` of a `skill://` URL addresses; undefined for every other read. */
+function skillReadName(toolName: string, args: unknown): string | undefined {
+  if (toolName !== 'read' || !isFrameObject(args)) return undefined;
+  const target = readString(args, 'path');
+  if (target === undefined || !target.startsWith(SKILL_URL_PREFIX)) return undefined;
+  // The name ends at the first separator or selector: `skill://name/file`, `skill://name:10-20`.
+  const name = target.slice(SKILL_URL_PREFIX.length).split(/[/:?]/, 1)[0] ?? '';
+  return name.length > 0 && name.length <= DESCRIBE_TEXT_LIMIT ? name : undefined;
 }
 
 /** Reads the `{allow, reason, input}` shape a host authorization answers with. */
@@ -694,6 +785,9 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       case 'models_request':
         answerModelCatalog(value);
         return;
+      case 'info_request':
+        answerSessionInfo(value);
+        return;
       case 'rpc_result':
         settleRpc(value);
         return;
@@ -796,6 +890,140 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       ok: true,
       catalog: { models: answer.models },
     });
+  }
+
+  // ── Session description ───────────────────────────────────
+
+  /**
+   * Answer one describe request with what this native session has loaded. It is
+   * read-only and answered like a model catalog: the registry is read at call
+   * time, and a request that arrives before the session starts waits for it.
+   */
+  function answerSessionInfo(frame: Record<string, unknown>): void {
+    const id = readString(frame, 'id');
+    if (!id || frame['sessionId'] !== sessionId || frame['runEpoch'] !== runEpoch) {
+      report('warn', 'host session info request named another run');
+      return;
+    }
+    if (!connected()) {
+      send({
+        v: PROTOCOL_VERSION,
+        t: 'info_result',
+        id,
+        sessionId,
+        runEpoch,
+        ok: false,
+        error: { code: 'omp_bridge_disconnected', message: 'the company bridge is closed' },
+      });
+      return;
+    }
+    if (sessionContext === undefined) {
+      heldUntilSessionStart.push(() => answerSessionInfo(frame));
+      return;
+    }
+    const answer = buildSessionDescription(sessionContext);
+    if ('code' in answer) {
+      send({
+        v: PROTOCOL_VERSION,
+        t: 'info_result',
+        id,
+        sessionId,
+        runEpoch,
+        ok: false,
+        error: { code: answer.code, message: answer.message },
+      });
+      return;
+    }
+    send({
+      v: PROTOCOL_VERSION,
+      t: 'info_result',
+      id,
+      sessionId,
+      runEpoch,
+      ok: true,
+      info: answer,
+    });
+  }
+
+  function buildSessionDescription(
+    ctx: OmpContext,
+  ): SessionDescription | { code: string; message: string } {
+    const unavailable = {
+      code: 'omp_session_info_unavailable',
+      message: 'this OMP build does not expose its tool and command registry',
+    };
+    if (
+      typeof pi.getActiveTools !== 'function' ||
+      typeof pi.getAllTools !== 'function' ||
+      typeof pi.getCommands !== 'function'
+    ) {
+      return unavailable;
+    }
+    const registered = asList(pi.getAllTools());
+    const commands = asList(pi.getCommands());
+    if (registered === undefined || commands === undefined) return unavailable;
+    const activeNames = new Set(
+      (asList(pi.getActiveTools()) ?? []).filter(
+        (name): name is string => typeof name === 'string',
+      ),
+    );
+
+    const tools: DescribedTool[] = [];
+    for (const entry of registered) {
+      if (tools.length >= DESCRIBE_ITEM_LIMIT) break;
+      if (!isFrameObject(entry)) continue;
+      const name = readString(entry, 'name');
+      if (name === undefined || name.length === 0) continue;
+      const mcpServer = describedMcpServer(entry, name);
+      tools.push({
+        name: clampText(name),
+        source: describedSource(entry, name),
+        ...(mcpServer === undefined ? {} : { mcpServer }),
+        active: activeNames.has(name),
+      });
+    }
+
+    const skills: DescribedSkill[] = [];
+    for (const entry of commands) {
+      if (skills.length >= DESCRIBE_ITEM_LIMIT) break;
+      if (!isFrameObject(entry) || readString(entry, 'source') !== 'skill') continue;
+      const raw = readString(entry, 'name');
+      if (raw === undefined) continue;
+      const name = raw.startsWith(SKILL_COMMAND_PREFIX)
+        ? raw.slice(SKILL_COMMAND_PREFIX.length)
+        : raw;
+      if (name.length === 0) continue;
+      const description = readString(entry, 'description');
+      skills.push({
+        name: clampText(name),
+        ...(description === undefined || description.length === 0
+          ? {}
+          : { description: clampText(description) }),
+      });
+    }
+
+    const modelId = ctx.model?.id;
+    const provider = ctx.model?.provider;
+    const model =
+      typeof modelId === 'string' && modelId.length > 0
+        ? clampText(
+            typeof provider === 'string' && provider.length > 0
+              ? `${provider}/${modelId}`
+              : modelId,
+          )
+        : undefined;
+    const thinking = pi.getThinkingLevel?.();
+    const sessionFile = ctx.sessionManager?.getSessionFile?.();
+    return {
+      cwd: process.cwd(),
+      ...(model === undefined ? {} : { model }),
+      ...(typeof thinking === 'string' && thinking.length > 0
+        ? { thinking: clampText(thinking) }
+        : {}),
+      ...(sessionFile === undefined || sessionFile.length === 0 ? {} : { sessionFile }),
+      tools,
+      skills,
+    };
   }
 
   function settleRpc(frame: Record<string, unknown>): void {
@@ -1968,12 +2196,15 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       if (usage) sendEvent({ ...usage, nativeSessionId });
     });
     pi.on('tool_execution_start', (event) => {
-      const payload = isFrameObject(event) ? event : {};
+      const payload: Record<string, unknown> = isFrameObject(event) ? event : {};
+      const toolName = readString(payload, 'toolName') ?? '';
+      const skill = skillReadName(toolName, payload['args']);
       sendEvent({
         k: 'tool',
         phase: 'start',
         toolCallId: readString(payload, 'toolCallId') ?? '',
-        toolName: readString(payload, 'toolName') ?? '',
+        toolName,
+        ...(skill === undefined ? {} : { skill }),
       });
     });
     pi.on('tool_execution_end', (event) => {

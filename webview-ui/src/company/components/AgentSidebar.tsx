@@ -15,6 +15,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { useState } from 'react';
 
 import type { CompanyRole, RoleProfile } from '../../../../core/src/company.js';
+import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
 import {
   activityCounts,
   type AgentRoleGroup,
@@ -65,6 +66,7 @@ export interface AgentSidebarProps {
   onCollapse: () => void;
   onSelectSession: (sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }
 
 export function AgentSidebar({
@@ -78,6 +80,7 @@ export function AgentSidebar({
   onCollapse,
   onSelectSession,
   onOpenHerdr,
+  onMenu,
 }: AgentSidebarProps) {
   const [editingRole, setEditingRole] = useState<CompanyRole | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -136,9 +139,15 @@ export function AgentSidebar({
             }
             onPick={(modelId, thinking) => changeRole(group.role, modelId, thinking)}
             onSelectSession={onSelectSession}
+            onMenu={onMenu}
           />
         ))}
-        <HerdrSection group={herdr} selectedPaneId={selectedPaneId} onOpen={onOpenHerdr} />
+        <HerdrSection
+          group={herdr}
+          selectedPaneId={selectedPaneId}
+          onOpen={onOpenHerdr}
+          onMenu={onMenu}
+        />
       </div>
 
       {notice && (
@@ -165,6 +174,7 @@ function RoleSection({
   onToggleEdit,
   onPick,
   onSelectSession,
+  onMenu,
 }: {
   group: AgentRoleGroup;
   catalog: CompanyViewState['modelCatalog'];
@@ -174,6 +184,7 @@ function RoleSection({
   onToggleEdit: () => void;
   onPick: (modelId: string, thinking: string | undefined) => void;
   onSelectSession: (sessionId: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
   const [showParked, setShowParked] = useState(false);
   const rowCount = group.active.length + group.parked.length;
@@ -218,6 +229,7 @@ function RoleSection({
               row={row}
               selected={row.sessionId === selectedSessionId}
               onSelect={() => onSelectSession(row.sessionId)}
+              onMenu={onMenu}
             />
           </li>
         ))}
@@ -244,6 +256,7 @@ function RoleSection({
                     row={row}
                     selected={row.sessionId === selectedSessionId}
                     onSelect={() => onSelectSession(row.sessionId)}
+                    onMenu={onMenu}
                   />
                 </li>
               ))}
@@ -272,15 +285,22 @@ function AgentRowButton({
   row,
   selected,
   onSelect,
+  onMenu,
 }: {
   row: AgentRow;
   selected: boolean;
   onSelect: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
+  const triggers = agentMenuTriggers<HTMLButtonElement>(
+    { kind: 'session', sessionId: row.sessionId },
+    onMenu,
+  );
   return (
     <button
       type="button"
       onClick={onSelect}
+      {...triggers}
       aria-pressed={selected}
       title={agentTooltip(row)}
       data-testid={`agent-row-${row.code}`}
@@ -309,10 +329,12 @@ function HerdrSection({
   group,
   selectedPaneId,
   onOpen,
+  onMenu,
 }: {
   group: HerdrGroup;
   selectedPaneId: string | null;
   onOpen: (paneId: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
   if (group.kind === 'hidden') return null;
   return (
@@ -336,6 +358,7 @@ function HerdrSection({
             repo={repo}
             selectedPaneId={selectedPaneId}
             onOpen={onOpen}
+            onMenu={onMenu}
           />
         ))
       )}
@@ -348,10 +371,12 @@ function HerdrRepoSection({
   repo,
   selectedPaneId,
   onOpen,
+  onMenu,
 }: {
   repo: HerdrRepoGroup;
   selectedPaneId: string | null;
   onOpen: (paneId: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
   return (
     <div className="pb-1">
@@ -369,6 +394,7 @@ function HerdrRepoSection({
               row={row}
               selected={row.paneId === selectedPaneId}
               onOpen={() => onOpen(row.paneId)}
+              onMenu={onMenu}
             />
           </li>
         ))}
@@ -381,15 +407,22 @@ function HerdrRowButton({
   row,
   selected,
   onOpen,
+  onMenu,
 }: {
   row: HerdrRow;
   selected: boolean;
   onOpen: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
+  const triggers = agentMenuTriggers<HTMLButtonElement>(
+    { kind: 'herdr', paneId: row.paneId },
+    onMenu,
+  );
   return (
     <button
       type="button"
       onClick={onOpen}
+      {...triggers}
       aria-pressed={selected}
       title={herdrTooltip(row)}
       data-testid={`herdr-row-${row.paneId}`}

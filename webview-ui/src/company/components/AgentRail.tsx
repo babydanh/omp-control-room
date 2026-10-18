@@ -5,6 +5,7 @@
  * status and summary.
  */
 
+import { type AgentMenuRequest, type AgentMenuTriggers, agentMenuTriggers } from '../agentMenu.js';
 import {
   activityCounts,
   agentTooltip,
@@ -36,6 +37,7 @@ export interface AgentRailProps {
   onExpand: () => void;
   onSelectSession: (sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }
 
 export function AgentRail({
@@ -45,6 +47,7 @@ export function AgentRail({
   onExpand,
   onSelectSession,
   onOpenHerdr,
+  onMenu,
 }: AgentRailProps) {
   const now = useNow();
   const groups = buildAgentGroups(state, now);
@@ -79,6 +82,7 @@ export function AgentRail({
             onExpand={onExpand}
             onSelectSession={onSelectSession}
             onOpenHerdr={onOpenHerdr}
+            onMenu={onMenu}
           />
         ))}
       </div>
@@ -109,6 +113,7 @@ function RailEntryView({
   onExpand,
   onSelectSession,
   onOpenHerdr,
+  onMenu,
 }: {
   entry: RailEntry;
   selectedSessionId: string | null;
@@ -116,6 +121,7 @@ function RailEntryView({
   onExpand: () => void;
   onSelectSession: (sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
   switch (entry.kind) {
     case 'session':
@@ -129,6 +135,10 @@ function RailEntryView({
           title={agentTooltip(entry.row)}
           selected={entry.row.sessionId === selectedSessionId}
           onClick={() => onSelectSession(entry.row.sessionId)}
+          triggers={agentMenuTriggers<HTMLButtonElement>(
+            { kind: 'session', sessionId: entry.row.sessionId },
+            onMenu,
+          )}
         />
       );
     case 'pane':
@@ -142,6 +152,10 @@ function RailEntryView({
           title={herdrTooltip(entry.row)}
           selected={entry.row.paneId === selectedPaneId}
           onClick={() => onOpenHerdr(entry.row.paneId)}
+          triggers={agentMenuTriggers<HTMLButtonElement>(
+            { kind: 'herdr', paneId: entry.row.paneId },
+            onMenu,
+          )}
         />
       );
     case 'repo':
@@ -181,6 +195,7 @@ function RailBadge({
   title,
   selected,
   onClick,
+  triggers,
 }: {
   testId: string;
   label: string;
@@ -191,11 +206,13 @@ function RailBadge({
   title: string;
   selected: boolean;
   onClick: () => void;
+  triggers: AgentMenuTriggers<HTMLButtonElement>;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      {...triggers}
       aria-pressed={selected}
       aria-label={title}
       title={title}

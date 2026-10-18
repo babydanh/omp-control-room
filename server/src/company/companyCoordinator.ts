@@ -112,6 +112,9 @@ export type ContractDecision = (typeof CONTRACT_DECISIONS)[number];
 export const COMPANY_SESSION_ACTIONS = ['pause', 'resume', 'kill', 'restart', 'archive'] as const;
 export type CompanySessionAction = (typeof COMPANY_SESSION_ACTIONS)[number];
 
+/** Longest name a managed session may carry, after trimming. */
+export const COMPANY_SESSION_NAME_MAX_LENGTH = 60;
+
 export interface CompanyCoordinator {
   /** Ingest a user prompt, returning the stored prompt record. */
   submitPrompt(input: SubmitPromptInput): Promise<CompanyPrompt>;
@@ -162,6 +165,13 @@ export interface CompanyCoordinator {
    * client believes is live; a mismatch is rejected rather than applied.
    */
   controlSession(id: string, action: CompanySessionAction, runEpoch: number): Promise<void>;
+
+  /**
+   * Rename a managed session. Only the board's label changes: no run, epoch or
+   * record beyond the name. Names are trimmed, and must be 1 to
+   * `COMPANY_SESSION_NAME_MAX_LENGTH` characters after trimming.
+   */
+  renameSession(id: string, name: string): Promise<void>;
 
   /**
    * Replace the per-role model profiles. Applied to the next dispatch or to an

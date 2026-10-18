@@ -3,11 +3,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CompanyState } from '../../core/src/company.js';
 import type { ServerMessage } from '../../core/src/messages.js';
 import type { CompanyRuntimeDeps } from '../src/company/companyRuntime.js';
+import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
 import { UsageLedger } from '../src/company/usageService.js';
 
 let tempHome: string;
@@ -70,6 +72,7 @@ interface FakeRunner {
   readonly prompts: { text: string; runEpoch?: number }[];
   identity: { pid: number; imageName: string } | null;
   requestModelCatalog: ReturnType<typeof vi.fn>;
+  requestSessionInfo: Mock<(runEpoch: number) => Promise<unknown>>;
   abort: ReturnType<typeof vi.fn>;
   sendPrompt: (runEpoch: number, prompt: { text: string; runEpoch?: number }) => Promise<void>;
   dispose: ReturnType<typeof vi.fn>;
@@ -92,6 +95,16 @@ interface Harness {
   /** The rpc handler the last started runner was given, for bridge assertions. */
   rpcHandler(): (request: never) => Promise<unknown>;
 }
+
+/** What a live run reports about its own process; the bridge answers in this shape. */
+const LIVE_SESSION_DESCRIPTION = {
+  cwd: 'D:/live-cwd',
+  model: 'provider/live-model',
+  thinking: 'high',
+  sessionFile: 'D:/live-cwd/session.jsonl',
+  tools: [{ name: 'read', source: 'builtin', active: true }],
+  skills: [{ name: 'brand', description: 'Brand voice' }],
+};
 
 const startedRunners: FakeRunner[] = [];
 
@@ -118,6 +131,9 @@ function makeRunner(sessionId: string, runEpoch: number): FakeRunner {
         },
       ],
     })),
+    requestSessionInfo: vi.fn<(runEpoch: number) => Promise<unknown>>(
+      async () => LIVE_SESSION_DESCRIPTION,
+    ),
     abort: vi.fn(async () => undefined),
     sendPrompt: vi.fn(async (_epoch: number, prompt: { text: string; runEpoch?: number }) => {
       runner.prompts.push(prompt);
@@ -198,6 +214,7 @@ async function harness(): Promise<Harness> {
         sendPrompt: runner.sendPrompt,
         abort: runner.abort,
         requestModelCatalog: runner.requestModelCatalog,
+        requestSessionInfo: runner.requestSessionInfo,
         dispose: runner.dispose,
         onEvent: runner.onEvent,
       } as never;
@@ -273,6 +290,51 @@ async function seed(
     changes,
     harnessValue.coordinator.readState().revision,
   );
+}
+
+/** Record tool-call starts in a session's durable log, as the runtime does while a run works. */
+async function recordToolCalls(
+  h: Harness,
+  sessionId: string,
+  calls: { toolName: string; text: string }[],
+): Promise<void> {
+  const log = new SessionLog({
+    directory: sessionLogDirectory(h.store.namespaceDir),
+    now: () => '2026-10-02T00:00:00.000Z',
+    onEntry: () => undefined,
+  });
+  for (const call of calls) {
+    log.record(sessionId, { kind: 'tool', runEpoch: 1, toolName: call.toolName, text: call.text });
+  }
+  await log.drain();
+}
+
+/** Commit an idle Worker, with its omp transcript at `nativeSessionPath` when one is given. */
+async function seedWorker(
+  h: Harness,
+  sessionId: string,
+  nativeSessionPath?: string,
+): Promise<void> {
+  await seed(h, [
+    {
+      entity: 'session',
+      op: 'put',
+      id: sessionId,
+      value: {
+        id: sessionId,
+        code: 'S8',
+        name: 'Worker S8',
+        role: 'worker',
+        workstreamId: 'ws-8',
+        workspaceKey: 'workspace',
+        requestedModel: 'provider/model',
+        runEpoch: 1,
+        status: 'idle',
+        lastUsedAt: '2026-10-02T00:00:00.000Z',
+        ...(nativeSessionPath === undefined ? {} : { nativeSessionId: 'saved', nativeSessionPath }),
+      },
+    },
+  ]);
 }
 
 describe('company runtime effects', () => {
@@ -539,5 +601,104 @@ describe('company runtime effects', () => {
     expect(recovered.attempts['attempt-9']?.status).toBe('interrupted');
     // Recovery reconciles records; it never starts a process.
     expect(h.runners).toEqual([]);
+  });
+
+  it('reports an unknown session as not found', async () => {
+    const h = await harness();
+    await expect(h.runtime.sessionInfo(randomUUID())).rejects.toThrowError(
+      expect.objectContaining({ code: 'session_not_found' }),
+    );
+  });
+
+  it('asks the live run, and reports its tools, skills and recorded tool use', async () => {
+    const h = await harness();
+    await h.coordinator.submitPrompt({
+      requestId: 'req-5',
+      text: 'Plan the work',
+      delivery: 'prompt',
+    });
+    const runner = await promptedRun(h);
+    await recordToolCalls(h, runner.sessionId, [
+      { toolName: 'read', text: 'skill://brand' },
+      { toolName: 'read', text: 'src/a.ts' },
+      { toolName: 'bash', text: 'ls' },
+    ]);
+
+    const info = await h.runtime.sessionInfo(runner.sessionId);
+
+    expect(runner.requestSessionInfo).toHaveBeenCalledWith(runner.runEpoch);
+    expect(info).toMatchObject({
+      cwd: 'D:/live-cwd',
+      launchCwd: h.store.workspacePath,
+      model: 'provider/live-model',
+      thinking: 'high',
+      sessionFile: 'D:/live-cwd/session.jsonl',
+      tools: [{ name: 'read', source: 'builtin', active: true }],
+      skills: [{ name: 'brand', description: 'Brand voice', used: true }],
+      toolUsage: [
+        { name: 'read', count: 2 },
+        { name: 'bash', count: 1 },
+      ],
+      collectedFrom: 'live',
+      collectedAt: '2026-10-02T00:00:00.000Z',
+    });
+  });
+
+  it('falls back to the saved record when the live run cannot answer', async () => {
+    const h = await harness();
+    await h.coordinator.submitPrompt({
+      requestId: 'req-6',
+      text: 'Plan the work',
+      delivery: 'prompt',
+    });
+    const runner = await promptedRun(h);
+    runner.requestSessionInfo.mockRejectedValueOnce(new Error('bridge gone'));
+
+    const info = await h.runtime.sessionInfo(runner.sessionId);
+
+    expect(info.collectedFrom).toBe('transcript');
+    expect(info.cwd).toBe(h.store.workspacePath);
+  });
+
+  it('answers from the saved transcript and the session log when no run is live', async () => {
+    const h = await harness();
+    const sessionId = randomUUID();
+    const transcript = path.join(WORKSPACE, 'saved-session.jsonl');
+    fs.writeFileSync(
+      transcript,
+      `${JSON.stringify({ type: 'session', version: 3, id: 'saved', cwd: WORKSPACE })}\n`,
+    );
+    await seedWorker(h, sessionId, transcript);
+    await recordToolCalls(h, sessionId, [{ toolName: 'bash', text: 'ls' }]);
+
+    const info = await h.runtime.sessionInfo(sessionId);
+
+    expect(info).toMatchObject({
+      cwd: h.store.workspacePath,
+      model: 'provider/model',
+      sessionFile: transcript,
+      tools: [],
+      skills: [],
+      toolUsage: [{ name: 'bash', count: 1 }],
+      collectedFrom: 'transcript',
+      collectedAt: '2026-10-02T00:00:00.000Z',
+    });
+  });
+
+  it('says it is record-only when neither a run nor a transcript can answer', async () => {
+    const h = await harness();
+    const sessionId = randomUUID();
+    await seedWorker(h, sessionId);
+
+    const info = await h.runtime.sessionInfo(sessionId);
+
+    expect(info).toMatchObject({
+      model: 'provider/model',
+      toolUsage: [],
+      collectedFrom: 'transcript',
+    });
+    expect(info.note).toEqual(expect.any(String));
+    expect(info).not.toHaveProperty('tools');
+    expect(info).not.toHaveProperty('sessionFile');
   });
 });

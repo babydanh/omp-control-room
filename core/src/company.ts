@@ -2,6 +2,10 @@ import type { CompanyEvent, CompanyRole } from './messages.js';
 
 export type {
   AcceptanceCriterion,
+  AgentInfo,
+  AgentSkillInfo,
+  AgentToolInfo,
+  AgentToolUsage,
   ArtifactPage,
   Attempt,
   CompanyArchitectureIssue,

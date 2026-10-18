@@ -24,6 +24,7 @@ describe('company egress gate', () => {
       'companyCommandResult',
       'companyTextDelta',
       'companySessionLog',
+      'companySessionInfo',
       'companyModelCatalog',
       'companyArtifactPage',
       'companyFileList',
@@ -31,6 +32,7 @@ describe('company egress gate', () => {
       'companyAttachmentUploaded',
       'herdrAgents',
       'herdrScreen',
+      'herdrInfo',
       'terminalAttached',
       'terminalData',
     ]) {

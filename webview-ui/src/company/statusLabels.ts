@@ -157,4 +157,5 @@ export const DRAWER_TAB_LABELS: Record<CompanyDrawerTab, string> = {
   questions: 'Câu hỏi',
   usage: 'Chi phí',
   report: 'Báo cáo',
+  info: 'Thông tin',
 };
