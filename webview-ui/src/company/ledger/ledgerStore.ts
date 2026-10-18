@@ -28,6 +28,7 @@ import type {
   LedgerViewRequestMessage,
   ServerMessage,
 } from '../../../../core/src/messages.js';
+import { newRequestId as defaultRequestId } from '../companyMessages.js';
 import type { LedgerWindow } from './ledgerFormat.js';
 
 /** The replies the ledger store applies. Everything else on the socket is ignored. */
@@ -313,7 +314,7 @@ export function reduceLedgerMessage(state: LedgerState, message: LedgerServerMes
 /** The state an outside reader sees. Components read it through `useLedgerState`. */
 export interface LedgerStoreOptions {
   send: LedgerSend;
-  /** Request ids; defaults to crypto.randomUUID(). Tests inject a counter. */
+  /** Request ids; defaults to `newRequestId`. Tests inject a counter. */
   newRequestId?: () => string;
 }
 
@@ -334,7 +335,7 @@ export interface LedgerStore {
 }
 
 export function createLedgerStore(options: LedgerStoreOptions): LedgerStore {
-  const newRequestId = options.newRequestId ?? (() => crypto.randomUUID());
+  const newRequestId = options.newRequestId ?? defaultRequestId;
   let send = options.send;
   let state = createInitialLedgerState();
   const listeners = new Set<() => void>();
