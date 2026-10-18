@@ -82,7 +82,7 @@ describe('groupToolsBySource', () => {
   it('files an MCP tool with no server name under an unknown server', () => {
     const groups = groupToolsBySource([tool('mystery', { source: 'mcp' })]);
 
-    expect(groups.map((group) => group.label)).toEqual(['MCP · không rõ máy chủ']);
+    expect(groups.map((group) => group.label)).toEqual(['MCP · không rõ']);
   });
 
   it('drops groups that have no tools', () => {
@@ -104,12 +104,12 @@ describe('inferMcpServers', () => {
 
     expect(servers.get('mcp__botkeep_cloud_devdocs_search')).toBe('botkeep_cloud');
     expect(servers.get('mcp__cua_driver_bring_to_front')).toBe('cua_driver');
-    // One tool cannot show where the server name ends; the source's guess stands.
+    // One tool cannot show where its server name ends, so its guessed name is not shown.
     expect(servers.has('mcp__solo_only')).toBe(false);
     expect(groupToolsBySource(tools).map((group) => group.label)).toEqual([
-      'MCP · botkeep_cloud',
-      'MCP · cua_driver',
-      'MCP · solo',
+      'MCP · botkeep_cloud (ước tính)',
+      'MCP · cua_driver (ước tính)',
+      'MCP · không rõ',
     ]);
   });
 });
@@ -125,9 +125,82 @@ describe('mcpServerViews', () => {
     );
 
     expect(views).toEqual([
-      { name: 'github', toolCount: 2, activeCount: 1, usageCount: 3, used: true },
-      { name: 'filesystem', toolCount: 1, activeCount: 1, usageCount: 1, used: true },
-      { name: 'idle', toolCount: 1, activeCount: 1, usageCount: 0, used: false },
+      {
+        name: 'github',
+        estimated: false,
+        toolCount: 2,
+        activeCount: 1,
+        usageCount: 3,
+        used: true,
+      },
+      {
+        name: 'filesystem',
+        estimated: false,
+        toolCount: 1,
+        activeCount: 1,
+        usageCount: 1,
+        used: true,
+      },
+      {
+        name: 'idle',
+        estimated: false,
+        toolCount: 1,
+        activeCount: 1,
+        usageCount: 0,
+        used: false,
+      },
+    ]);
+  });
+
+  it('marks a server named from tool prefixes it shares as estimated', () => {
+    const views = mcpServerViews(
+      [
+        tool('mcp__botkeep_cloud_devdocs_search', { source: 'mcp', mcpServer: 'botkeep' }),
+        tool('mcp__botkeep_cloud_diff_validator', { source: 'mcp', mcpServer: 'botkeep' }),
+      ],
+      [],
+    );
+
+    expect(views).toEqual([
+      {
+        name: 'botkeep_cloud',
+        estimated: true,
+        toolCount: 2,
+        activeCount: 2,
+        usageCount: 0,
+        used: false,
+      },
+    ]);
+  });
+
+  it('shows a server nothing reports, or one tool only guesses at, as unknown', () => {
+    const views = mcpServerViews(
+      [
+        tool('mcp__solo_only', { source: 'mcp', mcpServer: 'solo' }),
+        tool('mcp__github_pr', { source: 'mcp', mcpServer: 'github' }),
+        tool('mystery', { source: 'mcp' }),
+        tool('mcp__botkeep_cloud_x', { source: 'mcp', mcpServer: 'botkeep_cloud' }),
+      ],
+      [],
+    );
+
+    expect(views).toEqual([
+      {
+        name: 'botkeep_cloud',
+        estimated: false,
+        toolCount: 1,
+        activeCount: 1,
+        usageCount: 0,
+        used: false,
+      },
+      {
+        name: 'không rõ',
+        estimated: false,
+        toolCount: 3,
+        activeCount: 3,
+        usageCount: 0,
+        used: false,
+      },
     ]);
   });
 });

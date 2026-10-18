@@ -2,10 +2,10 @@
  * AgentContextMenu: the right-click menu on an agent, as one floating panel.
  *
  * It opens from the surface that was used, at the pointer or below the focused
- * row, and lists what the agent offers (agentMenu.ts decides the items). A rename
- * or a focus is sent here and the menu stays open until the server answers, so a
- * refusal can be read. Escape steps back out of rename or stop-confirm, then closes
- * the menu and returns focus to the row that opened it.
+ * row, and lists what the agent offers (agentMenu.ts decides the items). A rename,
+ * a focus or a lifecycle control is sent here, and the menu stays open until the
+ * server answers, so a refusal can be read. Escape steps back out of rename or a
+ * confirm, then closes the menu and returns focus to the row that opened it.
  */
 
 import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
@@ -29,13 +29,16 @@ import {
   type SessionMenuTab,
   sessionNameProblem,
 } from '../agentMenu.js';
+import { pendingQuestionSessionIds } from '../agentSidebarView.js';
 import { copyText } from '../clipboard.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
+import { DELETE_CONFIRM_DETAIL, REFUSED_NOTICE, sessionHoldsWork } from '../sessionActions.js';
 import { sessionStatusLabel } from '../statusLabels.js';
 import { CompanyButton } from './CompanyButton.js';
+import { ConfirmAction } from './SessionActions.js';
 
 export interface AgentContextMenuProps {
   client: CompanyClient;
@@ -46,7 +49,7 @@ export interface AgentContextMenuProps {
   onHerdrTab: (paneId: string, tab: HerdrDrawerTab) => void;
 }
 
-type MenuMode = 'menu' | 'rename' | 'confirm-kill';
+type MenuMode = 'menu' | 'rename' | 'confirm-kill' | 'confirm-delete';
 
 interface Notice {
   text: string;
@@ -54,7 +57,6 @@ interface Notice {
 }
 
 const ITEM_SELECTOR = 'button[role="menuitem"]:not([aria-disabled="true"])';
-const REFUSED_NOTICE = 'Máy chủ từ chối lệnh này.';
 const NOT_SENT_NOTICE = 'Không gửi được.';
 const COPY_FAILED_NOTICE = 'Không sao chép được vào bộ nhớ tạm.';
 
@@ -69,11 +71,12 @@ function menuItemsFor(
   session: CompanySessionSummary | undefined,
   agent: HerdrAgent | undefined,
   folder: string | null,
+  holdsWork: boolean,
 ): AgentMenuItem[] | null {
   if (subject.kind === 'herdr') return agent === undefined ? null : herdrMenuItems(folder);
   if (subject.sessionId === null) return sessionMenuItems(null);
   if (session === undefined) return null;
-  return sessionMenuItems({ status: session.status, cwd: folder });
+  return sessionMenuItems({ status: session.status, cwd: folder, holdsWork });
 }
 
 /** The two lines the menu's header prints about what it is open on. */
@@ -143,7 +146,10 @@ export function AgentContextMenu({
       : sessionInfo === undefined
         ? null
         : workingFolder(sessionInfo);
-  const items = menuItemsFor(subject, session, agent, folder);
+  const holdsWork =
+    session !== undefined &&
+    sessionHoldsWork(session, pendingQuestionSessionIds(state).has(session.id));
+  const items = menuItemsFor(subject, session, agent, folder, holdsWork);
   const header = headerLines(subject, session, agent);
 
   const menuRef = useRef<HTMLDivElement>(null);
@@ -250,12 +256,7 @@ export function AgentContextMenu({
 
   function control(action: SessionControlAction): void {
     if (sessionId === null) return;
-    const outcome = client.controlSession(sessionId, action);
-    if (outcome.ok) {
-      onClose();
-      return;
-    }
-    setNotice({ text: outcome.message ?? outcome.errorCode ?? REFUSED_NOTICE, failed: true });
+    track(client.controlSession(sessionId, action));
   }
 
   async function copy(what: 'cwd' | 'sessionCode' | 'paneId'): Promise<void> {
@@ -291,8 +292,8 @@ export function AgentContextMenu({
         void copy(action.what);
         return;
       case 'control':
-        if (action.action === 'kill') {
-          setMode('confirm-kill');
+        if (action.action === 'kill' || action.action === 'delete') {
+          setMode(action.action === 'kill' ? 'confirm-kill' : 'confirm-delete');
           return;
         }
         control(action.action);
@@ -392,19 +393,27 @@ export function AgentContextMenu({
             </CompanyButton>
           </div>
         </form>
+      ) : mode === 'confirm-kill' ? (
+        <div className="px-3 py-2">
+          <ConfirmAction
+            message={`Tắt phiên ${session?.code ?? ''}? Phiên đang chạy sẽ bị dừng ngay.`}
+            confirmLabel="Tắt phiên"
+            danger
+            disabled={pending !== null}
+            onConfirm={() => control('kill')}
+            onCancel={() => setMode('menu')}
+          />
+        </div>
       ) : (
-        <div className="flex flex-col gap-2 px-3 py-2">
-          <p className="text-text">
-            Dừng phiên {session?.code ?? ''}? Phiên đang chạy sẽ bị dừng ngay.
-          </p>
-          <div className="flex gap-1">
-            <CompanyButton size="sm" className="text-warning" onClick={() => control('kill')}>
-              Dừng phiên
-            </CompanyButton>
-            <CompanyButton size="sm" onClick={() => setMode('menu')}>
-              Quay lại
-            </CompanyButton>
-          </div>
+        <div className="px-3 py-2">
+          <ConfirmAction
+            message={`Xoá phiên ${session?.code ?? ''}? ${DELETE_CONFIRM_DETAIL}`}
+            confirmLabel="Xoá phiên"
+            danger
+            disabled={pending !== null}
+            onConfirm={() => control('delete')}
+            onCancel={() => setMode('menu')}
+          />
         </div>
       )}
 

@@ -34,7 +34,11 @@ import type { ArtifactPage, CompanyEvent, CompanyState } from '../../../core/src
 import { LAYOUT_FILE_DIR } from '../constants.js';
 import { toPathKey } from '../pathKey.js';
 import { CompanyError } from './companyError.js';
-import { applyCompanyEvent, createInitialCompanyState } from './companyState.js';
+import {
+  applyCompanyEvent,
+  createInitialCompanyState,
+  withMissingRoleProfiles,
+} from './companyState.js';
 import {
   COMPANY_ARTIFACT_BODY_SUFFIX,
   COMPANY_ARTIFACT_DIR,
@@ -196,6 +200,8 @@ export class CompanyStore {
       if (event.sequence <= this.state.revision) continue; // already in the snapshot
       this.state = applyCompanyEvent(this.state, event);
     }
+    // A board saved before the chat role has no chat profile; add it here, and the next commit persists it.
+    this.state = withMissingRoleProfiles(this.state, this.modelRoles);
     return this.state;
   }
 

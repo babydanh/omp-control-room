@@ -50,6 +50,8 @@ import type {
   CompanyFileEntry,
   CompanyRemoveChange,
   CompanyStateChangedMessage,
+  CompanyWorkspaceEntry,
+  OmpSessionEntry,
   ServerMessage,
 } from '../../../core/src/messages.js';
 import { type CommandResultView, viewCommandResult } from './commandResults.js';
@@ -204,6 +206,13 @@ export function emptyHerdrView(): HerdrView {
   return { loaded: false, available: false, reason: null, agents: [], screens: {}, infos: {} };
 }
 
+/** The omp sessions the resume picker lists: the latest answer to a request for them. */
+export interface OmpSessionsView {
+  requestId: string;
+  folder: string;
+  sessions: OmpSessionEntry[];
+}
+
 export interface CompanyViewState {
   /** Last revision the client can account for; null before the first snapshot. */
   revision: number | null;
@@ -240,6 +249,14 @@ export interface CompanyViewState {
   /** Latest agent info per session; a late reply older than the one held is dropped. */
   sessionInfos: Record<string, AgentInfo>;
   herdr: HerdrView;
+  /** The latest answer to a resume-picker request; null until one has arrived. */
+  ompSessions: OmpSessionsView | null;
+  /** The folders the server reports; null until the server has sent a list. */
+  workspaces: CompanyWorkspaceEntry[] | null;
+  /** requestId of a folder switch in flight; its success clears the selection. */
+  pendingWorkspaceOpen: string | null;
+  /** A session a successful command named that is not on the board yet; selected once it is. */
+  openingSessionId: string | null;
 }
 
 export function emptyCompanyState(): CompanyViewState {
@@ -272,6 +289,10 @@ export function emptyCompanyState(): CompanyViewState {
     sessionLogs: {},
     sessionInfos: {},
     herdr: emptyHerdrView(),
+    ompSessions: null,
+    workspaces: null,
+    pendingWorkspaceOpen: null,
+    openingSessionId: null,
   };
 }
 
@@ -671,35 +692,118 @@ function applyTerminalFrame(
   };
 }
 
+/**
+ * The folders the server reports. When the active one changes, what the board held for
+ * the old folder goes: its terminal leases belong to sessions that are no longer here, and
+ * a selection or a resume list names those sessions.
+ */
+function applyWorkspaces(
+  state: CompanyViewState,
+  workspaces: readonly CompanyWorkspaceEntry[],
+): CompanyViewState {
+  const before = state.workspaces?.find((entry) => entry.active)?.path ?? null;
+  const after = workspaces.find((entry) => entry.active)?.path ?? null;
+  const held: CompanyViewState = { ...state, workspaces: [...workspaces] };
+  if (state.workspaces === null || before === after) return held;
+  return {
+    ...held,
+    terminals: {},
+    selection: EMPTY_SELECTION,
+    ompSessions: null,
+    openingSessionId: null,
+  };
+}
+
 function applyCommandResult(
   state: CompanyViewState,
   message: Extract<ServerMessage, { type: 'companyCommandResult' }>,
-): CompanyViewState {
+): CompanyResult {
   const result = viewCommandResult(message);
-  return {
+  const recorded: CompanyViewState = {
     ...state,
     commandResults: { ...state.commandResults, [result.requestId]: result },
     // The draft is the user's text until the server accepts it: a refused
     // prompt, a refused upload, or an answer to something else all leave it be.
     prompt: applySubmitResult(state.prompt, result),
   };
+  if (state.pendingWorkspaceOpen === result.requestId) {
+    if (!result.ok) return { state: { ...recorded, pendingWorkspaceOpen: null }, effects: [] };
+    // The board now points at another folder: nothing selected belonged to the old one.
+    return {
+      state: {
+        ...recorded,
+        pendingWorkspaceOpen: null,
+        ompSessions: null,
+        openingSessionId: null,
+        selection: EMPTY_SELECTION,
+      },
+      effects: [{ type: 'requestSnapshot' }],
+    };
+  }
+  // A command that opened or resumed a session names it; the board selects it once it is on screen.
+  if (result.ok && result.sessionId !== undefined) {
+    return { state: { ...recorded, openingSessionId: result.sessionId }, effects: [] };
+  }
+  return { state: recorded, effects: [] };
 }
 
 /**
- * Reduce one company server message. Unknown or foreign messages are ignored
- * rather than throwing: this runs inside the app's single transport handler.
+ * Keep the selection honest after every change. A session or task the board no
+ * longer holds is unselected. A session a command opened is selected as soon as it
+ * appears, and a newly selected session opens on the drawer's default tab.
+ */
+function settleSelection(result: CompanyResult): CompanyResult {
+  const { state } = result;
+  let sessionId = state.selection.sessionId;
+  let taskId = state.selection.taskId;
+  let openingSessionId = state.openingSessionId;
+  if (openingSessionId !== null && state.sessions[openingSessionId] !== undefined) {
+    sessionId = openingSessionId;
+    openingSessionId = null;
+  }
+  if (taskId !== null && state.tasks[taskId] === undefined) taskId = null;
+  if (sessionId !== null && state.sessions[sessionId] === undefined) sessionId = null;
+  if (
+    sessionId === state.selection.sessionId &&
+    taskId === state.selection.taskId &&
+    openingSessionId === state.openingSessionId
+  ) {
+    return result;
+  }
+  return {
+    ...result,
+    state: {
+      ...state,
+      openingSessionId,
+      selection: {
+        sessionId,
+        taskId,
+        tab: sessionId === state.selection.sessionId ? state.selection.tab : null,
+      },
+    },
+  };
+}
+
+/**
+ * Reduce one company server message, then settle the selection against the result.
+ * Unknown or foreign messages are ignored rather than throwing: this runs inside
+ * the app's single transport handler.
  */
 export function applyCompanyMessage(
   state: CompanyViewState,
   message: ServerMessage,
 ): CompanyResult {
+  return settleSelection(reduceMessage(state, message));
+}
+
+function reduceMessage(state: CompanyViewState, message: ServerMessage): CompanyResult {
   switch (message.type) {
     case 'companySnapshot':
       return unchanged(applySnapshot(state, message.snapshot));
     case 'companyStateChanged':
       return applyStateChanged(state, message);
     case 'companyCommandResult':
-      return unchanged(applyCommandResult(state, message));
+      return applyCommandResult(state, message);
     case 'companyTextDelta':
       return unchanged(applyTextDelta(state, message));
     case 'companyModelCatalog':
@@ -708,6 +812,17 @@ export function applyCompanyMessage(
       // answers for it with `model_unavailable`, which is more truthful than
       // silently switching the user to something else.
       return unchanged({ ...state, modelCatalog: [...message.entries] });
+    case 'companyOmpSessions':
+      return unchanged({
+        ...state,
+        ompSessions: {
+          requestId: message.requestId,
+          folder: message.folder,
+          sessions: [...message.sessions],
+        },
+      });
+    case 'companyWorkspaces':
+      return unchanged(applyWorkspaces(state, message.workspaces));
     case 'companyArtifactPage': {
       const page = message.page;
       const previous: ArtifactView = state.artifacts[page.id] ?? {

@@ -37,7 +37,7 @@ import type {
   VerificationEvidence,
   WorkspaceChange,
 } from '../../../core/src/company.js';
-import type { CompanySessionAction } from './companyCoordinator.js';
+import type { TransitionAction } from './companyCoordinator.js';
 import { CompanyError } from './companyError.js';
 import type { VerificationVerdict } from './companyWorkflow.js';
 import { evaluateVerification, nextAttemptOutcome, validateContract } from './companyWorkflow.js';
@@ -709,7 +709,7 @@ export function answerQuestion(
 export function controlSession(
   state: CompanyState,
   sessionId: string,
-  action: CompanySessionAction,
+  action: TransitionAction,
   runEpoch: number,
   now: string,
   newEvent: EngineEvent,
@@ -745,7 +745,7 @@ export function controlSession(
  * tool or child is still running, which is why the intermediate status exists.
  */
 const SESSION_STATUS_BY_ACTION: Record<
-  CompanySessionAction,
+  TransitionAction,
   CompanyState['sessions'][string]['status']
 > = {
   pause: 'pausing',

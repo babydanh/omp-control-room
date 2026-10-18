@@ -97,6 +97,17 @@ export async function readSessionLog(
   return entries.slice(Math.max(0, entries.length - limit));
 }
 
+/**
+ * Erase one session's board log. Queued writes for that file land first, so a
+ * write still in flight cannot recreate the file after it is removed.
+ */
+export async function removeSessionLog(directory: string, sessionId: string): Promise<void> {
+  const filePath = sessionLogPath(directory, sessionId);
+  const pending = writeChains.get(filePath);
+  if (pending !== undefined) await pending;
+  await fs.promises.rm(filePath, { force: true });
+}
+
 /** Prefix of the `text` a `read` of a skill logs, so the skill name stays in the log. */
 export const SKILL_READ_LOG_PREFIX = 'skill://';
 

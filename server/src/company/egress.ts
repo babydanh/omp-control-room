@@ -26,6 +26,8 @@ const COMPANY_PRIVATE_TYPES: ReadonlySet<string> = new Set([
   'companySessionLog',
   'companySessionInfo',
   'companyModelCatalog',
+  'companyWorkspaces',
+  'companyOmpSessions',
   'companyArtifactPage',
   'companyFileList',
   'companyFileRead',

@@ -8,7 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CompanyState } from '../../core/src/company.js';
 import type { ServerMessage } from '../../core/src/messages.js';
+import { CompanyError } from '../src/company/companyError.js';
 import type { CompanyRuntimeDeps } from '../src/company/companyRuntime.js';
+import { COMPANY_MODEL_CATALOG_TTL_MS } from '../src/company/constants.js';
 import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
 import { UsageLedger } from '../src/company/usageService.js';
 
@@ -46,11 +48,8 @@ async function until(predicate: () => boolean, label: string): Promise<void> {
 }
 
 /**
- * The run that actually received a prompt.
- *
- * The runtime may start an idle Director purely to answer a model-catalog read,
- * and that run never receives a prompt, so "the first runner started" is not
- * necessarily the one under test.
+ * The run that actually received a prompt. A board can hold more than one live
+ * run, so "the first runner started" is not necessarily the one under test.
  */
 async function promptedRun(h: Harness): Promise<FakeRunner> {
   await until(
@@ -77,6 +76,8 @@ interface FakeRunner {
   sendPrompt: (runEpoch: number, prompt: { text: string; runEpoch?: number }) => Promise<void>;
   dispose: ReturnType<typeof vi.fn>;
   onEvent: (handler: (event: never) => void) => () => void;
+  /** The runtime's event handler, so a kill can deliver the exit a real process sends. */
+  listener?: (event: never) => void;
   start: () => Promise<void>;
   state: string;
 }
@@ -141,7 +142,10 @@ function makeRunner(sessionId: string, runEpoch: number): FakeRunner {
     dispose: vi.fn(async () => {
       runner.disposed += 1;
     }),
-    onEvent: () => () => undefined,
+    onEvent: (handler) => {
+      runner.listener = handler;
+      return () => undefined;
+    },
     start: async () => {
       runner.started += 1;
     },
@@ -149,7 +153,7 @@ function makeRunner(sessionId: string, runEpoch: number): FakeRunner {
   return runner;
 }
 
-async function harness(): Promise<Harness> {
+async function harness(overrides: Partial<CompanyRuntimeDeps> = {}): Promise<Harness> {
   startedRunners.length = 0;
   const store = await CompanyStore.open(WORKSPACE);
   const state: CompanyState = await store.load();
@@ -168,6 +172,16 @@ async function harness(): Promise<Harness> {
       extensionPath: 'C:/dist/company-omp-bridge.mjs',
       helperPath: 'C:/dist/company-pty-host.js',
     }),
+    readOmpModels: async () => [
+      {
+        id: 'provider/model',
+        provider: 'provider',
+        model: 'model',
+        input: ['text'],
+        thinkingLevels: ['high', 'xhigh'],
+        configured: true,
+      },
+    ],
     startPtyClient: async () =>
       ({
         onEvent: () => () => undefined,
@@ -223,12 +237,15 @@ async function harness(): Promise<Harness> {
       // The real supervisor's kill is what closes a run's bridge, so the fake
       // has to do the same or a dispose could never reach the runner.
       const ports = new Map<string, { shutdownBridge?: () => Promise<unknown> }>();
+      const sessionOfRun = new Map<string, string>();
       return {
         registerRun: (input: {
           runId: string;
+          sessionId: string;
           ports?: { shutdownBridge?: () => Promise<unknown> };
         }) => {
           if (input.ports) ports.set(input.runId, input.ports);
+          sessionOfRun.set(input.runId, input.sessionId);
           return undefined;
         },
         notifyExit: (runId: string) => {
@@ -239,9 +256,13 @@ async function harness(): Promise<Harness> {
         kill: async (runId: string) => {
           await ports.get(runId)?.shutdownBridge?.();
           ports.delete(runId);
+          // A real process reports its exit while the kill is still settling.
+          const sessionId = sessionOfRun.get(runId);
+          const runner = startedRunners.find((entry) => entry.sessionId === sessionId);
+          runner?.listener?.({ kind: 'exit', exitCode: 1 } as never);
           return { state: 'stopped' };
         },
-        getRun: () => undefined,
+        getRun: (runId: string) => (sessionOfRun.has(runId) ? { runId } : undefined),
         verifyRunOwnership: async () => 'gone' as const,
         dispose: async () => ({ role: 'owner', blocked: [] }),
       } as never;
@@ -249,6 +270,7 @@ async function harness(): Promise<Harness> {
     now: () => '2026-10-02T00:00:00.000Z',
     setInterval: (() => 0) as unknown as CompanyRuntimeDeps['setInterval'],
     clearInterval: () => undefined,
+    ...overrides,
   };
 
   const runtime = await createCompanyRuntime({
@@ -700,5 +722,201 @@ describe('company runtime effects', () => {
     expect(info.note).toEqual(expect.any(String));
     expect(info).not.toHaveProperty('tools');
     expect(info).not.toHaveProperty('sessionFile');
+  });
+});
+
+describe('chat sessions', () => {
+  beforeEach(async () => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'company-runtime-home-'));
+    fs.rmSync(WORKSPACE, { recursive: true, force: true });
+    fs.mkdirSync(WORKSPACE, { recursive: true });
+  });
+
+  afterEach(async () => {
+    fs.rmSync(WORKSPACE, { recursive: true, force: true });
+  });
+
+  it('opens one plain chat session for a prompt with nothing selected, then reuses it', async () => {
+    const h = await harness();
+    const directorsBefore = Object.values(h.coordinator.readState().sessions).filter(
+      (s) => s.role === 'director',
+    ).length;
+    const first = await h.coordinator.submitPrompt({
+      requestId: 'chat-1',
+      text: 'hi',
+      delivery: 'prompt',
+      mode: 'chat',
+    });
+    const sessionId = first.targetSessionId;
+    expect(sessionId).toEqual(expect.any(String));
+    expect(h.coordinator.readState().sessions[sessionId ?? '']?.role).toBe('chat');
+
+    // The chat text reaches omp exactly as typed: no company brief around it.
+    const runner = await promptedRun(h);
+    expect(runner.prompts[0]?.text).toBe('hi');
+
+    const second = await h.coordinator.submitPrompt({
+      requestId: 'chat-2',
+      text: 'and then?',
+      delivery: 'prompt',
+      mode: 'chat',
+      targetSessionId: sessionId,
+    });
+    expect(second.targetSessionId).toBe(sessionId);
+    const roles = Object.values(h.coordinator.readState().sessions).map((s) => s.role);
+    expect(roles.filter((role) => role === 'chat')).toHaveLength(1);
+    // The chat prompt opened no Director: the board's own Director was already there.
+    expect(roles.filter((role) => role === 'director')).toHaveLength(directorsBefore);
+    expect(h.runners).toHaveLength(1);
+  });
+
+  it('deletes a live chat session without recording its own kill as a crash', async () => {
+    const h = await harness();
+    const opened = await h.coordinator.submitPrompt({
+      requestId: 'chat-del',
+      text: 'hi',
+      delivery: 'prompt',
+      mode: 'chat',
+    });
+    const sessionId = opened.targetSessionId ?? '';
+    await promptedRun(h);
+    const session = h.coordinator.readState().sessions[sessionId];
+    expect(session).toBeDefined();
+    // The turn has ended; only an idle session may be deleted.
+    await h.coordinator.commitRuntimeChanges(
+      [{ entity: 'session', op: 'put', id: sessionId, value: { ...session!, status: 'idle' } }],
+      h.coordinator.readState().revision,
+    );
+
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      await h.coordinator.controlSession(sessionId, 'delete', session!.runEpoch);
+      // Let the exit callback the kill delivered finish its work.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(h.coordinator.readState().sessions[sessionId]).toBeUndefined();
+      // The exit of a run the board killed is not a crash: no write raced the
+      // delete. Unhandled, that conflicting write used to take the server down.
+      expect(errors).not.toHaveBeenCalled();
+    } finally {
+      errors.mockRestore();
+    }
+  });
+});
+
+describe('model catalog', () => {
+  beforeEach(async () => {
+    tempHome = fs.mkdtempSync(path.join(os.tmpdir(), 'company-runtime-home-'));
+    fs.rmSync(WORKSPACE, { recursive: true, force: true });
+    fs.mkdirSync(WORKSPACE, { recursive: true });
+  });
+
+  afterEach(async () => {
+    fs.rmSync(WORKSPACE, { recursive: true, force: true });
+  });
+
+  const CATALOG_MODEL = {
+    id: 'provider/model',
+    provider: 'provider',
+    model: 'model',
+    input: ['text'],
+    thinkingLevels: ['high', 'xhigh'],
+    configured: true,
+  };
+  const CATALOG_ENTRY = {
+    id: 'provider/model',
+    provider: 'provider',
+    model: 'model',
+    thinking: ['high', 'xhigh'],
+    acceptsImages: false,
+    credentialsConfigured: true,
+  };
+
+  it('reads the catalog from omp models without starting a session', async () => {
+    const readOmpModels = vi.fn(async () => [CATALOG_MODEL]);
+    const h = await harness({ readOmpModels });
+    const sessionsBefore = Object.keys(h.coordinator.readState().sessions).length;
+
+    await expect(h.runtime.modelCatalog()).resolves.toEqual([CATALOG_ENTRY]);
+
+    expect(readOmpModels).toHaveBeenCalledTimes(1);
+    expect(h.runners).toHaveLength(0);
+    expect(Object.keys(h.coordinator.readState().sessions)).toHaveLength(sessionsBefore);
+  });
+
+  it('shares one read between concurrent callers', async () => {
+    const readOmpModels = vi.fn(async () => [CATALOG_MODEL]);
+    const h = await harness({ readOmpModels });
+
+    const [first, second] = await Promise.all([h.runtime.modelCatalog(), h.runtime.modelCatalog()]);
+
+    expect(first).toEqual([CATALOG_ENTRY]);
+    expect(second).toEqual([CATALOG_ENTRY]);
+    expect(readOmpModels).toHaveBeenCalledTimes(1);
+  });
+
+  it('reuses one read inside the TTL and reads again once it has aged out', async () => {
+    let clock = Date.parse('2026-10-02T00:00:00.000Z');
+    const readOmpModels = vi.fn(async () => [CATALOG_MODEL]);
+    const h = await harness({ readOmpModels, now: () => new Date(clock).toISOString() });
+
+    await h.runtime.modelCatalog();
+    clock += COMPANY_MODEL_CATALOG_TTL_MS - 1;
+    await h.runtime.modelCatalog();
+    expect(readOmpModels).toHaveBeenCalledTimes(1);
+
+    clock += 1;
+    await h.runtime.modelCatalog();
+    expect(readOmpModels).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not keep a failed read, so the next caller asks again', async () => {
+    const readOmpModels = vi
+      .fn(async () => [CATALOG_MODEL])
+      .mockRejectedValueOnce(new CompanyError('model_catalog_unavailable', 'omp is missing'));
+    const h = await harness({ readOmpModels });
+
+    await expect(h.runtime.modelCatalog()).rejects.toMatchObject({
+      code: 'model_catalog_unavailable',
+    });
+    await expect(h.runtime.modelCatalog()).resolves.toEqual([CATALOG_ENTRY]);
+    expect(readOmpModels).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers from a live run when the CLI read fails', async () => {
+    const readOmpModels = vi.fn(async () => {
+      throw new CompanyError('model_catalog_unavailable', 'omp is missing');
+    });
+    const h = await harness({ readOmpModels });
+    const opened = await h.coordinator.submitPrompt({
+      requestId: 'catalog-live',
+      text: 'hi',
+      delivery: 'prompt',
+      mode: 'chat',
+    });
+    const sessionId = opened.targetSessionId ?? '';
+    const runner = await promptedRun(h);
+    const session = h.coordinator.readState().sessions[sessionId];
+    runner.requestModelCatalog.mockResolvedValueOnce({
+      sessionId,
+      runEpoch: session!.runEpoch,
+      models: [CATALOG_MODEL],
+    });
+
+    await expect(h.runtime.modelCatalog()).resolves.toEqual([CATALOG_ENTRY]);
+    expect(readOmpModels).toHaveBeenCalled();
+  });
+
+  it('refuses with the CLI reason when no run is live to ask', async () => {
+    const readOmpModels = vi.fn(async () => {
+      throw new CompanyError('model_catalog_unavailable', 'omp is missing');
+    });
+    const h = await harness({ readOmpModels });
+
+    await expect(h.runtime.modelCatalog()).rejects.toMatchObject({
+      code: 'model_catalog_unavailable',
+      message: expect.stringContaining('omp is missing'),
+    });
+    expect(h.runners).toHaveLength(0);
   });
 });

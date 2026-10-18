@@ -32,6 +32,7 @@ const REPLAYABLE_MESSAGE_TYPES: ReadonlySet<string> = new Set([
   'companyFileReadRequest',
   'companySessionLogRequest',
   'companySessionInfoRequest',
+  'companyOmpSessionsRequest',
   'herdrInfoRequest',
 ]);
 

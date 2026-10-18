@@ -108,3 +108,12 @@ export const HERDR_SCREEN_POLL_MS = 2000;
 
 /** Slide time of the detail drawer, matching the approved mockup. */
 export const COMPANY_DRAWER_SLIDE_MS = 320;
+
+/** Detail drawer width bounds, in CSS pixels. The maximum is a share of the viewport, never below the minimum. */
+export const COMPANY_DRAWER_MIN_WIDTH_PX = 320;
+export const COMPANY_DRAWER_DEFAULT_WIDTH_PX = 560;
+export const COMPANY_DRAWER_MAX_VIEWPORT_SHARE = 0.9;
+
+/** How far one arrow key moves the drawer's resize handle; with Shift, the large step. */
+export const COMPANY_DRAWER_RESIZE_STEP_PX = 16;
+export const COMPANY_DRAWER_RESIZE_LARGE_STEP_PX = 64;

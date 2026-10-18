@@ -155,6 +155,7 @@ export function BoardShell({ client }: BoardShellProps) {
     >
       <BoardTopBar
         state={state}
+        client={client}
         sidebarCollapsed={prefs.collapsed}
         onToggleSidebar={toggleSidebar}
         filesOpen={opened?.kind === 'files'}
@@ -208,6 +209,7 @@ export function BoardShell({ client }: BoardShellProps) {
           />
         )}
         <CompanyBoard
+          client={client}
           lanes={lanes}
           flow={boardFlow(lanes, state.settings?.maxWorkers ?? null)}
           planning={planningPrompts(state)}

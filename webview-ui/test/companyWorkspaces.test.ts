@@ -1,0 +1,238 @@
+import { randomUUID } from 'node:crypto';
+
+import { describe, expect, it } from 'vitest';
+
+import { TRANSPORT_DISCONNECTED_ERROR } from '../../core/src/messageDelivery.js';
+import type { ClientMessage, CompanyWorkspaceEntry } from '../../core/src/messages.js';
+import { CompanyClient } from '../src/company/companyClient.js';
+import {
+  applyCompanyMessage,
+  type CompanyViewState,
+  EMPTY_SELECTION,
+  type TerminalView,
+} from '../src/company/companyState.js';
+import {
+  activeWorkspace,
+  planWorkspaceOpen,
+  workspaceActivity,
+  workspaceName,
+} from '../src/company/workspaces.js';
+import type { MessageTransport } from '../src/transport/types.js';
+import { session, snapshot, stateFrom } from './companyFixtures.js';
+
+const DU_AN = 'D:\\du-an';
+const KHAC = 'D:\\khac';
+
+function folder(
+  path: string,
+  active: boolean,
+  counts: { working?: number; waiting?: number } = {},
+): CompanyWorkspaceEntry {
+  return {
+    path,
+    active,
+    open: true,
+    working: counts.working ?? 0,
+    waiting: counts.waiting ?? 0,
+  };
+}
+
+function terminal(sessionId: string): TerminalView {
+  return {
+    sessionId,
+    runEpoch: 1,
+    attached: true,
+    leaseId: 'lease-1',
+    lastSeq: 0,
+    frames: [],
+    overflow: false,
+    closedReason: null,
+  };
+}
+
+describe('folder names and activity', () => {
+  it('names a folder by its last segment, whatever the separator', () => {
+    expect(workspaceName('D:\\du-an')).toBe('du-an');
+    expect(workspaceName('D:\\du-an\\')).toBe('du-an');
+    expect(workspaceName('/home/me/app/')).toBe('app');
+    expect(workspaceName('D:\\')).toBe('D:');
+  });
+
+  it('reads an idle folder as idle and counts only what is happening', () => {
+    expect(workspaceActivity(folder(DU_AN, false))).toBe('rảnh');
+    expect(workspaceActivity(folder(DU_AN, false, { working: 2, waiting: 1 }))).toBe(
+      'đang chạy 2 · chờ 1',
+    );
+    expect(workspaceActivity(folder(DU_AN, false, { waiting: 3 }))).toBe('chờ 3');
+  });
+});
+
+describe('planning a folder switch', () => {
+  const list = [folder(DU_AN, true), folder(KHAC, false)];
+
+  it('refuses a blank entry before any command is sent', () => {
+    expect(planWorkspaceOpen(list, '   ')).toEqual({
+      kind: 'refuse',
+      message: 'Hãy nhập đường dẫn thư mục.',
+    });
+  });
+
+  it('needs no command for the folder already active, whatever its slash style or case', () => {
+    expect(planWorkspaceOpen(list, 'd:/du-an/')).toEqual({ kind: 'stay' });
+  });
+
+  it('sends any other folder as a switch, with the path trimmed', () => {
+    expect(planWorkspaceOpen(list, '  D:\\moi  ')).toEqual({ kind: 'open', path: 'D:\\moi' });
+  });
+
+  it('sends the switch when no folder list has arrived yet', () => {
+    expect(planWorkspaceOpen(null, DU_AN)).toEqual({ kind: 'open', path: DU_AN });
+  });
+
+  it('finds the active folder, and none before a list arrives', () => {
+    expect(activeWorkspace(list)?.path).toBe(DU_AN);
+    expect(activeWorkspace(null)).toBeNull();
+  });
+});
+
+/** A board that has a session selected, holding the terminal and resume list of its folder. */
+function stateWithFolders(workspaces: CompanyWorkspaceEntry[] | null): CompanyViewState {
+  return {
+    ...stateFrom({ sessions: [session({ id: 's1' })] }),
+    workspaces,
+    selection: { sessionId: 's1', taskId: null, tab: 'log' },
+    terminals: { s1: terminal('s1') },
+    ompSessions: { requestId: 'r1', folder: DU_AN, sessions: [] },
+    openingSessionId: 's2',
+  };
+}
+
+describe('the board follows the folder the server reports', () => {
+  it('keeps the selection, terminals, and resume list when the active folder is unchanged', () => {
+    const before = stateWithFolders([folder(DU_AN, true), folder(KHAC, false)]);
+    const after = applyCompanyMessage(before, {
+      type: 'companyWorkspaces',
+      workspaces: [folder(KHAC, false, { working: 1 }), folder(DU_AN, true, { waiting: 2 })],
+    }).state;
+    expect(after.selection.sessionId).toBe('s1');
+    expect(after.terminals.s1).toBeDefined();
+    expect(after.ompSessions).not.toBeNull();
+    expect(after.workspaces?.find((entry) => entry.active)?.waiting).toBe(2);
+  });
+
+  it('drops what the old folder held when the active folder changes', () => {
+    const before = stateWithFolders([folder(DU_AN, true), folder(KHAC, false)]);
+    const after = applyCompanyMessage(before, {
+      type: 'companyWorkspaces',
+      workspaces: [folder(DU_AN, false), folder(KHAC, true)],
+    }).state;
+    expect(after.selection).toEqual(EMPTY_SELECTION);
+    expect(after.terminals).toEqual({});
+    expect(after.ompSessions).toBeNull();
+    expect(after.openingSessionId).toBeNull();
+  });
+
+  it('does not treat the first folder list as a switch', () => {
+    const before = stateWithFolders(null);
+    const after = applyCompanyMessage(before, {
+      type: 'companyWorkspaces',
+      workspaces: [folder(DU_AN, true)],
+    }).state;
+    expect(after.selection.sessionId).toBe('s1');
+    expect(after.terminals.s1).toBeDefined();
+  });
+});
+
+interface FakeTransport {
+  transport: MessageTransport;
+  sent: ClientMessage[];
+  setConnected(connected: boolean): void;
+}
+
+function fakeTransport(): FakeTransport {
+  const sent: ClientMessage[] = [];
+  let connected = true;
+  return {
+    sent,
+    setConnected(value: boolean) {
+      connected = value;
+    },
+    transport: {
+      send(message: ClientMessage) {
+        if (!connected) throw new Error(TRANSPORT_DISCONNECTED_ERROR);
+        sent.push(message);
+      },
+      onMessage: () => () => {},
+      ready: Promise.resolve(),
+      state: 'connected',
+      onStateChange: () => () => {},
+      dispose: () => {},
+    } as MessageTransport,
+  };
+}
+
+/** A client on a board with one selected session and two folders, one of them active. */
+function clientWithSession() {
+  const fake = fakeTransport();
+  const client = new CompanyClient(fake.transport);
+  client.accept({
+    type: 'companySnapshot',
+    requestId: randomUUID(),
+    snapshot: snapshot({ sessions: [session({ id: 's1' })] }),
+  });
+  client.accept({
+    type: 'companyWorkspaces',
+    workspaces: [folder(DU_AN, true), folder(KHAC, false)],
+  });
+  client.select({ sessionId: 's1' });
+  return { client, sent: fake.sent, setConnected: fake.setConnected };
+}
+
+describe('opening a folder through the client', () => {
+  it('sends the switch and holds it in flight until its verdict', () => {
+    const { client, sent } = clientWithSession();
+    const handle = client.openWorkspace(KHAC);
+    expect(handle.ok).toBe(true);
+    expect(sent.at(-1)).toEqual({
+      type: 'companyWorkspaceOpen',
+      requestId: handle.requestId,
+      path: KHAC,
+    });
+    expect(client.getState().pendingWorkspaceOpen).toBe(handle.requestId);
+  });
+
+  it('a success clears the in-flight mark and the selection, and asks for a fresh snapshot', () => {
+    const { client, sent } = clientWithSession();
+    const handle = client.openWorkspace(KHAC);
+    client.accept({ type: 'companyCommandResult', requestId: handle.requestId, ok: true });
+    const state = client.getState();
+    expect(state.pendingWorkspaceOpen).toBeNull();
+    expect(state.selection.sessionId).toBeNull();
+    expect(sent.some((message) => message.type === 'companySnapshotRequest')).toBe(true);
+  });
+
+  it('a refusal keeps the selection and holds the server message under the handle', () => {
+    const { client } = clientWithSession();
+    const handle = client.openWorkspace(KHAC);
+    client.accept({
+      type: 'companyCommandResult',
+      requestId: handle.requestId,
+      ok: false,
+      errorCode: 'workspace_invalid',
+      message: 'Thư mục không tồn tại.',
+    });
+    const state = client.getState();
+    expect(state.pendingWorkspaceOpen).toBeNull();
+    expect(state.selection.sessionId).toBe('s1');
+    expect(state.commandResults[handle.requestId]?.message).toBe('Thư mục không tồn tại.');
+  });
+
+  it('a send the transport refuses leaves nothing in flight', () => {
+    const { client, setConnected } = clientWithSession();
+    setConnected(false);
+    const handle = client.openWorkspace(KHAC);
+    expect(handle.ok).toBe(false);
+    expect(handle.errorCode).toBe(TRANSPORT_DISCONNECTED_ERROR);
+    expect(client.getState().pendingWorkspaceOpen).toBeNull();
+  });
+});

@@ -208,6 +208,9 @@ function effects() {
       measuredAt: now,
     }),
     onPromptSubmitted: async () => undefined,
+    openChatSession: async () => {
+      throw new Error('openChatSession is not used by this test');
+    },
     onContractDecision: async () => undefined,
     onQuestionAnswered: async () => undefined,
     controlSession: async (_session: CompanySession, action: CompanySessionAction) => ({
@@ -217,6 +220,9 @@ function effects() {
           ? 'idle'
           : 'stopped') as CompanySession['status'],
     }),
+    deleteSession: async () => {
+      throw new Error('deleteSession is not used by this test');
+    },
     onSettingsUpdated: async () => undefined,
     onStateChanged: () => undefined,
     recover: async () => undefined,

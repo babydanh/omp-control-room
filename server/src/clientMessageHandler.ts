@@ -4,7 +4,7 @@ import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
-import type { CompanyCommandServices } from './company/clientCommands.js';
+import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import { handleCompanyCommand } from './company/clientCommands.js';
 import {
   getHooksConsent,
@@ -74,6 +74,8 @@ export interface ClientMessageContext {
   companyExecutionAllowed?: boolean;
   /** Server-level herdr link. `null` or absent means herdr is not linked into this process. */
   herdr?: HerdrLink | null;
+  /** Folder list and switching for this process; absent when it holds one fixed workspace. */
+  workspaces?: CompanyWorkspaceControl | null;
   /** Called as soon as attach rotates the socket's terminal egress lease. */
   onTerminalAttached?: (sessionId: string, leaseId: string) => void;
   /** Called after a successful detach; see CompanyCommandContext. */
@@ -115,6 +117,7 @@ export function handleClientMessage(
       (message) => send(message as unknown as Record<string, unknown>),
       {
         services: ctx.company ?? null,
+        workspaces: ctx.workspaces ?? null,
         privileged: ctx.privileged === true,
         executionAllowed: ctx.companyExecutionAllowed === true,
         onTerminalAttached: ctx.onTerminalAttached,

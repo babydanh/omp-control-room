@@ -129,6 +129,8 @@ components:
         - $ref: '#/components/schemas/CompanySessionInfoMessage'
         - $ref: '#/components/schemas/HerdrInfoMessage'
         - $ref: '#/components/schemas/CompanyModelCatalogMessage'
+        - $ref: '#/components/schemas/CompanyOmpSessionsMessage'
+        - $ref: '#/components/schemas/CompanyWorkspacesMessage'
         - $ref: '#/components/schemas/CompanyArtifactPageMessage'
         - $ref: '#/components/schemas/CompanyFileListMessage'
         - $ref: '#/components/schemas/CompanyFileReadMessage'
@@ -170,6 +172,10 @@ components:
         - $ref: '#/components/schemas/CompanyContractDecisionMessage'
         - $ref: '#/components/schemas/CompanyQuestionAnswerMessage'
         - $ref: '#/components/schemas/CompanySessionControlMessage'
+        - $ref: '#/components/schemas/CompanyPromptCancelMessage'
+        - $ref: '#/components/schemas/CompanyOmpSessionsRequestMessage'
+        - $ref: '#/components/schemas/CompanySessionResumeMessage'
+        - $ref: '#/components/schemas/CompanyWorkspaceOpenMessage'
         - $ref: '#/components/schemas/CompanySettingsUpdateMessage'
         - $ref: '#/components/schemas/CompanyModelCatalogRequestMessage'
         - $ref: '#/components/schemas/CompanyArtifactRequestMessage'
@@ -1245,7 +1251,8 @@ components:
           type: integer
     CompanyRole:
       type: string
-      enum: [director, advisor, worker, qa, judge]
+      description: chat is a plain OMP session the user talks to, like an `omp` terminal; the other roles are the Company workflow.
+      enum: [director, advisor, worker, qa, judge, chat]
 
     CompanySettings:
       type: object
@@ -1301,7 +1308,8 @@ components:
           type: string
         toolsPolicy:
           type: string
-          enum: [read-only, scoped-write, verification-only]
+          description: omp = the session runs with the user's own OMP tools and approvals, exactly like an `omp` terminal (chat sessions only).
+          enum: [read-only, scoped-write, verification-only, omp]
 
     PromptAttachment:
       type: object
@@ -2540,6 +2548,10 @@ components:
         delivery:
           type: string
           enum: [prompt, steer, follow_up]
+        mode:
+          type: string
+          enum: [chat, company]
+          description: chat sends to the target session or opens a plain OMP session, like typing in omp; company hands the prompt to the Director workflow. Absent means company.
         attachments:
           type: array
           items:
@@ -2928,7 +2940,65 @@ components:
           minimum: 0
         action:
           type: string
-          enum: [pause, resume, kill, restart, archive]
+          enum: [pause, resume, kill, restart, archive, interrupt, delete]
+
+    CompanyPromptCancelMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, promptId]
+      description: Withdraw a prompt that no Contract holds yet, and stop and delete the session planning it.
+      properties:
+        type:
+          const: companyPromptCancel
+        requestId:
+          type: string
+          format: uuid
+        promptId:
+          type: string
+          format: uuid
+
+    CompanyOmpSessionsRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      description: List the OMP sessions saved for the active folder, like omp's /resume.
+      properties:
+        type:
+          const: companyOmpSessionsRequest
+        requestId:
+          type: string
+          format: uuid
+
+    CompanySessionResumeMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, file]
+      description: Open a saved OMP session of the active folder as a chat session.
+      properties:
+        type:
+          const: companySessionResume
+        requestId:
+          type: string
+          format: uuid
+        file:
+          type: string
+          maxLength: 4096
+
+    CompanyWorkspaceOpenMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path]
+      description: Make a folder the board's active folder, opening its Company if it is not open yet.
+      properties:
+        type:
+          const: companyWorkspaceOpen
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          minLength: 1
+          maxLength: 4096
 
     CompanySettingsUpdateMessage:
       type: object
@@ -3329,6 +3399,10 @@ components:
         revision:
           type: integer
           minimum: 0
+        sessionId:
+          type: string
+          format: uuid
+          description: The session a prompt was delivered to or opened, so the board can make it the current session.
 
     CompanyTextDeltaMessage:
       type: object
@@ -3591,6 +3665,77 @@ components:
           type: string
         info:
           $ref: '#/components/schemas/AgentInfo'
+
+    OmpSessionEntry:
+      type: object
+      additionalProperties: false
+      required: [file, updatedAt, sizeBytes]
+      properties:
+        file:
+          type: string
+        title:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+        sizeBytes:
+          type: integer
+          minimum: 0
+        boardSessionId:
+          type: string
+          format: uuid
+          description: Set when a board session already runs this file.
+
+    CompanyOmpSessionsMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, folder, sessions]
+      properties:
+        type:
+          const: companyOmpSessions
+        requestId:
+          type: string
+          format: uuid
+        folder:
+          type: string
+        sessions:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/OmpSessionEntry'
+
+    CompanyWorkspaceEntry:
+      type: object
+      additionalProperties: false
+      required: [path, active, open, working, waiting]
+      properties:
+        path:
+          type: string
+        active:
+          type: boolean
+          description: The folder this board is showing.
+        open:
+          type: boolean
+          description: Whether its Company is running on this server (its agents keep working while another folder is shown).
+        working:
+          type: integer
+          minimum: 0
+        waiting:
+          type: integer
+          minimum: 0
+          description: Sessions or Contracts waiting on the user.
+
+    CompanyWorkspacesMessage:
+      type: object
+      additionalProperties: false
+      required: [type, workspaces]
+      properties:
+        type:
+          const: companyWorkspaces
+        workspaces:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyWorkspaceEntry'
 
     CompanyModelCatalogMessage:
       type: object

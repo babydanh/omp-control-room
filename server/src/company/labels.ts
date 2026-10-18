@@ -22,6 +22,8 @@ export const SESSION_ACTION_LABELS: Readonly<Record<CompanySessionAction, string
   kill: 'dừng',
   restart: 'khởi động lại',
   archive: 'lưu trữ',
+  interrupt: 'ngắt lượt',
+  delete: 'xoá',
 };
 
 export const SESSION_STATUS_LABELS: Readonly<Record<CompanySession['status'], string>> = {
@@ -64,6 +66,7 @@ export const ROLE_LABELS: Readonly<Record<CompanyRole, string>> = {
   worker: 'Nhân viên',
   qa: 'QA',
   judge: 'Trọng tài',
+  chat: 'Phiên chat',
 };
 
 /** A Contract status as a reader sees it, not as the wire spells it. */

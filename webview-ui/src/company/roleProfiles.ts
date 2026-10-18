@@ -12,6 +12,8 @@ import type { CompanyRole, RoleProfile } from '../../../core/src/company.js';
 import type { CompanyViewState } from './companyState.js';
 
 export const COMPANY_ROLES: readonly CompanyRole[] = [
+  // Chat sessions are plain omp sessions; they sit above the Company roles in the sidebar.
+  'chat',
   'director',
   'advisor',
   'worker',
@@ -20,6 +22,7 @@ export const COMPANY_ROLES: readonly CompanyRole[] = [
 ];
 
 export const ROLE_LABELS: Record<CompanyRole, string> = {
+  chat: 'Phiên chat',
   director: 'Giám đốc',
   advisor: 'Cố vấn',
   worker: 'Nhân viên',
@@ -34,6 +37,7 @@ export function companyRoleLabel(role: string): string {
 
 /** Left-edge colour that marks a role on a card and in the role strip. */
 export const ROLE_EDGE_CLASS: Record<CompanyRole, string> = {
+  chat: 'border-l-orchid',
   director: 'border-l-accent-bright',
   advisor: 'border-l-status-permission',
   worker: 'border-l-status-active',

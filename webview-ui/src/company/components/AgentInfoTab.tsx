@@ -12,6 +12,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { AgentInfo } from '../../../../core/src/company.js';
 import {
   collectedLine,
+  ESTIMATED_MCP_LABEL,
   groupToolsBySource,
   matchesFilter,
   mcpGap,
@@ -259,7 +260,10 @@ function McpSection({ info }: { info: AgentInfo }) {
     <InfoSection title="Máy chủ MCP">
       {servers.map((server) => (
         <div key={server.name} className="flex items-baseline justify-between gap-2">
-          <span className="min-w-0 truncate font-mono text-text">{server.name}</span>
+          <span className="min-w-0 truncate font-mono text-text">
+            {server.name}
+            {server.estimated && <span className="text-text-muted"> {ESTIMATED_MCP_LABEL}</span>}
+          </span>
           <span className="shrink-0 text-text-muted">
             {server.toolCount} tool · {server.activeCount} đang bật
           </span>

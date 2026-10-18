@@ -119,6 +119,8 @@ export const COMPANY_HOST_MAX_SUBSCRIBERS = 8;
 /** Bounded body fields, so a hostile peer cannot pin the owner with one value. */
 const MAX_ID_LENGTH = 128;
 const MAX_NOTE_LENGTH = 4_096;
+/** An absolute OMP session file path; longer than any path the owner can open. */
+const MAX_FILE_PATH_LENGTH = 4_096;
 /** A PTY dimension is never zero, negative, or larger than a giant display. */
 const MAX_TERMINAL_DIMENSION = 1_000;
 
@@ -740,6 +742,21 @@ export function createCompanyHostDispatcher(
         const name = readBoundedString(body, 'name', COMPANY_SESSION_NAME_MAX_LENGTH);
         await withCompanyCode(() => options.coordinator().renameSession(id, name));
         return null;
+      }
+
+      case COMPANY_HOST_COMMANDS.promptCancel: {
+        const promptId = readBoundedString(body, 'promptId', MAX_ID_LENGTH);
+        await withCompanyCode(() => options.coordinator().cancelPrompt(promptId));
+        return null;
+      }
+
+      case COMPANY_HOST_COMMANDS.ompSessions:
+        return withCompanyCode(() => options.coordinator().listOmpSessions());
+
+      case COMPANY_HOST_COMMANDS.resumeOmpSession: {
+        const file = readBoundedString(body, 'file', MAX_FILE_PATH_LENGTH);
+        const sessionId = await withCompanyCode(() => options.coordinator().resumeOmpSession(file));
+        return { sessionId };
       }
 
       case COMPANY_HOST_COMMANDS.updateSettings: {

@@ -78,4 +78,6 @@ export const COMPANY_HOST_ROLE_BY_ROLE: Readonly<Record<CompanyRole, string>> = 
   worker: 'task',
   qa: COMPANY_HOST_DEFAULT_ROLE,
   judge: COMPANY_HOST_DEFAULT_ROLE,
+  // A chat session is a plain omp session, so it runs on omp's own default model.
+  chat: COMPANY_HOST_DEFAULT_ROLE,
 };

@@ -12,7 +12,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 
 import type { HerdrDrawerTab } from './herdrView.js';
-import { sessionControls, type SessionControlSet } from './sessionActions.js';
+import { HOLDS_WORK_REASON, sessionControls, type SessionControlSet } from './sessionActions.js';
 
 /** What a menu was opened on. A session subject with no session is a task card nobody runs. */
 export type AgentMenuSubject =
@@ -21,7 +21,8 @@ export type AgentMenuSubject =
 /** The drawer tabs a session's menu can open. */
 export type SessionMenuTab = 'info' | 'log' | 'commands' | 'terminal';
 
-export type SessionControlAction = 'pause' | 'resume' | 'restart' | 'kill' | 'archive';
+export type SessionControlAction =
+  'interrupt' | 'pause' | 'resume' | 'restart' | 'kill' | 'archive' | 'delete';
 
 export type AgentMenuAction =
   | { kind: 'sessionTab'; tab: SessionMenuTab }
@@ -50,6 +51,8 @@ export interface AgentMenuItem {
 export interface SessionMenuFacts {
   status: string;
   cwd: string | null;
+  /** Whether the session holds work; delete is refused for it, so its item is disabled. */
+  holdsWork: boolean;
 }
 
 const NO_SESSION_REASON = 'Chưa có phiên nào để thao tác.';
@@ -61,10 +64,11 @@ const CONTROL_ITEMS: ReadonlyArray<{
   label: string;
   danger: boolean;
 }> = [
+  { flag: 'interrupt', action: 'interrupt', label: 'Dừng lượt', danger: false },
   { flag: 'pause', action: 'pause', label: 'Tạm dừng', danger: false },
   { flag: 'resume', action: 'resume', label: 'Tiếp tục', danger: false },
   { flag: 'restart', action: 'restart', label: 'Khởi động lại', danger: false },
-  { flag: 'kill', action: 'kill', label: 'Dừng', danger: true },
+  { flag: 'kill', action: 'kill', label: 'Tắt phiên', danger: true },
   { flag: 'archive', action: 'archive', label: 'Lưu trữ', danger: false },
 ];
 
@@ -98,6 +102,7 @@ function menuItem(spec: MenuItemSpec): AgentMenuItem {
 export function sessionMenuItems(session: SessionMenuFacts | null): AgentMenuItem[] {
   const blocked = session === null ? NO_SESSION_REASON : null;
   const folderBlocked = blocked ?? (session?.cwd ? null : FOLDER_UNKNOWN_REASON);
+  const deleteBlocked = blocked ?? (session?.holdsWork ? HOLDS_WORK_REASON : null);
   const controls: SessionControlSet | null =
     session === null ? null : sessionControls(session.status);
   const controlItems = CONTROL_ITEMS.filter(
@@ -152,6 +157,14 @@ export function sessionMenuItems(session: SessionMenuFacts | null): AgentMenuIte
         startsGroup: index === 0,
       }),
     ),
+    menuItem({
+      id: 'control-delete',
+      label: 'Xoá phiên…',
+      action: { kind: 'control', action: 'delete' },
+      blockedBy: deleteBlocked,
+      danger: true,
+      startsGroup: controlItems.length === 0,
+    }),
   ];
 }
 

@@ -12,7 +12,7 @@
  */
 
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 
 import type { CompanyRole, RoleProfile } from '../../../../core/src/company.js';
 import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
@@ -35,10 +35,18 @@ import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS, withRoleModel } from '../roleProfiles.js';
+import { DELETE_CONFIRM_DETAIL } from '../sessionActions.js';
+import {
+  deleteSessionsInOrder,
+  removableErroredSessionIds,
+  removalNotice,
+} from '../sessionRemoval.js';
 import { clampSidebarWidth } from '../sidebarPrefs.js';
 import { useNow } from '../useNow.js';
 import { ActivityChips } from './ActivityCounts.js';
+import { CompanyButton } from './CompanyButton.js';
 import { ModelPicker } from './ModelPicker.js';
+import { ConfirmAction } from './SessionActions.js';
 import { StatusDot } from './StatusDot.js';
 
 /** Pixels one arrow-key press moves the resize edge. */
@@ -84,6 +92,7 @@ export function AgentSidebar({
 }: AgentSidebarProps) {
   const [editingRole, setEditingRole] = useState<CompanyRole | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [cleaning, setCleaning] = useState(false);
   const now = useNow();
 
   const groups = buildAgentGroups(state, now);
@@ -102,6 +111,15 @@ export function AgentSidebar({
         ? `${companyRoleLabel(role)} sẽ dùng ${modelId}${thinking ? ` · ${thinking}` : ''} từ lượt tới.`
         : (outcome.message ?? outcome.errorCode ?? 'Máy chủ từ chối đổi model.'),
     );
+  }
+
+  // Deletes the given folded sessions one at a time, then reports the outcome.
+  async function cleanErrored(sessionIds: readonly string[]): Promise<void> {
+    setCleaning(true);
+    setNotice(null);
+    const report = await deleteSessionsInOrder(client, sessionIds);
+    setCleaning(false);
+    setNotice(removalNotice(report));
   }
 
   return (
@@ -126,21 +144,28 @@ export function AgentSidebar({
       <ActivityChips counts={counts} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {groups.map((group) => (
-          <RoleSection
-            key={group.role}
-            group={group}
-            catalog={state.modelCatalog}
-            profile={profiles[group.role] ?? null}
-            editing={editingRole === group.role}
-            selectedSessionId={selectedSessionId}
-            onToggleEdit={() =>
-              setEditingRole((current) => (current === group.role ? null : group.role))
-            }
-            onPick={(modelId, thinking) => changeRole(group.role, modelId, thinking)}
-            onSelectSession={onSelectSession}
-            onMenu={onMenu}
-          />
+        {groups.map((group, index) => (
+          <Fragment key={group.role}>
+            {index > 0 && groups[index - 1]?.role === 'chat' && group.role !== 'chat' && (
+              <div role="separator" className="mx-2.5 my-1 border-t border-border" />
+            )}
+            <RoleSection
+              group={group}
+              catalog={state.modelCatalog}
+              profile={profiles[group.role] ?? null}
+              editing={editingRole === group.role}
+              selectedSessionId={selectedSessionId}
+              removable={removableErroredSessionIds(state, group)}
+              cleaning={cleaning}
+              onToggleEdit={() =>
+                setEditingRole((current) => (current === group.role ? null : group.role))
+              }
+              onPick={(modelId, thinking) => changeRole(group.role, modelId, thinking)}
+              onSelectSession={onSelectSession}
+              onMenu={onMenu}
+              onClean={(sessionIds) => void cleanErrored(sessionIds)}
+            />
+          </Fragment>
         ))}
         <HerdrSection
           group={herdr}
@@ -175,6 +200,9 @@ function RoleSection({
   onPick,
   onSelectSession,
   onMenu,
+  removable,
+  cleaning,
+  onClean,
 }: {
   group: AgentRoleGroup;
   catalog: CompanyViewState['modelCatalog'];
@@ -185,8 +213,13 @@ function RoleSection({
   onPick: (modelId: string, thinking: string | undefined) => void;
   onSelectSession: (sessionId: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
+  /** Folded sessions the cleanup may delete: crashed, with no task and no work held. */
+  removable: readonly string[];
+  cleaning: boolean;
+  onClean: (sessionIds: readonly string[]) => void;
 }) {
   const [showParked, setShowParked] = useState(false);
+  const [confirmingClean, setConfirmingClean] = useState(false);
   const rowCount = group.active.length + group.parked.length;
 
   return (
@@ -240,14 +273,36 @@ function RoleSection({
 
       {group.parked.length > 0 && (
         <div className="px-2 pb-1">
-          <button
-            type="button"
-            aria-expanded={showParked}
-            onClick={() => setShowParked((current) => !current)}
-            className="cursor-pointer text-2xs text-text-muted hover:text-text"
-          >
-            Tạm trữ ({group.parked.length}) {showParked ? '▴' : '▾'}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              aria-expanded={showParked}
+              onClick={() => setShowParked((current) => !current)}
+              className="cursor-pointer text-2xs text-text-muted hover:text-text"
+            >
+              Tạm trữ ({group.parked.length}) {showParked ? '▴' : '▾'}
+            </button>
+            {removable.length > 0 && (
+              <CompanyButton size="sm" disabled={cleaning} onClick={() => setConfirmingClean(true)}>
+                Dọn các phiên lỗi
+              </CompanyButton>
+            )}
+          </div>
+          {confirmingClean && removable.length > 0 && (
+            <div className="mt-1">
+              <ConfirmAction
+                message={`Xoá ${removable.length} phiên lỗi của ${group.label}? ${DELETE_CONFIRM_DETAIL}`}
+                confirmLabel="Xoá các phiên"
+                danger
+                disabled={cleaning}
+                onConfirm={() => {
+                  setConfirmingClean(false);
+                  onClean(removable);
+                }}
+                onCancel={() => setConfirmingClean(false)}
+              />
+            </div>
+          )}
           {showParked && (
             <ul>
               {group.parked.map((row) => (

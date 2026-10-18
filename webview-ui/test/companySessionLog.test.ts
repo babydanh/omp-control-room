@@ -4,7 +4,11 @@ import { describe, expect, it } from 'vitest';
 
 import type { CompanySessionLogEntry } from '../../core/src/company.js';
 import type { ServerMessage } from '../../core/src/messages.js';
-import { applyCompanyMessage, mergeSessionLog } from '../src/company/companyState.js';
+import {
+  applyCompanyMessage,
+  mergeSessionLog,
+  type TextStreamView,
+} from '../src/company/companyState.js';
 import { COMPANY_SESSION_LOG_MAX_ENTRIES } from '../src/company/constants.js';
 import {
   commandExitLabel,
@@ -14,7 +18,9 @@ import {
   logEntriesFor,
   logIsReplaying,
   logTone,
+  runningToolName,
   splitCommandText,
+  streamingLine,
 } from '../src/company/sessionLogView.js';
 import { session, snapshot, stateFrom, task } from './companyFixtures.js';
 
@@ -194,5 +200,61 @@ describe('sessionLogView', () => {
   it('shows an unreadable timestamp as dashes and a readable one as HH:MM:SS', () => {
     expect(formatLogTime('not a date')).toBe('--:--:--');
     expect(formatLogTime('2026-10-02T10:00:00.000Z')).toMatch(/^\d{2}:\d{2}:\d{2}$/);
+  });
+});
+
+describe('runningToolName and streamingLine', () => {
+  function toolStart(seq: number, toolName: string): CompanySessionLogEntry {
+    return entry({ seq, kind: 'tool', toolName, text: toolName });
+  }
+
+  function stream(excerpt: string): TextStreamView {
+    return { sessionId: 'session-1', runEpoch: 1, seq: 1, tail: excerpt, excerpt };
+  }
+
+  it('names the tool whose start is the newest thing logged', () => {
+    expect(runningToolName([entry({ seq: 1 }), toolStart(2, 'read')])).toBe('read');
+  });
+
+  it('reports no running tool once its failure is logged', () => {
+    const failed = entry({ seq: 2, kind: 'tool', toolName: 'bash', text: 'bash', ok: false });
+    expect(runningToolName([toolStart(1, 'bash'), failed])).toBeNull();
+  });
+
+  it('names the newer tool when an earlier one ended without a log entry', () => {
+    expect(runningToolName([toolStart(1, 'read'), toolStart(2, 'grep')])).toBe('grep');
+  });
+
+  it('treats any later text as the agent having moved on', () => {
+    expect(runningToolName([toolStart(1, 'read'), entry({ seq: 2, text: 'đã đọc' })])).toBeNull();
+  });
+
+  it('keeps a running command with the tool that started it', () => {
+    const running = entry({ seq: 2, kind: 'command', text: 'npm test' });
+    expect(runningToolName([toolStart(1, 'bash'), running])).toBe('bash');
+  });
+
+  it('does not keep a finished command with its tool', () => {
+    const finished = entry({ seq: 2, kind: 'command', text: 'npm test', exitCode: 0 });
+    expect(runningToolName([toolStart(1, 'bash'), finished])).toBeNull();
+  });
+
+  it('passes over state lines', () => {
+    const state = entry({ seq: 2, kind: 'state', text: 'busy' });
+    expect(runningToolName([toolStart(1, 'edit'), state])).toBe('edit');
+  });
+
+  it('reports nothing running in an empty log', () => {
+    expect(runningToolName([])).toBeNull();
+  });
+
+  it('shows the newest excerpt on one line only while the session is busy', () => {
+    expect(streamingLine(stream('đang đọc\n  file  '), 'busy')).toBe('đang đọc file');
+    expect(streamingLine(stream('đang đọc'), 'idle')).toBeNull();
+  });
+
+  it('shows nothing when there is no stream or nothing in it', () => {
+    expect(streamingLine(undefined, 'busy')).toBeNull();
+    expect(streamingLine(stream('   '), 'busy')).toBeNull();
   });
 });

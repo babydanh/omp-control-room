@@ -21,18 +21,24 @@
  * because status is the server's to change.
  */
 
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
+import { failureNotice } from '../commandResults.js';
+import type { CompanyClient } from '../companyClient.js';
 import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS } from '../constants.js';
 import { type FlightMemory, flyChangedCards } from '../flip.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
+import { REFUSED_NOTICE } from '../sessionActions.js';
 import { taskStatusLabel } from '../statusLabels.js';
 import { useMediaQuery } from '../useMediaQuery.js';
+import { CompanyButton } from './CompanyButton.js';
+import { ConfirmAction } from './SessionActions.js';
 
 export interface CompanyBoardProps {
+  client: CompanyClient;
   lanes: readonly BoardLane[];
   flow: BoardFlow;
   /** Prompts a Director is still planning; shown in the planned lane. */
@@ -62,24 +68,81 @@ function cardTone(card: BoardCard): CardTone {
   return 'plain';
 }
 
-function PlanningCard({ prompt, onSelect }: { prompt: PlanningPrompt; onSelect: () => void }) {
+/**
+ * A prompt a Director is still planning. The board lists it only while no Contract holds
+ * it (planningPrompts), so the cancel is offered only for a prompt the server can still
+ * withdraw.
+ */
+function PlanningCard({
+  client,
+  prompt,
+  onSelect,
+}: {
+  client: CompanyClient;
+  prompt: PlanningPrompt;
+  onSelect: () => void;
+}) {
+  const [confirming, setConfirming] = useState(false);
+  const [pending, setPending] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function cancel(): Promise<void> {
+    setPending(true);
+    setNotice(null);
+    const verdict = await client.waitForCommand(client.cancelPrompt(prompt.promptId));
+    setPending(false);
+    if (verdict.ok) return;
+    setConfirming(false);
+    setNotice(failureNotice(verdict, REFUSED_NOTICE));
+  }
+
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      disabled={prompt.session === null}
+    <div
       data-testid="planning-card"
-      className={`company-card block w-full cursor-pointer border-dashed border-l-4 px-2 py-[7px] text-left disabled:cursor-default ${ROLE_EDGE_CLASS.director}`}
+      className={`company-card block w-full border-dashed border-l-4 px-2 py-[7px] ${ROLE_EDGE_CLASS.director}`}
     >
-      <span className="block text-sm leading-snug text-text">{prompt.preview}</span>
-      <span className="mt-1 block text-2xs text-text-muted">Giám đốc đang lập kế hoạch</span>
-      {prompt.session && (
-        <span className="mt-1 block font-mono text-2xs text-text-muted">
-          {prompt.session.code} &middot;{' '}
-          {prompt.session.effectiveModel ?? prompt.session.requestedModel}
-        </span>
+      <button
+        type="button"
+        onClick={onSelect}
+        disabled={prompt.session === null}
+        className="block w-full cursor-pointer text-left disabled:cursor-default"
+      >
+        <span className="block text-sm leading-snug text-text">{prompt.preview}</span>
+        <span className="mt-1 block text-2xs text-text-muted">Giám đốc đang lập kế hoạch</span>
+        {prompt.session && (
+          <span className="mt-1 block font-mono text-2xs text-text-muted">
+            {prompt.session.code} &middot;{' '}
+            {prompt.session.effectiveModel ?? prompt.session.requestedModel}
+          </span>
+        )}
+      </button>
+      {confirming ? (
+        <div className="mt-2">
+          <ConfirmAction
+            message="Huỷ prompt này? Máy chủ sẽ dừng và xoá những gì đang lập kế hoạch từ nó."
+            confirmLabel="Huỷ prompt"
+            danger
+            disabled={pending}
+            onConfirm={() => void cancel()}
+            onCancel={() => setConfirming(false)}
+          />
+        </div>
+      ) : (
+        <CompanyButton
+          size="sm"
+          className="mt-2"
+          disabled={pending}
+          onClick={() => setConfirming(true)}
+        >
+          Huỷ prompt này
+        </CompanyButton>
       )}
-    </button>
+      {notice !== null && (
+        <p role="status" className="mt-1 text-2xs text-warning">
+          {notice}
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -209,6 +272,7 @@ function layoutSignature(lanes: readonly BoardLane[]): string {
 }
 
 export function CompanyBoard({
+  client,
   lanes,
   flow,
   planning,
@@ -265,6 +329,7 @@ export function CompanyBoard({
                 {drafts.map((prompt) => (
                   <PlanningCard
                     key={prompt.promptId}
+                    client={client}
                     prompt={prompt}
                     onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
                   />

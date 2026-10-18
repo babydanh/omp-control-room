@@ -15,6 +15,8 @@ export interface CommandResultView {
   errorCode?: string;
   message?: string;
   revision?: number;
+  /** The session a command opened, resumed or acted on, when the server names one. */
+  sessionId?: string;
 }
 
 export function viewCommandResult(
@@ -26,6 +28,7 @@ export function viewCommandResult(
     errorCode: message.errorCode,
     message: message.message,
     revision: message.revision,
+    sessionId: message.sessionId,
   };
 }
 

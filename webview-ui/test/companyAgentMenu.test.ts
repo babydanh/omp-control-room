@@ -21,13 +21,14 @@ import {
   sessionInfoRequest,
   sessionRename,
 } from '../src/company/companyMessages.js';
+import { HOLDS_WORK_REASON } from '../src/company/sessionActions.js';
 
 const NO_SESSION_REASON = 'Chưa có phiên nào để thao tác.';
 const FOLDER_UNKNOWN_REASON = 'Chưa rõ thư mục làm việc.';
 
 describe('sessionMenuItems', () => {
   it('lists the session actions, then the controls its status allows', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: '/work' });
+    const items = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: false });
 
     expect(items.map((item) => item.label)).toEqual([
       'Xem thông tin',
@@ -37,39 +38,77 @@ describe('sessionMenuItems', () => {
       'Mở Log',
       'Mở Lệnh',
       'Mở Terminal',
+      'Dừng lượt',
       'Tạm dừng',
-      'Dừng',
+      'Tắt phiên',
+      'Xoá phiên…',
     ]);
     expect(items.every((item) => !item.disabled)).toBe(true);
   });
 
-  it('offers resume and restart for a parked session, and no control once archived', () => {
-    const parked = sessionMenuItems({ status: 'parked', cwd: '/work' });
-    expect(parked.filter((item) => item.action.kind === 'control').map((i) => i.label)).toEqual([
+  it('offers resume and restart for a parked session; delete is listed for every status', () => {
+    const parked = sessionMenuItems({ status: 'parked', cwd: '/work', holdsWork: false });
+    const parkedControls = parked.filter((item) => item.action.kind === 'control');
+    expect(parkedControls.map((item) => item.label)).toEqual([
       'Tiếp tục',
       'Khởi động lại',
+      'Xoá phiên…',
     ]);
 
-    const archived = sessionMenuItems({ status: 'archived', cwd: '/work' });
-    expect(archived.some((item) => item.action.kind === 'control')).toBe(false);
+    const archived = sessionMenuItems({ status: 'archived', cwd: '/work', holdsWork: false });
+    const archivedControls = archived.filter((item) => item.action.kind === 'control');
+    expect(archivedControls.map((item) => item.label)).toEqual(['Xoá phiên…']);
   });
 
-  it('marks only the stop control as dangerous and maps it to kill', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: '/work' });
-    const stop = items.find((item) => item.label === 'Dừng');
+  it('marks the kill and delete controls as dangerous and maps each to its action', () => {
+    const items = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: false });
 
-    expect(stop).toMatchObject({
+    expect(items.find((item) => item.label === 'Dừng lượt')).toMatchObject({
+      danger: false,
+      action: { kind: 'control', action: 'interrupt' },
+    });
+    expect(items.find((item) => item.label === 'Tắt phiên')).toMatchObject({
       danger: true,
       action: { kind: 'control', action: 'kill' },
     });
-    expect(items.filter((item) => item.danger)).toHaveLength(1);
+    expect(items.find((item) => item.label === 'Xoá phiên…')).toMatchObject({
+      danger: true,
+      action: { kind: 'control', action: 'delete' },
+    });
+    expect(items.filter((item) => item.danger).map((item) => item.label)).toEqual([
+      'Tắt phiên',
+      'Xoá phiên…',
+    ]);
   });
 
   it('starts a group at the log tabs and at the first control', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: '/work' });
+    const items = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: false });
     const starts = items.filter((item) => item.startsGroup).map((item) => item.label);
 
-    expect(starts).toEqual(['Mở Log', 'Tạm dừng']);
+    expect(starts).toEqual(['Mở Log', 'Dừng lượt']);
+  });
+
+  it('offers interrupt only while a turn runs', () => {
+    const idle = sessionMenuItems({ status: 'idle', cwd: '/work', holdsWork: false });
+    expect(idle.some((item) => item.label === 'Dừng lượt')).toBe(false);
+
+    const busy = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: false });
+    expect(busy.some((item) => item.label === 'Dừng lượt')).toBe(true);
+  });
+
+  it('disables delete with the reason while the session holds work', () => {
+    const items = sessionMenuItems({ status: 'busy', cwd: '/work', holdsWork: true });
+
+    expect(items.find((item) => item.id === 'control-delete')).toMatchObject({
+      disabled: true,
+      reason: HOLDS_WORK_REASON,
+    });
+  });
+
+  it('enables delete for a session that holds no work', () => {
+    const items = sessionMenuItems({ status: 'parked', cwd: '/work', holdsWork: false });
+
+    expect(items.find((item) => item.id === 'control-delete')).toMatchObject({ disabled: false });
   });
 
   it('shows every item disabled when the subject holds no session', () => {
@@ -78,10 +117,11 @@ describe('sessionMenuItems', () => {
     expect(items.every((item) => item.disabled)).toBe(true);
     expect(items.every((item) => item.reason === NO_SESSION_REASON)).toBe(true);
     expect(items.map((item) => item.label)).toContain('Lưu trữ');
+    expect(items.map((item) => item.label)).toContain('Xoá phiên…');
   });
 
   it('disables only the folder copy when the folder is not known', () => {
-    const items = sessionMenuItems({ status: 'busy', cwd: null });
+    const items = sessionMenuItems({ status: 'busy', cwd: null, holdsWork: false });
 
     expect(items.find((item) => item.id === 'copy-cwd')).toMatchObject({
       disabled: true,

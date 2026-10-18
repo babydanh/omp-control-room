@@ -11,7 +11,7 @@ import type {
   ReloadAssetsSideEffect,
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
-import type { CompanyCommandServices } from './company/clientCommands.js';
+import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import {
   SERVER_JSON_DIR,
   SERVER_JSON_NAME,
@@ -75,6 +75,7 @@ export class PixelAgentsServer {
     company?: CompanyCommandServices | null;
     getCompany?: () => CompanyCommandServices | null;
     isCompanyExecutionAllowed?: () => boolean;
+    workspaces?: CompanyWorkspaceControl | null;
     herdr?: HerdrLink | null;
   }): Promise<ServerConfig> {
     this.stopPromise = null;
@@ -122,6 +123,7 @@ export class PixelAgentsServer {
       company: options?.company,
       getCompany: options?.getCompany,
       isCompanyExecutionAllowed: options?.isCompanyExecutionAllowed,
+      workspaces: options?.workspaces,
       herdr: options?.herdr,
     });
 

@@ -86,6 +86,7 @@ export const COMPANY_ROLES: readonly CompanyRole[] = [
   'worker',
   'qa',
   'judge',
+  'chat',
 ];
 
 /**

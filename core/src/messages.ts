@@ -49,6 +49,8 @@ export type ServerMessage =
   | CompanySessionInfoMessage
   | HerdrInfoMessage
   | CompanyModelCatalogMessage
+  | CompanyOmpSessionsMessage
+  | CompanyWorkspacesMessage
   | CompanyArtifactPageMessage
   | CompanyFileListMessage
   | CompanyFileReadMessage
@@ -86,6 +88,10 @@ export type ClientMessage =
   | CompanyContractDecisionMessage
   | CompanyQuestionAnswerMessage
   | CompanySessionControlMessage
+  | CompanyPromptCancelMessage
+  | CompanyOmpSessionsRequestMessage
+  | CompanySessionResumeMessage
+  | CompanyWorkspaceOpenMessage
   | CompanySettingsUpdateMessage
   | CompanyModelCatalogRequestMessage
   | CompanyArtifactRequestMessage
@@ -398,9 +404,9 @@ export interface RoleProfile {
   toolsPolicy: AnonymousSchema_205;
 }
 
-export type CompanyRole = 'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+export type CompanyRole = 'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
-export type AnonymousSchema_205 = 'read-only' | 'scoped-write' | 'verification-only';
+export type AnonymousSchema_205 = 'read-only' | 'scoped-write' | 'verification-only' | 'omp';
 
 export interface VerificationProfile {
   id: string;
@@ -941,6 +947,7 @@ export interface CompanyCommandResultMessage {
   errorCode?: string;
   message?: string;
   revision?: number;
+  sessionId?: string;
 }
 
 export interface CompanyTextDeltaMessage {
@@ -963,7 +970,7 @@ export interface CompanySessionLogMessage {
 export interface CompanySessionLogEntry {
   seq: number;
   at: string;
-  kind: AnonymousSchema_543;
+  kind: AnonymousSchema_544;
   runEpoch: number;
   taskId?: string;
   text: string;
@@ -972,7 +979,7 @@ export interface CompanySessionLogEntry {
   ok?: boolean;
 }
 
-export type AnonymousSchema_543 =
+export type AnonymousSchema_544 =
   'text' | 'tool' | 'command' | 'verdict' | 'question' | 'state' | 'error';
 
 export interface HerdrAgentsMessage {
@@ -986,7 +993,7 @@ export interface HerdrAgent {
   paneId: string;
   name?: string;
   kind: string;
-  status: AnonymousSchema_557;
+  status: AnonymousSchema_558;
   cwd?: string;
   title?: string;
   workspaceId: string;
@@ -997,7 +1004,7 @@ export interface HerdrAgent {
   focused?: boolean;
 }
 
-export type AnonymousSchema_557 = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
+export type AnonymousSchema_558 = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
 
 export interface HerdrScreenMessage {
   type: 'herdrScreen';
@@ -1023,19 +1030,19 @@ export interface AgentInfo {
   tools?: AgentToolInfo[];
   skills?: AgentSkillInfo[];
   toolUsage?: AgentToolUsage[];
-  collectedFrom: AnonymousSchema_591;
+  collectedFrom: AnonymousSchema_592;
   collectedAt: string;
   note?: string;
 }
 
 export interface AgentToolInfo {
   name: string;
-  source: AnonymousSchema_581;
+  source: AnonymousSchema_582;
   mcpServer?: string;
   active: boolean;
 }
 
-export type AnonymousSchema_581 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
+export type AnonymousSchema_582 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
 
 export interface AgentSkillInfo {
   name: string;
@@ -1048,7 +1055,7 @@ export interface AgentToolUsage {
   count: number;
 }
 
-export type AnonymousSchema_591 = 'live' | 'transcript' | 'herdr';
+export type AnonymousSchema_592 = 'live' | 'transcript' | 'herdr';
 
 export interface HerdrInfoMessage {
   type: 'herdrInfo';
@@ -1070,6 +1077,34 @@ export interface CompanyModelCatalogEntry {
   thinking: string[];
   acceptsImages: boolean;
   credentialsConfigured: boolean;
+}
+
+export interface CompanyOmpSessionsMessage {
+  type: 'companyOmpSessions';
+  requestId: string;
+  folder: string;
+  sessions: OmpSessionEntry[];
+}
+
+export interface OmpSessionEntry {
+  file: string;
+  title?: string;
+  updatedAt: string;
+  sizeBytes: number;
+  boardSessionId?: string;
+}
+
+export interface CompanyWorkspacesMessage {
+  type: 'companyWorkspaces';
+  workspaces: CompanyWorkspaceEntry[];
+}
+
+export interface CompanyWorkspaceEntry {
+  path: string;
+  active: boolean;
+  open: boolean;
+  working: number;
+  waiting: number;
 }
 
 export interface CompanyArtifactPageMessage {
@@ -1097,12 +1132,12 @@ export interface CompanyFileListMessage {
 export interface CompanyFileEntry {
   name: string;
   path: string;
-  kind: AnonymousSchema_621;
+  kind: AnonymousSchema_638;
   sizeBytes?: number;
   modifiedAt?: string;
 }
 
-export type AnonymousSchema_621 = 'file' | 'directory';
+export type AnonymousSchema_638 = 'file' | 'directory';
 
 export interface CompanyFileReadMessage {
   type: 'companyFileRead';
@@ -1114,14 +1149,14 @@ export interface CompanyFileContent {
   path: string;
   totalBytes: number;
   offset: number;
-  encoding: AnonymousSchema_629;
+  encoding: AnonymousSchema_646;
   text?: string;
   dataBase64?: string;
   mediaType?: string;
   truncated: boolean;
 }
 
-export type AnonymousSchema_629 = 'utf8' | 'base64';
+export type AnonymousSchema_646 = 'utf8' | 'base64';
 
 export interface CompanyAttachmentUploadedMessage {
   type: 'companyAttachmentUploaded';
@@ -1294,22 +1329,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_711;
+  delivery: AnonymousSchema_728;
+  mode?: AnonymousSchema_729;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_711 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_728 = 'prompt' | 'steer' | 'follow_up';
+
+export type AnonymousSchema_729 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_717;
+  decision: AnonymousSchema_735;
   note?: string;
 }
 
-export type AnonymousSchema_717 = 'approve' | 'reject';
+export type AnonymousSchema_735 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1322,7 +1360,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_729;
+  decision?: AnonymousSchema_747;
 }
 
 export interface QuestionAnswer {
@@ -1331,17 +1369,41 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_729 = 'approve_once' | 'reject';
+export type AnonymousSchema_747 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_734;
+  action: AnonymousSchema_752;
 }
 
-export type AnonymousSchema_734 = 'pause' | 'resume' | 'kill' | 'restart' | 'archive';
+export type AnonymousSchema_752 =
+  'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
+
+export interface CompanyPromptCancelMessage {
+  type: 'companyPromptCancel';
+  requestId: string;
+  promptId: string;
+}
+
+export interface CompanyOmpSessionsRequestMessage {
+  type: 'companyOmpSessionsRequest';
+  requestId: string;
+}
+
+export interface CompanySessionResumeMessage {
+  type: 'companySessionResume';
+  requestId: string;
+  file: string;
+}
+
+export interface CompanyWorkspaceOpenMessage {
+  type: 'companyWorkspaceOpen';
+  requestId: string;
+  path: string;
+}
 
 export interface CompanySettingsUpdateMessage {
   type: 'companySettingsUpdate';
@@ -1535,10 +1597,10 @@ export interface CompanyStateSettingsRoleProfilesAdditionalProperty {
 }
 
 export type CompanyStateSettingsRoleProfilesAdditionalPropertyRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export type CompanyStateSettingsRoleProfilesAdditionalPropertyToolsPolicy =
-  'read-only' | 'scoped-write' | 'verification-only';
+  'read-only' | 'scoped-write' | 'verification-only' | 'omp';
 
 export interface CompanyStateSettingsVerificationProfilesAdditionalProperty {
   id: string;
@@ -1835,7 +1897,7 @@ export interface CompanyStateSessionsAdditionalProperty {
 }
 
 export type CompanyStateSessionsAdditionalPropertyRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export type CompanyStateSessionsAdditionalPropertyStatus =
   | 'parked'
@@ -1966,7 +2028,7 @@ export interface CompanyStateReportsAdditionalPropertyUsageItem {
 }
 
 export type CompanyStateReportsAdditionalPropertyUsageItemRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export type CompanyStateReportsAdditionalPropertyUsageItemSource = 'provider' | 'native_session';
 
@@ -1983,7 +2045,7 @@ export interface CompanyStateReportsAdditionalPropertySessionsItem {
 }
 
 export type CompanyStateReportsAdditionalPropertySessionsItemRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export interface CompanyStateEvidenceAdditionalProperty {
   id: string;
@@ -2031,7 +2093,7 @@ export interface CompanyStateUsageIndexAdditionalPropertyItem {
 }
 
 export type CompanyStateUsageIndexAdditionalPropertyItemRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export type CompanyStateUsageIndexAdditionalPropertyItemSource = 'provider' | 'native_session';
 
@@ -2384,7 +2446,7 @@ export interface CompanyEventChangesItemOneOf_3Value {
 }
 
 export type CompanyEventChangesItemOneOf_3ValueRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export type CompanyEventChangesItemOneOf_3ValueStatus =
   | 'parked'
@@ -2536,7 +2598,7 @@ export interface CompanyEventChangesItemOneOf_6ValueUsageItem {
 }
 
 export type CompanyEventChangesItemOneOf_6ValueUsageItemRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export type CompanyEventChangesItemOneOf_6ValueUsageItemSource = 'provider' | 'native_session';
 
@@ -2553,7 +2615,7 @@ export interface CompanyEventChangesItemOneOf_6ValueSessionsItem {
 }
 
 export type CompanyEventChangesItemOneOf_6ValueSessionsItemRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export interface CompanyEventChangesItemOneOf_7 {
   entity: 'evidence';
@@ -2613,10 +2675,10 @@ export interface CompanyEventChangesItemOneOf_8ValueRoleProfilesAdditionalProper
 }
 
 export type CompanyEventChangesItemOneOf_8ValueRoleProfilesAdditionalPropertyRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export type CompanyEventChangesItemOneOf_8ValueRoleProfilesAdditionalPropertyToolsPolicy =
-  'read-only' | 'scoped-write' | 'verification-only';
+  'read-only' | 'scoped-write' | 'verification-only' | 'omp';
 
 export interface CompanyEventChangesItemOneOf_8ValueVerificationProfilesAdditionalProperty {
   id: string;
@@ -2666,7 +2728,7 @@ export interface CompanyEventChangesItemOneOf_9Value {
 }
 
 export type CompanyEventChangesItemOneOf_9ValueRole =
-  'director' | 'advisor' | 'worker' | 'qa' | 'judge';
+  'director' | 'advisor' | 'worker' | 'qa' | 'judge' | 'chat';
 
 export type CompanyEventChangesItemOneOf_9ValueSource = 'provider' | 'native_session';
 

@@ -7,12 +7,14 @@
  * `session-maintenance.ts`), read here from the runtime's model list rather
  * than guessed from a model name.
  *
- * Where the rows come from: only a live OMP process can answer this. The bridge
- * extension reads `ctx.models.list()` — the runtime's own credential-filtered
- * set — and delivers it over the authenticated channel as an
+ * Where the rows come from: a live OMP run answers from its own process. The
+ * bridge extension reads `ctx.models.list()` — the runtime's own credential-
+ * filtered set — and delivers it over the authenticated channel as an
  * {@link OmpModelCatalog} envelope; this module turns that envelope into wire
- * entries. There is no host-side catalog and no CLI fallback, so a session
- * with no live runtime reports unavailable instead of a guessed model list.
+ * entries. With no live run, `ompModelsCatalog.ts` reads the same credential-
+ * filtered list from `omp models --json`, and {@link buildCompanyModelCatalog}
+ * builds the entries. Both sources list credentialed models only. A read that
+ * fails on both is a typed refusal, never a guessed model list.
  *
  * The gate matters because OMP ships `images.describeForTextModels`, default
  * ON: attaching an image to a text-only model silently stores it under

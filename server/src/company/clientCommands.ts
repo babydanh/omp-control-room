@@ -35,7 +35,11 @@ import type {
   RoleProfile,
   SubmitPromptInput,
 } from '../../../core/src/company.js';
-import type { HerdrAgentsMessage, ServerMessage } from '../../../core/src/messages.js';
+import type {
+  CompanyWorkspaceEntry,
+  HerdrAgentsMessage,
+  ServerMessage,
+} from '../../../core/src/messages.js';
 import {
   HERDR_DEFAULT_READ_LINES,
   HerdrError,
@@ -111,9 +115,23 @@ export interface CompanyCommandServices {
   sessionInfo(sessionId: string): Promise<AgentInfo>;
 }
 
+/**
+ * Folder list and folder switching for this server. It sits beside the services
+ * rather than inside them: it must answer while no folder is active, which is
+ * exactly when the user most needs to open one.
+ */
+export interface CompanyWorkspaceControl {
+  /** Folders for the board: the open ones first, then the recently used ones. */
+  entries(): CompanyWorkspaceEntry[];
+  /** Open the folder if it is not open, then make it the active one. Refusals carry a user-facing message. */
+  open(workspacePath: string): Promise<void>;
+}
+
 export interface CompanyCommandContext {
   /** `null` when this process has no company workspace open. */
   services: CompanyCommandServices | null;
+  /** Folder list and switching; absent when this surface has no folder control. */
+  workspaces?: CompanyWorkspaceControl | null;
   /** Whether this connection may run company commands at all. */
   privileged?: boolean;
   /** False in an untrusted VS Code workspace; authorized read-only views remain usable. */
@@ -138,6 +156,8 @@ const SESSION_ACTIONS: ReadonlySet<string> = new Set([
   'kill',
   'restart',
   'archive',
+  'interrupt',
+  'delete',
 ]);
 const PROMPT_DELIVERIES: ReadonlySet<string> = new Set(['prompt', 'steer', 'follow_up']);
 
@@ -183,6 +203,9 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySessionControl',
   'companySessionRename',
   'companySessionInfoRequest',
+  'companyPromptCancel',
+  'companyOmpSessionsRequest',
+  'companySessionResume',
   'companySettingsUpdate',
   'companyModelCatalogRequest',
   'companyArtifactRequest',
@@ -190,6 +213,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyFileReadRequest',
   'companySessionLogRequest',
   'companyAttachmentUpload',
+  'companyWorkspaceOpen',
   'terminalAttach',
   'terminalInput',
   'terminalResize',
@@ -206,6 +230,7 @@ const READ_ONLY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyFileReadRequest',
   'companySessionLogRequest',
   'companySessionInfoRequest',
+  'companyOmpSessionsRequest',
 ]);
 
 export function isCompanyCommand(msg: Record<string, unknown>): boolean {
@@ -249,12 +274,13 @@ function fail(send: Send, requestId: string | null, code: string, message?: stri
   });
 }
 
-function ok(send: Send, requestId: string | null, revision?: number): void {
+function ok(send: Send, requestId: string | null, revision?: number, sessionId?: string): void {
   send({
     type: 'companyCommandResult',
     requestId: requestId ?? FALLBACK_REQUEST_ID,
     ok: true,
     ...(revision === undefined ? {} : { revision }),
+    ...(sessionId === undefined ? {} : { sessionId }),
   });
 }
 
@@ -307,8 +333,15 @@ export function handleCompanyCommand(
   if (msg.type === 'companySnapshotRequest') {
     send(ctx.herdr?.snapshot() ?? HERDR_NOT_LINKED_ROSTER);
   }
+  if (msg.type === 'companySnapshotRequest' && ctx.workspaces) {
+    send({ type: 'companyWorkspaces', workspaces: ctx.workspaces.entries() });
+  }
   if (HERDR_COMMAND_TYPES.has(String(msg.type))) {
     void herdrCommand(msg, requestId, ctx.herdr ?? null, send);
+    return true;
+  }
+  if (msg.type === 'companyWorkspaceOpen') {
+    void openWorkspace(requestId, stringField(msg, 'path'), ctx.workspaces ?? null, send);
     return true;
   }
   const services = ctx.services;
@@ -350,6 +383,15 @@ async function run(
         return;
       case 'companySessionInfoRequest':
         await sessionInfo(msg, requestId, services, send);
+        return;
+      case 'companyPromptCancel':
+        await cancelPrompt(msg, requestId, services, send);
+        return;
+      case 'companyOmpSessionsRequest':
+        await listOmpSessions(requestId, services, send);
+        return;
+      case 'companySessionResume':
+        await resumeOmpSession(msg, requestId, services, send);
         return;
       case 'companySettingsUpdate':
         await updateSettings(msg, requestId, services, send);
@@ -469,6 +511,32 @@ async function herdrCommand(
   }
 }
 
+/**
+ * Open or switch to a Company folder. The folder list answers the refusal, so a
+ * missing path or a file reaches the user with its own Vietnamese message.
+ */
+async function openWorkspace(
+  requestId: string | null,
+  workspacePath: string | null,
+  workspaces: CompanyWorkspaceControl | null,
+  send: Send,
+): Promise<void> {
+  if (workspaces === null) {
+    fail(send, requestId, 'company_unavailable', 'Máy chủ này không quản lý nhiều thư mục.');
+    return;
+  }
+  if (workspacePath === null) {
+    fail(send, requestId, 'invalid_request', 'Cần đường dẫn thư mục để mở.');
+    return;
+  }
+  try {
+    await workspaces.open(workspacePath);
+    ok(send, requestId);
+  } catch (err) {
+    fail(send, requestId, codeOf(err), messageOf(err));
+  }
+}
+
 async function snapshot(
   msg: Record<string, unknown>,
   requestId: string | null,
@@ -497,6 +565,11 @@ async function submitPrompt(
     fail(send, requestIdOf(msg), 'invalid_prompt', 'Cần có nội dung prompt và cách gửi.');
     return;
   }
+  const mode = stringField(prompt, 'mode');
+  if (mode !== null && mode !== 'chat' && mode !== 'company') {
+    fail(send, requestIdOf(msg), 'invalid_prompt', 'Chế độ prompt phải là chat hoặc company.');
+    return;
+  }
   const requestId = stringField(prompt, 'requestId') ?? requestIdOf(msg);
   // Checked on the raw bytes, before decoding, so a truncated prompt is never
   // submitted as a valid shorter one.
@@ -504,8 +577,8 @@ async function submitPrompt(
     fail(send, requestId, 'prompt_too_large', `Prompt vượt quá ${COMPANY_MAX_PROMPT_BYTES} byte.`);
     return;
   }
-  await services.coordinator.submitPrompt(prompt as unknown as SubmitPromptInput);
-  ok(send, requestId);
+  const stored = await services.coordinator.submitPrompt(prompt as unknown as SubmitPromptInput);
+  ok(send, requestId, undefined, stored.targetSessionId);
 }
 
 async function decideContract(
@@ -606,6 +679,50 @@ async function controlSession(
   }
   await services.coordinator.controlSession(sessionId, action as CompanySessionAction, runEpoch);
   ok(send, requestId);
+}
+
+async function cancelPrompt(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const promptId = stringField(msg, 'promptId');
+  if (promptId === null || promptId.length === 0) {
+    fail(send, requestId, 'invalid_prompt_cancel', 'Cần có id prompt.');
+    return;
+  }
+  await services.coordinator.cancelPrompt(promptId);
+  ok(send, requestId);
+}
+
+async function listOmpSessions(
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const listing = await services.coordinator.listOmpSessions();
+  send({
+    type: 'companyOmpSessions',
+    requestId: requestId ?? FALLBACK_REQUEST_ID,
+    folder: listing.folder,
+    sessions: listing.sessions,
+  });
+}
+
+async function resumeOmpSession(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const file = stringField(msg, 'file');
+  if (file === null || file.length === 0) {
+    fail(send, requestId, 'invalid_session_resume', 'Cần có đường dẫn file phiên OMP.');
+    return;
+  }
+  const sessionId = await services.coordinator.resumeOmpSession(file);
+  ok(send, requestId, undefined, sessionId);
 }
 
 async function updateSettings(

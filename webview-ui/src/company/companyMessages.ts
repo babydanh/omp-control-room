@@ -42,6 +42,8 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   companySessionLog: true,
   companySessionInfo: true,
   herdrInfo: true,
+  companyOmpSessions: true,
+  companyWorkspaces: true,
   herdrAgents: true,
   herdrScreen: true,
   terminalAttached: true,
@@ -91,13 +93,35 @@ export function questionAnswer(answer: QuestionAnswerInput): ClientMessage {
   return { type: 'companyQuestionAnswer', answer };
 }
 
+/** Every lifecycle action a session accepts; the server refuses the ones it cannot take. */
+export type SessionControlAction =
+  'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
+
 export function sessionControl(
   requestId: string,
   sessionId: string,
   runEpoch: number,
-  action: 'pause' | 'resume' | 'kill' | 'restart' | 'archive',
+  action: SessionControlAction,
 ): ClientMessage {
   return { type: 'companySessionControl', requestId, sessionId, runEpoch, action };
+}
+
+/** Withdraw a prompt no Contract holds yet; the server stops and deletes what planned it. */
+export function promptCancel(requestId: string, promptId: string): ClientMessage {
+  return { type: 'companyPromptCancel', requestId, promptId };
+}
+
+/** Read-only: the omp sessions saved for the folder the board is pointed at. */
+export function ompSessionsRequest(requestId: string): ClientMessage {
+  return { type: 'companyOmpSessionsRequest', requestId };
+}
+
+export function sessionResume(requestId: string, file: string): ClientMessage {
+  return { type: 'companySessionResume', requestId, file };
+}
+
+export function workspaceOpen(requestId: string, path: string): ClientMessage {
+  return { type: 'companyWorkspaceOpen', requestId, path };
 }
 
 export function settingsUpdate(

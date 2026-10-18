@@ -7,10 +7,13 @@
  */
 
 import type { CompanyModelCatalogEntry } from '../../../../core/src/company.js';
+import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { quotaRows } from '../usageView.js';
+import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 
 export interface BoardTopBarProps {
+  client: CompanyClient;
   state: CompanyViewState;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
@@ -56,6 +59,7 @@ function toggleClass(pressed: boolean): string {
 }
 
 export function BoardTopBar({
+  client,
   state,
   sidebarCollapsed,
   onToggleSidebar,
@@ -66,9 +70,7 @@ export function BoardTopBar({
   return (
     <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2">
       <h1 className="text-base text-text">OMP Board</h1>
-      <span className="text-2xs text-text" data-testid="board-workspace">
-        {state.settings?.workspacePath ?? 'đang chờ máy chủ…'}
-      </span>
+      <WorkspaceSwitcher client={client} state={state} />
       <span className="flex flex-wrap gap-1.5">
         <span className={CHIP_CLASS}>bản sửa {state.revision ?? '-'}</span>
         <CatalogStatus entries={state.modelCatalog} />

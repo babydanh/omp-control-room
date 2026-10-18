@@ -22,7 +22,9 @@ import {
   logIsReplaying,
   type LogTone,
   logTone,
+  runningToolName,
   splitCommandText,
+  streamingLine,
 } from '../sessionLogView.js';
 import { AttemptRow } from './AttemptRow.js';
 
@@ -63,14 +65,17 @@ export function SessionLogTab({
 }: SessionLogTabProps) {
   const entries = logEntriesFor(state, sessionId, taskId);
   const replaying = logIsReplaying(state, sessionId);
-  const excerpt = state.streams[sessionId]?.excerpt ?? '';
+  const status = state.sessions[sessionId]?.status ?? '';
+  // Live activity shows only while the session is busy: the tool it runs and the text it writes.
+  const writing = streamingLine(state.streams[sessionId], status);
+  const running = status === 'busy' ? runningToolName(logEntriesFor(state, sessionId, null)) : null;
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
 
   useLayoutEffect(() => {
     const element = scrollRef.current;
     if (element !== null && followingRef.current) element.scrollTop = element.scrollHeight;
-  }, [entries]);
+  }, [entries, writing, running]);
 
   function onScroll(event: UIEvent<HTMLDivElement>): void {
     const element = event.currentTarget;
@@ -101,16 +106,27 @@ export function SessionLogTab({
         className="min-h-0 flex-1 overflow-y-auto border-t border-border p-2"
       >
         {replaying && <p className="text-2xs text-text-muted">Đang tải nhật ký…</p>}
-        {!replaying && entries.length === 0 && (
-          <p className="text-2xs text-text-muted">
-            {excerpt === '' ? 'Chưa có nhật ký nào.' : excerpt}
-          </p>
+        {!replaying && entries.length === 0 && writing === null && running === null && (
+          <p className="text-2xs text-text-muted">Chưa có nhật ký nào.</p>
         )}
         <ol className="flex flex-col gap-1">
           {entries.map((entry) => (
             <LogRow key={entry.seq} entry={entry} />
           ))}
         </ol>
+        {(running !== null || writing !== null) && (
+          <div
+            data-testid="session-live"
+            className="mt-2 flex flex-col gap-1 border-t border-border pt-2 text-2xs"
+          >
+            {running !== null && <p className="text-status-active">Đang chạy công cụ {running}</p>}
+            {writing !== null && (
+              <p className="break-words text-text">
+                <span className="text-text-muted">đang viết…</span> {writing}
+              </p>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

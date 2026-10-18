@@ -24,12 +24,15 @@ import {
   COMPANY_OMP_BRIDGE_FILENAME,
   COMPANY_PTY_HOST_FILENAME,
 } from './company/constants.js';
-import { openWorkspaceCompany, type WorkspaceCompanyHost } from './company/workspaceCompanyHost.js';
+import { openWorkspaceCompany } from './company/workspaceCompanyHost.js';
+import { CompanyWorkspaceRegistry } from './company/workspaceRegistry.js';
 import {
   getHooksConsent,
   getHooksEnabled,
   grantHooksConsent,
   readConfig,
+  readRecentCompanyWorkspaces,
+  rememberRecentCompanyWorkspace,
 } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
@@ -163,7 +166,17 @@ async function main(): Promise<void> {
   const herdr = createHerdrLink();
   herdr.onAgents((message) => store.broadcast(message as unknown as Record<string, unknown>));
   herdr.onScreen((message) => store.broadcast(message as unknown as Record<string, unknown>));
-  let companyHost: WorkspaceCompanyHost | null = null;
+  // Company folders: the initial one opens below; the board can open more and
+  // switch between them. Only the active folder's traffic reaches the board.
+  const company = new CompanyWorkspaceRegistry({
+    broadcast: (message) => store.broadcast(message as unknown as Record<string, unknown>),
+    openHost: openWorkspaceCompany,
+    hostDefaults: {
+      helperPath: path.join(distRoot, COMPANY_PTY_HOST_FILENAME),
+      extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
+    },
+    recents: { read: readRecentCompanyWorkspaces, remember: rememberRecentCompanyWorkspace },
+  });
   let acceptingCompany = true;
   let disposal: Promise<void> | null = null;
   const dispose = (): Promise<void> => {
@@ -171,9 +184,8 @@ async function main(): Promise<void> {
     acceptingCompany = false;
     disposal = (async () => {
       try {
-        await companyHost?.dispose();
+        await company.dispose();
       } finally {
-        companyHost = null;
         runtime.dispose();
         herdr.stop();
         await server.stop();
@@ -185,12 +197,7 @@ async function main(): Promise<void> {
 
   try {
     try {
-      companyHost = await openWorkspaceCompany({
-        workspacePath: args.workspace,
-        helperPath: path.join(distRoot, COMPANY_PTY_HOST_FILENAME),
-        extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
-        onMessage: (message) => store.broadcast(message as unknown as Record<string, unknown>),
-      });
+      await company.open(args.workspace);
       console.log(`[Pixel Agents] Company workspace: ${args.workspace}`);
     } catch (error) {
       // Legacy observation remains usable; Company commands fail closed while
@@ -290,8 +297,9 @@ async function main(): Promise<void> {
       assetCache,
       onSetHooksEnabled,
       onReloadAssets,
-      getCompany: () => (acceptingCompany ? (companyHost?.services ?? null) : null),
+      getCompany: () => (acceptingCompany ? company.activeServices() : null),
       isCompanyExecutionAllowed: () => acceptingCompany,
+      workspaces: company,
       herdr,
     });
     currentConfig = { port: config.port, token: config.token };

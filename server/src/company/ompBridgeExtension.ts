@@ -571,6 +571,9 @@ export default function ompBridgeExtension(pi: OmpApi): void {
   const sessionId = process.env['PIXEL_AGENTS_OMP_BRIDGE_SESSION'];
   const runEpoch = Number(process.env['PIXEL_AGENTS_OMP_BRIDGE_EPOCH']);
   const role = process.env['PIXEL_AGENTS_OMP_BRIDGE_ROLE'] ?? '';
+  // Chat is the one role the user drives like plain omp: no company tools, no
+  // ask wrapper, and no authorization round trip for its native tools or subagents.
+  const userDriven = role === 'chat';
   const rpcTimeoutMs = positiveNumber(
     process.env['PIXEL_AGENTS_OMP_BRIDGE_RPC_TIMEOUT_MS'],
     DEFAULT_RPC_TIMEOUT_MS,
@@ -2068,6 +2071,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
 
   function gateToolCall(event: unknown, ctx: OmpContext): Promise<OmpToolGateResult | undefined> {
     activeContext = ctx;
+    if (userDriven) return Promise.resolve(undefined);
     const payload = isFrameObject(event) ? event : {};
     const toolName = readString(payload, 'toolName') ?? '';
     // A company tool already asks the host for its effect; a second
@@ -2094,6 +2098,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
   }
 
   function gateSubagentSpawn(event: unknown): Promise<OmpSpawnGateResult | undefined> {
+    if (userDriven) return Promise.resolve(undefined);
     if (!connected()) {
       return Promise.resolve(blocked('company bridge is not connected; native spawn refused'));
     }
@@ -2226,8 +2231,10 @@ export default function ompBridgeExtension(pi: OmpApi): void {
 
   // ── Load ──────────────────────────────────────────────────
 
-  for (const spec of COMPANY_TOOLS) registerCompanyTool(spec);
-  registerAskWrapper();
+  if (!userDriven) {
+    for (const spec of COMPANY_TOOLS) registerCompanyTool(spec);
+    registerAskWrapper();
+  }
   registerHandlers();
   connect();
 }

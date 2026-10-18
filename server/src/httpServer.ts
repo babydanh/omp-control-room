@@ -13,7 +13,7 @@ import type {
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
-import type { CompanyCommandServices } from './company/clientCommands.js';
+import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import { CompanyClientGate } from './company/egress.js';
 import {
   HOOK_API_PREFIX,
@@ -56,6 +56,8 @@ export interface HttpServerOptions {
   isCompanyExecutionAllowed?: () => boolean;
   /** Server-level herdr link; absent when this process does not link herdr. */
   herdr?: HerdrLink | null;
+  /** Company folder list and switching; absent when the process holds one fixed workspace. */
+  workspaces?: CompanyWorkspaceControl | null;
 }
 
 /** Result of createHttpServer(). */
@@ -235,6 +237,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
             onSetHooksEnabled: options.onSetHooksEnabled,
             onReloadAssets: options.onReloadAssets,
             company: options.getCompany?.() ?? options.company ?? null,
+            workspaces: options.workspaces ?? null,
             privileged,
             companyExecutionAllowed: options.isCompanyExecutionAllowed?.() ?? !options.embedded,
             onTerminalAttached: (sessionId, leaseId) => gate.grant(sessionId, leaseId),

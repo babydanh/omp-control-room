@@ -25,6 +25,11 @@
  * Contract it belongs to is approved or running. Planning roles (director,
  * advisor) legitimately work on contracts that are still drafts, so a draft is
  * not an obstacle for them.
+ *
+ * Chat prompts (`mode: 'chat'`) work like typing into the user's own omp. They
+ * never attach to a Contract and never reach the Director. A named session is
+ * honoured or refused; with none named, the prompt opens a new plain chat
+ * session. A refused target is never swapped for a new session.
  */
 
 import type {
@@ -44,6 +49,7 @@ export const ROUTE_STRATEGIES = [
   'explicit_contract',
   'approved_workstream',
   'new_workstream',
+  'new_chat',
   'undeliverable',
 ] as const;
 export type RouteStrategy = (typeof ROUTE_STRATEGIES)[number];
@@ -70,6 +76,8 @@ export interface AcceptedRelation {
 }
 
 export interface RouteInput {
+  /** `chat` prompts take the chat path below; anything else follows the Contract ladder. */
+  mode?: SubmitPromptInput['mode'];
   delivery: SubmitPromptInput['delivery'];
   targetContractId?: string;
   targetSessionId?: string;
@@ -259,10 +267,63 @@ function withRejections(reason: string, rejected: RouteRejection[]): string {
 }
 
 /**
+ * Decide a chat prompt. Chat never attaches to a Contract and never reaches the
+ * Director, so the only question is which session, if any, receives it. A named
+ * session is honoured or refused; a refused target is never replaced by a new
+ * session, because the user named one on purpose.
+ */
+function routeChatPrompt(input: RouteInput): RouteDecision {
+  const rejected: RouteRejection[] = [];
+  if (input.targetSessionId !== undefined) {
+    const session = input.sessions.find((entry) => entry.id === input.targetSessionId);
+    const contract = session ? contractOfSession(session, input.contracts) : undefined;
+    const refusal = refuseSession(session, input.targetSessionId, contract);
+    if (refusal) rejected.push(refusal);
+    else if (session) {
+      return {
+        strategy: 'explicit_session',
+        role: session.role,
+        newWorkstream: false,
+        targetSessionId: session.id,
+        ...(contract ? { targetContractId: contract.id } : {}),
+        workstreamId: session.workstreamId,
+        reason: `Prompt gửi tới phiên ${session.code} mà bạn đã chọn.`,
+        rejected: [],
+      };
+    }
+  }
+
+  // Steering and follow-ups address a run that exists, so without a resolved
+  // session they cannot be delivered. A refused target is never replaced.
+  if (rejected.length > 0 || input.delivery !== 'prompt') {
+    const base =
+      rejected.length > 0
+        ? 'Prompt không được gửi vì phiên bạn chọn không nhận được nó.'
+        : `Prompt ${PROMPT_DELIVERY_LABELS[input.delivery] ?? input.delivery} cần một phiên đang hoạt động để gửi tới, và chưa chọn phiên nào.`;
+    return {
+      strategy: 'undeliverable',
+      role: 'chat',
+      newWorkstream: false,
+      reason: withRejections(base, rejected),
+      rejected,
+    };
+  }
+
+  return {
+    strategy: 'new_chat',
+    role: 'chat',
+    newWorkstream: false,
+    reason: 'Mở một phiên omp trò chuyện mới trong thư mục này.',
+    rejected: [],
+  };
+}
+
+/**
  * Decide where a prompt goes. Pure: it reads the records it is handed, starts
  * nothing, and never looks at the prompt body.
  */
 export function routePrompt(input: RouteInput): RouteDecision {
+  if (input.mode === 'chat') return routeChatPrompt(input);
   const rejected: RouteRejection[] = [];
   const candidate = resolveTarget(input, rejected);
 

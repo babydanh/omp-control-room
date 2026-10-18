@@ -200,6 +200,7 @@ describe('session controls follow the reported status', () => {
   it('offers nothing for a status it does not know', () => {
     expect(sessionControls('levitating')).toEqual({
       pause: false,
+      interrupt: false,
       resume: false,
       kill: false,
       restart: false,

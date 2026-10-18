@@ -27,8 +27,10 @@ import type {
   CompanyCoordinator,
   CompanySessionAction,
   ContractDecision,
+  OmpSessionListing,
   ReviewerResultInput,
   ReviewerResultOutput,
+  TransitionAction,
   VerificationOutcome,
   VerificationRequest,
   WorkerTaskResultInput,
@@ -54,17 +56,24 @@ import { COMPANY_MAX_PROMPT_BYTES, COMPANY_PROMPT_TEXT_MEDIA_TYPE } from './cons
 import { type ContractDraftProposal, createContractDraft } from './contractDraft.js';
 import { recordArchitectureReview as recordArchitectureReviewTransition } from './contractWorkflow.js';
 import { SESSION_ACTION_LABELS, SESSION_STATUS_LABELS } from './labels.js';
+import {
+  assertOmpSessionFileIn,
+  comparableOmpPath,
+  listOmpSessionFiles,
+  ompSessionDirForFolder,
+} from './ompSessionFiles.js';
 import { resolveWorkspaceTarget } from './permissionPolicy.js';
 import type { UsageLedger } from './usageService.js';
 import { type PrerequisiteCheck, runVerificationCommand } from './verificationRunner.js';
 
-const REQUIRED_ROLES = ['director', 'advisor', 'worker', 'qa', 'judge'] as const;
+const REQUIRED_ROLES = ['director', 'advisor', 'worker', 'qa', 'judge', 'chat'] as const;
 const ROLE_TOOL_POLICIES: Record<(typeof REQUIRED_ROLES)[number], RoleProfile['toolsPolicy']> = {
   director: 'read-only',
   advisor: 'read-only',
   worker: 'scoped-write',
   qa: 'verification-only',
   judge: 'read-only',
+  chat: 'omp',
 };
 const CONTEXT_NUMBER_FIELDS = new Set([
   'contextTokens',
@@ -83,6 +92,31 @@ const OWNERSHIP_GATED_ACTIONS: ReadonlySet<CompanySessionAction> = new Set([
   'kill',
   'archive',
 ]);
+
+/** Session statuses that hold a live turn; only an interrupt may end one. */
+const INTERRUPTIBLE_STATUSES: Partial<Record<CompanySession['status'], true>> = {
+  busy: true,
+  waiting_input: true,
+};
+/** Statuses in which a session is starting, running or winding down; it cannot be deleted yet. */
+const DELETE_BLOCKING_STATUSES: Partial<Record<CompanySession['status'], true>> = {
+  starting: true,
+  busy: true,
+  waiting_input: true,
+  pausing: true,
+  stopping: true,
+};
+/** Task states that release their session; any other state still holds the session's work. */
+const RELEASED_TASK_STATUSES: Partial<Record<Task['status'], true>> = {
+  done: true,
+  failed: true,
+  cancelled: true,
+};
+/** Contract states that no longer keep their prompts' sessions in use. */
+const CLOSED_CONTRACT_STATUSES: Partial<Record<Contract['status'], true>> = {
+  completed: true,
+  cancelled: true,
+};
 
 /**
  * Why the host could not prove it still owns a run.
@@ -162,6 +196,11 @@ export interface WorkspaceCompanyCoordinatorEffects {
   readonly getModelCatalog: () => Promise<CompanyModelCatalogEntry[]>;
   readonly diagnostics: () => CompanyDiagnostics;
   readonly onPromptSubmitted: (prompt: CompanyPrompt, input: SubmitPromptInput) => Promise<void>;
+  /**
+   * Open a plain omp chat session in this workspace, or resume an omp session
+   * file. Like onPromptSubmitted, awaited after the caller's serialized phase.
+   */
+  readonly openChatSession: (input: { resumeFile?: string }) => Promise<CompanySession>;
   readonly onContractDecision: (contract: Contract, decision: ContractDecision) => Promise<void>;
   readonly onQuestionAnswered: (question: Question, input: QuestionAnswerInput) => Promise<void>;
   /**
@@ -177,6 +216,12 @@ export interface WorkspaceCompanyCoordinatorEffects {
     action: CompanySessionAction,
     runEpoch: number,
   ) => Promise<CompanySessionControlResult>;
+  /**
+   * Stop a deleted session's live process and erase the files it owns: its OMP
+   * session file and its board log. Awaited WHILE the write queue is held and
+   * must NOT commit. A refusal throws, and then nothing is removed from the board.
+   */
+  readonly deleteSession: (sessionId: string, session: CompanySession | undefined) => Promise<void>;
   /**
    * Pre-invalidation ownership gate for a destructive control.
    *
@@ -305,6 +350,8 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
   private readonly entityRevisions = new Map<string, number>();
 
   private readonly workspaceRoot: string;
+  /** Canonical keys of OMP files a resume is opening right now. */
+  private readonly resumingOmpFiles = new Set<string>();
 
   constructor(private readonly options: WorkspaceCompanyCoordinatorOptions) {
     this.state = options.state;
@@ -449,7 +496,9 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     // durable, so a failing effect rejects to the caller without anything to
     // roll back and without replaying the prompt.
     await this.options.effects.onPromptSubmitted(committed, input);
-    return committed;
+    // The routed session is written in phase 2, so the answer (which session took
+    // the prompt) is read back from the committed record, not the pre-route copy.
+    return this.state.prompts[committed.id] ?? committed;
   }
 
   async submitContractDraft(input: {
@@ -1090,6 +1139,14 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
           `Session ${current.code} is at epoch ${current.runEpoch}, not ${runEpoch}.`,
         );
       }
+      if (action === 'delete') {
+        await this.deleteSession(current, runEpoch);
+        return;
+      }
+      if (action === 'interrupt') {
+        await this.interruptSession(current, runEpoch);
+        return;
+      }
       this.assertActionAvailable(current, action);
       if (action === 'archive') this.assertArchivable(current);
 
@@ -1174,6 +1231,176 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
         throw error;
       }
     });
+  }
+
+  /**
+   * Withdraw one prompt no Contract holds. When the session it was routed to
+   * carries no other prompt and is not a chat session, that session is stopped
+   * and deleted with it. Both changes commit together.
+   */
+  async cancelPrompt(promptId: string): Promise<void> {
+    await this.serialize(async () => {
+      this.assertOwner();
+      this.assertStarted();
+      const prompt = this.state.prompts[promptId];
+      if (!prompt) throw new CompanyError('prompt_not_found', `Unknown prompt: ${promptId}`);
+      const held = Object.values(this.state.contracts).some((contract) =>
+        contract.promptIds.includes(promptId),
+      );
+      if (held) {
+        throw new CompanyError(
+          'prompt_in_contract',
+          'Prompt này đã nằm trong một Contract nên không thể rút lại.',
+        );
+      }
+      const changes: CompanyChange[] = [{ entity: 'prompt', op: 'remove', id: promptId }];
+      const target =
+        prompt.targetSessionId === undefined
+          ? undefined
+          : this.state.sessions[prompt.targetSessionId];
+      const sharedWithOtherPrompts =
+        target !== undefined &&
+        Object.values(this.state.prompts).some(
+          (other) => other.id !== promptId && other.targetSessionId === target.id,
+        );
+      if (target !== undefined && target.role !== 'chat' && !sharedWithOtherPrompts) {
+        this.assertDeletable(target, { allowRunning: true });
+        await this.options.effects.verifyControlOwnership?.(target, 'delete', target.runEpoch);
+        await this.options.effects.deleteSession(target.id, target);
+        changes.push({ entity: 'session', op: 'remove', id: target.id });
+      }
+      await this.commit(this.makeEvent(changes));
+    });
+  }
+
+  /** List the OMP session files saved for the workspace folder. Read-only. */
+  async listOmpSessions(): Promise<OmpSessionListing> {
+    this.assertNotDisposed();
+    const boardSessionByFile = new Map<string, string>();
+    for (const session of Object.values(this.state.sessions)) {
+      if (session.nativeSessionPath !== undefined) {
+        boardSessionByFile.set(comparableOmpPath(session.nativeSessionPath), session.id);
+      }
+    }
+    const sessions = await listOmpSessionFiles(
+      ompSessionDirForFolder(this.workspaceRoot),
+      boardSessionByFile,
+    );
+    return { folder: this.workspaceRoot, sessions };
+  }
+
+  /**
+   * Open a saved OMP session as a chat session. A file a board session already
+   * holds answers with that session, and concurrent opens of one file are refused.
+   */
+  async resumeOmpSession(file: string): Promise<string> {
+    const resolved = await assertOmpSessionFileIn(file, ompSessionDirForFolder(this.workspaceRoot));
+    const key = comparableOmpPath(resolved);
+    const open = await this.serialize(async () => {
+      this.assertOwner();
+      this.assertStarted();
+      if (this.resumingOmpFiles.has(key)) {
+        throw new CompanyError('omp_session_resuming', 'Phiên OMP này đang được mở; thử lại sau.');
+      }
+      const existing = Object.values(this.state.sessions).find(
+        (session) =>
+          session.nativeSessionPath !== undefined &&
+          comparableOmpPath(session.nativeSessionPath) === key,
+      );
+      if (existing === undefined) this.resumingOmpFiles.add(key);
+      return existing;
+    });
+    if (open !== undefined) return open.id;
+    try {
+      const session = await this.options.effects.openChatSession({ resumeFile: resolved });
+      return session.id;
+    } finally {
+      this.resumingOmpFiles.delete(key);
+    }
+  }
+
+  /**
+   * Interrupt the turn a session is running, as Esc does in omp. The native turn
+   * ends and the session returns to idle through its normal run-end path, so
+   * nothing durable is written here.
+   */
+  private async interruptSession(current: CompanySession, runEpoch: number): Promise<void> {
+    if (INTERRUPTIBLE_STATUSES[current.status] !== true) {
+      throw new CompanyError(
+        'session_not_busy',
+        `Phiên ${current.code} không có lượt đang chạy để dừng.`,
+      );
+    }
+    await this.options.effects.verifyControlOwnership?.(current, 'interrupt', runEpoch);
+    await this.options.effects.controlSession(current, 'interrupt', runEpoch);
+  }
+
+  /**
+   * Delete a session the user asked to remove. Its process is stopped and its
+   * files erased before the board forgets it, so a failure part-way leaves the
+   * record in place and the delete can be retried.
+   */
+  private async deleteSession(current: CompanySession, runEpoch: number): Promise<void> {
+    this.assertDeletable(current, { allowRunning: false });
+    await this.options.effects.verifyControlOwnership?.(current, 'delete', runEpoch);
+    await this.options.effects.deleteSession(current.id, current);
+    await this.commit(this.makeEvent([{ entity: 'session', op: 'remove', id: current.id }]));
+  }
+
+  /**
+   * Refuse deletion while the session still holds work: a live turn (unless the
+   * caller stops it), an unfinished task or running attempt, a pending question,
+   * or a prompt that belongs to an open Contract.
+   */
+  private assertDeletable(
+    session: CompanySession,
+    options: { readonly allowRunning: boolean },
+  ): void {
+    if (!options.allowRunning && DELETE_BLOCKING_STATUSES[session.status] === true) {
+      throw new CompanyError(
+        'session_running',
+        `Phiên ${session.code} đang chạy lượt; hãy dừng lượt trước khi xoá.`,
+      );
+    }
+    const task =
+      session.activeTaskId === undefined ? undefined : this.state.tasks[session.activeTaskId];
+    if (task !== undefined && RELEASED_TASK_STATUSES[task.status] !== true) {
+      throw new CompanyError(
+        'session_holds_task',
+        `Phiên ${session.code} còn giữ một việc chưa xong; hãy hoàn tất hoặc huỷ việc đó trước.`,
+      );
+    }
+    const attemptRunning = Object.values(this.state.attempts).some(
+      (attempt) => attempt.sessionId === session.id && attempt.status === 'running',
+    );
+    if (attemptRunning) {
+      throw new CompanyError(
+        'session_holds_task',
+        `Phiên ${session.code} đang chạy một lượt làm việc; hãy dừng lượt đó trước.`,
+      );
+    }
+    const questionPending = Object.values(this.state.questions).some(
+      (question) => question.sessionId === session.id && question.status === 'pending',
+    );
+    if (questionPending) {
+      throw new CompanyError(
+        'session_holds_question',
+        `Phiên ${session.code} đang chờ trả lời một câu hỏi; hãy trả lời hoặc từ chối câu hỏi đó trước.`,
+      );
+    }
+    const inOpenContract = Object.values(this.state.contracts).some(
+      (contract) =>
+        CLOSED_CONTRACT_STATUSES[contract.status] !== true &&
+        contract.promptIds.some(
+          (promptId) => this.state.prompts[promptId]?.targetSessionId === session.id,
+        ),
+    );
+    if (inOpenContract) {
+      throw new CompanyError(
+        'session_in_contract',
+        `Phiên ${session.code} đang nằm trong một Contract chưa đóng.`,
+      );
+    }
   }
 
   /**
@@ -1391,8 +1618,8 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     return validated;
   }
 
-  private assertActionAvailable(session: CompanySession, action: CompanySessionAction): void {
-    const available: Record<CompanySessionAction, readonly CompanySession['status'][]> = {
+  private assertActionAvailable(session: CompanySession, action: TransitionAction): void {
+    const available: Record<TransitionAction, readonly CompanySession['status'][]> = {
       pause: ['starting', 'idle', 'busy', 'waiting_input'],
       resume: ['paused', 'parked'],
       kill: ['starting', 'idle', 'busy', 'waiting_input', 'pausing', 'stopping', 'crashed'],
@@ -1418,11 +1645,8 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     }
   }
 
-  private assertControlResult(
-    action: CompanySessionAction,
-    status: CompanySession['status'],
-  ): void {
-    const allowed: Record<CompanySessionAction, readonly CompanySession['status'][]> = {
+  private assertControlResult(action: TransitionAction, status: CompanySession['status']): void {
+    const allowed: Record<TransitionAction, readonly CompanySession['status'][]> = {
       pause: ['pausing', 'paused'],
       resume: ['starting', 'idle', 'busy', 'waiting_input'],
       kill: ['stopped'],

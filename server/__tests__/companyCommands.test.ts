@@ -75,6 +75,15 @@ function fakeCoordinator(overrides: Partial<CompanyCoordinator> = {}): {
     answerQuestion: track('answerQuestion'),
     controlSession: track('controlSession'),
     renameSession: track('renameSession'),
+    cancelPrompt: track('cancelPrompt'),
+    listOmpSessions: async () => {
+      calls.push({ method: 'listOmpSessions', args: [] });
+      return { folder: 'C:/workspace', sessions: [] };
+    },
+    resumeOmpSession: async (file) => {
+      calls.push({ method: 'resumeOmpSession', args: [file] });
+      return 'session-resumed';
+    },
     updateSettings: track('updateSettings'),
     submitTaskResult: async () => {
       throw new Error('Native task results are not browser commands.');
@@ -162,6 +171,9 @@ function companyCommands(): Record<string, Record<string, unknown>> {
     companySessionLogRequest: { requestId: randomUUID(), sessionId: randomUUID(), limit: 10 },
     companySessionRename: { requestId: randomUUID(), sessionId: randomUUID(), name: 'Tên mới' },
     companySessionInfoRequest: { requestId: randomUUID(), sessionId: randomUUID() },
+    companyPromptCancel: { requestId: randomUUID(), promptId: randomUUID() },
+    companySessionResume: { requestId: randomUUID(), file: '/omp/saved.jsonl' },
+    companyOmpSessionsRequest: { requestId: randomUUID() },
     companyAttachmentUpload: {
       requestId: randomUUID(),
       fileName: 'shot.png',
@@ -262,6 +274,7 @@ describe('company client commands', () => {
       'companyFileReadRequest',
       'companySessionLogRequest',
       'companySessionInfoRequest',
+      'companyOmpSessionsRequest',
     ]);
     for (const [type, msg] of Object.entries(commands)) {
       if (readOnly.has(type)) continue;
@@ -794,5 +807,79 @@ describe('company client commands', () => {
 
     await vi.waitFor(() => expect(replies('companyModelCatalog')).toHaveLength(1));
     expect(replies('companyModelCatalog')[0].entries).toHaveLength(1);
+  });
+
+  it('routes interrupt, delete, prompt withdrawal and resume to the coordinator and lists OMP sessions', async () => {
+    const sessionId = randomUUID();
+    const promptId = randomUUID();
+    const resumeId = randomUUID();
+    const listId = randomUUID();
+    for (const action of ['interrupt', 'delete'] as const) {
+      handleCompanyCommand(
+        { type: 'companySessionControl', requestId: randomUUID(), sessionId, runEpoch: 2, action },
+        send,
+        context(),
+      );
+    }
+    handleCompanyCommand(
+      { type: 'companyPromptCancel', requestId: randomUUID(), promptId },
+      send,
+      context(),
+    );
+    handleCompanyCommand(
+      { type: 'companySessionResume', requestId: resumeId, file: '/omp/saved.jsonl' },
+      send,
+      context(),
+    );
+    await vi.waitFor(() => expect(results()).toHaveLength(4));
+    expect(results().every((result) => result.ok)).toBe(true);
+    expect(results().find((result) => result.requestId === resumeId)).toMatchObject({
+      ok: true,
+      sessionId: 'session-resumed',
+    });
+    expect(calls).toEqual(
+      expect.arrayContaining([
+        { method: 'controlSession', args: [sessionId, 'interrupt', 2] },
+        { method: 'controlSession', args: [sessionId, 'delete', 2] },
+        { method: 'cancelPrompt', args: [promptId] },
+        { method: 'resumeOmpSession', args: ['/omp/saved.jsonl'] },
+      ]),
+    );
+
+    outbox = [];
+    handleCompanyCommand(
+      { type: 'companyOmpSessionsRequest', requestId: listId },
+      send,
+      context({ executionAllowed: false }),
+    );
+    await vi.waitFor(() => expect(replies('companyOmpSessions')).toHaveLength(1));
+    expect(replies('companyOmpSessions')[0]).toMatchObject({
+      requestId: listId,
+      folder: 'C:/workspace',
+      sessions: [],
+    });
+    expect(calls).toContainEqual({ method: 'listOmpSessions', args: [] });
+  });
+
+  it('refuses a prompt withdrawal or resume without a target before reaching the coordinator', async () => {
+    handleCompanyCommand(
+      { type: 'companyPromptCancel', requestId: randomUUID(), promptId: '' },
+      send,
+      context(),
+    );
+    handleCompanyCommand(
+      { type: 'companySessionResume', requestId: randomUUID(), file: '' },
+      send,
+      context(),
+    );
+    await vi.waitFor(() => expect(results()).toHaveLength(2));
+    expect(
+      results()
+        .map((result) => result.errorCode)
+        .sort(),
+    ).toEqual(['invalid_prompt_cancel', 'invalid_session_resume']);
+    expect(
+      calls.some((call) => call.method === 'cancelPrompt' || call.method === 'resumeOmpSession'),
+    ).toBe(false);
   });
 });

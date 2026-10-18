@@ -177,6 +177,10 @@ function matchesApprovedCommand(
 export function decideToolCall(request: ToolCallRequest): PermissionDecision {
   const { role, tool, args } = request;
 
+  // A chat session is the user's own omp: its tools and approvals are native,
+  // so company policy never gates them. The bridge does not ask for these.
+  if (role === 'chat') return allow('Chat sessions use the user’s own OMP tools and approvals.');
+
   if (READ_TOOLS.has(tool) || ASK_TOOLS.has(tool)) {
     return allow(`${tool} is a read/no-side-effect tool.`);
   }

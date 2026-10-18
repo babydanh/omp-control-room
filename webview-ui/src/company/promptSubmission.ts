@@ -23,7 +23,6 @@ export interface PromptError {
 
 export interface PromptDraftState {
   text: string;
-  delivery: SubmitPromptInput['delivery'];
   /** The submit awaiting its result; null when nothing is in flight. */
   pendingSubmit: { requestId: string } | null;
   error: PromptError | null;
@@ -31,10 +30,21 @@ export interface PromptDraftState {
 
 export const EMPTY_PROMPT_DRAFT: PromptDraftState = {
   text: '',
-  delivery: 'prompt',
   pendingSubmit: null,
   error: null,
 };
+
+/**
+ * Where a prompt goes. `chat` is omp's own conversation: it lands in the target
+ * session, or opens a new chat session when there is none. `company` hands the
+ * prompt to the Company workflow (Director, Contract, approval, workers).
+ */
+export interface PromptRoute {
+  mode: 'chat' | 'company';
+  delivery: SubmitPromptInput['delivery'];
+  /** The session the prompt is for; null lets the server pick or open one. */
+  targetSessionId: string | null;
+}
 
 export interface SubmitPlan {
   state: PromptDraftState;
@@ -43,16 +53,13 @@ export interface SubmitPlan {
 
 /**
  * Build the message to send and mark the draft in flight. The text stays in the
- * draft until the result says otherwise. A selected session is the target: the
- * prompt goes to that OMP session the way typing into it would, and steering or
- * a follow-up is refused by the server without one.
+ * draft until the result says otherwise.
  */
 export function planSubmit(
   state: PromptDraftState,
   requestId: string,
-  targetSessionId: string | null = null,
+  route: PromptRoute,
 ): SubmitPlan {
-  const text = state.text;
   return {
     state: {
       ...state,
@@ -61,23 +68,30 @@ export function planSubmit(
     },
     input: {
       requestId,
-      text,
-      delivery: state.delivery,
-      ...(targetSessionId === null ? {} : { targetSessionId }),
+      text: state.text,
+      mode: route.mode,
+      delivery: route.delivery,
+      ...(route.targetSessionId === null ? {} : { targetSessionId: route.targetSessionId }),
     },
   };
 }
 
-/** Fold a command result into the draft. Only an `ok` clears the text. */
+/**
+ * Fold a command result into the draft. Only the result of the submit in flight
+ * speaks for the draft: another command's answer (a folder switch, a herdr
+ * prompt) leaves it alone. Only an `ok` clears the text.
+ */
 export function applySubmitResult(
   state: PromptDraftState,
   result: CommandResultView,
 ): PromptDraftState {
+  if (state.pendingSubmit?.requestId !== result.requestId) return state;
   if (result.ok) {
     return { ...state, text: '', error: null, pendingSubmit: null };
   }
   return {
     ...state,
+    pendingSubmit: null,
     error: {
       requestId: result.requestId,
       errorCode: result.errorCode ?? 'company_command_failed',
@@ -92,18 +106,33 @@ export function applySubmitResult(
  * a round trip.
  */
 export function promptBlockReason(state: PromptDraftState): string | null {
-  if (state.text.trim().length === 0) return 'Hãy nhập điều bạn muốn công ty thực hiện.';
+  if (state.text.trim().length === 0) return 'Hãy nhập điều bạn muốn gửi.';
   if (new TextEncoder().encode(state.text).length > COMPANY_MAX_PROMPT_BYTES) {
     return `Nội dung yêu cầu vượt quá giới hạn ${COMPANY_MAX_PROMPT_BYTES} byte.`;
   }
   return null;
 }
 
+/** The keys a composer chord reads. */
+export interface ChordEvent {
+  key: string;
+  ctrlKey: boolean;
+  metaKey: boolean;
+  shiftKey: boolean;
+}
+
 /**
- * The submit chord. It is bound to the composer's own textarea, so a keypress
- * typed into a terminal never reaches it; naming it here keeps that true by
- * construction rather than by accident.
+ * Ctrl/Cmd+Shift+Enter: send the prompt to the Company workflow. Bound to the
+ * composer's own textarea, so a keypress typed into a terminal never reaches it.
  */
-export function isSubmitChord(event: { key: string; ctrlKey: boolean; metaKey: boolean }): boolean {
-  return (event.ctrlKey || event.metaKey) && event.key === 'Enter';
+export function isCompanyChord(event: ChordEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'Enter';
+}
+
+/**
+ * Ctrl/Cmd+Enter: a follow-up into the current session, as OMP's Ctrl+Enter
+ * sends it. It never dispatches a slash command.
+ */
+export function isFollowUpChord(event: ChordEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key === 'Enter';
 }

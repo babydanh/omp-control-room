@@ -22,6 +22,7 @@ import { TRANSPORT_DISCONNECTED_ERROR } from '../../../core/src/messageDelivery.
 import type { ClientMessage, HerdrKey, ServerMessage } from '../../../core/src/messages.js';
 import type { MessageTransport } from '../transport/types.js';
 import { decodeBase64ToBytes } from './base64.js';
+import type { CommandResultView } from './commandResults.js';
 import * as commands from './companyMessages.js';
 import {
   applyCompanyMessage,
@@ -35,7 +36,7 @@ import {
   COMPANY_TEXT_BATCH_MS,
   HERDR_SCREEN_LINES,
 } from './constants.js';
-import { planSubmit, promptBlockReason } from './promptSubmission.js';
+import { planSubmit, promptBlockReason, type PromptRoute } from './promptSubmission.js';
 
 export interface SendOutcome {
   ok: boolean;
@@ -50,6 +51,9 @@ export interface SendOutcome {
 export type CompanyCommandHandle = SendOutcome & { requestId: string };
 
 const SENT: SendOutcome = { ok: true };
+/** Shown when a dropped socket means a command's verdict is no longer coming. */
+const LOST_VERDICT_MESSAGE =
+  'Mất kết nối trước khi có kết quả; chưa rõ lệnh đã được xử lý hay chưa.';
 
 export class CompanyClient {
   private readonly transport: MessageTransport;
@@ -62,6 +66,8 @@ export class CompanyClient {
   private lastFlushAt = 0;
   /** Offset requested per artifact, so paging never runs ahead of itself. */
   private readonly artifactOffsets = new Map<string, number>();
+  /** Verdict waiters, keyed by the requestId of the command they wait for. */
+  private readonly commandWaiters = new Map<string, (result: CommandResultView) => void>();
 
   constructor(transport: MessageTransport) {
     this.transport = transport;
@@ -111,18 +117,7 @@ export class CompanyClient {
 
   private reduce(message: ServerMessage): void {
     const result = applyCompanyMessage(this.state, message);
-    let next = result.state;
-    // A selection pointing at something the server no longer has would open a
-    // drawer for a task that does not exist.
-    if (next.selection.taskId !== null && next.tasks[next.selection.taskId] === undefined) {
-      next = { ...next, selection: { ...next.selection, taskId: null } };
-    }
-    if (
-      next.selection.sessionId !== null &&
-      next.sessions[next.selection.sessionId] === undefined
-    ) {
-      next = { ...next, selection: { ...next.selection, sessionId: null } };
-    }
+    const next = result.state;
     const shouldReattach = message.type === 'companySnapshot' && this.reattachTerminalAfterSnapshot;
     if (shouldReattach) this.reattachTerminalAfterSnapshot = false;
     this.state = next;
@@ -132,6 +127,7 @@ export class CompanyClient {
       this.attachTerminal(this.state.selection.sessionId);
     }
     this.continueArtifacts();
+    if (message.type === 'companyCommandResult') this.settleCommandWaiter(message.requestId);
   }
 
   private runEffect(effect: CompanyEffect): void {
@@ -150,6 +146,15 @@ export class CompanyClient {
 
   private emit(): void {
     for (const listener of this.listeners) listener();
+  }
+
+  /** Resolve whoever waits on a command's verdict, once that verdict is held. */
+  private settleCommandWaiter(requestId: string): void {
+    const waiter = this.commandWaiters.get(requestId);
+    const verdict = this.state.commandResults[requestId];
+    if (waiter === undefined || verdict === undefined) return;
+    this.commandWaiters.delete(requestId);
+    waiter(verdict);
   }
 
   /**
@@ -182,6 +187,16 @@ export class CompanyClient {
    * never delivered.
    */
   connect(): void {
+    // A verdict for a command sent before the drop will never arrive; its waiter is told now.
+    for (const [requestId, waiter] of this.commandWaiters) {
+      waiter({
+        requestId,
+        ok: false,
+        errorCode: TRANSPORT_DISCONNECTED_ERROR,
+        message: LOST_VERDICT_MESSAGE,
+      });
+    }
+    this.commandWaiters.clear();
     const terminals = { ...this.state.terminals };
     let invalidated = false;
     for (const [sessionId, terminal] of Object.entries(terminals)) {
@@ -265,20 +280,25 @@ export class CompanyClient {
 
   // ── Writes ───────────────────────────────────────────────────────────────
 
-  submitPrompt(): SendOutcome {
+  /**
+   * Send the draft along a route. The draft keeps its text until the server's verdict
+   * says otherwise; a route the send itself refuses is reported here.
+   */
+  submitPrompt(route: PromptRoute): SendOutcome {
     const blocker = promptBlockReason(this.state.prompt);
     if (blocker !== null) return { ok: false, errorCode: 'prompt_invalid', message: blocker };
     const requestId = commands.newRequestId();
-    const plan = planSubmit(this.state.prompt, requestId, this.state.selection.sessionId);
+    const plan = planSubmit(this.state.prompt, requestId, route);
     const outcome = this.send(commands.promptSubmit(plan.input));
-    // The draft keeps its text either way: the server clears it on an `ok`
-    // result, and a refusal leaves the user looking at what they wrote.
+    // The draft keeps its text either way: the server clears it on an `ok` result,
+    // and a refusal leaves the user looking at what they wrote.
     this.state = {
       ...this.state,
       prompt: outcome.ok
         ? plan.state
         : {
-            ...plan.state,
+            ...this.state.prompt,
+            pendingSubmit: null,
             error: {
               requestId,
               errorCode: outcome.errorCode ?? 'company_send_failed',
@@ -305,15 +325,24 @@ export class CompanyClient {
     return this.send(commands.questionAnswer(input));
   }
 
-  controlSession(
-    sessionId: string,
-    action: 'pause' | 'resume' | 'kill' | 'restart' | 'archive',
-  ): SendOutcome {
+  /**
+   * Stop, kill, archive or delete a session. The server's verdict is a companyCommandResult
+   * under the handle's requestId; a refusal (for example, a delete while work is held)
+   * carries its own message.
+   */
+  controlSession(sessionId: string, action: commands.SessionControlAction): CompanyCommandHandle {
     const runEpoch = this.state.sessions[sessionId]?.runEpoch;
     if (runEpoch === undefined) {
-      return { ok: false, errorCode: 'session_not_found', message: 'Phiên đó không còn tồn tại.' };
+      return {
+        requestId: commands.newRequestId(),
+        ok: false,
+        errorCode: 'session_not_found',
+        message: 'Phiên đó không còn tồn tại.',
+      };
     }
-    return this.send(commands.sessionControl(commands.newRequestId(), sessionId, runEpoch, action));
+    return this.command((requestId) =>
+      commands.sessionControl(requestId, sessionId, runEpoch, action),
+    );
   }
 
   /**
@@ -326,6 +355,61 @@ export class CompanyClient {
 
   updateRoleProfiles(roleProfiles: Record<string, RoleProfile>): SendOutcome {
     return this.send(commands.settingsUpdate(commands.newRequestId(), roleProfiles));
+  }
+
+  /**
+   * Withdraw a prompt no Contract holds yet. The verdict is a companyCommandResult under
+   * the handle's requestId.
+   */
+  cancelPrompt(promptId: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.promptCancel(requestId, promptId));
+  }
+
+  /**
+   * Ask for the omp sessions saved for the folder the board points at. The answer is a
+   * companyOmpSessions; a refused send is reported on the handle itself.
+   */
+  requestOmpSessions(): CompanyCommandHandle {
+    return this.command((requestId) => commands.ompSessionsRequest(requestId));
+  }
+
+  /** Resume a saved omp session on the board. The verdict names the session it opened. */
+  resumeSession(file: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.sessionResume(requestId, file));
+  }
+
+  /**
+   * Point the board at another folder. The verdict is a companyCommandResult under the
+   * handle's requestId; a success is followed by a snapshot and a companyWorkspaces.
+   */
+  openWorkspace(path: string): CompanyCommandHandle {
+    const requestId = commands.newRequestId();
+    this.state = { ...this.state, pendingWorkspaceOpen: requestId };
+    const outcome = this.send(commands.workspaceOpen(requestId, path));
+    if (!outcome.ok) this.state = { ...this.state, pendingWorkspaceOpen: null };
+    this.emit();
+    return { requestId, ...outcome };
+  }
+
+  /**
+   * Resolves with a command's verdict: at once when it is already held, or with the
+   * refusal when the send itself failed. A verdict lost to a dropped socket resolves as a
+   * transport failure (see connect).
+   */
+  waitForCommand(handle: CompanyCommandHandle): Promise<CommandResultView> {
+    const held = this.state.commandResults[handle.requestId];
+    if (held !== undefined) return Promise.resolve(held);
+    if (!handle.ok) {
+      return Promise.resolve({
+        requestId: handle.requestId,
+        ok: false,
+        errorCode: handle.errorCode,
+        message: handle.message,
+      });
+    }
+    return new Promise<CommandResultView>((resolve) => {
+      this.commandWaiters.set(handle.requestId, resolve);
+    });
   }
 
   // ── Herdr ────────────────────────────────────────────────────────────────
@@ -411,7 +495,12 @@ export class CompanyClient {
   // ── Local view state ─────────────────────────────────────────────────────
 
   select(selection: Partial<CompanySelection>): void {
-    this.state = { ...this.state, selection: { ...this.state.selection, ...selection } };
+    this.state = {
+      ...this.state,
+      selection: { ...this.state.selection, ...selection },
+      // Choosing a different session abandons one that was still on its way.
+      openingSessionId: selection.sessionId === undefined ? this.state.openingSessionId : null,
+    };
     this.emit();
   }
 
@@ -422,11 +511,6 @@ export class CompanyClient {
 
   setDraftText(text: string): void {
     this.state = { ...this.state, prompt: { ...this.state.prompt, text } };
-    this.emit();
-  }
-
-  setDraftDelivery(delivery: 'prompt' | 'steer' | 'follow_up'): void {
-    this.state = { ...this.state, prompt: { ...this.state.prompt, delivery } };
     this.emit();
   }
 

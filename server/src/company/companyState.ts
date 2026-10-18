@@ -46,6 +46,7 @@ const ROLE_TOOLS_POLICY: Record<CompanyRole, RoleProfile['toolsPolicy']> = {
   worker: 'scoped-write',
   qa: 'verification-only',
   judge: 'read-only',
+  chat: 'omp',
 };
 
 /**
@@ -106,6 +107,26 @@ export function createInitialCompanySettings(
     roleProfiles: createRoleProfiles(modelRoles),
     verificationProfiles: {},
   };
+}
+
+/**
+ * Give a stored settings record the profiles it predates. A board saved before
+ * the chat role existed has no `chat` profile; it gets the one a fresh board
+ * would have, and every profile already stored is left exactly as it was.
+ */
+export function withMissingRoleProfiles(
+  state: CompanyState,
+  modelRoles: CompanyModelResolution = FALLBACK_MODEL_ROLES,
+): CompanyState {
+  const missing = COMPANY_ROLES.filter((role) => state.settings.roleProfiles[role] === undefined);
+  if (missing.length === 0) return state;
+  const fresh = createRoleProfiles(modelRoles);
+  const roleProfiles: Record<string, RoleProfile> = { ...state.settings.roleProfiles };
+  for (const role of missing) {
+    const profile = fresh[role];
+    if (profile) roleProfiles[role] = profile;
+  }
+  return { ...state, settings: { ...state.settings, roleProfiles } };
 }
 
 export function createInitialCompanyState(

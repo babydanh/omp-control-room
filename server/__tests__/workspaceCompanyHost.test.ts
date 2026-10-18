@@ -92,11 +92,17 @@ class FakeRuntime implements CompanyRuntime {
       getModelCatalog: async () => MODEL_CATALOG,
       diagnostics: () => DIAGNOSTICS,
       onPromptSubmitted: async () => undefined,
+      openChatSession: async () => {
+        throw new Error('openChatSession is not used by this test');
+      },
       onContractDecision: async () => undefined,
       onQuestionAnswered: async () => undefined,
       controlSession: async (session, action) => {
         if (action === 'kill') this.sessions.delete(`${session.id}:${session.runEpoch}`);
         return { status: session.status };
+      },
+      deleteSession: async () => {
+        throw new Error('deleteSession is not used by this test');
       },
       onSettingsUpdated: async () => undefined,
       onStateChanged: () => undefined,

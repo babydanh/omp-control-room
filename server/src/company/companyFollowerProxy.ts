@@ -42,7 +42,7 @@ import type {
   RoleProfile,
   SubmitPromptInput,
 } from '../../../core/src/company.js';
-import type { ServerMessage } from '../../../core/src/messages.js';
+import type { OmpSessionEntry, ServerMessage } from '../../../core/src/messages.js';
 import type { CompanyTerminalGateway, CompanyTerminalHandle } from './clientCommands.js';
 import {
   COMPANY_BROKER_MAX_FRAME_BYTES,
@@ -55,6 +55,7 @@ import {
   type CompanySessionAction,
   CONTRACT_DECISIONS,
   type ContractDecision,
+  type OmpSessionListing,
   type ReviewerResultOutput,
   type VerificationOutcome,
   type WorkerTaskResultOutput,
@@ -75,6 +76,9 @@ export const COMPANY_HOST_COMMANDS = {
   answerQuestion: 'company.question.answer',
   controlSession: 'company.session.control',
   renameSession: 'company.session.rename',
+  promptCancel: 'company.prompt.cancel',
+  ompSessions: 'company.omp.sessions',
+  resumeOmpSession: 'company.session.resume',
   sessionInfo: 'company.session.info',
   updateSettings: 'company.settings.update',
   terminalAttach: 'terminal.attach',
@@ -220,10 +224,12 @@ export function readExecutionConsent(params: Record<string, unknown>): void {
 /** Commands that change company state or hand out a control lease. */
 export const COMPANY_HOST_MUTATING_COMMANDS: Readonly<Record<string, true>> = {
   'company.prompt.submit': true,
+  'company.prompt.cancel': true,
   'company.contract.decide': true,
   'company.question.answer': true,
   'company.session.control': true,
   'company.session.rename': true,
+  'company.session.resume': true,
   'company.settings.update': true,
   'terminal.attach': true,
   'terminal.write': true,
@@ -639,6 +645,33 @@ export class CompanyFollowerProxy {
         if (typeof id !== 'string' || id.length === 0) throw hostError('command_invalid');
         if (typeof name !== 'string') throw hostError('command_invalid');
         await proxy.send(COMPANY_HOST_COMMANDS.renameSession, { id, name });
+      },
+
+      async cancelPrompt(promptId: string): Promise<void> {
+        if (typeof promptId !== 'string' || promptId.length === 0) {
+          throw hostError('command_invalid');
+        }
+        await proxy.send(COMPANY_HOST_COMMANDS.promptCancel, { promptId });
+      },
+
+      async listOmpSessions(): Promise<OmpSessionListing> {
+        const value = await proxy.send(COMPANY_HOST_COMMANDS.ompSessions);
+        if (!isFrameObject(value)) throw hostError('owner_protocol_error');
+        const folder = value['folder'];
+        const sessions = value['sessions'];
+        if (typeof folder !== 'string' || !Array.isArray(sessions)) {
+          throw hostError('owner_protocol_error');
+        }
+        return { folder, sessions: sessions as OmpSessionEntry[] };
+      },
+
+      async resumeOmpSession(file: string): Promise<string> {
+        if (typeof file !== 'string' || file.length === 0) throw hostError('command_invalid');
+        const value = await proxy.send(COMPANY_HOST_COMMANDS.resumeOmpSession, { file });
+        if (!isFrameObject(value)) throw hostError('owner_protocol_error');
+        const sessionId = value['sessionId'];
+        if (typeof sessionId !== 'string') throw hostError('owner_protocol_error');
+        return sessionId;
       },
 
       async updateSettings(roleProfiles: Record<string, RoleProfile>): Promise<void> {

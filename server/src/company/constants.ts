@@ -107,6 +107,7 @@ export const COMPANY_DEFAULT_MODELS = {
   worker: 'openai-codex/gpt-6-luna',
   qa: 'openai-codex/gpt-6-luna',
   judge: 'openai-codex/gpt-6-luna',
+  chat: 'openai-codex/gpt-6-luna',
 } as const;
 
 /**
@@ -125,10 +126,20 @@ export const COMPANY_FALLBACK_ROLE_THINKING = {
   worker: 'xhigh',
   qa: 'xhigh',
   judge: 'xhigh',
+  chat: 'xhigh',
 } as const;
 
 /** Deadline for the one `omp config get modelRoles` read that seeds a board. */
 export const COMPANY_MODEL_ROLES_TIMEOUT_MS = 15_000;
+
+/** Deadline for the one `omp models --json` read that lists the catalog. */
+export const COMPANY_MODEL_CATALOG_TIMEOUT_MS = 30_000;
+/**
+ * How long one catalog read is reused. Every launch asks for the catalog, so a
+ * short reuse keeps launches from each waiting on a fresh OMP process, and a
+ * credential added since then shows up within a minute.
+ */
+export const COMPANY_MODEL_CATALOG_TTL_MS = 60_000;
 
 // ── Usage + quota ────────────────────────────────────────────
 /** At most one `omp usage` process per this window, whatever the caller asks. */

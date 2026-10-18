@@ -92,12 +92,17 @@ import {
   COMPANY_MAX_PROMPT_BYTES,
   COMPANY_MAX_RETAINED_SESSIONS,
   COMPANY_MAX_WORKERS,
+  COMPANY_MODEL_CATALOG_TTL_MS,
 } from './constants.js';
 import { type RouteDecision, routePrompt } from './contextRouter.js';
 import type { ContractDraftProposal } from './contractDraft.js';
 import { buildSessionHandoff, renderHandoffText } from './handoff.js';
 import { ROLE_LABELS } from './labels.js';
-import { buildCompanyModelCatalogFromBridge } from './modelCatalog.js';
+import {
+  buildCompanyModelCatalog,
+  buildCompanyModelCatalogFromBridge,
+  type OmpModelDescriptor,
+} from './modelCatalog.js';
 import {
   OmpBridgeRpcError,
   type OmpBridgeRpcRequest,
@@ -105,12 +110,14 @@ import {
   type OmpBridgeSubagentAuthorization,
   type OmpBridgeToolAuthorization,
 } from './ompBridge.js';
+import { readOmpModelsCatalog } from './ompModelsCatalog.js';
 import {
   createOmpRunner,
   type OmpRunner,
   type OmpRunnerCommand,
   type OmpRunnerOptions,
 } from './ompRunner.js';
+import { ompSessionsRoot, removeSessionFileWithin } from './ompSessionFiles.js';
 import {
   actionDigest,
   type ApprovedVerificationCommand,
@@ -160,13 +167,15 @@ import { PtyClient, type PtyClientOptions } from './ptyClient.js';
 import { buildRolePacket, roleBriefForProfile, roleBriefText } from './roleBriefs.js';
 import { Scheduler } from './scheduler.js';
 import {
+  isSessionLogId,
+  removeSessionLog,
   SessionLog,
   sessionLogDirectory,
   type SessionLogInput,
   SKILL_READ_LOG_PREFIX,
   tallySessionTools,
 } from './sessionLog.js';
-import { sessionHoldsRunner, SessionPool } from './sessionPool.js';
+import { sessionHoldsRunner, SessionPool, type SessionRequest } from './sessionPool.js';
 import type { UsageLedger } from './usageService.js';
 import { discoverVerificationProfiles } from './verificationDiscovery.js';
 import { WorkspaceLockTable } from './workspaceLocks.js';
@@ -258,6 +267,7 @@ export interface CompanyRuntimeDeps {
   createRunner(options: OmpRunnerOptions): OmpRunner;
   createSupervisor(): CompanySupervisorPort;
   resolveLaunch(input: NativeLaunchInput): NativeLaunchResolution;
+  readOmpModels(command: OmpRunnerCommand, cwd: string): Promise<OmpModelDescriptor[]>;
   now(): string;
   setInterval(handler: () => void, ms: number): NodeJS.Timeout;
   clearInterval(handle: NodeJS.Timeout): void;
@@ -389,6 +399,7 @@ const DEFAULT_DEPS: CompanyRuntimeDeps = {
   createRunner: (options) => createOmpRunner(options),
   createSupervisor: () => new ProcessSupervisor(),
   resolveLaunch: (input) => resolveNativeLaunch(input),
+  readOmpModels: (command, cwd) => readOmpModelsCatalog({ command, cwd }),
   now: () => new Date().toISOString(),
   setInterval: (handler, ms) => setInterval(handler, ms),
   clearInterval: (handle) => clearInterval(handle),
@@ -474,8 +485,9 @@ class NativeCompanyRuntime implements CompanyRuntime {
   readonly effects: WorkspaceCompanyCoordinatorEffects;
   terminal!: CompanyTerminalGateway;
 
-  /** True while the idle catalog Director starts, which breaks the recursion. */
-  private bootstrappingDirector = false;
+  /** The last CLI catalog read, reused until it is older than the TTL. */
+  private hostCatalog:
+    { readonly startedAt: number; readonly read: Promise<CompanyModelCatalogEntry[]> } | undefined;
   private readonly store: CompanyStore;
   private readonly usageLedger: UsageLedger;
   private readonly getCoordinator: () => WorkspaceCompanyCoordinator;
@@ -548,9 +560,11 @@ class NativeCompanyRuntime implements CompanyRuntime {
       getModelCatalog: () => this.modelCatalog(),
       diagnostics: () => this.diagnostics(),
       onPromptSubmitted: (prompt, input) => this.onPromptSubmitted(prompt, input),
+      openChatSession: (input) => this.openChatSession(input),
       onContractDecision: (contract, decision) => this.onContractDecision(contract, decision),
       onQuestionAnswered: (question, input) => this.onQuestionAnswered(question, input),
       controlSession: (session, action, runEpoch) => this.controlSession(session, action, runEpoch),
+      deleteSession: (sessionId, session) => this.deleteSession(sessionId, session),
       onSettingsUpdated: (profiles) => this.onSettingsUpdated(profiles),
       onStateChanged: (event) => this.onStateChanged(event),
       recover: (state) => this.recover(state),
@@ -737,41 +751,46 @@ class NativeCompanyRuntime implements CompanyRuntime {
   // ── Model catalog ────────────────────────────────────────────────────────
 
   /**
-   * Read the catalog from a live Director. There is no cached copy on purpose:
-   * only a running process knows which models its own credentials expose, and
-   * that set changes while it runs. With no live Director the answer is a typed
-   * refusal, never a stale list and never an empty one.
+   * The models this machine can run. The installed OMP answers from
+   * `omp models --json`, which starts no session, so a board with no Director
+   * still has a catalog. That read is reused for {@link COMPANY_MODEL_CATALOG_TTL_MS},
+   * because every launch asks for the catalog. When the read fails, a live run
+   * answers from inside its own process, which holds the same credentials. With
+   * neither, the refusal carries the reason.
    */
   async modelCatalog(): Promise<CompanyModelCatalogEntry[]> {
-    let director = this.newestDirector();
-    if (director === undefined && !this.bootstrappingDirector) {
-      // A live Director is what can answer a catalog question at all, and one is
-      // started IDLE for exactly that: the record is persisted first and no prompt
-      // is sent, so discovering a capability spends no model turn.
-      //
-      // The guard matters: starting that Director goes through startRun, which
-      // resolves a launch profile, which asks for the catalog. Without it the two
-      // call each other forever, and because every step awaits I/O it never trips a
-      // stack overflow — it simply never returns.
-      this.bootstrappingDirector = true;
-      try {
-        await this.bootstrapIdleDirector();
-      } finally {
-        this.bootstrappingDirector = false;
-      }
-      director = this.newestDirector();
+    try {
+      return await this.readHostCatalog();
+    } catch (readError) {
+      const run = this.liveCatalogRun();
+      if (run === undefined) throw readError;
+      const catalog = await run.runner.requestModelCatalog(run.runEpoch);
+      return buildCompanyModelCatalogFromBridge(catalog, {
+        sessionId: run.sessionId,
+        runEpoch: run.runEpoch,
+      });
     }
-    if (director === undefined) {
-      throw new CompanyError(
-        'model_catalog_unavailable',
-        'No Director run is live, so no model catalog can be read. The native runtime is queried, never a cache.',
-      );
+  }
+
+  /**
+   * One CLI read, shared by concurrent callers and reused until it ages out. A
+   * failed read is dropped at once, so the next caller asks again.
+   */
+  private readHostCatalog(): Promise<CompanyModelCatalogEntry[]> {
+    const startedAt = Date.parse(this.deps.now());
+    const cached = this.hostCatalog;
+    if (cached !== undefined && startedAt - cached.startedAt < COMPANY_MODEL_CATALOG_TTL_MS) {
+      return cached.read;
     }
-    const catalog = await director.runner.requestModelCatalog(director.runEpoch);
-    return buildCompanyModelCatalogFromBridge(catalog, {
-      sessionId: director.sessionId,
-      runEpoch: director.runEpoch,
+    const read = this.deps
+      .readOmpModels(this.launch.command, this.store.workspacePath)
+      .then((models) => buildCompanyModelCatalog(models));
+    const entry = { startedAt, read };
+    this.hostCatalog = entry;
+    read.catch(() => {
+      if (this.hostCatalog === entry) this.hostCatalog = undefined;
     });
+    return read;
   }
 
   /**
@@ -831,23 +850,14 @@ class NativeCompanyRuntime implements CompanyRuntime {
     };
   }
 
-  /** The newest live Director, which is the only run allowed to answer a catalog. */
-  private newestDirector(): ActiveRun | undefined {
-    return [...this.runs.values()]
-      .filter((run) => run.role === 'director')
-      .sort((left, right) => right.runEpoch - left.runEpoch)[0];
-  }
-
-  /** Persist a Director session and start it with no prompt at all. */
-  private async bootstrapIdleDirector(): Promise<void> {
-    const state = this.state();
-    const session = await this.mintSession(
-      'director',
-      `ws-catalog-${Date.now()}`,
-      this.profileFor(state, 'director').requestedModel,
-      1,
-    );
-    await this.startRun(session);
+  /**
+   * The run that answers a catalog question when the CLI read fails: the newest
+   * live Director, else the newest live run of any role. Every run holds the same
+   * credentials, and the bridge answers `models_request` for any of them.
+   */
+  private liveCatalogRun(): ActiveRun | undefined {
+    const runs = [...this.runs.values()].sort((left, right) => right.runEpoch - left.runEpoch);
+    return runs.find((run) => run.role === 'director') ?? runs[0];
   }
 
   diagnostics(): CompanyDiagnostics {
@@ -875,6 +885,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
     const state = this.state();
     const route = routePrompt({
       delivery: input.delivery,
+      ...(input.mode === undefined ? {} : { mode: input.mode }),
       ...(input.targetContractId === undefined ? {} : { targetContractId: input.targetContractId }),
       ...(input.targetSessionId === undefined ? {} : { targetSessionId: input.targetSessionId }),
       contracts: Object.values(state.contracts),
@@ -882,14 +893,9 @@ class NativeCompanyRuntime implements CompanyRuntime {
       acceptedRelation: null,
     });
     if (route.strategy === 'undeliverable') {
-      this.onMessage({
-        type: 'companyCommandResult',
-        requestId: input.requestId,
-        ok: false,
-        errorCode: 'prompt_undeliverable',
-        message: route.reason,
-      });
-      return;
+      // Thrown rather than reported on the side: the caller answers the prompt
+      // with exactly one command result, so a refusal cannot race a success.
+      throw new CompanyError('prompt_undeliverable', route.reason);
     }
 
     const text = await this.readArtifactText(prompt.rawTextArtifactId);
@@ -913,12 +919,16 @@ class NativeCompanyRuntime implements CompanyRuntime {
       this.state().revision,
     );
 
-    const brief =
-      session.role === 'director'
-        ? this.composePlanningText(session, prompt, text)
-        : this.composePromptText(session, text);
+    // Chat prompts reach the session exactly as typed, the way omp receives them.
+    // Company prompts are wrapped in the role brief (and planning rules for the Director).
+    const turn =
+      input.mode === 'chat'
+        ? text
+        : session.role === 'director'
+          ? this.composePlanningText(session, prompt, text)
+          : this.composePromptText(session, text);
     await this.dispatchTurn(session.id, {
-      text: brief,
+      text: turn,
       delivery: input.delivery,
       attachments: prompt.attachments ?? [],
     });
@@ -1000,7 +1010,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       .join('\n');
     const brief = this.composePromptText(
       session,
-      `Plan the Contract for prompt ${prompt.id}. Classify every fragment below exactly once.\n\n${rows}\n\n${this.verificationProfileList()}`,
+      `Plan the Contract for prompt ${prompt.id}. Classify every fragment below exactly once, unless the prompt asks for nothing to build (a greeting, thanks or small talk): then submit no Contract and ask nothing, and reply in one or two short Vietnamese sentences.\n\n${rows}\n\n${this.verificationProfileList()}`,
     );
     return `${brief}\n--- user prompt ${prompt.id} (verbatim) ---\n${text}\n`;
   }
@@ -1047,18 +1057,50 @@ class NativeCompanyRuntime implements CompanyRuntime {
     if (route.targetSessionId !== undefined) {
       const existing = state.sessions[route.targetSessionId];
       if (existing !== undefined) {
+        // A parked session comes back at the next epoch, as the pool reopens one,
+        // so events from its earlier run cannot be taken for this one's.
+        if (existing.status === 'parked') {
+          const runEpoch = existing.runEpoch + 1;
+          await this.reopenSession(existing, runEpoch);
+          return { ...existing, runEpoch, status: 'starting' };
+        }
         this.pool.upsert(existing);
         return existing;
       }
     }
+    return this.acquireNewSession(
+      route.role,
+      route.workstreamId ?? `${route.role === 'chat' ? 'chat' : 'ws'}-${promptId.slice(0, 8)}`,
+    );
+  }
 
-    const workstreamId = route.workstreamId ?? `ws-${promptId.slice(0, 8)}`;
-    const decision = this.pool.plan({
-      role: route.role,
+  /**
+   * Plan and mint a session for a workstream no live session holds yet.
+   *
+   * Chat is the user's own work, so when every runner is taken it may park one
+   * idle session that owes nothing. Busy and waiting sessions keep their runner,
+   * and so does everything else the parking check refuses.
+   */
+  private async acquireNewSession(
+    role: CompanyRole,
+    workstreamId: string,
+  ): Promise<CompanySession> {
+    const state = this.state();
+    const request: SessionRequest = {
+      role,
       workstreamId,
-      requestedModel: this.profileFor(state, route.role).requestedModel,
+      requestedModel: this.profileFor(state, role).requestedModel,
       requireLiveRunner: true,
-    });
+    };
+    let decision = this.pool.plan(request);
+    if (
+      decision.kind === 'queue' &&
+      decision.code === 'live_limit' &&
+      role === 'chat' &&
+      (await this.parkOneIdleSession())
+    ) {
+      decision = this.pool.plan(request);
+    }
     if (decision.kind === 'queue') {
       throw new CompanyError('company_pool_full', decision.detail);
     }
@@ -1067,12 +1109,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       return { ...decision.session, runEpoch: decision.runEpoch, status: 'starting' };
     }
     for (const candidate of decision.archiveCandidates) await this.archiveSession(candidate);
-    return this.mintSession(
-      route.role,
-      workstreamId,
-      decision.mint.requestedModel,
-      decision.runEpoch,
-    );
+    return this.mintSession(role, workstreamId, decision.mint.requestedModel, decision.runEpoch);
   }
 
   private async mintSession(
@@ -1125,6 +1162,17 @@ class NativeCompanyRuntime implements CompanyRuntime {
       this.state().revision,
     );
     this.pool.upsert(reopened);
+  }
+
+  /**
+   * Open a plain omp chat session in this workspace. Nothing is sent: the session
+   * starts with no turn and waits for the user's first prompt. `resumeFile`
+   * reopens an omp session file instead of starting a fresh one.
+   */
+  private async openChatSession(input: { resumeFile?: string }): Promise<CompanySession> {
+    const session = await this.acquireNewSession('chat', `chat-${randomUUID()}`);
+    await this.startRun(session, undefined, true, input.resumeFile);
+    return this.state().sessions[session.id] ?? session;
   }
 
   // ── Run lifecycle ────────────────────────────────────────────────────────
@@ -1237,6 +1285,8 @@ class NativeCompanyRuntime implements CompanyRuntime {
      * which is the only channel a session record has.
      */
     persist = true,
+    /** A session file to resume exactly; set only when the board reopens an omp session. */
+    resumeFile?: string,
   ): Promise<ActiveRun> {
     const launch = await this.selectLaunchProfile(session.role);
     const profile = launch.profile;
@@ -1275,7 +1325,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
         runEpoch: session.runEpoch,
         roleProfile: profile,
         workspaceRoot: this.store.workspacePath,
-        sessionDirectory: this.sessionDirectory(session.id),
+        ...(profile.toolsPolicy === 'omp'
+          ? {}
+          : { sessionDirectory: this.sessionDirectory(session.id) }),
+        ...(resumeFile === undefined ? {} : { resumeFile }),
         ...(session.nativeSessionId === undefined
           ? {}
           : { nativeSessionId: session.nativeSessionId }),
@@ -1338,8 +1391,8 @@ class NativeCompanyRuntime implements CompanyRuntime {
     try {
       catalog = await this.modelCatalog();
     } catch {
-      // No live session can be asked yet, notably for the Director itself. The
-      // approved spelling is passed through untouched rather than resolved.
+      // The catalog could not be read: the CLI read failed and no live run can
+      // answer. The approved spelling is passed through untouched, not resolved.
       return unresolved;
     }
     const exact = catalog.find((entry) => entry.id === approved.requestedModel);
@@ -1435,6 +1488,41 @@ class NativeCompanyRuntime implements CompanyRuntime {
     if (stopped) this.handoffs.set(run.sessionId, reason);
   }
 
+  /**
+   * Erase a deleted session: stop its live process, then remove its OMP session
+   * file (only where it resolves inside an omp or company sessions root), its
+   * board log and its own directory. Runs inside the coordinator's lock and must
+   * not commit. A stop the supervisor refuses leaves the session on the board.
+   */
+  private async deleteSession(
+    sessionId: string,
+    session: CompanySession | undefined,
+  ): Promise<void> {
+    if (!isSessionLogId(sessionId)) {
+      throw new CompanyError('session_not_found', `Mã phiên không hợp lệ: ${sessionId}`);
+    }
+    const live = this.runs.get(sessionId);
+    if (live !== undefined) {
+      await this.stopRun(live, 'the session was deleted by the user');
+      if (this.runs.has(sessionId)) {
+        throw new CompanyError(
+          'session_delete_refused',
+          'Tiến trình OMP của phiên chưa dừng được nên phiên chưa bị xoá.',
+        );
+      }
+    }
+    this.handoffs.delete(sessionId);
+    if (session?.nativeSessionPath !== undefined) {
+      await removeSessionFileWithin(session.nativeSessionPath, [
+        ompSessionsRoot(),
+        path.join(this.store.namespaceDir, 'sessions'),
+      ]);
+    }
+    await removeSessionLog(sessionLogDirectory(this.store.namespaceDir), sessionId);
+    await fs.promises.rm(this.sessionDirectory(sessionId), { recursive: true, force: true });
+    this.pool.remove(sessionId);
+  }
+
   private async archiveSession(session: CompanySession): Promise<void> {
     const run = this.runs.get(session.id);
     if (run !== undefined) {
@@ -1475,7 +1563,11 @@ class NativeCompanyRuntime implements CompanyRuntime {
       return;
     }
     if (event.kind === 'exit') {
-      void this.onRunExited(run, event.exitCode);
+      // An exit is recorded from an event callback: nothing awaits it, so a
+      // failed write must be reported here or it takes the whole server down.
+      this.onRunExited(run, event.exitCode).catch((error: unknown) => {
+        console.error(`[CompanyRuntime] could not record the exit of ${run.sessionId}.`, error);
+      });
       return;
     }
     if (event.event !== null && typeof event.event === 'object') {
@@ -1493,6 +1585,13 @@ class NativeCompanyRuntime implements CompanyRuntime {
       ...(exitCode === undefined ? {} : { exitCode }),
       expected: false,
     });
+    // A run the board stopped on purpose (kill, archive, delete) exits while its
+    // stopper is still writing the session's next state; recording "crashed"
+    // over it raced that write, and for a delete it resurrected the session.
+    if (run.stopping) {
+      this.requestDispatch();
+      return;
+    }
     const session = this.state().sessions[run.sessionId];
     if (session !== undefined && !['archived', 'stopped'].includes(session.status)) {
       await this.commit(
@@ -2140,6 +2239,16 @@ class NativeCompanyRuntime implements CompanyRuntime {
     if (run === undefined || run.runEpoch !== runEpoch) {
       // No live process to act on: the truthful answer is the record's own
       // status, not a fabricated success.
+      return { status: session.status };
+    }
+
+    if (action === 'interrupt') {
+      // Esc in omp: the native turn ends and the run-end path returns the session to idle.
+      await run.runner.abort(runEpoch);
+      this.logEntry(session.id, runEpoch, {
+        kind: 'state',
+        text: 'Lượt đang chạy đã được dừng theo yêu cầu của người dùng.',
+      });
       return { status: session.status };
     }
 

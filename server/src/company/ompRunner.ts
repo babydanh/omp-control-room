@@ -45,8 +45,11 @@ export interface OmpRunnerStartInput {
   readonly runEpoch: number;
   readonly roleProfile: RoleProfile;
   readonly workspaceRoot: string;
-  readonly sessionDirectory: string;
+  /** Omit to let omp keep the session in its own default directory for the workspace. */
+  readonly sessionDirectory?: string;
   readonly nativeSessionId?: string;
+  /** A session file to resume exactly (`omp --resume <file>`), used when the board reopens a session. */
+  readonly resumeFile?: string;
   /** Omitted when the run starts idle (capability discovery), so no turn is spent. */
   readonly initialPrompt?: OmpBridgeSendPrompt;
   readonly rpcHandler: OmpBridgeRpcHandler;
@@ -225,8 +228,9 @@ export class OmpRunner {
       commandArgs: this.options.command.args,
       extensionPath: this.options.extensionPath,
       roleProfile: input.roleProfile,
-      sessionDirectory: input.sessionDirectory,
+      ...(input.sessionDirectory === undefined ? {} : { sessionDirectory: input.sessionDirectory }),
       ...(input.nativeSessionId === undefined ? {} : { nativeSessionId: input.nativeSessionId }),
+      ...(input.resumeFile === undefined ? {} : { resumeFile: input.resumeFile }),
     });
     const env = Object.fromEntries(
       Object.entries(this.options.environment ?? process.env).filter(
@@ -335,9 +339,13 @@ export function buildOmpRunnerArgs(input: {
   readonly commandArgs: readonly string[];
   readonly extensionPath: string;
   readonly roleProfile: RoleProfile;
-  readonly sessionDirectory: string;
+  readonly sessionDirectory?: string;
   readonly nativeSessionId?: string;
+  readonly resumeFile?: string;
 }): string[] {
+  // A chat session is the user's own omp: it keeps omp's default approval mode.
+  const userDriven = input.roleProfile.toolsPolicy === 'omp';
+  const resume = input.resumeFile ?? input.nativeSessionId;
   return [
     ...input.commandArgs,
     '--extension',
@@ -346,10 +354,8 @@ export function buildOmpRunnerArgs(input: {
     input.roleProfile.requestedModel,
     '--thinking',
     input.roleProfile.thinking,
-    '--approval-mode',
-    'write',
-    '--session-dir',
-    input.sessionDirectory,
-    ...(input.nativeSessionId ? ['--resume', input.nativeSessionId] : []),
+    ...(userDriven ? [] : ['--approval-mode', 'write']),
+    ...(input.sessionDirectory === undefined ? [] : ['--session-dir', input.sessionDirectory]),
+    ...(resume ? ['--resume', resume] : []),
   ];
 }

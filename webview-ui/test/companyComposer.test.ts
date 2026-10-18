@@ -5,10 +5,18 @@ import { describe, expect, it } from 'vitest';
 import { TRANSPORT_DISCONNECTED_ERROR } from '../../core/src/messageDelivery.js';
 import type { ClientMessage } from '../../core/src/messages.js';
 import { CompanyClient } from '../src/company/companyClient.js';
-import { isSubmitChord } from '../src/company/promptSubmission.js';
+import { companyRoute, resumeListView, startNewChat } from '../src/company/composerRouting.js';
+import {
+  isCompanyChord,
+  isFollowUpChord,
+  type PromptRoute,
+} from '../src/company/promptSubmission.js';
 import { thinkingForModel } from '../src/company/roleProfiles.js';
 import type { MessageTransport } from '../src/transport/types.js';
 import { session, settings, snapshot, task } from './companyFixtures.js';
+
+/** What Enter sends when nothing is selected: a chat prompt that opens a new omp chat. */
+const NEW_CHAT: PromptRoute = { mode: 'chat', delivery: 'prompt', targetSessionId: null };
 
 interface FakeTransport {
   transport: MessageTransport;
@@ -70,7 +78,7 @@ describe('the prompt draft survives a failure', () => {
     const { client } = connectedClient();
     client.setDraftText(draft);
 
-    const outcome = client.submitPrompt();
+    const outcome = client.submitPrompt(NEW_CHAT);
     expect(outcome.ok).toBe(true);
     // The send succeeded; the server's verdict is what decides the draft.
     client.accept({
@@ -88,7 +96,7 @@ describe('the prompt draft survives a failure', () => {
   it('clears the draft only when the server accepted it', () => {
     const { client } = connectedClient();
     client.setDraftText(draft);
-    client.submitPrompt();
+    client.submitPrompt(NEW_CHAT);
 
     client.accept({
       type: 'companyCommandResult',
@@ -107,7 +115,7 @@ describe('the prompt draft survives a failure', () => {
     sent.length = 0;
     setConnected(false);
 
-    const outcome = client.submitPrompt();
+    const outcome = client.submitPrompt(NEW_CHAT);
 
     expect(outcome.ok).toBe(false);
     expect(outcome.errorCode).toBe(TRANSPORT_DISCONNECTED_ERROR);
@@ -120,36 +128,59 @@ describe('the prompt draft survives a failure', () => {
     const { client, sent } = connectedClient();
     sent.length = 0;
 
-    const outcome = client.submitPrompt();
+    const outcome = client.submitPrompt(NEW_CHAT);
 
     expect(outcome.ok).toBe(false);
     expect(sent.some((message) => message.type === 'companyPromptSubmit')).toBe(false);
   });
 });
 
-describe('the prompt goes where the board points', () => {
-  it('targets the selected session, so a follow-up is not refused for lack of one', () => {
+describe('the prompt goes where the route says', () => {
+  it('sends a follow-up to the selected session', () => {
     const { client, sent } = connectedClient();
     const sessionId = randomUUID();
     client.select({ sessionId, taskId: null });
     client.setDraftText('also cover the empty state');
-    client.setDraftDelivery('follow_up');
 
-    client.submitPrompt();
+    client.submitPrompt({ mode: 'chat', delivery: 'follow_up', targetSessionId: sessionId });
 
     expect(sent.find((message) => message.type === 'companyPromptSubmit')).toMatchObject({
-      prompt: { delivery: 'follow_up', targetSessionId: sessionId },
+      prompt: { mode: 'chat', delivery: 'follow_up', targetSessionId: sessionId },
     });
   });
 
-  it('sends new work to the Director when nothing is selected', () => {
+  it('sends a chat prompt with no target when nothing is selected', () => {
     const { client, sent } = connectedClient();
     client.setDraftText('build the standings page');
 
-    client.submitPrompt();
+    client.submitPrompt(NEW_CHAT);
 
     const message = sent.find((entry) => entry.type === 'companyPromptSubmit');
-    expect(message).toBeDefined();
+    expect(message).toMatchObject({ prompt: { mode: 'chat', delivery: 'prompt' } });
+    expect(JSON.stringify(message)).not.toContain('targetSessionId');
+  });
+
+  it('sends a company prompt to a Company session', () => {
+    const { client, sent } = connectedClient();
+    const worker = session({ id: randomUUID(), role: 'worker' });
+    client.setDraftText('build the standings page');
+
+    client.submitPrompt(companyRoute(worker));
+
+    expect(sent.find((entry) => entry.type === 'companyPromptSubmit')).toMatchObject({
+      prompt: { mode: 'company', delivery: 'prompt', targetSessionId: worker.id },
+    });
+  });
+
+  it('never targets a plain omp chat from company mode', () => {
+    const { client, sent } = connectedClient();
+    const chat = session({ id: randomUUID(), role: 'chat' });
+    client.setDraftText('build the standings page');
+
+    client.submitPrompt(companyRoute(chat));
+
+    const message = sent.find((entry) => entry.type === 'companyPromptSubmit');
+    expect(message).toMatchObject({ prompt: { mode: 'company', delivery: 'prompt' } });
     expect(JSON.stringify(message)).not.toContain('targetSessionId');
   });
 });
@@ -163,12 +194,124 @@ describe('switching a role to another model', () => {
   });
 });
 
-describe('the submit chord', () => {
-  it('is Ctrl+Enter (or Cmd+Enter), never a bare Enter', () => {
-    expect(isSubmitChord({ key: 'Enter', ctrlKey: true, metaKey: false })).toBe(true);
-    expect(isSubmitChord({ key: 'Enter', ctrlKey: false, metaKey: true })).toBe(true);
-    expect(isSubmitChord({ key: 'Enter', ctrlKey: false, metaKey: false })).toBe(false);
-    expect(isSubmitChord({ key: 'a', ctrlKey: true, metaKey: false })).toBe(false);
+describe('the composer chords', () => {
+  // A keypress with no modifier held; each case names only the modifiers it changes.
+  const base = { key: 'Enter', ctrlKey: false, metaKey: false, shiftKey: false };
+
+  it('Ctrl/Cmd+Shift+Enter is the company chord', () => {
+    expect(isCompanyChord({ ...base, ctrlKey: true, shiftKey: true })).toBe(true);
+    expect(isCompanyChord({ ...base, metaKey: true, shiftKey: true })).toBe(true);
+    expect(isCompanyChord({ ...base, ctrlKey: true })).toBe(false);
+    expect(isCompanyChord({ ...base, shiftKey: true })).toBe(false);
+    expect(isCompanyChord(base)).toBe(false);
+  });
+
+  it('Ctrl/Cmd+Enter without Shift is the follow-up chord, never a bare Enter', () => {
+    expect(isFollowUpChord({ ...base, ctrlKey: true })).toBe(true);
+    expect(isFollowUpChord({ ...base, metaKey: true })).toBe(true);
+    expect(isFollowUpChord({ ...base, ctrlKey: true, shiftKey: true })).toBe(false);
+    expect(isFollowUpChord(base)).toBe(false);
+    expect(isFollowUpChord({ ...base, key: 'a', ctrlKey: true })).toBe(false);
+  });
+});
+
+describe('/new starts a new chat', () => {
+  it('clears the selection and the draft, so the next send opens a new omp chat', () => {
+    const { client, sent } = connectedClient();
+    client.select({ sessionId: randomUUID(), taskId: null });
+    client.setDraftText('/new');
+
+    startNewChat(client);
+
+    expect(client.getState().selection.sessionId).toBeNull();
+    expect(client.getState().prompt.text).toBe('');
+    client.setDraftText('build the standings page');
+    client.submitPrompt(NEW_CHAT);
+    const message = sent.find((entry) => entry.type === 'companyPromptSubmit');
+    expect(message).toMatchObject({ prompt: { mode: 'chat', delivery: 'prompt' } });
+    expect(JSON.stringify(message)).not.toContain('targetSessionId');
+  });
+});
+
+describe('/resume asks for the saved omp sessions and lists the answer to its own request', () => {
+  const saved = {
+    file: 'D:/omp/sessions/bang-xep-hang.jsonl',
+    title: 'Bảng xếp hạng',
+    updatedAt: '2026-10-02T10:00:00.000Z',
+    sizeBytes: 2048,
+  };
+
+  it('sends the request under the handle requestId', () => {
+    const { client, sent } = connectedClient();
+    sent.length = 0;
+
+    const handle = client.requestOmpSessions();
+
+    expect(handle.ok).toBe(true);
+    expect(sent).toEqual([{ type: 'companyOmpSessionsRequest', requestId: handle.requestId }]);
+  });
+
+  it('a request the socket refuses is reported on its handle, so no list is awaited', () => {
+    const { client, setConnected } = connectedClient();
+    setConnected(false);
+
+    const handle = client.requestOmpSessions();
+
+    expect(handle.ok).toBe(false);
+    expect(handle.errorCode).toBe(TRANSPORT_DISCONNECTED_ERROR);
+  });
+
+  it('is loading until the answer to its own request arrives', () => {
+    const { client } = connectedClient();
+    const { requestId } = client.requestOmpSessions();
+    expect(resumeListView(requestId, client.getState().ompSessions, undefined)).toEqual({
+      kind: 'loading',
+    });
+
+    client.accept({ type: 'companyOmpSessions', requestId, folder: 'D:/omp', sessions: [saved] });
+
+    expect(resumeListView(requestId, client.getState().ompSessions, undefined)).toEqual({
+      kind: 'ready',
+      entries: [saved],
+    });
+  });
+
+  it('ignores an answer to an earlier request', () => {
+    const { client } = connectedClient();
+    const earlier = client.requestOmpSessions();
+    const current = client.requestOmpSessions();
+
+    client.accept({
+      type: 'companyOmpSessions',
+      requestId: earlier.requestId,
+      folder: 'D:/omp',
+      sessions: [saved],
+    });
+
+    expect(resumeListView(current.requestId, client.getState().ompSessions, undefined)).toEqual({
+      kind: 'loading',
+    });
+  });
+
+  it('shows the refusal of its own request rather than loading forever', () => {
+    const { client } = connectedClient();
+    const { requestId } = client.requestOmpSessions();
+
+    client.accept({
+      type: 'companyCommandResult',
+      requestId,
+      ok: false,
+      errorCode: 'workspace_missing',
+      message: 'Thư mục không còn tồn tại.',
+    });
+
+    expect(
+      resumeListView(
+        requestId,
+        client.getState().ompSessions,
+        client.getState().commandResults[requestId],
+      ),
+    ).toEqual({ kind: 'failed', message: 'Thư mục không còn tồn tại.' });
   });
 });
 

@@ -57,6 +57,7 @@ const ROLE_COMPANY_TOOLS: Record<CompanyRole, readonly string[]> = {
   worker: ['company_task_result'],
   qa: ['company_qa_result'],
   judge: ['company_judge_result'],
+  chat: [],
 };
 
 /**
@@ -69,11 +70,12 @@ const ROLE_TOOLS_POLICY: Record<CompanyRole, ToolsPolicy> = {
   worker: 'scoped-write',
   qa: 'verification-only',
   judge: 'read-only',
+  chat: 'omp',
 };
 
 const ROLE_PURPOSE: Record<CompanyRole, string> = {
   director:
-    'You are the Director of this company. Turn the user prompt into a Contract: classify every prompt fragment as a requirement, a constraint or context, ask only the questions that change the Contract, and submit numbered phases with exact write scopes and verification commands.',
+    'You are the Director of this company. Turn the user prompt into a Contract: classify every prompt fragment as a requirement, a constraint or context, ask only the questions that change the Contract, and submit numbered phases with exact write scopes and verification commands. A greeting or small talk has no fragments to classify: answer it in one or two short Vietnamese sentences and submit nothing.',
   advisor:
     'You are the architecture Advisor. Review the draft Contract against the interfaces it touches and return approve or changes_requested with P0-P3 issues tied to requirement ids and repository evidence.',
   worker:
@@ -81,12 +83,14 @@ const ROLE_PURPOSE: Record<CompanyRole, string> = {
   qa: 'You are QA. Run the Contract-approved verification commands and judge the exit code against the consumer-visible acceptance, reporting failures with their real logs instead of repairing them.',
   judge:
     'You are the Judge. Read the Contract coverage, the Advisor notes, the diff and the QA evidence, then return a verdict of passed or failed with a per-criterion reason backed by evidence ids.',
+  chat: "You are a plain OMP chat session that the user drives directly. Company rules do not apply to you; the user's own OMP tools and approvals govern this session.",
 };
 
 const ROLE_RESTRICTIONS: Record<CompanyRole, readonly string[]> = {
   director: [
     'You never writes or edits a file, runs a shell, or evaluates code; you plan and ask.',
-    'You must classify every prompt fragment; a fragment you cannot classify becomes a question, never a silent omission.',
+    'A greeting, thanks or small talk is not a work fragment: reply in one or two short Vietnamese sentences, submit no Contract and ask no question.',
+    'You must classify every prompt fragment that asks for work; a fragment you cannot classify becomes a question, never a silent omission.',
     'You never approves your own Contract; approval is the user decision.',
   ],
   advisor: [
@@ -108,6 +112,9 @@ const ROLE_RESTRICTIONS: Record<CompanyRole, readonly string[]> = {
     'You never writes or edits a file, runs a shell, or evaluates code; you never repair the work yourself.',
     'A required criterion without successful evidence blocks a pass.',
     'You may not drop or weaken an acceptance criterion to make a verdict green.',
+  ],
+  chat: [
+    "Company rules do not apply to you; the user's own OMP tools and approvals govern this session.",
   ],
 };
 

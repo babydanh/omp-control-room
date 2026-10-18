@@ -7,7 +7,7 @@
  */
 
 import type { CompanySessionLogEntry } from '../../../core/src/company.js';
-import type { CompanyViewState } from './companyState.js';
+import type { CompanyViewState, TextStreamView } from './companyState.js';
 
 export const LOG_KIND_LABELS: Readonly<Record<CompanySessionLogEntry['kind'], string>> = {
   text: 'nói',
@@ -95,4 +95,32 @@ export function formatLogTime(at: string): string {
   return [date.getHours(), date.getMinutes(), date.getSeconds()]
     .map((part) => String(part).padStart(2, '0'))
     .join(':');
+}
+
+/**
+ * The tool a session is running now, or null. The log records a tool's start but
+ * not its success, only its failure, so a start counts as running until something
+ * after it says otherwise. A command still running belongs to the tool that started
+ * it, and a state line is not news, so both are passed over. Any other entry means
+ * the agent has moved on.
+ */
+export function runningToolName(entries: readonly CompanySessionLogEntry[]): string | null {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index];
+    if (entry === undefined || entry.kind === 'state') continue;
+    if (entry.kind === 'command' && entry.exitCode === undefined) continue;
+    if (entry.kind !== 'tool') return null;
+    return entry.ok === undefined ? (entry.toolName ?? null) : null;
+  }
+  return null;
+}
+
+/**
+ * The live line of a busy session: the newest excerpt of what it is writing, on
+ * one line. Null when the session is not busy, or has written nothing to show.
+ */
+export function streamingLine(stream: TextStreamView | undefined, status: string): string | null {
+  if (status !== 'busy' || stream === undefined) return null;
+  const line = stream.excerpt.replace(/\s+/g, ' ').trim();
+  return line === '' ? null : line;
 }

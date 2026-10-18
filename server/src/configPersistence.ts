@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
+import { pathsMatch } from './pathKey.js';
 
 export interface AdapterSettings {
   soundEnabled: boolean;
@@ -41,6 +42,9 @@ export type ConfigNamespace = 'vscode' | 'standalone';
  *  unanswered, the ask is still open. */
 export type HooksConsentState = 'granted' | 'declined';
 
+/** Most recent Company workspace folders kept in config.json; the board lists them after the open ones. */
+export const RECENT_COMPANY_WORKSPACES_LIMIT = 10;
+
 export interface PixelAgentsConfig {
   vscode: AdapterSettings;
   standalone: AdapterSettings;
@@ -53,6 +57,10 @@ export interface PixelAgentsConfig {
   /** Per-provider hooks preference, machine-global for the same reason as the
    *  consent above. A provider absent from the map takes the default (true). */
   hooksEnabled: Record<string, boolean>;
+  /** Company workspace folders the user opened, most recent first, capped at
+   *  RECENT_COMPANY_WORKSPACES_LIMIT. Machine-wide like the consent above: a
+   *  folder is a fact about this machine, not a per-adapter setting. */
+  recentCompanyWorkspaces: string[];
 }
 
 const DEFAULT_ADAPTER_SETTINGS: AdapterSettings = {
@@ -87,6 +95,22 @@ function parseHooksEnabled(raw: unknown): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   for (const [providerId, enabled] of Object.entries(raw as Record<string, unknown>)) {
     if (typeof enabled === 'boolean') out[providerId] = enabled;
+  }
+  return out;
+}
+
+/**
+ * Coerce a loose value into the recent-folder list: strings only, blanks and
+ * spelling duplicates dropped, newest first, capped at the limit.
+ */
+function parseRecentCompanyWorkspaces(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const out: string[] = [];
+  for (const entry of raw) {
+    if (typeof entry !== 'string' || entry.trim().length === 0) continue;
+    if (out.some((kept) => pathsMatch(kept, entry))) continue;
+    out.push(entry);
+    if (out.length === RECENT_COMPANY_WORKSPACES_LIMIT) break;
   }
   return out;
 }
@@ -158,6 +182,7 @@ export function readConfig(): PixelAgentsConfig {
         externalAssetDirectories: [],
         hooksConsent: {},
         hooksEnabled: {},
+        recentCompanyWorkspaces: [],
       };
     }
     const raw = fs.readFileSync(filePath, 'utf-8');
@@ -170,6 +195,7 @@ export function readConfig(): PixelAgentsConfig {
         : [],
       hooksConsent: parseHooksConsent(parsed.hooksConsent),
       hooksEnabled: parseHooksEnabled(parsed.hooksEnabled),
+      recentCompanyWorkspaces: parseRecentCompanyWorkspaces(parsed.recentCompanyWorkspaces),
     };
   } catch (err) {
     console.error('[Pixel Agents] Failed to read config file:', err);
@@ -179,6 +205,7 @@ export function readConfig(): PixelAgentsConfig {
       externalAssetDirectories: [],
       hooksConsent: {},
       hooksEnabled: {},
+      recentCompanyWorkspaces: [],
     };
   }
 }
@@ -296,4 +323,27 @@ export function writeConfig(config: PixelAgentsConfig): void {
   } catch (err) {
     console.error('[Pixel Agents] Failed to write config file:', err);
   }
+}
+
+/** Company workspace folders most recently opened, newest first. Empty when none were. */
+export function readRecentCompanyWorkspaces(): string[] {
+  return readConfig().recentCompanyWorkspaces;
+}
+
+/**
+ * Move one folder to the front of the recent list, dropping its older entry and
+ * anything past the limit. Writes only when the order actually changes.
+ */
+export function rememberRecentCompanyWorkspace(workspacePath: string): void {
+  const cfg = readConfig();
+  const next = [
+    workspacePath,
+    ...cfg.recentCompanyWorkspaces.filter((entry) => !pathsMatch(entry, workspacePath)),
+  ].slice(0, RECENT_COMPANY_WORKSPACES_LIMIT);
+  const unchanged =
+    next.length === cfg.recentCompanyWorkspaces.length &&
+    next.every((entry, index) => entry === cfg.recentCompanyWorkspaces[index]);
+  if (unchanged) return;
+  cfg.recentCompanyWorkspaces = next;
+  writeConfig(cfg);
 }

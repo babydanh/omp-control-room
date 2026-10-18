@@ -11,7 +11,10 @@
  * conservative set (nothing) rather than to a full row of buttons.
  */
 
+import type { CompanySessionSummary } from '../../../core/src/company.js';
+
 export interface SessionControlSet {
+  interrupt: boolean;
   pause: boolean;
   resume: boolean;
   kill: boolean;
@@ -20,6 +23,7 @@ export interface SessionControlSet {
 }
 
 const NONE: SessionControlSet = {
+  interrupt: false,
   pause: false,
   resume: false,
   kill: false,
@@ -31,8 +35,8 @@ const CONTROLS_BY_STATUS: Readonly<Record<string, SessionControlSet>> = {
   parked: { ...NONE, resume: true, restart: true },
   starting: { ...NONE, kill: true },
   idle: { ...NONE, pause: true, restart: true, kill: true, archive: true },
-  busy: { ...NONE, pause: true, kill: true },
-  waiting_input: { ...NONE, pause: true, kill: true },
+  busy: { ...NONE, interrupt: true, pause: true, kill: true },
+  waiting_input: { ...NONE, interrupt: true, pause: true, kill: true },
   pausing: { ...NONE },
   paused: { ...NONE, resume: true, restart: true, kill: true, archive: true },
   stopping: { ...NONE },
@@ -43,6 +47,40 @@ const CONTROLS_BY_STATUS: Readonly<Record<string, SessionControlSet>> = {
 
 export function sessionControls(status: string): SessionControlSet {
   return CONTROLS_BY_STATUS[status] ?? NONE;
+}
+
+/** Statuses in which a session has a run or a turn in flight, so it holds work. */
+const WORKING_STATUSES: Readonly<Record<string, true>> = {
+  starting: true,
+  busy: true,
+  waiting_input: true,
+  pausing: true,
+  stopping: true,
+};
+
+/** Why delete is refused while a session holds work; the menu and the drawer show it. */
+export const HOLDS_WORK_REASON = 'Phiên đang giữ việc nên chưa xoá được.';
+
+/** Shown in a delete confirm: the omp session file and the board log go with the session. */
+export const DELETE_CONFIRM_DETAIL =
+  'File phiên omp và nhật ký của bảng cũng bị xoá. Không thể hoàn tác.';
+
+/** The line shown when the server refuses a command and gives no message of its own. */
+export const REFUSED_NOTICE = 'Máy chủ từ chối lệnh này.';
+
+/**
+ * Whether a session holds work the server will not let go of: a task attached, a
+ * question still waiting on the user, or a run in flight. Delete is refused for one.
+ */
+export function sessionHoldsWork(
+  session: Pick<CompanySessionSummary, 'status' | 'activeTaskId'>,
+  questionPending: boolean,
+): boolean {
+  return (
+    session.activeTaskId !== undefined ||
+    questionPending ||
+    WORKING_STATUSES[session.status] === true
+  );
 }
 
 /** What a session's terminal may do, and what the drawer shows in its place. */

@@ -22,7 +22,11 @@ export const INFO_SOURCE_LABEL: Readonly<Record<AgentInfo['collectedFrom'], stri
   herdr: 'herdr',
 };
 
-const UNKNOWN_MCP_SERVER = 'không rõ máy chủ';
+/** The name for an MCP server nothing reports, or whose only evidence is a guess from one tool's name. */
+const UNKNOWN_MCP_SERVER = 'không rõ';
+
+/** Marks a server name worked out from tool names rather than reported by the source. */
+export const ESTIMATED_MCP_LABEL = '(ước tính)';
 
 /** How many of the most-used tools the usage section draws. */
 export const USAGE_BAR_LIMIT = 10;
@@ -36,7 +40,7 @@ const MCP_TOOL_PREFIX = 'mcp__';
  * server itself, so "first underscore" turned `botkeep_cloud` into `botkeep`.
  * Tools that share their first word share a server, and the server is the
  * longest word prefix they all have while each still keeps a tool name. A
- * server with a single tool keeps the name the source guessed.
+ * server with a single tool is not inferred here; serverOf reads the name it reports.
  */
 export function inferMcpServers(tools: readonly AgentToolInfo[]): Map<string, string> {
   const byFirstWord = new Map<string, { name: string; words: string[] }[]>();
@@ -63,8 +67,29 @@ export function inferMcpServers(tools: readonly AgentToolInfo[]): Map<string, st
   return servers;
 }
 
-function serverOf(tool: AgentToolInfo, inferred: Map<string, string>): string {
-  return inferred.get(tool.name) || tool.mcpServer || UNKNOWN_MCP_SERVER;
+/** A tool's MCP server, and whether that name is worked out from tool names rather than reported. */
+interface McpServerName {
+  name: string;
+  estimated: boolean;
+}
+
+/** The server a bare `mcp__<server>_<tool>` name suggests: the text before its first underscore. */
+function firstWordServer(toolName: string): string | undefined {
+  if (!toolName.startsWith(MCP_TOOL_PREFIX)) return undefined;
+  const rest = toolName.slice(MCP_TOOL_PREFIX.length);
+  const cut = rest.indexOf('_');
+  return cut > 0 ? rest.slice(0, cut) : undefined;
+}
+
+function serverOf(tool: AgentToolInfo, inferred: Map<string, string>): McpServerName {
+  const shared = inferred.get(tool.name);
+  if (shared) return { name: shared, estimated: true };
+  const reported = tool.mcpServer;
+  // A reported name that is only the tool's first word is the source's guess, not a report.
+  if (!reported || reported === firstWordServer(tool.name)) {
+    return { name: UNKNOWN_MCP_SERVER, estimated: false };
+  }
+  return { name: reported, estimated: false };
 }
 
 /** Orders names the way a person reads them: "tool2" before "tool10". */
@@ -113,7 +138,7 @@ export function groupToolsBySource(tools: readonly AgentToolInfo[]): ToolGroup[]
   const extension: AgentToolInfo[] = [];
   const sdk: AgentToolInfo[] = [];
   const other: AgentToolInfo[] = [];
-  const mcp = new Map<string, AgentToolInfo[]>();
+  const mcp = new Map<string, { server: McpServerName; tools: AgentToolInfo[] }>();
   const inferred = inferMcpServers(tools);
   for (const tool of tools) {
     switch (tool.source) {
@@ -128,16 +153,24 @@ export function groupToolsBySource(tools: readonly AgentToolInfo[]): ToolGroup[]
         break;
       case 'mcp': {
         const server = serverOf(tool, inferred);
-        mcp.set(server, [...(mcp.get(server) ?? []), tool]);
+        const entry = mcp.get(server.name) ?? { server, tools: [] };
+        entry.tools.push(tool);
+        mcp.set(server.name, entry);
         break;
       }
       default:
         other.push(tool);
     }
   }
-  const mcpGroups = [...mcp.keys()]
-    .sort(compareNames)
-    .map((server) => toolGroup(`mcp:${server}`, `MCP · ${server}`, mcp.get(server) ?? []));
+  const mcpGroups = [...mcp.values()]
+    .sort((a, b) => compareNames(a.server.name, b.server.name))
+    .map(({ server, tools: members }) =>
+      toolGroup(
+        `mcp:${server.name}`,
+        `MCP · ${server.name}${server.estimated ? ` ${ESTIMATED_MCP_LABEL}` : ''}`,
+        members,
+      ),
+    );
   const groups = [
     toolGroup('builtin', 'Builtin', builtin),
     toolGroup('extension', 'Extension', extension),
@@ -157,6 +190,8 @@ function usageCounts(usage: readonly AgentToolUsage[]): Map<string, number> {
 
 export interface McpServerView {
   name: string;
+  /** True when the name is worked out from tool names rather than reported. */
+  estimated: boolean;
   toolCount: number;
   activeCount: number;
   /** Calls to this server's tools, summed; 0 means the agent never used it. */
@@ -177,9 +212,10 @@ export function mcpServerViews(
   const inferred = inferMcpServers(tools);
   for (const tool of tools) {
     if (tool.source !== 'mcp') continue;
-    const name = serverOf(tool, inferred);
+    const { name, estimated } = serverOf(tool, inferred);
     const view = servers.get(name) ?? {
       name,
+      estimated,
       toolCount: 0,
       activeCount: 0,
       usageCount: 0,

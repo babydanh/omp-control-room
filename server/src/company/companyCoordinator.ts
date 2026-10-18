@@ -30,6 +30,7 @@ import type {
   SubmitPromptInput,
   Task,
 } from '../../../core/src/company.js';
+import type { OmpSessionEntry } from '../../../core/src/messages.js';
 
 // ── Task delivery: Worker result, QA verification, QA and Judge verdicts ──
 
@@ -109,11 +110,27 @@ export const CONTRACT_DECISIONS = ['approve', 'reject'] as const;
 export type ContractDecision = (typeof CONTRACT_DECISIONS)[number];
 
 /** Lifecycle actions a user can apply to a managed company session. */
-export const COMPANY_SESSION_ACTIONS = ['pause', 'resume', 'kill', 'restart', 'archive'] as const;
+export const COMPANY_SESSION_ACTIONS = [
+  'pause',
+  'resume',
+  'kill',
+  'restart',
+  'archive',
+  'interrupt',
+  'delete',
+] as const;
 export type CompanySessionAction = (typeof COMPANY_SESSION_ACTIONS)[number];
+/** Actions that change a session's status through the transition table; delete and interrupt have their own paths. */
+export type TransitionAction = Exclude<CompanySessionAction, 'delete' | 'interrupt'>;
 
 /** Longest name a managed session may carry, after trimming. */
 export const COMPANY_SESSION_NAME_MAX_LENGTH = 60;
+
+/** The OMP session files saved for one workspace folder. */
+export interface OmpSessionListing {
+  readonly folder: string;
+  readonly sessions: OmpSessionEntry[];
+}
 
 export interface CompanyCoordinator {
   /** Ingest a user prompt, returning the stored prompt record. */
@@ -172,6 +189,25 @@ export interface CompanyCoordinator {
    * `COMPANY_SESSION_NAME_MAX_LENGTH` characters after trimming.
    */
   renameSession(id: string, name: string): Promise<void>;
+
+  /**
+   * Withdraw one prompt no Contract holds. When the Director it was routed to
+   * carries no other prompt, that session is interrupted and deleted with it.
+   * A Contract that holds the prompt refuses the whole withdrawal.
+   */
+  cancelPrompt(promptId: string): Promise<void>;
+
+  /**
+   * List the OMP session files saved for the workspace folder, newest first.
+   * Read-only: nothing is created, moved or opened.
+   */
+  listOmpSessions(): Promise<OmpSessionListing>;
+
+  /**
+   * Open a saved OMP session as a chat session in this workspace and return its
+   * board session id. A file already open answers with its existing session.
+   */
+  resumeOmpSession(file: string): Promise<string>;
 
   /**
    * Replace the per-role model profiles. Applied to the next dispatch or to an

@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react';
 import type { Attempt } from '../../../../core/src/company.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
+import { defaultDrawerTab } from '../drawerView.js';
 import { questionProvenance } from '../questionProvenance.js';
 import { companyRoleLabel } from '../roleProfiles.js';
 import { sessionControls } from '../sessionActions.js';
@@ -41,6 +42,15 @@ const TABS = [
   'info',
 ] as const satisfies readonly CompanyDrawerTab[];
 
+/** The drawer tab in use for one session: the reader's pick, or a request from the shared selection. */
+interface TabChoice {
+  sessionId: string;
+  /** The selection the tab was read from, so a newer request is noticed. */
+  selection: CompanyViewState['selection'];
+  /** The tab the reader or a request chose; null means the drawer's default. */
+  tab: CompanyDrawerTab | null;
+}
+
 export interface SessionBodyProps {
   client: CompanyClient;
   state: CompanyViewState;
@@ -59,14 +69,20 @@ export function SessionBody({
   onOpenArtifact,
   onOpenQuestion,
 }: SessionBodyProps) {
-  const [tab, setTab] = useState<CompanyDrawerTab>('log');
-
-  // A card or a bubble can ask for a specific tab ("show me the question it is
-  // blocked on"). The request is part of the shared selection, so it outlives a
-  // re-render of this body.
-  useEffect(() => {
-    if (state.selection.tab) setTab(state.selection.tab);
-  }, [state.selection]);
+  // The reader's tab for this session. A tab a card or bubble asked for, carried in the
+  // shared selection, overrides a pick; a new session starts on the drawer's default.
+  const [stored, setStored] = useState<TabChoice>(() => ({
+    sessionId,
+    selection: state.selection,
+    tab: state.selection.tab,
+  }));
+  let choice = stored;
+  if (stored.sessionId !== sessionId) {
+    choice = { sessionId, selection: state.selection, tab: state.selection.tab };
+  } else if (stored.selection !== state.selection) {
+    choice = { sessionId, selection: state.selection, tab: state.selection.tab ?? stored.tab };
+  }
+  if (choice !== stored) setStored(choice);
 
   // The server keeps the log on disk; live entries only cover what happened
   // since this page connected, so opening a session asks for its history.
@@ -78,6 +94,8 @@ export function SessionBody({
   if (session === undefined) {
     return <p className="p-2 text-2xs text-text-muted">Phiên đó không còn thuộc công ty nữa.</p>;
   }
+
+  const tab = choice.tab ?? defaultDrawerTab(session.status);
 
   const controls = sessionControls(session.status);
   const attempts: Attempt[] = Object.values(state.attempts).filter((attempt) =>
@@ -125,11 +143,6 @@ export function SessionBody({
               Khởi động lại
             </CompanyButton>
           )}
-          {controls.kill && (
-            <CompanyButton size="sm" onClick={() => client.controlSession(sessionId, 'kill')}>
-              Dừng
-            </CompanyButton>
-          )}
           {controls.archive && (
             <CompanyButton size="sm" onClick={() => client.controlSession(sessionId, 'archive')}>
               Lưu trữ
@@ -143,7 +156,7 @@ export function SessionBody({
           <button
             key={entry}
             type="button"
-            onClick={() => setTab(entry)}
+            onClick={() => setStored({ ...choice, tab: entry })}
             aria-current={tab === entry}
             className={`-mb-px cursor-pointer border-b-2 px-2 py-1.5 text-2xs ${
               tab === entry
