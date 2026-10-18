@@ -347,6 +347,8 @@ The webview is one full-screen board (`webview-ui/src/company/components/BoardSh
 
 **Herdr.** `server/src/herdr/herdrLink.ts` talks to the user's herdr server over its socket (`HERDR_SOCKET_PATH`, else `%APPDATA%\herdr\herdr.sock` on Windows): roster from `agent.list` + `workspace.list`, live via `events.subscribe`, git repo/branch per cwd. The board reads screens, prompts, sends the allowed keys and focuses panes; it never answers a blocked agent on its own. Company OMP sessions get no `HERDR_*` env (`ompRunner.ts`).
 
+**Agent menu and info.** Right-click (or Shift+F10) on a sidebar row, rail badge, task card or herdr agent opens `AgentContextMenu` (`agentMenu.ts` decides the items): info, rename, copy folder/id, open Log/Lệnh/Terminal, and the session controls valid for its status. The drawer's Thông tin tab shows `AgentInfo`: a live company session answers from inside OMP (`describe` over the bridge: active tools by source, skills, cwd, model), a session without a run falls back to its record and log; a herdr omp agent is read from `pane.process_info` plus the last 4 MB of its transcript (`server/src/herdr/ompTranscript.ts`). MCP server names are inferred from the tools' shared `mcp__<server>_` prefix (`agentInfoView.ts`), since OMP does not report them.
+
 ## Asset System
 
 **Loading**: `esbuild.js` copies `webview-ui/public/assets/` → `dist/assets/`. Loader checks bundled path first, falls back to workspace root. PNG → pngjs → SpriteData (2D hex array, alpha≥2 = visible, `#RRGGBBAA` for semi-transparent). `loadDefaultLayout()` reads `assets/default-layout.json` as fallback for new workspaces.
