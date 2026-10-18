@@ -19,13 +19,10 @@
  *    are all `return false` there, and the caller
  *    (src/modes/controllers/input-controller.ts:1071-1081) falls through and
  *    sends the text to the model as an ordinary prompt.
- *  - `modelCompletions`    <- src/slash-commands/builtin-completions.ts:202-227.
  *
  * Two adaptations are marked below and are deliberate, not omissions; see
  * `OMP_ADAPTATIONS`.
  */
-
-import type { CompanyModelCatalogEntry } from '../../../core/src/company.js';
 
 /** Parsed slash-command text after stripping the leading `/`. */
 export interface ParsedSlashCommand {
@@ -709,23 +706,6 @@ export function commandCompletionQuery(text: string): string | null {
 }
 
 /**
- * The raw argument tail of a slash invocation — everything after the name
- * separator, untrimmed — which is the string an argument completion matches.
- * `null` when the invocation has no separator yet, so there is nothing after
- * the name to complete. OMP's own argument completions receive exactly this
- * (`builtin-completions.ts:205-209`).
- *
- * The separator itself is not re-derived: `parseSlashCommand` already found
- * the name, so the tail starts one character past it.
- */
-export function slashArgumentPrefix(text: string): string | null {
-  const parsed = parseSlashCommand(text);
-  if (parsed === null) return null;
-  const body = text.slice(1);
-  return parsed.name.length < body.length ? body.slice(parsed.name.length + 1) : null;
-}
-
-/**
  * Every command name and alias in one flat index, built the way OMP builds
  * `BUILTIN_SLASH_COMMAND_LOOKUP` (builtin-registry.ts:50-56): each command is
  * keyed by its name and then by every alias.
@@ -786,70 +766,5 @@ export function commandCompletions(typed: string): OmpSlashCommand[] {
     (command) =>
       command.name.startsWith(needle) ||
       (command.aliases ?? []).some((alias) => alias.toLowerCase().startsWith(needle)),
-  );
-}
-
-/** One argument-completion row, as OMP's `AutocompleteItem` renders it. */
-export interface ArgumentCompletion {
-  /** Text inserted into the box, trailing space included. */
-  value: string;
-  label: string;
-  description: string;
-}
-
-/**
- * Model-selector argument completion, ported from `buildModelSelectorCompletions`
- * (`builtin-completions.ts:202-227`): a space ends it, a `:level` suffix is
- * carried through untouched, and the query is a case-insensitive SUBSTRING
- * match against `provider/id`. Empty result means "offer nothing", which is
- * what OMP returns there.
- *
- * OMP also offers configured model-role aliases (`@name`) first. Those live in
- * OMP settings and never reach the company snapshot, so this port cannot offer
- * them and does not pretend to.
- */
-export function modelCompletions(
-  argumentPrefix: string,
-  catalog: readonly CompanyModelCatalogEntry[],
-): ArgumentCompletion[] {
-  if (argumentPrefix.includes(' ')) return [];
-  const suffixIndex = argumentPrefix.indexOf(':');
-  const suffix = suffixIndex === -1 ? '' : argumentPrefix.slice(suffixIndex);
-  const query = (
-    suffixIndex === -1 ? argumentPrefix : argumentPrefix.slice(0, suffixIndex)
-  ).toLowerCase();
-  const matches: ArgumentCompletion[] = [];
-  for (const entry of catalog) {
-    const selector = `${entry.provider}/${entry.model}`;
-    if (!selector.toLowerCase().includes(query)) continue;
-    matches.push({
-      value: `${selector}${suffix} `,
-      label: selector,
-      description: entry.credentialsConfigured ? entry.id : `${entry.id} (no credentials)`,
-    });
-  }
-  return matches;
-}
-
-/**
- * Resolve a `/model` selector against the runtime catalog.
- *
- * OMP's own resolver (`config/model-resolver.ts:2005`) also accepts fuzzy ids,
- * `@role` aliases and `:level` thinking suffixes. The company can only prove an
- * exact match: the server binds a requested model by `catalog.find(id ===)`
- * (`server/src/company/modelCatalog.ts:90-99`), so a fuzzy guess here would be
- * a client-side fiction. Returns the entry, or `null` for OMP's refusal.
- */
-export function matchModelSelector(
-  selector: string,
-  catalog: readonly CompanyModelCatalogEntry[],
-): CompanyModelCatalogEntry | null {
-  const trimmed = selector.trim();
-  if (trimmed === '') return null;
-  const scoped = trimmed.includes(':') ? trimmed.slice(0, trimmed.indexOf(':')) : trimmed;
-  return (
-    catalog.find((entry) => `${entry.provider}/${entry.model}` === scoped) ??
-    catalog.find((entry) => entry.id === scoped) ??
-    null
   );
 }

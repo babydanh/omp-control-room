@@ -14,10 +14,13 @@ import {
   workspaceActivity,
   workspaceName,
 } from '../workspaces.js';
+import { Icon } from './Icon.js';
 
 export interface WorkspaceSwitcherProps {
   client: CompanyClient;
   state: CompanyViewState;
+  /** Bumped by the command palette to open the path field; a new value opens it once. */
+  openRequest?: number;
 }
 
 /** The class every control in the switcher shares: a small ghost button, no edge. */
@@ -27,13 +30,20 @@ const CONTROL_CLASS =
 const ACTION_CLASS =
   'touch-target company-btn-accent cursor-pointer rounded-(--company-radius-sm) px-2.5 py-1 text-2xs disabled:cursor-default disabled:opacity-50';
 
-export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
+export function WorkspaceSwitcher({ client, state, openRequest = 0 }: WorkspaceSwitcherProps) {
   const [typing, setTyping] = useState(false);
   const [draft, setDraft] = useState('');
   /** A refusal of the request itself, shown until the next attempt. */
   const [refusal, setRefusal] = useState<string | null>(null);
   /** requestId of the last switch sent, so its verdict can be shown if it failed. */
   const [lastOpen, setLastOpen] = useState<string | null>(null);
+  /** The last palette request this switcher answered; a new value opens the path field. */
+  const [seenRequest, setSeenRequest] = useState(openRequest);
+  if (openRequest !== seenRequest) {
+    setSeenRequest(openRequest);
+    setRefusal(null);
+    setTyping(true);
+  }
 
   const workspaces = state.workspaces;
   const active = activeWorkspace(workspaces);
@@ -126,13 +136,15 @@ export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
         <button
           type="button"
           disabled={opening}
+          aria-label="Mở thư mục…"
+          title="Mở thư mục…"
           onClick={() => {
             setRefusal(null);
             setTyping(true);
           }}
-          className={CONTROL_CLASS}
+          className="company-icon-btn touch-target shrink-0 px-2 text-sm"
         >
-          Mở thư mục…
+          <Icon name="folder" />
         </button>
       )}
       {opening && <span className="text-2xs text-text-muted">Đang mở thư mục…</span>}

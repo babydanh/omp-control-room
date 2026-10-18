@@ -1,5 +1,5 @@
 /**
- * AgentInfoTab: the Thông tin tab of a company session or a herdr pane. It asks
+ * AgentInfoTab: the Chi tiết tab of a company session or a herdr pane. It asks
  * the server for the agent's info when the tab opens, then shows what came back:
  * the folders it works in, its model, its tools grouped by where they come from,
  * its MCP servers, its skills, and how often each tool was used. A section the
@@ -61,10 +61,17 @@ export interface SessionInfoTabProps {
   client: CompanyClient;
   state: CompanyViewState;
   sessionId: string;
+  /** The details tab already shows a session's model, so the info tab can leave it out. */
+  hideModel?: boolean;
 }
 
 /** What a company session reports about itself, asked for when the tab opens. */
-export function SessionInfoTab({ client, state, sessionId }: SessionInfoTabProps) {
+export function SessionInfoTab({
+  client,
+  state,
+  sessionId,
+  hideModel = false,
+}: SessionInfoTabProps) {
   const send = useCallback(() => client.requestSessionInfo(sessionId), [client, sessionId]);
   const { failure, refresh } = useInfoRequest(send, state.commandResults);
   return (
@@ -72,6 +79,7 @@ export function SessionInfoTab({ client, state, sessionId }: SessionInfoTabProps
       info={state.sessionInfos[sessionId]}
       failure={failure}
       fallbackCwd={null}
+      showModel={!hideModel}
       onRefresh={refresh}
     />
   );
@@ -94,6 +102,7 @@ export function HerdrInfoTab({ client, state, paneId, fallbackCwd }: HerdrInfoTa
       info={state.herdr.infos[paneId]}
       failure={failure}
       fallbackCwd={fallbackCwd}
+      showModel
       onRefresh={refresh}
     />
   );
@@ -103,13 +112,14 @@ interface AgentInfoViewProps {
   info: AgentInfo | undefined;
   failure: string | null;
   fallbackCwd: string | null;
+  showModel: boolean;
   onRefresh: () => void;
 }
 
 const NOT_YET_REPLIED =
   'Chưa có thông tin về agent này. Máy chủ trả lời sau khi nhận yêu cầu; nếu mãi không có, máy chủ có thể chưa hỗ trợ việc này — bấm Làm mới để thử lại.';
 
-function AgentInfoView({ info, failure, fallbackCwd, onRefresh }: AgentInfoViewProps) {
+function AgentInfoView({ info, failure, fallbackCwd, showModel, onRefresh }: AgentInfoViewProps) {
   const [toolFilter, setToolFilter] = useState('');
   const [skillFilter, setSkillFilter] = useState('');
 
@@ -137,14 +147,16 @@ function AgentInfoView({ info, failure, fallbackCwd, onRefresh }: AgentInfoViewP
         <>
           {info.note && <p className="text-text-muted">{info.note}</p>}
           <FoldersSection info={info} fallbackCwd={fallbackCwd} />
-          <InfoSection title="Mô hình">
-            <p className="text-text">{modelLine(info)}</p>
-            {info.sessionFile && (
-              <p className="truncate font-mono text-text-muted" title={info.sessionFile}>
-                {info.sessionFile}
-              </p>
-            )}
-          </InfoSection>
+          {showModel && (
+            <InfoSection title="Mô hình">
+              <p className="text-text">{modelLine(info)}</p>
+              {info.sessionFile && (
+                <p className="truncate font-mono text-text-muted" title={info.sessionFile}>
+                  {info.sessionFile}
+                </p>
+              )}
+            </InfoSection>
+          )}
           <ToolsSection info={info} filter={toolFilter} onFilter={setToolFilter} />
           <McpSection info={info} />
           <SkillsSection info={info} filter={skillFilter} onFilter={setSkillFilter} />
@@ -158,7 +170,7 @@ function AgentInfoView({ info, failure, fallbackCwd, onRefresh }: AgentInfoViewP
 function InfoSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <section className="flex flex-col gap-1.5">
-      <h3 className="text-sm font-semibold text-text">{title}</h3>
+      <h3 className="text-xs font-semibold text-text-muted">{title}</h3>
       {children}
     </section>
   );

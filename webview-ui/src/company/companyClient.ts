@@ -377,6 +377,14 @@ export class CompanyClient {
   }
 
   /**
+   * Open a new omp chat session in the folder, with no prompt. The verdict is a
+   * companyCommandResult under the handle's requestId; its `sessionId` names the new session.
+   */
+  newChatSession(): CompanyCommandHandle {
+    return this.command((requestId) => commands.chatNew(requestId));
+  }
+
+  /**
    * Rename a session. The verdict is a companyCommandResult under the handle's requestId;
    * a refused send is reported on the handle itself.
    */
@@ -604,11 +612,6 @@ export class CompanyClient {
           ? this.state.openingSessionId
           : null,
     };
-    this.emit();
-  }
-
-  setModel(modelId: string | null): void {
-    this.state = { ...this.state, selectedModel: modelId };
     this.emit();
   }
 

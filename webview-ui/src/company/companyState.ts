@@ -102,9 +102,11 @@ export interface CompanySelection {
  * bubble or the board because all three surfaces ask for the same session, and
  * a click that means "show me the question it is blocked on" has to survive
  * the drawer being re-rendered by an unrelated company message.
+ *
+ * Four tabs cover a session: its activity timeline, its live terminal, the work
+ * it holds, and its details. A pending question is a banner above them, not a tab.
  */
-export type CompanyDrawerTab =
-  'terminal' | 'log' | 'commands' | 'questions' | 'usage' | 'report' | 'info';
+export type CompanyDrawerTab = 'activity' | 'terminal' | 'tasks' | 'details';
 
 export const EMPTY_SELECTION: CompanySelection = {
   sessionId: null,
@@ -588,6 +590,7 @@ function applyChange(state: CompanyViewState, change: CompanyPutChange | Company
         activeTaskId: change.value.activeTaskId,
         lastUsedAt: change.value.lastUsedAt,
         contextSnapshot: change.value.contextSnapshot,
+        insight: change.value.insight,
         workstreamId: change.value.workstreamId,
         nativeSessionId: change.value.nativeSessionId,
         nativeSessionPath: change.value.nativeSessionPath,

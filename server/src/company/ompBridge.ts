@@ -388,6 +388,16 @@ export type OmpBridgeEvent =
       readonly idle: boolean;
     }
   | {
+      /**
+       * Overview snapshot of the running session, pushed when it changes. Rows are
+       * unvalidated here; the company runtime checks and bounds every field.
+       */
+      readonly k: 'insight';
+      readonly todo?: { readonly phases: readonly unknown[] };
+      readonly planMode: string;
+      readonly subagents: readonly unknown[];
+    }
+  | {
       /** A static protocol or lifecycle failure. Never carries content. */
       readonly k: 'error';
       readonly code: string;

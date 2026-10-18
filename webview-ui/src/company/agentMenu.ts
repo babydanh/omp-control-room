@@ -17,6 +17,7 @@
 
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 
+import type { CompanyDrawerTab } from './companyState.js';
 import type { HerdrDrawerTab } from './herdrView.js';
 import type { IconName } from './iconNames.js';
 import { HOLDS_WORK_REASON, sessionControls, type SessionControlSet } from './sessionActions.js';
@@ -47,16 +48,13 @@ export type AgentMenuSubject =
   | { kind: 'sleeping'; paneId: string; drawer: DrawerView | null }
   | { kind: 'project'; project: ProjectMenuFacts };
 
-/** The drawer tabs a session's menu can open. */
-export type SessionMenuTab = 'info' | 'log' | 'commands' | 'terminal';
-
 export type SessionControlAction =
   'interrupt' | 'pause' | 'resume' | 'restart' | 'kill' | 'archive' | 'delete';
 
 export type CopyWhat = 'cwd' | 'sessionCode' | 'paneId' | 'taskCode' | 'path';
 
 export type AgentMenuAction =
-  | { kind: 'sessionTab'; tab: SessionMenuTab }
+  | { kind: 'sessionTab'; tab: CompanyDrawerTab }
   | { kind: 'herdrTab'; tab: HerdrDrawerTab }
   | { kind: 'rename' }
   | { kind: 'copy'; what: CopyWhat }
@@ -207,12 +205,6 @@ export function sessionMenuItems(
     title: session.holdsWork ? HOLDS_WORK_REASON : null,
   });
   return [
-    item({
-      id: 'info',
-      label: 'Xem thông tin',
-      icon: 'info',
-      action: { kind: 'sessionTab', tab: 'info' },
-    }),
     item({ id: 'rename', label: 'Đổi tên…', icon: 'pencil', action: { kind: 'rename' } }),
     item({
       id: 'copy-code',
@@ -232,22 +224,28 @@ export function sessionMenuItems(
         ]),
     ...withGroupStart([
       item({
-        id: 'tab-log',
-        label: 'Mở Log',
-        icon: 'file-text',
-        action: { kind: 'sessionTab', tab: 'log' },
-      }),
-      item({
-        id: 'tab-commands',
-        label: 'Mở Lệnh',
-        icon: 'list',
-        action: { kind: 'sessionTab', tab: 'commands' },
-      }),
-      item({
         id: 'tab-terminal',
         label: 'Mở Terminal',
         icon: 'terminal',
         action: { kind: 'sessionTab', tab: 'terminal' },
+      }),
+      item({
+        id: 'tab-activity',
+        label: 'Mở Hoạt động',
+        icon: 'list',
+        action: { kind: 'sessionTab', tab: 'activity' },
+      }),
+      item({
+        id: 'tab-tasks',
+        label: 'Mở Việc',
+        icon: 'flag',
+        action: { kind: 'sessionTab', tab: 'tasks' },
+      }),
+      item({
+        id: 'tab-details',
+        label: 'Mở Chi tiết',
+        icon: 'info',
+        action: { kind: 'sessionTab', tab: 'details' },
       }),
       ...maximizeItems(drawer),
     ]),
@@ -322,7 +320,7 @@ export function herdrMenuItems(folder: string | null, drawer: DrawerView | null)
   return [
     item({
       id: 'info',
-      label: 'Xem thông tin',
+      label: 'Xem chi tiết',
       icon: 'info',
       action: { kind: 'herdrTab', tab: 'info' },
     }),

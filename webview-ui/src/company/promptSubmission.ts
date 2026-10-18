@@ -137,11 +137,3 @@ export interface ChordEvent {
 export function isCompanyChord(event: ChordEvent): boolean {
   return (event.ctrlKey || event.metaKey) && event.shiftKey && event.key === 'Enter';
 }
-
-/**
- * Ctrl/Cmd+Enter: a follow-up into the current session, as OMP's Ctrl+Enter
- * sends it. It never dispatches a slash command.
- */
-export function isFollowUpChord(event: ChordEvent): boolean {
-  return (event.ctrlKey || event.metaKey) && !event.shiftKey && event.key === 'Enter';
-}

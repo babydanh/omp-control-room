@@ -503,6 +503,178 @@ describe('session lifecycle on the workspace coordinator', () => {
     await coordinator.dispose();
   });
 
+  it('opens a new chat with no prompt through the effect and answers its board id', async () => {
+    const inputs: unknown[] = [];
+    const coordinator = await open([], {
+      openChatSession: async (input) => {
+        inputs.push(input);
+        return session('chat-new', { role: 'chat', name: 'Chat' });
+      },
+    });
+
+    await expect(coordinator.openNewChat()).resolves.toBe('chat-new');
+
+    expect(inputs).toEqual([{}]);
+    await coordinator.dispose();
+  });
+
+  it('answers a resume of a file a live chat session holds, opening nothing', async () => {
+    const dir = ompSessionDirForFolder(workspace);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'live.jsonl');
+    await fs.promises.writeFile(file, '{}\n');
+    const opened: unknown[] = [];
+    const coordinator = await open(
+      [put(session('chat-live', { role: 'chat', status: 'idle', nativeSessionPath: file }))],
+      {
+        openChatSession: async (input) => {
+          opened.push(input);
+          return session('chat-x', { role: 'chat' });
+        },
+      },
+    );
+
+    await expect(coordinator.resumeOmpSession(file)).resolves.toBe('chat-live');
+
+    expect(opened).toEqual([]);
+    await coordinator.dispose();
+  });
+
+  it('reopens a parked chat session on its own omp file under the same record', async () => {
+    const dir = ompSessionDirForFolder(workspace);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'parked.jsonl');
+    await fs.promises.writeFile(file, '{}\n');
+    const controlled: { id: string; action: string; runEpoch: number; file?: string }[] = [];
+    const opened: unknown[] = [];
+    const coordinator = await open(
+      [
+        put(
+          session('chat-parked', {
+            role: 'chat',
+            status: 'parked',
+            runEpoch: 2,
+            nativeSessionPath: file,
+          }),
+        ),
+      ],
+      {
+        openChatSession: async (input) => {
+          opened.push(input);
+          return session('chat-x', { role: 'chat' });
+        },
+        controlSession: async (record, action) => {
+          controlled.push({
+            id: record.id,
+            action,
+            runEpoch: record.runEpoch,
+            file: record.nativeSessionPath,
+          });
+          return { status: 'starting' };
+        },
+      },
+    );
+
+    await expect(coordinator.resumeOmpSession(file)).resolves.toBe('chat-parked');
+
+    expect(opened).toEqual([]);
+    expect(controlled).toEqual([{ id: 'chat-parked', action: 'resume', runEpoch: 2, file }]);
+    expect(coordinator.snapshot().sessions.find((s) => s.id === 'chat-parked')?.status).toBe(
+      'starting',
+    );
+    await coordinator.dispose();
+  });
+
+  it('restarts a stopped chat session on its own omp file with the next epoch', async () => {
+    const dir = ompSessionDirForFolder(workspace);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'stopped.jsonl');
+    await fs.promises.writeFile(file, '{}\n');
+    const controlled: { id: string; action: string; runEpoch: number; file?: string }[] = [];
+    const coordinator = await open(
+      [
+        put(
+          session('chat-stopped', {
+            role: 'chat',
+            status: 'stopped',
+            runEpoch: 3,
+            nativeSessionPath: file,
+          }),
+        ),
+      ],
+      {
+        controlSession: async (record, action) => {
+          controlled.push({
+            id: record.id,
+            action,
+            runEpoch: record.runEpoch,
+            file: record.nativeSessionPath,
+          });
+          return { status: 'starting' };
+        },
+      },
+    );
+
+    await expect(coordinator.resumeOmpSession(file)).resolves.toBe('chat-stopped');
+
+    expect(controlled).toEqual([{ id: 'chat-stopped', action: 'restart', runEpoch: 4, file }]);
+    await coordinator.dispose();
+  });
+
+  it('refuses to reopen a parked chat session that never recorded its omp file', async () => {
+    const controlled: string[] = [];
+    const coordinator = await open(
+      [put(session('chat-blank', { role: 'chat', status: 'parked', runEpoch: 1 }))],
+      {
+        controlSession: async (record, action) => {
+          controlled.push(`${record.id}:${action}`);
+          return { status: 'starting' };
+        },
+      },
+    );
+
+    await expect(coordinator.controlSession('chat-blank', 'resume', 1)).rejects.toMatchObject({
+      code: 'session_reopen_refused',
+    });
+    await expect(coordinator.controlSession('chat-blank', 'restart', 1)).rejects.toMatchObject({
+      code: 'session_reopen_refused',
+    });
+
+    expect(controlled).toEqual([]);
+    expect(coordinator.snapshot().sessions.find((s) => s.id === 'chat-blank')?.status).toBe(
+      'parked',
+    );
+    await coordinator.dispose();
+  });
+
+  it('refuses to resume a file whose chat session is archived, opening nothing', async () => {
+    const dir = ompSessionDirForFolder(workspace);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'archived.jsonl');
+    await fs.promises.writeFile(file, '{}\n');
+    const opened: unknown[] = [];
+    const coordinator = await open(
+      [
+        put(
+          session('chat-archived', { role: 'chat', status: 'archived', nativeSessionPath: file }),
+        ),
+      ],
+      {
+        openChatSession: async (input) => {
+          opened.push(input);
+          return session('chat-x', { role: 'chat' });
+        },
+      },
+    );
+
+    await expect(coordinator.resumeOmpSession(file)).rejects.toMatchObject({
+      code: 'omp_session_archived',
+    });
+
+    expect(opened).toEqual([]);
+    await coordinator.dispose();
+  });
+
   it('erases one session board log and tolerates one that is already gone', async () => {
     const logs = sessionLogDirectory(path.join(tempHome, 'namespace'));
     await fs.promises.mkdir(logs, { recursive: true });

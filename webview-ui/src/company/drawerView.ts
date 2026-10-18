@@ -7,11 +7,16 @@ import type { CompanyDrawerTab } from './companyState.js';
 import { terminalPolicy } from './sessionActions.js';
 
 /**
- * The tab a session's drawer opens on when nothing asked for another: the
- * terminal while a process is there to attach to, else the log.
+ * The tab a session's drawer opens on when nothing asked for another. A live
+ * session opens on its terminal, since that is where it is worked; any other
+ * session opens on the tab the reader last picked, or the activity timeline.
  */
-export function defaultDrawerTab(status: string): CompanyDrawerTab {
-  return terminalPolicy(status).attach ? 'terminal' : 'log';
+export function defaultDrawerTab(
+  status: string,
+  remembered: CompanyDrawerTab | null,
+): CompanyDrawerTab {
+  if (terminalPolicy(status).attach) return 'terminal';
+  return remembered ?? 'activity';
 }
 
 /** The model's name without its provider: "anthropic/claude-sonnet-4-5" reads "claude-sonnet-4-5". */

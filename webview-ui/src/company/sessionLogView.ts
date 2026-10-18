@@ -38,6 +38,64 @@ export function logIsReplaying(state: CompanyViewState, sessionId: string): bool
   return view !== undefined && !view.replayed;
 }
 
+/**
+ * The chips above the activity timeline. One chip is one group of log kinds, so
+ * the merged timeline (commands included) can be narrowed without a second tab.
+ */
+export const ACTIVITY_FILTERS = ['all', 'commands', 'tools', 'says', 'asks', 'errors'] as const;
+export type ActivityFilter = (typeof ACTIVITY_FILTERS)[number];
+
+export const ACTIVITY_FILTER_LABELS: Readonly<Record<ActivityFilter, string>> = {
+  all: 'Tất cả',
+  commands: 'Lệnh',
+  tools: 'Công cụ',
+  says: 'Lời nói',
+  asks: 'Kết luận & hỏi',
+  errors: 'Lỗi',
+};
+
+/** Whether a log entry belongs to a filter group. `all` holds every entry, state lines included. */
+export function matchesActivityFilter(
+  entry: CompanySessionLogEntry,
+  filter: ActivityFilter,
+): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'commands':
+      return entry.kind === 'command';
+    case 'tools':
+      return entry.kind === 'tool';
+    case 'says':
+      return entry.kind === 'text';
+    case 'asks':
+      return entry.kind === 'verdict' || entry.kind === 'question';
+    case 'errors':
+      return (
+        entry.kind === 'error' ||
+        (entry.kind === 'verdict' && entry.ok === false) ||
+        (entry.kind === 'command' && commandTone(entry) === 'failed')
+      );
+  }
+}
+
+/** The entries one chip shows, in log order. */
+export function filterActivity(
+  entries: readonly CompanySessionLogEntry[],
+  filter: ActivityFilter,
+): readonly CompanySessionLogEntry[] {
+  return entries.filter((entry) => matchesActivityFilter(entry, filter));
+}
+
+/** How many entries each chip would show, so the chips can carry counts. */
+export function activityCounts(
+  entries: readonly CompanySessionLogEntry[],
+): Readonly<Record<ActivityFilter, number>> {
+  const counts = {} as Record<ActivityFilter, number>;
+  for (const filter of ACTIVITY_FILTERS) counts[filter] = filterActivity(entries, filter).length;
+  return counts;
+}
+
 export function logTone(entry: CompanySessionLogEntry): LogTone {
   switch (entry.kind) {
     case 'text':

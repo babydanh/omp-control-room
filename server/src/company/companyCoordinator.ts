@@ -204,8 +204,16 @@ export interface CompanyCoordinator {
   listOmpSessions(): Promise<OmpSessionListing>;
 
   /**
+   * Open a plain omp chat session in this workspace with no prompt and return its
+   * board session id. Nothing is sent; the session waits for the first message.
+   */
+  openNewChat(): Promise<string>;
+
+  /**
    * Open a saved OMP session as a chat session in this workspace and return its
-   * board session id. A file already open answers with its existing session.
+   * board session id. A live chat session that holds the file answers with its
+   * existing id. A parked, stopped or crashed chat session reopens on its own file
+   * under the same record; an archived one is refused.
    */
   resumeOmpSession(file: string): Promise<string>;
 

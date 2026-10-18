@@ -21,7 +21,7 @@ export function selectionForTask(state: CompanyViewState, taskId: string): Compa
     taskId,
     sessionId,
     // A card is about the work, not about a transcript: open what it is doing.
-    tab: sessionId === null ? null : 'log',
+    tab: sessionId === null ? null : 'activity',
     herdrPaneId: null,
   };
 }

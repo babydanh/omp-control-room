@@ -6,14 +6,14 @@
  * component because the test environment is node, and these rules are the part
  * that must not drift.
  *
- *  - Enter and the Send button: a chat prompt to the selected omp session. A busy
- *    session is steered; with no session selected, a new omp chat opens.
- *    With a herdr agent selected, the plain send goes to that agent's pane instead.
- *  - Ctrl/Cmd+Enter: a follow-up into the selected session (a prompt with none).
+ *  - Enter and the Send button: the line is typed into the selected session's terminal
+ *    (`terminalLine`), where OMP reads it as its own TUI does, including its `/` commands.
+ *    Ctrl/Cmd+Enter does the same. With no session selected nothing is sent.
+ *  - With a herdr agent selected, the plain send goes to that agent's pane instead.
  *  - Ctrl/Cmd+Shift+Enter and the "Giao cho công ty" button: the Company workflow.
  *    A chat session is never a Company target.
- *  - `/new` and `/resume` are the composer's own commands. Every other OMP command
- *    that resolves runs in the selected session's terminal.
+ *  - `/new` opens a new omp chat in the folder and `/resume` lists the saved ones. Those
+ *    two are the composer's own; every other `/` line goes to the terminal.
  */
 
 import type { CompanySessionSummary, HerdrAgent } from '../../../core/src/company.js';
@@ -23,7 +23,7 @@ import type { CompanyClient } from './companyClient.js';
 import type { OmpSessionsView } from './companyState.js';
 import type { PromptRoute } from './promptSubmission.js';
 import { companyRoleLabel } from './roleProfiles.js';
-import { type ResolvedSlashCommand, resolveSlashCommand } from './slashCommands.js';
+import { resolveSlashCommand } from './slashCommands.js';
 
 /** Session states in which OMP steers rather than starting a new turn. */
 const BUSY_STATUSES: readonly string[] = ['busy', 'running', 'starting'];
@@ -36,15 +36,6 @@ export function chatRoute(session: RouteSession): PromptRoute {
   return {
     mode: 'chat',
     delivery: session !== null && BUSY_STATUSES.includes(session.status) ? 'steer' : 'prompt',
-    targetSessionId: session?.id ?? null,
-  };
-}
-
-/** Ctrl/Cmd+Enter: a follow-up into the selected session; a plain prompt when none is selected. */
-export function followUpRoute(session: RouteSession): PromptRoute {
-  return {
-    mode: 'chat',
-    delivery: session === null ? 'prompt' : 'follow_up',
     targetSessionId: session?.id ?? null,
   };
 }
@@ -72,17 +63,12 @@ export function sendTargetLabel(
 }
 
 /**
- * What a submitted draft means. `new` and `resume` are the composer's own
- * commands. `command` is any other OMP command the accept gate resolves: the
- * composer runs `/model` and `/switch` itself and types the rest into the
- * selected session's terminal. `prompt` is everything else, including text OMP
- * would not dispatch (for example `/new` with arguments).
+ * What a submitted draft means. `new` and `resume` are the composer's own commands.
+ * `prompt` is everything else, including OMP commands with arguments OMP does not take
+ * (for example `/new stuff`). The line is typed into the selected session's terminal,
+ * so OMP runs its own commands exactly as its TUI does.
  */
-export type ComposerCommandPlan =
-  | { kind: 'new' }
-  | { kind: 'resume' }
-  | { kind: 'command'; resolved: ResolvedSlashCommand }
-  | { kind: 'prompt' };
+export type ComposerCommandPlan = { kind: 'new' } | { kind: 'resume' } | { kind: 'prompt' };
 
 export function planComposerCommand(text: string): ComposerCommandPlan {
   const resolved = resolveSlashCommand(text);
@@ -93,17 +79,35 @@ export function planComposerCommand(text: string): ComposerCommandPlan {
     case 'resume':
       return { kind: 'resume' };
     default:
-      return { kind: 'command', resolved };
+      return { kind: 'prompt' };
   }
 }
 
 /**
- * `/new`: the next send opens a new omp chat. Clears the selection, and the draft
- * the command was typed into.
+ * The bytes a typed line becomes in an omp terminal: the text and Enter, as the keyboard
+ * sends them. Several lines go as one bracketed paste, so OMP keeps them together and
+ * submits once. Blank text sends nothing.
  */
-export function startNewChat(client: Pick<CompanyClient, 'select' | 'setDraftText'>): void {
-  client.select({ sessionId: null });
-  client.setDraftText('');
+export function terminalLine(text: string): string | null {
+  const line = text.replace(/\s+$/, '');
+  if (line.trim() === '') return null;
+  if (!line.includes('\n')) return `${line}\r`;
+  return `\u001b[200~${line.replace(/\r\n?/g, '\n')}\u001b[201~\r`;
+}
+
+/**
+ * Open a new omp chat in the folder, with no prompt. The session is selected once the
+ * server names it in its verdict. Resolves with the verdict, so the caller can show a refusal.
+ */
+export function startNewChat(
+  client: Pick<CompanyClient, 'newChatSession' | 'waitForCommand' | 'select'>,
+): Promise<CommandResultView> {
+  return client.waitForCommand(client.newChatSession()).then((verdict) => {
+    if (verdict.ok && verdict.sessionId !== undefined) {
+      client.select({ sessionId: verdict.sessionId });
+    }
+    return verdict;
+  });
 }
 
 /** What the `/resume` picker shows for its request. */

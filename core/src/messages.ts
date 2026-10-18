@@ -118,6 +118,7 @@ export type ClientMessage =
   | CompanySessionLogRequestMessage
   | CompanySessionRenameMessage
   | CompanySessionInfoRequestMessage
+  | CompanyChatNewMessage
   | LedgerViewRequestMessage
   | LedgerTimelineRequestMessage
   | LedgerFileDiffRequestMessage
@@ -667,7 +668,48 @@ export interface CompanySessionSummary {
   activeTaskId?: string;
   lastUsedAt: string;
   contextSnapshot?: Record<string, any>;
+  insight?: CompanySessionInsight;
 }
+
+export interface CompanySessionInsight {
+  observedAt: string;
+  todo?: CompanySessionTodo;
+  planMode: string;
+  subagents: CompanySessionSubagent[];
+}
+
+export interface CompanySessionTodo {
+  phases: CompanySessionTodoPhase[];
+}
+
+export interface CompanySessionTodoPhase {
+  name: string;
+  tasks: CompanySessionTodoTask[];
+}
+
+export interface CompanySessionTodoTask {
+  content: string;
+  status: AnonymousSchema_359;
+  blocker?: string;
+}
+
+export type AnonymousSchema_359 = 'pending' | 'in_progress' | 'completed' | 'abandoned' | 'blocked';
+
+export interface CompanySessionSubagent {
+  id: string;
+  agent: string;
+  status: AnonymousSchema_365;
+  task?: string;
+  currentTool?: string;
+  tokens: number;
+  contextTokens?: number;
+  contextWindow?: number;
+  costUsd?: number;
+  durationMs: number;
+  completionPercent?: number;
+}
+
+export type AnonymousSchema_365 = 'pending' | 'running' | 'completed' | 'failed' | 'aborted';
 
 export interface Question {
   id: string;
@@ -675,17 +717,17 @@ export interface Question {
   taskId?: string;
   runEpoch: number;
   nativeToolCallId?: string;
-  kind: AnonymousSchema_360;
+  kind: AnonymousSchema_380;
   title: string;
   questions: QuestionPrompt[];
   actionDigest?: string;
-  status: AnonymousSchema_371;
+  status: AnonymousSchema_391;
   answer?: Record<string, any>;
   createdAt: string;
   resolvedAt?: string;
 }
 
-export type AnonymousSchema_360 = 'clarification' | 'technical_choice' | 'approval';
+export type AnonymousSchema_380 = 'clarification' | 'technical_choice' | 'approval';
 
 export interface QuestionPrompt {
   id: string;
@@ -700,14 +742,14 @@ export interface QuestionOption {
   description?: string;
 }
 
-export type AnonymousSchema_371 = 'pending' | 'answered' | 'rejected' | 'cancelled' | 'expired';
+export type AnonymousSchema_391 = 'pending' | 'answered' | 'rejected' | 'cancelled' | 'expired';
 
 export interface QuotaSnapshot {
   provider: string;
   accountLabel?: string;
   windows: QuotaWindow[];
   fetchedAt: string;
-  status: AnonymousSchema_385;
+  status: AnonymousSchema_405;
 }
 
 export interface QuotaWindow {
@@ -718,7 +760,7 @@ export interface QuotaWindow {
   reportedUnit: string;
 }
 
-export type AnonymousSchema_385 =
+export type AnonymousSchema_405 =
   'available' | 'unsupported' | 'unauthenticated' | 'error' | 'stale';
 
 export interface CompanyDiagnostics {
@@ -742,7 +784,7 @@ export interface Attempt {
   runEpoch: number;
   startedAt: string;
   endedAt?: string;
-  status: AnonymousSchema_404;
+  status: AnonymousSchema_424;
   changes: WorkspaceChange[];
   evidenceIds: string[];
   qaVerdict?: Record<string, any>;
@@ -750,16 +792,16 @@ export interface Attempt {
   error?: string;
 }
 
-export type AnonymousSchema_404 = 'running' | 'passed' | 'failed' | 'interrupted' | 'blocked';
+export type AnonymousSchema_424 = 'running' | 'passed' | 'failed' | 'interrupted' | 'blocked';
 
 export interface WorkspaceChange {
   path: string;
-  kind: AnonymousSchema_407;
+  kind: AnonymousSchema_427;
   summary: string;
   diffArtifactId?: string;
 }
 
-export type AnonymousSchema_407 = 'create' | 'modify' | 'delete';
+export type AnonymousSchema_427 = 'create' | 'modify' | 'delete';
 
 export interface VerificationEvidence {
   id: string;
@@ -807,7 +849,7 @@ export interface UsageRecord {
   cacheWrite: number;
   costUsd?: number;
   timestamp: string;
-  source: AnonymousSchema_457;
+  source: AnonymousSchema_477;
   availability: string;
   provenance: UsageProvenance;
   toolCallId?: string;
@@ -817,7 +859,7 @@ export interface UsageRecord {
   totalTokens?: number;
 }
 
-export type AnonymousSchema_457 = 'provider' | 'native_session';
+export type AnonymousSchema_477 = 'provider' | 'native_session';
 
 export type UsageProvenance = 'own_turn' | 'native_child' | 'child_aggregate';
 
@@ -910,14 +952,15 @@ export interface CompanySession {
   nativeSessionPath?: string;
   agentId?: number;
   runEpoch: number;
-  status: AnonymousSchema_510;
+  status: AnonymousSchema_530;
   activeTaskId?: string;
   lastUsedAt: string;
   contextSnapshot?: Record<string, any>;
   handoffArtifactId?: string;
+  insight?: CompanySessionInsight;
 }
 
-export type AnonymousSchema_510 =
+export type AnonymousSchema_530 =
   | 'parked'
   | 'starting'
   | 'idle'
@@ -993,12 +1036,12 @@ export interface CompanyCounters {
 }
 
 export interface CompanyRemoveChange {
-  entity: AnonymousSchema_542;
+  entity: AnonymousSchema_562;
   op: 'remove';
   id: string;
 }
 
-export type AnonymousSchema_542 =
+export type AnonymousSchema_562 =
   | 'prompt'
   | 'contract'
   | 'task'
@@ -1040,7 +1083,7 @@ export interface CompanySessionLogMessage {
 export interface CompanySessionLogEntry {
   seq: number;
   at: string;
-  kind: AnonymousSchema_565;
+  kind: AnonymousSchema_585;
   runEpoch: number;
   taskId?: string;
   text: string;
@@ -1049,7 +1092,7 @@ export interface CompanySessionLogEntry {
   ok?: boolean;
 }
 
-export type AnonymousSchema_565 =
+export type AnonymousSchema_585 =
   'text' | 'tool' | 'command' | 'verdict' | 'question' | 'state' | 'error';
 
 export interface HerdrAgentsMessage {
@@ -1064,7 +1107,7 @@ export interface HerdrAgent {
   paneId: string;
   name?: string;
   kind: string;
-  status: AnonymousSchema_579;
+  status: AnonymousSchema_599;
   cwd?: string;
   title?: string;
   workspaceId: string;
@@ -1075,7 +1118,7 @@ export interface HerdrAgent {
   focused?: boolean;
 }
 
-export type AnonymousSchema_579 = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
+export type AnonymousSchema_599 = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
 
 export interface HerdrSleepingSession {
   paneId: string;
@@ -1113,19 +1156,19 @@ export interface AgentInfo {
   tools?: AgentToolInfo[];
   skills?: AgentSkillInfo[];
   toolUsage?: AgentToolUsage[];
-  collectedFrom: AnonymousSchema_623;
+  collectedFrom: AnonymousSchema_643;
   collectedAt: string;
   note?: string;
 }
 
 export interface AgentToolInfo {
   name: string;
-  source: AnonymousSchema_613;
+  source: AnonymousSchema_633;
   mcpServer?: string;
   active: boolean;
 }
 
-export type AnonymousSchema_613 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
+export type AnonymousSchema_633 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
 
 export interface AgentSkillInfo {
   name: string;
@@ -1138,7 +1181,7 @@ export interface AgentToolUsage {
   count: number;
 }
 
-export type AnonymousSchema_623 = 'live' | 'transcript' | 'herdr';
+export type AnonymousSchema_643 = 'live' | 'transcript' | 'herdr';
 
 export interface HerdrInfoMessage {
   type: 'herdrInfo';
@@ -1224,12 +1267,12 @@ export interface CompanyFileListMessage {
 export interface CompanyFileEntry {
   name: string;
   path: string;
-  kind: AnonymousSchema_674;
+  kind: AnonymousSchema_694;
   sizeBytes?: number;
   modifiedAt?: string;
 }
 
-export type AnonymousSchema_674 = 'file' | 'directory';
+export type AnonymousSchema_694 = 'file' | 'directory';
 
 export interface CompanyFileReadMessage {
   type: 'companyFileRead';
@@ -1241,14 +1284,14 @@ export interface CompanyFileContent {
   path: string;
   totalBytes: number;
   offset: number;
-  encoding: AnonymousSchema_682;
+  encoding: AnonymousSchema_702;
   text?: string;
   dataBase64?: string;
   mediaType?: string;
   truncated: boolean;
 }
 
-export type AnonymousSchema_682 = 'utf8' | 'base64';
+export type AnonymousSchema_702 = 'utf8' | 'base64';
 
 export interface CompanyAttachmentUploadedMessage {
   type: 'companyAttachmentUploaded';
@@ -1276,11 +1319,11 @@ export interface LedgerView {
 }
 
 export interface LedgerDatabaseStatus {
-  state: AnonymousSchema_692;
+  state: AnonymousSchema_712;
   error?: string;
 }
 
-export type AnonymousSchema_692 = 'ok' | 'missing' | 'unreadable';
+export type AnonymousSchema_712 = 'ok' | 'missing' | 'unreadable';
 
 export interface LedgerRepo {
   repo: string;
@@ -1362,7 +1405,7 @@ export interface LedgerMainWrite {
 
 export interface LedgerOverlapScan {
   repo: string;
-  state: AnonymousSchema_761;
+  state: AnonymousSchema_781;
   startedAt: string | null;
   finishedAt: string | null;
   base: string | null;
@@ -1374,7 +1417,7 @@ export interface LedgerOverlapScan {
   error: string | null;
 }
 
-export type AnonymousSchema_761 = 'idle' | 'running' | 'done' | 'partial' | 'error';
+export type AnonymousSchema_781 = 'idle' | 'running' | 'done' | 'partial' | 'error';
 
 export interface LedgerOverlapPair {
   a: string;
@@ -1663,25 +1706,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_923;
-  mode?: AnonymousSchema_924;
+  delivery: AnonymousSchema_943;
+  mode?: AnonymousSchema_944;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_923 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_943 = 'prompt' | 'steer' | 'follow_up';
 
-export type AnonymousSchema_924 = 'chat' | 'company';
+export type AnonymousSchema_944 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_930;
+  decision: AnonymousSchema_950;
   note?: string;
 }
 
-export type AnonymousSchema_930 = 'approve' | 'reject';
+export type AnonymousSchema_950 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1694,7 +1737,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_942;
+  decision?: AnonymousSchema_962;
 }
 
 export interface QuestionAnswer {
@@ -1703,17 +1746,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_942 = 'approve_once' | 'reject';
+export type AnonymousSchema_962 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_947;
+  action: AnonymousSchema_967;
 }
 
-export type AnonymousSchema_947 =
+export type AnonymousSchema_967 =
   'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
 
 export interface CompanyPromptCancelMessage {
@@ -1800,6 +1843,11 @@ export interface CompanySessionInfoRequestMessage {
   sessionId: string;
 }
 
+export interface CompanyChatNewMessage {
+  type: 'companyChatNew';
+  requestId: string;
+}
+
 export interface LedgerViewRequestMessage {
   type: 'ledgerViewRequest';
   requestId: string;
@@ -1808,10 +1856,10 @@ export interface LedgerViewRequestMessage {
 export interface LedgerTimelineRequestMessage {
   type: 'ledgerTimelineRequest';
   requestId: string;
-  windowMinutes: AnonymousSchema_997;
+  windowMinutes: AnonymousSchema_1019;
 }
 
-export type AnonymousSchema_997 = 15 | 60 | 360 | 1440;
+export type AnonymousSchema_1019 = 15 | 60 | 360 | 1440;
 
 export interface LedgerFileDiffRequestMessage {
   type: 'ledgerFileDiffRequest';
@@ -2262,6 +2310,7 @@ export interface CompanyStateSessionsAdditionalProperty {
   lastUsedAt: string;
   contextSnapshot?: Record<string, any>;
   handoffArtifactId?: string;
+  insight?: CompanyStateSessionsAdditionalPropertyInsight;
 }
 
 export type CompanyStateSessionsAdditionalPropertyRole =
@@ -2279,6 +2328,48 @@ export type CompanyStateSessionsAdditionalPropertyStatus =
   | 'stopped'
   | 'crashed'
   | 'archived';
+
+export interface CompanyStateSessionsAdditionalPropertyInsight {
+  observedAt: string;
+  todo?: CompanyStateSessionsAdditionalPropertyInsightTodo;
+  planMode: string;
+  subagents: CompanyStateSessionsAdditionalPropertyInsightSubagentsItem[];
+}
+
+export interface CompanyStateSessionsAdditionalPropertyInsightTodo {
+  phases: CompanyStateSessionsAdditionalPropertyInsightTodoPhasesItem[];
+}
+
+export interface CompanyStateSessionsAdditionalPropertyInsightTodoPhasesItem {
+  name: string;
+  tasks: CompanyStateSessionsAdditionalPropertyInsightTodoPhasesItemTasksItem[];
+}
+
+export interface CompanyStateSessionsAdditionalPropertyInsightTodoPhasesItemTasksItem {
+  content: string;
+  status: CompanyStateSessionsAdditionalPropertyInsightTodoPhasesItemTasksItemStatus;
+  blocker?: string;
+}
+
+export type CompanyStateSessionsAdditionalPropertyInsightTodoPhasesItemTasksItemStatus =
+  'pending' | 'in_progress' | 'completed' | 'abandoned' | 'blocked';
+
+export interface CompanyStateSessionsAdditionalPropertyInsightSubagentsItem {
+  id: string;
+  agent: string;
+  status: CompanyStateSessionsAdditionalPropertyInsightSubagentsItemStatus;
+  task?: string;
+  currentTool?: string;
+  tokens: number;
+  contextTokens?: number;
+  contextWindow?: number;
+  costUsd?: number;
+  durationMs: number;
+  completionPercent?: number;
+}
+
+export type CompanyStateSessionsAdditionalPropertyInsightSubagentsItemStatus =
+  'pending' | 'running' | 'completed' | 'failed' | 'aborted';
 
 export interface CompanyStateQuestionsAdditionalProperty {
   id: string;
@@ -2811,6 +2902,7 @@ export interface CompanyEventChangesItemOneOf_3Value {
   lastUsedAt: string;
   contextSnapshot?: Record<string, any>;
   handoffArtifactId?: string;
+  insight?: CompanyEventChangesItemOneOf_3ValueInsight;
 }
 
 export type CompanyEventChangesItemOneOf_3ValueRole =
@@ -2828,6 +2920,48 @@ export type CompanyEventChangesItemOneOf_3ValueStatus =
   | 'stopped'
   | 'crashed'
   | 'archived';
+
+export interface CompanyEventChangesItemOneOf_3ValueInsight {
+  observedAt: string;
+  todo?: CompanyEventChangesItemOneOf_3ValueInsightTodo;
+  planMode: string;
+  subagents: CompanyEventChangesItemOneOf_3ValueInsightSubagentsItem[];
+}
+
+export interface CompanyEventChangesItemOneOf_3ValueInsightTodo {
+  phases: CompanyEventChangesItemOneOf_3ValueInsightTodoPhasesItem[];
+}
+
+export interface CompanyEventChangesItemOneOf_3ValueInsightTodoPhasesItem {
+  name: string;
+  tasks: CompanyEventChangesItemOneOf_3ValueInsightTodoPhasesItemTasksItem[];
+}
+
+export interface CompanyEventChangesItemOneOf_3ValueInsightTodoPhasesItemTasksItem {
+  content: string;
+  status: CompanyEventChangesItemOneOf_3ValueInsightTodoPhasesItemTasksItemStatus;
+  blocker?: string;
+}
+
+export type CompanyEventChangesItemOneOf_3ValueInsightTodoPhasesItemTasksItemStatus =
+  'pending' | 'in_progress' | 'completed' | 'abandoned' | 'blocked';
+
+export interface CompanyEventChangesItemOneOf_3ValueInsightSubagentsItem {
+  id: string;
+  agent: string;
+  status: CompanyEventChangesItemOneOf_3ValueInsightSubagentsItemStatus;
+  task?: string;
+  currentTool?: string;
+  tokens: number;
+  contextTokens?: number;
+  contextWindow?: number;
+  costUsd?: number;
+  durationMs: number;
+  completionPercent?: number;
+}
+
+export type CompanyEventChangesItemOneOf_3ValueInsightSubagentsItemStatus =
+  'pending' | 'running' | 'completed' | 'failed' | 'aborted';
 
 export interface CompanyEventChangesItemOneOf_4 {
   entity: 'question';

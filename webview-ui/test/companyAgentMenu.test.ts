@@ -41,13 +41,13 @@ describe('sessionMenuItems', () => {
     const items = sessionMenuItems(BUSY_SESSION, null);
 
     expect(items.map((item) => item.label)).toEqual([
-      'Xem thông tin',
       'Đổi tên…',
       'Sao chép mã phiên',
       'Sao chép thư mục làm việc',
-      'Mở Log',
-      'Mở Lệnh',
       'Mở Terminal',
+      'Mở Hoạt động',
+      'Mở Việc',
+      'Mở Chi tiết',
       'Dừng lượt',
       'Tạm dừng',
       'Tắt phiên',
@@ -93,7 +93,7 @@ describe('sessionMenuItems', () => {
     const items = sessionMenuItems(BUSY_SESSION, null);
 
     expect(items.filter((item) => item.startsGroup).map((item) => item.label)).toEqual([
-      'Mở Log',
+      'Mở Terminal',
       'Dừng lượt',
       'Tắt phiên',
     ]);
@@ -158,7 +158,7 @@ describe('taskCardMenuItems', () => {
       'Xem Contract',
       'Sao chép mã việc',
     ]);
-    expect(items[3]).toMatchObject({ label: 'Xem thông tin', startsGroup: true });
+    expect(items[3]).toMatchObject({ label: 'Đổi tên…', startsGroup: true });
   });
 
   it('offers no Contract item when the board holds no Contract for the task', () => {
@@ -303,7 +303,7 @@ describe('herdr and session actions moved into the menu', () => {
 describe('herdrMenuItems', () => {
   it('lists the herdr views, the pane actions, then the copies', () => {
     expect(herdrMenuItems('/repo', null).map((item) => item.label)).toEqual([
-      'Xem thông tin',
+      'Xem chi tiết',
       'Đổi tên…',
       'Xem màn hình',
       'Đọc lại màn hình',

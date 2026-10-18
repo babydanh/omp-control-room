@@ -28,15 +28,6 @@ export interface SidebarStorage {
   setItem(key: string, value: string): void;
 }
 
-/** The part of a key event the toggle reads; a KeyboardEvent satisfies it. */
-export interface SidebarShortcutEvent {
-  key: string;
-  ctrlKey: boolean;
-  metaKey: boolean;
-  shiftKey: boolean;
-  altKey: boolean;
-}
-
 /** The part of an element the typing check reads; an HTMLElement satisfies it. */
 export interface TypingTarget {
   readonly isContentEditable: boolean;
@@ -103,16 +94,6 @@ export function writeSidebarPrefs(storage: SidebarStorage | null, prefs: Sidebar
 /** The folded project keys with `key` added when it is open, or removed when it is folded. */
 export function toggleProjectKey(keys: readonly string[], key: string): string[] {
   return keys.includes(key) ? keys.filter((entry) => entry !== key) : [...keys, key];
-}
-
-/** Ctrl+B (⌘B on macOS) with no Shift or Alt: the sidebar's toggle. */
-export function isSidebarToggleKey(event: SidebarShortcutEvent): boolean {
-  return (
-    (event.ctrlKey || event.metaKey) &&
-    !event.shiftKey &&
-    !event.altKey &&
-    event.key.toLowerCase() === 'b'
-  );
 }
 
 /**

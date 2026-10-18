@@ -65,6 +65,7 @@ const WORKSPACE = path.join(os.tmpdir(), 'company-runtime-workspace');
 interface FakeRunner {
   sessionId: string;
   runEpoch: number;
+  resumeFile?: string;
   started: number;
   disposed: number;
 
@@ -213,9 +214,14 @@ async function harness(overrides: Partial<CompanyRuntimeDeps> = {}): Promise<Har
           sessionId: string;
           runEpoch: number;
           initialPrompt?: { text: string };
+          resumeFile?: string;
           rpcHandler: (request: never) => Promise<unknown>;
         }) => {
-          Object.assign(runner, { sessionId: input.sessionId, runEpoch: input.runEpoch });
+          Object.assign(runner, {
+            sessionId: input.sessionId,
+            runEpoch: input.runEpoch,
+            resumeFile: input.resumeFile,
+          });
           lastRpc = input.rpcHandler;
           await runner.start();
           // The real runner sends the first turn once its bridge is ready, so
@@ -352,6 +358,34 @@ async function seedWorker(
         requestedModel: 'provider/model',
         runEpoch: 1,
         status: 'idle',
+        lastUsedAt: '2026-10-02T00:00:00.000Z',
+        ...(nativeSessionPath === undefined ? {} : { nativeSessionId: 'saved', nativeSessionPath }),
+      },
+    },
+  ]);
+}
+
+/** Commit a parked chat session, with its omp file at `nativeSessionPath` when given. */
+async function seedParkedChat(
+  h: Harness,
+  sessionId: string,
+  nativeSessionPath?: string,
+): Promise<void> {
+  await seed(h, [
+    {
+      entity: 'session',
+      op: 'put',
+      id: sessionId,
+      value: {
+        id: sessionId,
+        code: 'C1',
+        name: 'Chat parked',
+        role: 'chat',
+        workstreamId: `${sessionId}-stream`,
+        workspaceKey: 'workspace',
+        requestedModel: 'provider/model',
+        runEpoch: 2,
+        status: 'parked',
         lastUsedAt: '2026-10-02T00:00:00.000Z',
         ...(nativeSessionPath === undefined ? {} : { nativeSessionId: 'saved', nativeSessionPath }),
       },
@@ -801,6 +835,45 @@ describe('chat sessions', () => {
     } finally {
       errors.mockRestore();
     }
+  });
+
+  it('opens a new chat with no prompt and answers its board id', async () => {
+    const h = await harness();
+
+    const id = await h.coordinator.openNewChat();
+
+    expect(h.coordinator.readState().sessions[id]).toMatchObject({ role: 'chat' });
+    expect(h.runners).toHaveLength(1);
+    expect(h.runners[0]?.prompts).toEqual([]);
+    expect(h.runners[0]?.resumeFile).toBeUndefined();
+  });
+
+  it('reopens a parked chat session on its own omp file under the same session record', async () => {
+    const h = await harness();
+    const file = path.join(WORKSPACE, 'parked.jsonl');
+    await seedParkedChat(h, 'chat-parked', file);
+
+    await h.coordinator.controlSession('chat-parked', 'resume', 2);
+
+    expect(h.runners).toHaveLength(1);
+    expect(h.runners[0]?.resumeFile).toBe(file);
+    expect(h.coordinator.readState().sessions['chat-parked']).toMatchObject({
+      status: 'starting',
+      runEpoch: 2,
+      nativeSessionPath: file,
+    });
+  });
+
+  it('refuses to reopen a parked chat session whose record never learned its omp file', async () => {
+    const h = await harness();
+    await seedParkedChat(h, 'chat-blank');
+
+    await expect(h.coordinator.controlSession('chat-blank', 'resume', 2)).rejects.toMatchObject({
+      code: 'session_reopen_refused',
+    });
+
+    expect(h.runners).toHaveLength(0);
+    expect(h.coordinator.readState().sessions['chat-blank']).toMatchObject({ status: 'parked' });
   });
 });
 

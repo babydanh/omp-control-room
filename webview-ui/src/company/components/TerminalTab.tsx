@@ -20,7 +20,7 @@ export interface TerminalTabProps {
   client: CompanyClient;
   state: CompanyViewState;
   sessionId: string;
-  /** A command the Lệnh tab asked to find; null when none is pending. */
+  /** A command the Hoạt động tab asked to find; null when none is pending. */
   jump: TerminalJump | null;
 }
 
@@ -62,7 +62,7 @@ export function TerminalTab({ client, state, sessionId, jump }: TerminalTabProps
         </p>
         {policy.resume && (
           <CompanyButton size="sm" onClick={() => client.controlSession(sessionId, 'resume')}>
-            Tiếp tục
+            Mở lại
           </CompanyButton>
         )}
       </div>

@@ -1,21 +1,22 @@
 /**
- * SessionLog: what a session did, kept by the server across reloads.
- *
- * The Log tab reads the session's entries in order, with the attempts it ran at
- * the top. The log follows the newest line only while the reader is already at
- * the bottom, so reading an older line is never yanked away. The Lệnh tab lists
- * the commands the session ran. A live command jumps to its place in the terminal;
- * any other expands in place to its output.
+ * SessionLog: the activity timeline of one session, kept by the server across
+ * reloads. What it said, ran, and decided share one timeline; commands are rows
+ * in it, not a tab of their own. Filter chips narrow the timeline to one group.
  */
 
 import { useContext, useRef, useState } from 'react';
 
-import type { Attempt, CompanySessionLogEntry } from '../../../../core/src/company.js';
+import type { CompanySessionLogEntry } from '../../../../core/src/company.js';
 import type { CompanyViewState } from '../companyState.js';
 import {
+  ACTIVITY_FILTER_LABELS,
+  ACTIVITY_FILTERS,
+  activityCounts,
+  type ActivityFilter,
   commandExitLabel,
   type CommandTone,
   commandTone,
+  filterActivity,
   formatLogTime,
   LOG_KIND_LABELS,
   logEntriesFor,
@@ -28,7 +29,6 @@ import {
 } from '../sessionLogView.js';
 import { useStickToBottom } from '../useStickToBottom.js';
 import { textWrapClass, WrapLinesContext } from '../wrapLines.js';
-import { AttemptRow } from './AttemptRow.js';
 
 const LOG_TONE_CLASS: Readonly<Record<LogTone, string>> = {
   text: 'text-text',
@@ -46,23 +46,27 @@ const COMMAND_TONE_CLASS: Readonly<Record<CommandTone, string>> = {
   failed: 'text-warning',
 };
 
-export interface SessionLogTabProps {
+export interface SessionActivityTabProps {
   state: CompanyViewState;
   sessionId: string;
   /** The task whose entries to show, or null for the whole session. */
   taskId: string | null;
-  attempts: readonly Attempt[];
-  onOpenArtifact: (artifactId: string) => void;
+  /** A live session's commands jump to the terminal; the rest expand in place. */
+  live: boolean;
+  onJump: (command: string, output: string | null) => void;
 }
 
-export function SessionLogTab({
+export function SessionActivityTab({
   state,
   sessionId,
   taskId,
-  attempts,
-  onOpenArtifact,
-}: SessionLogTabProps) {
+  live,
+  onJump,
+}: SessionActivityTabProps) {
+  const [filter, setFilter] = useState<ActivityFilter>('all');
   const entries = logEntriesFor(state, sessionId, taskId);
+  const shown = filterActivity(entries, filter);
+  const counts = activityCounts(entries);
   const replaying = logIsReplaying(state, sessionId);
   const status = state.sessions[sessionId]?.status ?? '';
   // Live activity shows only while the session is busy: the tool it runs and the text it writes.
@@ -74,34 +78,51 @@ export function SessionLogTab({
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {attempts.length > 0 && (
-        <div className="flex max-h-48 flex-col gap-2 overflow-y-auto p-2">
-          {attempts.map((attempt) => (
-            <AttemptRow
-              key={attempt.id}
-              attempt={attempt}
-              evidence={state.evidence}
-              onOpenArtifact={onOpenArtifact}
-            />
-          ))}
-        </div>
-      )}
+      <div role="group" aria-label="Lọc hoạt động" className="flex flex-wrap gap-1 px-2 pt-2">
+        {ACTIVITY_FILTERS.map((option) => {
+          // A chip for a group with nothing in it is noise; the active one always stays.
+          if (option !== 'all' && option !== filter && counts[option] === 0) return null;
+          return (
+            <button
+              key={option}
+              type="button"
+              aria-pressed={filter === option}
+              onClick={() => setFilter(option)}
+              className={`cursor-pointer rounded-full px-2 py-0.5 text-2xs ${
+                filter === option ? 'bg-well text-text' : 'text-text-muted hover:text-text'
+              }`}
+            >
+              {ACTIVITY_FILTER_LABELS[option]}
+              {counts[option] > 0 && (
+                <span className="ml-1 tabular-nums text-text-muted">{counts[option]}</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
       <div
         ref={scrollRef}
         onScroll={onScroll}
         role="log"
-        aria-label="Nhật ký phiên"
+        aria-label="Hoạt động của phiên"
         data-testid="session-log"
         className="min-h-0 flex-1 overflow-y-auto p-2"
       >
-        {replaying && <p className="text-2xs text-text-muted">Đang tải nhật ký…</p>}
+        {replaying && <p className="text-2xs text-text-muted">Đang tải hoạt động…</p>}
         {!replaying && entries.length === 0 && writing === null && running === null && (
-          <p className="text-2xs text-text-muted">Chưa có nhật ký nào.</p>
+          <p className="text-2xs text-text-muted">Chưa có hoạt động nào.</p>
+        )}
+        {!replaying && entries.length > 0 && shown.length === 0 && (
+          <p className="text-2xs text-text-muted">Không có mục nào thuộc bộ lọc này.</p>
         )}
         <ol className="flex flex-col gap-1">
-          {entries.map((entry) => (
-            <LogRow key={entry.seq} entry={entry} />
-          ))}
+          {shown.map((entry) =>
+            entry.kind === 'command' ? (
+              <CommandRow key={entry.seq} entry={entry} live={live} onJump={onJump} />
+            ) : (
+              <LogRow key={entry.seq} entry={entry} />
+            ),
+          )}
         </ol>
         {(running !== null || writing !== null) && (
           <div data-testid="session-live" className="mt-2 flex flex-col gap-1 pt-2 text-2xs">
@@ -120,7 +141,6 @@ export function SessionLogTab({
 
 function LogRow({ entry }: { entry: CompanySessionLogEntry }) {
   const tone = logTone(entry);
-  const text = entry.kind === 'command' ? splitCommandText(entry.text).command : entry.text;
   const wrap = useContext(WrapLinesContext);
   return (
     <li className="company-fade-in grid min-w-0 grid-cols-[64px_72px_minmax(0,1fr)] gap-2 text-2xs">
@@ -130,37 +150,8 @@ function LogRow({ entry }: { entry: CompanySessionLogEntry }) {
       <span className={`uppercase tracking-wide ${LOG_TONE_CLASS[tone]}`}>
         {LOG_KIND_LABELS[entry.kind]}
       </span>
-      <span className={`min-w-0 text-text ${textWrapClass(wrap)}`}>{text}</span>
+      <span className={`min-w-0 text-text ${textWrapClass(wrap)}`}>{entry.text}</span>
     </li>
-  );
-}
-
-export interface CommandsTabProps {
-  state: CompanyViewState;
-  sessionId: string;
-  taskId: string | null;
-  /** A live session's commands jump to the terminal; the rest expand in place. */
-  live: boolean;
-  onJump: (command: string, output: string | null) => void;
-}
-
-export function CommandsTab({ state, sessionId, taskId, live, onJump }: CommandsTabProps) {
-  const commands = logEntriesFor(state, sessionId, taskId).filter(
-    (entry) => entry.kind === 'command',
-  );
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const onScroll = useStickToBottom(scrollRef);
-  if (commands.length === 0) {
-    return <p className="p-2 text-2xs text-text-muted">Chưa có lệnh nào được chạy.</p>;
-  }
-  return (
-    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
-      <ol className="flex flex-col gap-2 p-2">
-        {commands.map((entry) => (
-          <CommandRow key={entry.seq} entry={entry} live={live} onJump={onJump} />
-        ))}
-      </ol>
-    </div>
   );
 }
 

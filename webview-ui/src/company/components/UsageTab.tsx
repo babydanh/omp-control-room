@@ -1,18 +1,10 @@
 /**
- * UsageTab: what a session cost, what the company has spent, and the provider
- * quota windows. Provider quota is per account, not per session, so it is
- * labelled as such.
+ * UsageTab: what a session cost and what the company has spent so far. Provider
+ * quota is per account and reads in the top bar's status pill, not here.
  */
 
 import type { CompanyClient } from '../companyClient.js';
-import { quotaStatusLabel } from '../statusLabels.js';
-import {
-  cacheHitRate,
-  quotaRows,
-  summarizeUsage,
-  usageByModel,
-  usageForSession,
-} from '../usageView.js';
+import { cacheHitRate, summarizeUsage, usageByModel, usageForSession } from '../usageView.js';
 import { useCompanyState } from '../useCompanyState.js';
 
 export function UsageTab({ client, sessionId }: { client: CompanyClient; sessionId: string }) {
@@ -55,21 +47,6 @@ export function UsageTab({ client, sessionId }: { client: CompanyClient; session
         <p className="text-text">
           vào {company.input} · ra {company.output} · đọc bộ nhớ đệm {company.cacheRead}
         </p>
-      </section>
-
-      <section aria-label="Hạn mức nhà cung cấp">
-        <h4 className="mb-1 text-xs font-semibold text-text-muted">
-          Hạn mức nhà cung cấp (theo tài khoản, không phải theo phiên)
-        </h4>
-        {quotaRows(Object.values(state.quotas)).map((row) => (
-          <p key={row.provider} className="text-text-muted">
-            {row.provider} / {row.accountLabel} · {quotaStatusLabel(row.status)}
-            {row.windows.map(
-              (window) =>
-                ` — ${window.label}: ${window.remaining ?? '?'} ${window.reportedUnit} còn lại`,
-            )}
-          </p>
-        ))}
       </section>
     </div>
   );

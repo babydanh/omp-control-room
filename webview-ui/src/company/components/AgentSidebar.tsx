@@ -51,6 +51,7 @@ import { useNow } from '../useNow.js';
 import { ActivityChips } from './ActivityCounts.js';
 import { Icon } from './Icon.js';
 import { ModelPicker } from './ModelPicker.js';
+import { SessionProgressLabel } from './SessionInsightPanels.js';
 import { StatusDot } from './StatusDot.js';
 
 /** Pixels one arrow-key press moves the resize edge. */
@@ -609,6 +610,7 @@ function AgentRowButton({
           </span>
         </span>
         {row.summary !== null && <SummaryText summary={row.summary} />}
+        {row.progressSource !== undefined && <SessionProgressLabel session={row.progressSource} />}
       </span>
     </button>
   );

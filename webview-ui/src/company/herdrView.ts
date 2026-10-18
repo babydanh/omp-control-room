@@ -36,7 +36,7 @@ export type HerdrDrawerTab = 'screen' | 'info';
 
 export const HERDR_DRAWER_TAB_LABELS: Readonly<Record<HerdrDrawerTab, string>> = {
   screen: 'Màn hình',
-  info: 'Thông tin',
+  info: 'Chi tiết',
 };
 
 /** Sort rank: what needs the user first, then what is moving, then the rest. */

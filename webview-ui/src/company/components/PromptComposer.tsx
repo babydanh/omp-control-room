@@ -1,29 +1,22 @@
 /**
- * PromptComposer: ONE box, shaped like OMP's own composer.
+ * PromptComposer: ONE box that types into the selected omp session.
  *
- * The box takes a prompt or one of OMP's `/` commands. The key that sends it
- * decides where it goes, and the line above the box always names the target.
- * The rules live in `composerRouting.ts`:
+ * The line is typed into that session's own terminal, the way the keyboard would
+ * type it, so OMP handles it as its TUI does: its `/` commands, its steering of a
+ * busy session, its editor. The line above the box names the target. The rules
+ * live in `composerRouting.ts`:
  *
- *  - Enter, and the Send button: a chat prompt to the selected omp session. A
- *    busy session is steered (input-controller.ts:1216-1233). With no session
- *    selected, Enter opens a new omp chat, and `/new` clears the selection.
- *  - Ctrl/Cmd+Enter: a follow-up into the selected session, as OMP's Ctrl+Enter
- *    sends it (input-controller.ts:1851-1860). With no session selected it is a
- *    plain prompt.
- *  - Ctrl/Cmd+Shift+Enter, and the "Giao cho công ty" button: the Company
- *    workflow (Director, Contract, approval, workers). A selected Company session
- *    becomes the target; a plain omp chat never does.
- *  - With a herdr agent selected, the plain send and Ctrl/Cmd+Enter type the text into
- *    that agent's pane. The Company route does not apply to a herdr agent.
+ *  - Enter, Ctrl/Cmd+Enter and the Send button: the line goes into the selected
+ *    session's terminal, followed by Enter (`terminalLine`). The terminal must be
+ *    open in the drawer; otherwise the box says so and keeps the text.
+ *  - With a herdr agent selected, the plain send types into that agent's pane instead.
+ *  - Ctrl/Cmd+Shift+Enter, and the "Giao cho công ty" button: the Company workflow
+ *    (Director, Contract, approval, workers). A selected Company session becomes the
+ *    target; a plain omp chat never does.
+ *  - `/new` opens a new omp chat in this folder, with no prompt. `/resume` opens a
+ *    picker over the omp sessions saved here. Neither reaches a terminal.
  *  - Attach. OMP's box carries an image picker that the company bridge cannot
  *    reach, so the affordance is gone rather than faked.
- *
- * Commands: `/new` clears the selection and the draft. `/resume` opens a picker
- * over the omp sessions saved in this folder. `/model` and `/switch` run here.
- * Every other OMP command is typed into the selected session's terminal, so it
- * runs as the command OMP itself would run, not as text the model reads. Ctrl+Enter
- * and the Company route never dispatch a command; they send the text as a prompt.
  */
 
 import {
@@ -37,54 +30,42 @@ import {
   useState,
 } from 'react';
 
-import type {
-  CompanyModelCatalogEntry,
-  CompanyRole,
-  HerdrAgent,
-} from '../../../../core/src/company.js';
+import type { HerdrAgent } from '../../../../core/src/company.js';
 import type { OmpSessionEntry } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient } from '../companyClient.js';
 import { composerInputHeight } from '../composerHeight.js';
 import { composerStorage, readComposerHeight, writeComposerHeight } from '../composerPrefs.js';
 import {
-  chatRoute,
   companyRoute,
-  followUpRoute,
   planComposerCommand,
   resumeListView,
   sendTargetLabel,
   startNewChat,
+  terminalLine,
 } from '../composerRouting.js';
-import {
-  isCompanyChord,
-  isFollowUpChord,
-  promptBlockReason,
-  type PromptRoute,
-} from '../promptSubmission.js';
+import { isCompanyChord, promptBlockReason, type PromptRoute } from '../promptSubmission.js';
 import { draftAfterSend, herdrAgentFor, sendPrompt } from '../promptTargets.js';
-import { thinkingForModel, withRoleModel } from '../roleProfiles.js';
 import {
-  type ArgumentCompletion,
   commandCompletionQuery,
   commandCompletions,
-  matchModelSelector,
-  modelCompletions,
   ompModelMessage,
   type OmpSlashCommand,
-  resolveSlashCommand,
-  slashArgumentPrefix,
 } from '../slashCommands.js';
 import { useCompanyState } from '../useCompanyState.js';
 import { CompanyButton } from './CompanyButton.js';
 import { OmpSessionPicker } from './OmpSessionPicker.js';
 
-/** The notice `/new` shows: the next send opens a new omp chat. */
-const NEW_CHAT_NOTICE = 'Phiên mới: lần gửi tới sẽ mở một phiên omp mới.';
+/** Shown when a line is sent with no session selected. */
+const NO_SESSION_NOTICE = 'Chọn một phiên omp để gõ vào, hoặc bấm Phiên mới để mở phiên.';
+
+/** Shown when the selected session's terminal is not open, so the line cannot be typed. */
+const TERMINAL_NOT_OPEN_NOTICE =
+  'Terminal của phiên chưa mở. Mở tab Terminal của phiên rồi gửi lại.';
 
 /** The keys this box answers to, shown in the `?` tooltip beside the target line. */
 const COMPOSER_HINTS =
-  'Enter gửi tới phiên hoặc agent đang chọn · Shift+Enter xuống dòng · Ctrl+Enter để gửi tiếp · Ctrl+Shift+Enter để giao cho công ty · / để gõ lệnh';
+  'Enter gõ vào phiên đang chọn · Shift+Enter xuống dòng · Ctrl+Shift+Enter để giao cho công ty · /new mở phiên mới · /resume mở phiên đã lưu';
 
 /** Shown when Ctrl/Cmd+Shift+Enter is pressed while a herdr agent is the target. */
 const HERDR_COMPANY_NOTICE =
@@ -92,14 +73,11 @@ const HERDR_COMPANY_NOTICE =
 /** The Company button's tooltip while a herdr agent is the target. */
 const HERDR_COMPANY_TOOLTIP = 'Không giao cho công ty khi đang gửi tới agent herdr.';
 
-/** A row in the completion popup. */
-type CompletionRow =
-  | { kind: 'command'; command: OmpSlashCommand; insert: string }
-  | { kind: 'model'; completion: ArgumentCompletion; insert: string };
-
-/** The popup open over the box: a model catalog, or the omp sessions saved in this folder. */
-type ComposerPicker =
-  { kind: 'model'; command: OmpSlashCommand } | { kind: 'resume'; requestId: string };
+/** A row in the completion popup: an OMP command the first token completes to. */
+interface CompletionRow {
+  command: OmpSlashCommand;
+  insert: string;
+}
 
 export interface PromptComposerProps {
   client: CompanyClient;
@@ -146,8 +124,8 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const state = useCompanyState(client);
   const draft = state.prompt;
   const [notice, setNotice] = useState<string | null>(null);
-  /** The popup open over the box, if any. A model picker keeps the command that opened it. */
-  const [picker, setPicker] = useState<ComposerPicker | null>(null);
+  /** The request of an open `/resume` picker, or null when no picker is open. */
+  const [resumeRequest, setResumeRequest] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
   /** The request of a send from this box to a herdr agent whose verdict is still pending. */
   const [herdrRequest, setHerdrRequest] = useState<string | null>(null);
@@ -160,20 +138,17 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
   const selectedSession =
     state.selection.sessionId === null ? null : (state.sessions[state.selection.sessionId] ?? null);
-  const role: CompanyRole = selectedSession?.role ?? 'director';
   const selectedModel = selectedSession?.requestedModel ?? state.selectedModel;
   const herdrTarget = herdrAgentFor(state.selection.herdrPaneId, state.herdr.agents);
   const busy = draft.pendingSubmit !== null || herdrRequest !== null;
   const blocker = promptBlockReason(draft);
-  const modelCommand = picker?.kind === 'model' ? picker.command : null;
-  const resumeRequest = picker?.kind === 'resume' ? picker.requestId : null;
   const resumeView =
     resumeRequest === null
       ? null
       : resumeListView(resumeRequest, state.ompSessions, state.commandResults[resumeRequest]);
 
-  // The catalog is a request, not an assumption: without it `/model` cannot
-  // offer a single model. Asked once per mount, never polled.
+  // The catalog only names the model in the target line; without it the raw id is
+  // shown. Asked once per mount, never polled.
   useEffect(() => {
     if (state.modelCatalog.length === 0) client.requestModelCatalog();
   }, [client, state.modelCatalog.length]);
@@ -202,75 +177,17 @@ export function PromptComposer({ client }: PromptComposerProps) {
           modelEntry === null ? selectedModel : `${modelEntry.provider}/${modelEntry.model}`,
         );
 
-  const resolved = resolveSlashCommand(draft.text);
-
   const rows: readonly CompletionRow[] = useMemo(() => {
-    // OMP completes a command name only while the first token is being typed,
-    // and a model argument only for the one command that accepts arguments.
+    // OMP completes a command name only while the first token is being typed.
     const nameToken = commandCompletionQuery(draft.text);
-    if (nameToken !== null) {
-      return commandCompletions(nameToken).map((command) => ({
-        kind: 'command' as const,
-        command,
-        insert: `/${command.name}${command.allowArgs ? ' ' : ''}`,
-      }));
-    }
-    if (resolved === null || resolved.command.name !== 'switch') return [];
-    const prefix = slashArgumentPrefix(draft.text);
-    if (prefix === null) return [];
-    return modelCompletions(prefix, state.modelCatalog).map((completion) => ({
-      kind: 'model' as const,
-      completion,
-      insert: `/${resolved.command.name} ${completion.value}`,
+    if (nameToken === null) return [];
+    return commandCompletions(nameToken).map((command) => ({
+      command,
+      insert: `/${command.name}${command.allowArgs ? ' ' : ''}`,
     }));
-  }, [draft.text, resolved, state.modelCatalog]);
+  }, [draft.text]);
 
   const active = rows.length === 0 ? 0 : Math.min(highlight, rows.length - 1);
-
-  const applyModel = (entry: CompanyModelCatalogEntry, command: OmpSlashCommand) => {
-    const profiles = state.settings?.roleProfiles ?? {};
-    const thinking = thinkingForModel(entry.thinking, profiles[role]?.thinking);
-    if (thinking === undefined) {
-      setNotice(
-        `${entry.id} không khai báo mức suy nghĩ nào nên công ty chưa dùng được model này.`,
-      );
-      return;
-    }
-    client.setModel(entry.id);
-    const outcome = client.updateRoleProfiles(withRoleModel(profiles, role, entry.id, thinking));
-    setNotice(
-      outcome.ok
-        ? ompModelMessage(
-            command.name === 'switch' ? 'switched' : 'set',
-            `${entry.provider}/${entry.model}`,
-          )
-        : (outcome.message ?? outcome.errorCode ?? 'Thay đổi mô hình đã bị từ chối.'),
-    );
-  };
-
-  /**
-   * Run `/model` and `/switch`, the two commands this box can carry out on its
-   * own. Returns false when the draft is not one of them, which leaves the
-   * caller to send the text as an ordinary prompt.
-   */
-  const runModelCommand = (command: OmpSlashCommand, args: string): boolean => {
-    if (command.name !== 'model' && command.name !== 'switch') return false;
-    if (args === '') {
-      // OMP opens the Model Hub here and the picker for `/switch`; the company
-      // has neither dashboard, so both open the one catalog picker.
-      setPicker({ kind: 'model', command });
-      client.setDraftText('');
-      return true;
-    }
-    const entry = matchModelSelector(args, state.modelCatalog);
-    if (entry === null) {
-      setNotice(ompModelMessage('unknown', args));
-      return true;
-    }
-    applyModel(entry, command);
-    client.setDraftText('');
-    return true;
-  };
 
   /** Hand the draft to the client along a route, and show the reason when it does not go. */
   const send = (route: PromptRoute) => {
@@ -306,27 +223,39 @@ export function PromptComposer({ client }: PromptComposerProps) {
   };
 
   /**
-   * Every other OMP command runs in the selected session itself. The bridge
-   * hands prompts to OMP with command handling off, so `/compact` sent as a
-   * prompt would be text for the model; typed into the session's terminal it is
-   * the command, exactly as in OMP.
+   * Type the draft into the selected session's terminal, followed by Enter. The draft
+   * clears once the terminal takes the line; a refusal keeps it for another try.
    */
-  const runSessionCommand = () => {
+  const typeIntoSession = () => {
     if (selectedSession === null) {
-      setNotice('Chọn một phiên (bấm thẻ hoặc nút Phiên) để chạy lệnh này trong omp của phiên đó.');
+      setNotice(NO_SESSION_NOTICE);
       return;
     }
-    const outcome = client.writeTerminal(
-      selectedSession.id,
-      selectedSession.runEpoch,
-      `${draft.text.trim()}\r`,
-    );
+    const data = terminalLine(draft.text);
+    if (data === null) return;
+    const outcome = client.writeTerminal(selectedSession.id, selectedSession.runEpoch, data);
     if (!outcome.ok) {
-      setNotice('Terminal của phiên chưa mở; mở tab Bảng điều khiển của phiên rồi gửi lại.');
+      setNotice(
+        outcome.errorCode === 'terminal_not_attached'
+          ? TERMINAL_NOT_OPEN_NOTICE
+          : 'Chưa gõ được vào terminal của phiên.',
+      );
       return;
     }
-    setNotice(`Đã chạy ${draft.text.trim().split(/\s/)[0]} trong ${selectedSession.code}.`);
+    setNotice(null);
     client.setDraftText('');
+  };
+
+  /**
+   * `/new`, and the Phiên mới button's twin: a new omp chat in this folder, opened with no
+   * prompt. The draft clears with the command. A refusal is shown here.
+   */
+  const openNewChat = () => {
+    setNotice(null);
+    client.setDraftText('');
+    void startNewChat(client).then((verdict) => {
+      setNotice(failureNotice(verdict, 'Chưa mở được phiên mới.'));
+    });
   };
 
   /**
@@ -341,7 +270,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
     }
     client.setDraftText('');
     setNotice(null);
-    setPicker({ kind: 'resume', requestId: handle.requestId });
+    setResumeRequest(handle.requestId);
   };
 
   /**
@@ -349,7 +278,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
    * the board; a refusal, at send or in the verdict, is shown here.
    */
   const resumeEntry = (entry: OmpSessionEntry) => {
-    setPicker(null);
+    setResumeRequest(null);
     const handle = client.resumeSession(entry.file);
     if (!handle.ok) {
       setNotice(handle.message ?? handle.errorCode ?? 'Chưa mở được phiên.');
@@ -360,25 +289,18 @@ export function PromptComposer({ client }: PromptComposerProps) {
     });
   };
 
-  /** Enter and the Send button: the command the draft names decides what happens. */
+  /** Enter and the Send button: `/new` and `/resume` are the board's; every other line is typed. */
   const onSubmitKey = () => {
     const plan = planComposerCommand(draft.text);
     switch (plan.kind) {
       case 'new':
-        startNewChat(client);
-        setNotice(NEW_CHAT_NOTICE);
+        openNewChat();
         return;
       case 'resume':
         openResumePicker();
         return;
-      case 'command':
-        if (!runModelCommand(plan.resolved.command, plan.resolved.parsed.args)) {
-          if (herdrTarget === null) runSessionCommand();
-          else sendToHerdr(herdrTarget);
-        }
-        return;
       case 'prompt':
-        if (herdrTarget === null) send(chatRoute(selectedSession));
+        if (herdrTarget === null) typeIntoSession();
         else sendToHerdr(herdrTarget);
         return;
     }
@@ -393,9 +315,9 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     // While an IME is composing (Vietnamese Telex and similar), Enter only confirms a candidate.
     if (event.nativeEvent.isComposing) return;
-    if (picker !== null && event.key === 'Escape') {
+    if (resumeRequest !== null && event.key === 'Escape') {
       event.preventDefault();
-      setPicker(null);
+      setResumeRequest(null);
       return;
     }
     if (rows.length > 0) {
@@ -417,21 +339,14 @@ export function PromptComposer({ client }: PromptComposerProps) {
       }
     }
     // Ctrl/Cmd+Shift+Enter hands the prompt to the Company workflow. It never
-    // dispatches a slash command: the text is sent as the prompt.
+    // types into a terminal: the text is sent as the Company prompt.
     if (isCompanyChord(event)) {
       event.preventDefault();
       if (herdrTarget === null) send(companyRoute(selectedSession));
       else setNotice(HERDR_COMPANY_NOTICE);
       return;
     }
-    // OMP sends Ctrl+Enter down the follow-up path, which never dispatches a
-    // slash command (input-controller.ts:1851-1860).
-    if (isFollowUpChord(event)) {
-      event.preventDefault();
-      if (herdrTarget === null) send(followUpRoute(selectedSession));
-      else sendToHerdr(herdrTarget);
-      return;
-    }
+    // Enter, and Ctrl/Cmd+Enter, send the line. Shift+Enter starts a new line.
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       onSubmitKey();
@@ -440,7 +355,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
   const onChange = (event: ChangeEvent<HTMLTextAreaElement>) => {
     setHighlight(0);
-    setPicker(null);
+    setResumeRequest(null);
     setNotice(null);
     client.setDraftText(event.target.value);
   };
@@ -513,48 +428,9 @@ export function PromptComposer({ client }: PromptComposerProps) {
                   index === active ? 'company-selected text-text' : 'text-text-muted hover:bg-hover'
                 }`}
               >
-                {row.kind === 'command' ? (
-                  <>
-                    <span className="text-text">/{row.command.name}</span>
-                    {row.command.inlineHint && <span> {row.command.inlineHint}</span>}
-                    <span> &mdash; {row.command.description}</span>
-                  </>
-                ) : (
-                  <>
-                    <span className="text-text">{row.completion.label}</span>
-                    <span> &mdash; {row.completion.description}</span>
-                  </>
-                )}
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {modelCommand !== null && (
-        <ul
-          className="mb-1 max-h-40 overflow-auto rounded-[var(--company-radius-md)] border border-hairline bg-raised"
-          data-testid="model-picker"
-        >
-          {state.modelCatalog.length === 0 && (
-            <li className="px-2 py-1 text-2xs text-text-muted">
-              {state.modelCatalogLoaded ? 'Không có mô hình nào.' : 'Đang tải mô hình…'}
-            </li>
-          )}
-          {state.modelCatalog.map((entry) => (
-            <li key={entry.id}>
-              <button
-                type="button"
-                onClick={() => {
-                  applyModel(entry, modelCommand);
-                  setPicker(null);
-                }}
-                className="block w-full cursor-pointer px-2 py-1 text-left text-2xs text-text-muted hover:text-text"
-              >
-                {entry.provider}/{entry.model} &mdash;{' '}
-                {entry.credentialsConfigured
-                  ? entry.id
-                  : `${entry.id} (chưa có thông tin đăng nhập)`}
+                <span className="text-text">/{row.command.name}</span>
+                {row.command.inlineHint && <span> {row.command.inlineHint}</span>}
+                <span> &mdash; {row.command.description}</span>
               </button>
             </li>
           ))}
@@ -595,7 +471,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           size="sm"
           variant="default"
           className="shrink-0 whitespace-nowrap"
-          disabled={blocker !== null || busy || picker !== null || herdrTarget !== null}
+          disabled={blocker !== null || busy || resumeRequest !== null || herdrTarget !== null}
           title={herdrTarget === null ? undefined : HERDR_COMPANY_TOOLTIP}
           onClick={() => send(companyRoute(selectedSession))}
         >
@@ -605,7 +481,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           size="sm"
           variant="accent"
           className="shrink-0"
-          disabled={blocker !== null || busy || picker !== null}
+          disabled={blocker !== null || busy || resumeRequest !== null}
           onClick={onSubmitKey}
         >
           {busy ? 'Đang gửi...' : 'Gửi'}

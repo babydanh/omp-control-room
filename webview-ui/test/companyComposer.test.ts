@@ -6,16 +6,11 @@ import { TRANSPORT_DISCONNECTED_ERROR } from '../../core/src/messageDelivery.js'
 import type { ClientMessage } from '../../core/src/messages.js';
 import { CompanyClient } from '../src/company/companyClient.js';
 import { companyRoute, resumeListView, startNewChat } from '../src/company/composerRouting.js';
-import {
-  isCompanyChord,
-  isFollowUpChord,
-  type PromptRoute,
-} from '../src/company/promptSubmission.js';
-import { thinkingForModel } from '../src/company/roleProfiles.js';
+import { isCompanyChord, type PromptRoute } from '../src/company/promptSubmission.js';
 import type { MessageTransport } from '../src/transport/types.js';
 import { session, settings, snapshot, task } from './companyFixtures.js';
 
-/** What Enter sends when nothing is selected: a chat prompt that opens a new omp chat. */
+/** A chat prompt with no target: what the client sends when no session is named. */
 const NEW_CHAT: PromptRoute = { mode: 'chat', delivery: 'prompt', targetSessionId: null };
 
 interface FakeTransport {
@@ -185,15 +180,6 @@ describe('the prompt goes where the route says', () => {
   });
 });
 
-describe('switching a role to another model', () => {
-  it('keeps the thinking level only when the new model accepts it', () => {
-    expect(thinkingForModel(['low', 'high', 'xhigh'], 'high')).toBe('high');
-    // Keeping "max" for a model without it is what the server refused.
-    expect(thinkingForModel(['low', 'high'], 'max')).toBe('high');
-    expect(thinkingForModel([], 'high')).toBeUndefined();
-  });
-});
-
 describe('the composer chords', () => {
   // A keypress with no modifier held; each case names only the modifiers it changes.
   const base = { key: 'Enter', ctrlKey: false, metaKey: false, shiftKey: false };
@@ -205,31 +191,38 @@ describe('the composer chords', () => {
     expect(isCompanyChord({ ...base, shiftKey: true })).toBe(false);
     expect(isCompanyChord(base)).toBe(false);
   });
-
-  it('Ctrl/Cmd+Enter without Shift is the follow-up chord, never a bare Enter', () => {
-    expect(isFollowUpChord({ ...base, ctrlKey: true })).toBe(true);
-    expect(isFollowUpChord({ ...base, metaKey: true })).toBe(true);
-    expect(isFollowUpChord({ ...base, ctrlKey: true, shiftKey: true })).toBe(false);
-    expect(isFollowUpChord(base)).toBe(false);
-    expect(isFollowUpChord({ ...base, key: 'a', ctrlKey: true })).toBe(false);
-  });
 });
 
-describe('/new starts a new chat', () => {
-  it('clears the selection and the draft, so the next send opens a new omp chat', () => {
+describe('/new opens a chat with no prompt', () => {
+  const NEW_ID = randomUUID();
+
+  it('asks the server for a new chat and leaves the draft alone', () => {
     const { client, sent } = connectedClient();
-    client.select({ sessionId: randomUUID(), taskId: null });
-    client.setDraftText('/new');
+    client.setDraftText('draft kept');
+    sent.length = 0;
 
-    startNewChat(client);
+    void startNewChat(client);
 
-    expect(client.getState().selection.sessionId).toBeNull();
-    expect(client.getState().prompt.text).toBe('');
-    client.setDraftText('build the standings page');
-    client.submitPrompt(NEW_CHAT);
-    const message = sent.find((entry) => entry.type === 'companyPromptSubmit');
-    expect(message).toMatchObject({ prompt: { mode: 'chat', delivery: 'prompt' } });
-    expect(JSON.stringify(message)).not.toContain('targetSessionId');
+    expect(sent).toEqual([{ type: 'companyChatNew', requestId: expect.any(String) }]);
+    expect(client.getState().prompt.text).toBe('draft kept');
+  });
+
+  it('selects the session the server names in its verdict', async () => {
+    const { client, sent } = connectedClient();
+    sent.length = 0;
+
+    const opened = startNewChat(client);
+    const [request] = sent;
+    if (request?.type !== 'companyChatNew') throw new Error('companyChatNew was not sent');
+    client.accept({
+      type: 'companyCommandResult',
+      requestId: request.requestId,
+      ok: true,
+      sessionId: NEW_ID,
+    });
+
+    await expect(opened).resolves.toMatchObject({ ok: true, sessionId: NEW_ID });
+    expect(client.getState().selection.sessionId).toBe(NEW_ID);
   });
 });
 

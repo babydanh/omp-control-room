@@ -3,13 +3,13 @@ import { describe, expect, it } from 'vitest';
 import {
   chatRoute,
   companyRoute,
-  followUpRoute,
   formatSessionSize,
   formatUpdatedAt,
   planComposerCommand,
   resumeListView,
   resumeRowTitle,
   sendTargetLabel,
+  terminalLine,
 } from '../src/company/composerRouting.js';
 import { session } from './companyFixtures.js';
 
@@ -49,24 +49,6 @@ describe('Enter sends a chat prompt to the selected session', () => {
       }
     }
     expect(chatRoute(null).mode).toBe('chat');
-  });
-});
-
-describe('Ctrl/Cmd+Enter is a follow-up into the selected session', () => {
-  it('sends a follow_up to the selected session', () => {
-    expect(followUpRoute(IDLE_WORKER)).toEqual({
-      mode: 'chat',
-      delivery: 'follow_up',
-      targetSessionId: 'worker-1',
-    });
-  });
-
-  it('is a plain prompt when nothing is selected', () => {
-    expect(followUpRoute(null)).toEqual({
-      mode: 'chat',
-      delivery: 'prompt',
-      targetSessionId: null,
-    });
   });
 });
 
@@ -140,15 +122,9 @@ describe('the composer runs its own slash commands and passes the rest on', () =
     expect(planComposerCommand('/resume abc')).toEqual({ kind: 'resume' });
   });
 
-  it('sends every other resolved OMP command on to the selected session', () => {
-    expect(planComposerCommand('/model')).toMatchObject({
-      kind: 'command',
-      resolved: { command: { name: 'model' } },
-    });
-    expect(planComposerCommand('/compact focus on tests')).toMatchObject({
-      kind: 'command',
-      resolved: { command: { name: 'compact' }, parsed: { args: 'focus on tests' } },
-    });
+  it('types every other OMP command into the selected session, unchanged', () => {
+    expect(planComposerCommand('/model')).toEqual({ kind: 'prompt' });
+    expect(planComposerCommand('/compact focus on tests')).toEqual({ kind: 'prompt' });
   });
 
   it('keeps plain text, unknown commands and /new with arguments on the prompt path', () => {
@@ -156,6 +132,23 @@ describe('the composer runs its own slash commands and passes the rest on', () =
     expect(planComposerCommand('/unknown-command')).toEqual({ kind: 'prompt' });
     expect(planComposerCommand('/new extra')).toEqual({ kind: 'prompt' });
     expect(planComposerCommand('/')).toEqual({ kind: 'prompt' });
+  });
+});
+
+describe('a typed line becomes the bytes the terminal reads', () => {
+  it('adds Enter to a single line, and drops trailing blanks', () => {
+    expect(terminalLine('/compact')).toBe('/compact\r');
+    expect(terminalLine('/switch gpt   \n')).toBe('/switch gpt\r');
+  });
+
+  it('sends nothing for blank text', () => {
+    expect(terminalLine('')).toBeNull();
+    expect(terminalLine('   \n ')).toBeNull();
+  });
+
+  it('pastes several lines as one bracketed paste, then Enter', () => {
+    expect(terminalLine('first\nsecond')).toBe('\u001b[200~first\nsecond\u001b[201~\r');
+    expect(terminalLine('first\r\nsecond')).toBe('\u001b[200~first\nsecond\u001b[201~\r');
   });
 });
 

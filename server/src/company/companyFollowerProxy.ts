@@ -79,6 +79,7 @@ export const COMPANY_HOST_COMMANDS = {
   promptCancel: 'company.prompt.cancel',
   ompSessions: 'company.omp.sessions',
   resumeOmpSession: 'company.session.resume',
+  openNewChat: 'company.chat.new',
   sessionInfo: 'company.session.info',
   updateSettings: 'company.settings.update',
   terminalAttach: 'terminal.attach',
@@ -230,6 +231,7 @@ export const COMPANY_HOST_MUTATING_COMMANDS: Readonly<Record<string, true>> = {
   'company.session.control': true,
   'company.session.rename': true,
   'company.session.resume': true,
+  'company.chat.new': true,
   'company.settings.update': true,
   'terminal.attach': true,
   'terminal.write': true,
@@ -668,6 +670,14 @@ export class CompanyFollowerProxy {
       async resumeOmpSession(file: string): Promise<string> {
         if (typeof file !== 'string' || file.length === 0) throw hostError('command_invalid');
         const value = await proxy.send(COMPANY_HOST_COMMANDS.resumeOmpSession, { file });
+        if (!isFrameObject(value)) throw hostError('owner_protocol_error');
+        const sessionId = value['sessionId'];
+        if (typeof sessionId !== 'string') throw hostError('owner_protocol_error');
+        return sessionId;
+      },
+
+      async openNewChat(): Promise<string> {
+        const value = await proxy.send(COMPANY_HOST_COMMANDS.openNewChat);
         if (!isFrameObject(value)) throw hostError('owner_protocol_error');
         const sessionId = value['sessionId'];
         if (typeof sessionId !== 'string') throw hostError('owner_protocol_error');

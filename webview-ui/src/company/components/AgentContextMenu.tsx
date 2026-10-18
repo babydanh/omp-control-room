@@ -32,7 +32,6 @@ import {
   type SessionControlAction,
   type SessionMenuFacts,
   sessionMenuItems,
-  type SessionMenuTab,
   sessionNameProblem,
   sleepingMenuItems,
   taskCardMenuItems,
@@ -41,7 +40,7 @@ import { pendingQuestionSessionIds, sleepingName } from '../agentSidebarView.js'
 import { copyText } from '../clipboard.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
-import type { CompanyViewState } from '../companyState.js';
+import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
 import { DELETE_CONFIRM_DETAIL, REFUSED_NOTICE, sessionHoldsWork } from '../sessionActions.js';
 import { deleteSessionsInOrder, removalNotice } from '../sessionRemoval.js';
@@ -55,7 +54,7 @@ export interface AgentContextMenuProps {
   state: CompanyViewState;
   request: AgentMenuRequest;
   onClose: () => void;
-  onSessionTab: (sessionId: string, tab: SessionMenuTab) => void;
+  onSessionTab: (sessionId: string, tab: CompanyDrawerTab) => void;
   onHerdrTab: (paneId: string, tab: HerdrDrawerTab) => void;
   onSelectTask: (taskId: string) => void;
   onSelectSession: (sessionId: string) => void;

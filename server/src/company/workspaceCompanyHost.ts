@@ -759,6 +759,11 @@ export function createCompanyHostDispatcher(
         return { sessionId };
       }
 
+      case COMPANY_HOST_COMMANDS.openNewChat: {
+        const sessionId = await withCompanyCode(() => options.coordinator().openNewChat());
+        return { sessionId };
+      }
+
       case COMPANY_HOST_COMMANDS.updateSettings: {
         const roleProfiles = readObject(body, 'roleProfiles');
         for (const [role, profile] of Object.entries(roleProfiles)) {

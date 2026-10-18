@@ -7,7 +7,6 @@ import {
 } from '../src/company/constants.js';
 import {
   clampSidebarWidth,
-  isSidebarToggleKey,
   isTypingTarget,
   readSidebarPrefs,
   SIDEBAR_PREFS_KEY,
@@ -130,68 +129,6 @@ describe('toggleProjectKey', () => {
     toggleProjectKey(keys, 'herdr:r1');
 
     expect(keys).toEqual(['board:/a']);
-  });
-});
-
-describe('isSidebarToggleKey', () => {
-  it('accepts Ctrl+B and Cmd+B, in either case', () => {
-    expect(
-      isSidebarToggleKey({
-        key: 'b',
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-      }),
-    ).toBe(true);
-    expect(
-      isSidebarToggleKey({
-        key: 'B',
-        ctrlKey: false,
-        metaKey: true,
-        shiftKey: false,
-        altKey: false,
-      }),
-    ).toBe(true);
-  });
-
-  it('refuses the same key with Shift or Alt, a different key, or no modifier', () => {
-    expect(
-      isSidebarToggleKey({
-        key: 'b',
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: true,
-        altKey: false,
-      }),
-    ).toBe(false);
-    expect(
-      isSidebarToggleKey({
-        key: 'b',
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: false,
-        altKey: true,
-      }),
-    ).toBe(false);
-    expect(
-      isSidebarToggleKey({
-        key: 'n',
-        ctrlKey: true,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-      }),
-    ).toBe(false);
-    expect(
-      isSidebarToggleKey({
-        key: 'b',
-        ctrlKey: false,
-        metaKey: false,
-        shiftKey: false,
-        altKey: false,
-      }),
-    ).toBe(false);
   });
 });
 

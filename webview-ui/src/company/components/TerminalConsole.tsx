@@ -34,7 +34,7 @@ import { frameWrites } from '../terminalFrames.js';
  *    to, when the socket is down) and never queues them for a later reconnect.
  */
 
-/** A command the Lệnh tab asked this terminal to find. */
+/** A command the Hoạt động tab asked this terminal to find. */
 export interface TerminalJump {
   /** Bumped per request, so a second click on the same row still jumps. */
   seq: number;
@@ -56,7 +56,7 @@ export interface TerminalConsoleProps {
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
   onOverflow: () => void;
-  /** A command the Lệnh tab asked to find; answered once per seq. */
+  /** A command the Hoạt động tab asked to find; answered once per seq. */
   jump: TerminalJump | null;
   /** Called with the seq of a jump whose command is not in the buffer. */
   onJumpMissed: (seq: number) => void;
@@ -146,7 +146,7 @@ export function TerminalConsole({
     }
   }, [frames]);
 
-  // A command the Lệnh tab jumped to: once the snapshot is painted, find its line
+  // A command the Hoạt động tab jumped to: once the snapshot is painted, find its line
   // in the buffer, select it and scroll there. A miss is reported, never guessed.
   useEffect(() => {
     const terminal = terminalRef.current;

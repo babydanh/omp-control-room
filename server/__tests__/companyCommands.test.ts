@@ -84,6 +84,10 @@ function fakeCoordinator(overrides: Partial<CompanyCoordinator> = {}): {
       calls.push({ method: 'resumeOmpSession', args: [file] });
       return 'session-resumed';
     },
+    openNewChat: async () => {
+      calls.push({ method: 'openNewChat', args: [] });
+      return 'session-new-chat';
+    },
     updateSettings: track('updateSettings'),
     submitTaskResult: async () => {
       throw new Error('Native task results are not browser commands.');
@@ -174,6 +178,7 @@ function companyCommands(): Record<string, Record<string, unknown>> {
     companyPromptCancel: { requestId: randomUUID(), promptId: randomUUID() },
     companySessionResume: { requestId: randomUUID(), file: '/omp/saved.jsonl' },
     companyOmpSessionsRequest: { requestId: randomUUID() },
+    companyChatNew: { requestId: randomUUID() },
     companyAttachmentUpload: {
       requestId: randomUUID(),
       fileName: 'shot.png',
@@ -859,6 +864,14 @@ describe('company client commands', () => {
       sessions: [],
     });
     expect(calls).toContainEqual({ method: 'listOmpSessions', args: [] });
+  });
+
+  it('opens a new chat with no prompt and answers its board session id', async () => {
+    const requestId = randomUUID();
+    handleCompanyCommand({ type: 'companyChatNew', requestId }, send, context());
+    await vi.waitFor(() => expect(results()).toHaveLength(1));
+    expect(results()[0]).toMatchObject({ requestId, ok: true, sessionId: 'session-new-chat' });
+    expect(calls).toContainEqual({ method: 'openNewChat', args: [] });
   });
 
   it('refuses a prompt withdrawal or resume without a target before reaching the coordinator', async () => {

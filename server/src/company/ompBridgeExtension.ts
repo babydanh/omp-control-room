@@ -84,6 +84,7 @@ interface OmpContext {
   sessionManager?: {
     getSessionId?: () => string;
     getSessionFile?: () => string | undefined;
+    getBranch?: () => readonly unknown[];
   };
   /**
    * Installed 18.4.9 `ExtensionContext.models` (`ExtensionModelQuery`). `list()`
@@ -679,6 +680,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     // A half-collected body can never be completed once the link is gone, and
     // the host is about to be told its prompt failed.
     pendingPrompts.clear();
+    lastInsightKey = '';
     // An open question can never be answered once the link is gone. Settling it
     // ends the waiting tool call instead of hanging it: a lost channel is a
     // withdrawn question, never an unanswered one the model may assume.
@@ -2158,6 +2160,67 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     sendEvent({ k: 'quiescent', idle: quiescent(ctx) });
   }
 
+  // ── Session insight ───────────────────────────────────────
+  // Overview data the board shows for a running session: the todo list, the
+  // plan mode and the subagent rows. It is read from the live session branch
+  // and pushed when it changes. The periodic refresh catches changes that emit
+  // no event, such as todo edits made in the TUI or a /plan toggle.
+
+  /** Details of the in-flight `task` tool; cleared when the tool ends. */
+  let inflightTaskDetails: unknown;
+  let lastInsightKey = '';
+  let insightTimer: NodeJS.Timeout | undefined;
+  let insightRefresh: NodeJS.Timeout | undefined;
+
+  function buildInsight(ctx: OmpContext): Record<string, unknown> {
+    const entries = ctx.sessionManager?.getBranch?.() ?? [];
+    const todo = readBranchTodoPhases(entries);
+    return {
+      k: 'insight',
+      ...(todo === undefined ? {} : { todo: { phases: todo } }),
+      planMode: readBranchPlanMode(entries),
+      subagents: readTaskSubagents(inflightTaskDetails ?? readLatestTaskDetails(entries)),
+    };
+  }
+
+  function publishInsight(): void {
+    const ctx = sessionContext;
+    if (!ctx || !connected()) return;
+    let frame: Record<string, unknown>;
+    try {
+      frame = buildInsight(ctx);
+    } catch (error) {
+      report('warn', `session insight unavailable: ${describe(error)}`);
+      return;
+    }
+    const key = JSON.stringify(frame);
+    if (key === lastInsightKey) return;
+    lastInsightKey = key;
+    sendEvent(frame);
+  }
+
+  function scheduleInsight(): void {
+    if (insightTimer !== undefined) return;
+    insightTimer = setTimeout(() => {
+      insightTimer = undefined;
+      publishInsight();
+    }, INSIGHT_THROTTLE_MS);
+  }
+
+  function startInsightRefresh(): void {
+    if (insightRefresh !== undefined) return;
+    insightRefresh = setInterval(publishInsight, INSIGHT_REFRESH_MS);
+    insightRefresh.unref();
+  }
+
+  function stopInsightTimers(): void {
+    clearTimeout(insightTimer);
+    clearInterval(insightRefresh);
+    insightTimer = undefined;
+    insightRefresh = undefined;
+    inflightTaskDetails = undefined;
+  }
+
   // ── Handlers ──────────────────────────────────────────────
 
   function registerHandlers(): void {
@@ -2179,9 +2242,12 @@ export default function ompBridgeExtension(pi: OmpApi): void {
         nativeSessionPath: ctx.sessionManager?.getSessionFile?.(),
       });
       for (const replay of heldUntilSessionStart.splice(0)) replay();
+      startInsightRefresh();
+      scheduleInsight();
     });
     pi.on('session_shutdown', () => {
       stopIdleRecheck();
+      stopInsightTimers();
       activeContext = undefined;
       sessionContext = undefined;
       // The disconnect below fails these on the host; nothing is left to answer.
@@ -2199,6 +2265,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       flushText();
       const usage = readUsageRecord(isFrameObject(event) ? event['message'] : null);
       if (usage) sendEvent({ ...usage, nativeSessionId });
+      scheduleInsight();
     });
     pi.on('tool_execution_start', (event) => {
       const payload: Record<string, unknown> = isFrameObject(event) ? event : {};
@@ -2212,6 +2279,13 @@ export default function ompBridgeExtension(pi: OmpApi): void {
         ...(skill === undefined ? {} : { skill }),
       });
     });
+    pi.on('tool_execution_update', (event) => {
+      const payload = isFrameObject(event) ? event : {};
+      if (readString(payload, 'toolName') !== 'task') return;
+      const partial = payload['partialResult'];
+      inflightTaskDetails = isFrameObject(partial) ? partial['details'] : undefined;
+      scheduleInsight();
+    });
     pi.on('tool_execution_end', (event) => {
       const payload = isFrameObject(event) ? event : {};
       sendEvent({
@@ -2221,11 +2295,14 @@ export default function ompBridgeExtension(pi: OmpApi): void {
         toolName: readString(payload, 'toolName') ?? '',
         isError: payload['isError'] === true,
       });
+      if (readString(payload, 'toolName') === 'task') inflightTaskDetails = undefined;
+      scheduleInsight();
     });
     pi.on('agent_end', (_event, ctx) => {
       flushText();
       reportQuiescence(ctx);
       activeContext = undefined;
+      scheduleInsight();
     });
   }
 
@@ -2237,6 +2314,190 @@ export default function ompBridgeExtension(pi: OmpApi): void {
   }
   registerHandlers();
   connect();
+}
+
+// ── Session insight readers ───────────────────────────────
+// Pure readers over the session branch and the task tool details. Exported so
+// the shaping rules can be tested without a running OMP.
+
+const INSIGHT_THROTTLE_MS = 1000;
+const INSIGHT_REFRESH_MS = 2000;
+const INSIGHT_MAX_PHASES = 50;
+const INSIGHT_MAX_TASKS = 200;
+const INSIGHT_MAX_SUBAGENTS = 40;
+const INSIGHT_TEXT_CHARS = 400;
+/** Custom entry type omp writes when the user edits the todo list in the TUI. */
+const USER_TODO_EDIT_TYPE = 'user_todo_edit';
+
+export interface OmpInsightTask {
+  content: string;
+  status: string;
+  blocker?: string;
+}
+
+export interface OmpInsightPhase {
+  name: string;
+  tasks: OmpInsightTask[];
+}
+
+export interface OmpInsightSubagent {
+  id: string;
+  agent: string;
+  status: string;
+  task?: string;
+  currentTool?: string;
+  tokens: number;
+  contextTokens?: number;
+  contextWindow?: number;
+  costUsd?: number;
+  durationMs: number;
+  completionPercent?: number;
+}
+
+/** Clips free text to the bridge bound; the host applies its own caps. */
+function clipText(text: string): string {
+  return text.length > INSIGHT_TEXT_CHARS ? text.slice(0, INSIGHT_TEXT_CHARS) : text;
+}
+
+/** Phases from a todo snapshot; a malformed row is skipped, not fatal. */
+function readTodoPhases(value: unknown): OmpInsightPhase[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const phases: OmpInsightPhase[] = [];
+  for (const rawPhase of value.slice(0, INSIGHT_MAX_PHASES)) {
+    if (!isFrameObject(rawPhase)) continue;
+    const name = readString(rawPhase, 'name');
+    const rawTasks = rawPhase['tasks'];
+    if (name === undefined || !Array.isArray(rawTasks)) continue;
+    const tasks: OmpInsightTask[] = [];
+    for (const rawTask of rawTasks.slice(0, INSIGHT_MAX_TASKS)) {
+      if (!isFrameObject(rawTask)) continue;
+      const content = readString(rawTask, 'content');
+      const status = readString(rawTask, 'status');
+      if (content === undefined || status === undefined) continue;
+      const blocker = readString(rawTask, 'blocker');
+      tasks.push({
+        content: clipText(content),
+        status,
+        ...(blocker === undefined ? {} : { blocker: clipText(blocker) }),
+      });
+    }
+    phases.push({ name: clipText(name), tasks });
+  }
+  return phases;
+}
+
+/** The latest todo snapshot on the branch: a successful todo result or a user edit. */
+export function readBranchTodoPhases(entries: readonly unknown[]): OmpInsightPhase[] | undefined {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (!isFrameObject(entry)) continue;
+    if (entry['type'] === 'custom' && entry['customType'] === USER_TODO_EDIT_TYPE) {
+      const data = entry['data'];
+      const phases = readTodoPhases(isFrameObject(data) ? data['phases'] : undefined);
+      if (phases !== undefined) return phases;
+      continue;
+    }
+    if (entry['type'] !== 'message') continue;
+    const message = entry['message'];
+    if (
+      !isFrameObject(message) ||
+      message['role'] !== 'toolResult' ||
+      message['toolName'] !== 'todo' ||
+      message['isError'] === true
+    ) {
+      continue;
+    }
+    const details = message['details'];
+    const phases = readTodoPhases(isFrameObject(details) ? details['phases'] : undefined);
+    if (phases !== undefined) return phases;
+  }
+  return undefined;
+}
+
+/** The mode of the latest `mode_change` entry; `none` when no mode is active. */
+export function readBranchPlanMode(entries: readonly unknown[]): string {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (isFrameObject(entry) && entry['type'] === 'mode_change') {
+      return clipText(readString(entry, 'mode') ?? 'none');
+    }
+  }
+  return 'none';
+}
+
+/** Details of the latest `task` tool result on the branch. */
+export function readLatestTaskDetails(entries: readonly unknown[]): unknown {
+  for (let index = entries.length - 1; index >= 0; index--) {
+    const entry = entries[index];
+    if (!isFrameObject(entry) || entry['type'] !== 'message') continue;
+    const message = entry['message'];
+    if (
+      isFrameObject(message) &&
+      message['role'] === 'toolResult' &&
+      message['toolName'] === 'task'
+    ) {
+      return message['details'];
+    }
+  }
+  return undefined;
+}
+
+/** A finished subagent result carries no status string; derive it from the run. */
+function resultStatus(raw: Record<string, unknown>): string {
+  if (raw['aborted'] === true) return 'aborted';
+  return raw['exitCode'] === 0 ? 'completed' : 'failed';
+}
+
+function readSubagentRow(raw: unknown, fromResult: boolean): OmpInsightSubagent | undefined {
+  if (!isFrameObject(raw)) return undefined;
+  const status = fromResult ? resultStatus(raw) : readString(raw, 'status');
+  const id = readString(raw, 'id');
+  const agent = readString(raw, 'agent');
+  const tokens = readNumber(raw, 'tokens');
+  const durationMs = readNumber(raw, 'durationMs');
+  if (
+    id === undefined ||
+    agent === undefined ||
+    status === undefined ||
+    tokens === undefined ||
+    durationMs === undefined
+  ) {
+    return undefined;
+  }
+  const task = readString(raw, 'task');
+  const currentTool = readString(raw, 'currentTool');
+  const contextTokens = readNumber(raw, 'contextTokens');
+  const contextWindow = readNumber(raw, 'contextWindow');
+  const costUsd = readNumber(raw, 'cost');
+  const completionPercent = readNumber(raw, 'completionPercent');
+  return {
+    id: clipText(id),
+    agent: clipText(agent),
+    status,
+    tokens,
+    durationMs,
+    ...(task === undefined ? {} : { task: clipText(task) }),
+    ...(currentTool === undefined ? {} : { currentTool: clipText(currentTool) }),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(costUsd === undefined ? {} : { costUsd }),
+    ...(completionPercent === undefined ? {} : { completionPercent }),
+  };
+}
+
+/** Subagent rows from task tool details: live progress rows, else the finished results. */
+export function readTaskSubagents(details: unknown): OmpInsightSubagent[] {
+  if (!isFrameObject(details)) return [];
+  const progress = details['progress'];
+  const fromResult = !Array.isArray(progress);
+  const list = fromResult ? details['results'] : progress;
+  if (!Array.isArray(list)) return [];
+  const rows: OmpInsightSubagent[] = [];
+  for (const raw of list.slice(0, INSIGHT_MAX_SUBAGENTS)) {
+    const row = readSubagentRow(raw, fromResult);
+    if (row !== undefined) rows.push(row);
+  }
+  return rows;
 }
 
 /** Finite, positive environment number, or the supplied default. */

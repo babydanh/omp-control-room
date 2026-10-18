@@ -10,14 +10,16 @@
  * does not blank mid-motion.
  */
 
-import type {
-  CSSProperties,
-  Dispatch,
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent,
-  SetStateAction,
+import {
+  type CSSProperties,
+  type Dispatch,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type SetStateAction,
+  useEffect,
+  useRef,
+  useState,
 } from 'react';
-import { useEffect, useRef, useState } from 'react';
 
 import {
   type AgentMenuRequest,
@@ -29,7 +31,7 @@ import { sleepingName } from '../agentSidebarView.js';
 import type { BoardCard, BoardLane } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
-import type { CompanyViewState } from '../companyState.js';
+import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { COMPANY_DRAWER_MIN_WIDTH_PX, COMPANY_DRAWER_SLIDE_MS } from '../constants.js';
 import {
   clampDrawerWidth,
@@ -37,6 +39,7 @@ import {
   drawerWidthForKey,
   drawerWidthLimit,
   effectiveDrawerWidth,
+  rememberedOrChatWidth,
 } from '../drawerPrefs.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
 import { drawerPresentation, layoutModeFor } from '../layoutMode.js';
@@ -47,6 +50,7 @@ import {
   type OpenedSubject,
   pendingContract,
 } from '../selection.js';
+import { terminalPolicy } from '../sessionActions.js';
 import { contractStatusLabel, sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
 import { useViewportWidth } from '../useLayoutMode.js';
 import { WrapLinesContext } from '../wrapLines.js';
@@ -72,9 +76,12 @@ export interface DetailDrawerProps {
   onOpenArtifact: (artifactId: string) => void;
   onClearArtifact: () => void;
   onClose: () => void;
-  /** The herdr panel's tab, held by the board so a menu can open it on Thông tin. */
+  /** The herdr panel's tab, held by the board so a menu can open it on Chi tiết. */
   herdrTab: HerdrDrawerTab;
   onHerdrTab: (tab: HerdrDrawerTab) => void;
+  /** The tab the reader last picked for a session; null until they pick one. */
+  sessionTab: CompanyDrawerTab | null;
+  onSessionTab: (tab: CompanyDrawerTab) => void;
   /** The drawer's remembered shape: its width and whether it is maximized. */
   prefs: DrawerPrefs;
   onPrefsChange: Dispatch<SetStateAction<DrawerPrefs>>;
@@ -120,7 +127,19 @@ export function DetailDrawer({
 
   if (retained === null) return null;
   const heading = headingFor(rest.state, retained, rest.lanes);
-  const width = effectiveDrawerWidth(prefs.width, boardWidth);
+  const liveSessionId =
+    retained.kind === 'session'
+      ? retained.sessionId
+      : retained.kind === 'task'
+        ? (rest.state.tasks[retained.taskId]?.sessionId ?? null)
+        : null;
+  const liveChat =
+    liveSessionId !== null &&
+    terminalPolicy(rest.state.sessions[liveSessionId]?.status ?? '').attach;
+  const width = effectiveDrawerWidth(
+    rememberedOrChatWidth(prefs.width, liveChat, boardWidth),
+    boardWidth,
+  );
   const limit = drawerWidthLimit(boardWidth);
   const presentation = drawerPresentation(mode, prefs.maximized);
   const wrapToggleShown =
@@ -265,6 +284,8 @@ function DrawerContent(props: ContentProps) {
           client={client}
           state={state}
           lanes={lanes}
+          sessionTab={props.sessionTab}
+          onSessionTab={props.onSessionTab}
           taskId={subject.taskId}
           onOpenArtifact={onOpenArtifact}
           onOpenQuestion={(questionId) => onOpen({ kind: 'question', questionId })}
@@ -278,6 +299,8 @@ function DrawerContent(props: ContentProps) {
           state={state}
           sessionId={subject.sessionId}
           taskId={null}
+          rememberedTab={props.sessionTab}
+          onRememberTab={props.onSessionTab}
           onOpenArtifact={onOpenArtifact}
           onOpenQuestion={(questionId) => onOpen({ kind: 'question', questionId })}
         />
@@ -403,6 +426,8 @@ function TaskSubject({
   state,
   lanes,
   taskId,
+  sessionTab,
+  onSessionTab,
   onOpenArtifact,
   onOpenQuestion,
 }: {
@@ -410,6 +435,8 @@ function TaskSubject({
   state: CompanyViewState;
   lanes: readonly BoardLane[];
   taskId: string;
+  sessionTab: CompanyDrawerTab | null;
+  onSessionTab: (tab: CompanyDrawerTab) => void;
   onOpenArtifact: (artifactId: string) => void;
   onOpenQuestion: (questionId: string) => void;
 }) {
@@ -422,18 +449,18 @@ function TaskSubject({
   const sessionId = card?.session?.id ?? null;
   if (sessionId !== null) {
     return (
-      <>
-        {card && <TaskFacts card={card} />}
-        <SessionBody
-          key={`${sessionId}:${taskId}`}
-          client={client}
-          state={state}
-          sessionId={sessionId}
-          taskId={taskId}
-          onOpenArtifact={onOpenArtifact}
-          onOpenQuestion={onOpenQuestion}
-        />
-      </>
+      <SessionBody
+        key={`${sessionId}:${taskId}`}
+        client={client}
+        state={state}
+        sessionId={sessionId}
+        taskId={taskId}
+        tasksHeader={card ? <TaskFacts card={card} /> : undefined}
+        rememberedTab={sessionTab}
+        onRememberTab={onSessionTab}
+        onOpenArtifact={onOpenArtifact}
+        onOpenQuestion={onOpenQuestion}
+      />
     );
   }
 

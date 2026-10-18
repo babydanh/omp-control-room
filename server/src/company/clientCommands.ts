@@ -208,6 +208,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyPromptCancel',
   'companyOmpSessionsRequest',
   'companySessionResume',
+  'companyChatNew',
   'companySettingsUpdate',
   'companyModelCatalogRequest',
   'companyArtifactRequest',
@@ -394,6 +395,9 @@ async function run(
         return;
       case 'companySessionResume':
         await resumeOmpSession(msg, requestId, services, send);
+        return;
+      case 'companyChatNew':
+        await chatNew(requestId, services, send);
         return;
       case 'companySettingsUpdate':
         await updateSettings(msg, requestId, services, send);
@@ -734,6 +738,15 @@ async function resumeOmpSession(
     return;
   }
   const sessionId = await services.coordinator.resumeOmpSession(file);
+  ok(send, requestId, undefined, sessionId);
+}
+
+async function chatNew(
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const sessionId = await services.coordinator.openNewChat();
   ok(send, requestId, undefined, sessionId);
 }
 

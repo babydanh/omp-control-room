@@ -56,7 +56,7 @@ import type {
   Task,
   UsageRecord,
 } from '../../../core/src/company.js';
-import type { ServerMessage } from '../../../core/src/messages.js';
+import type { CompanySessionInsight, ServerMessage } from '../../../core/src/messages.js';
 import type { CompanyTerminalGateway } from './clientCommands.js';
 import type {
   CompanySessionAction,
@@ -68,6 +68,7 @@ import type {
   WorkspaceChangeInput,
 } from './companyCoordinator.js';
 import {
+  CHAT_REOPEN_WITHOUT_FILE_MESSAGE,
   CompanyOwnershipError,
   type CompanySessionControlResult,
   WorkspaceCompanyCoordinator,
@@ -130,6 +131,7 @@ import type {
   SupervisedRunRecord,
 } from './processSupervisor.js';
 import { ProcessSupervisor } from './processSupervisor.js';
+import { parseSessionInsight } from './sessionInsight.js';
 import type { PrerequisiteCheck } from './verificationRunner.js';
 
 /**
@@ -1594,13 +1596,19 @@ class NativeCompanyRuntime implements CompanyRuntime {
     }
     const session = this.state().sessions[run.sessionId];
     if (session !== undefined && !['archived', 'stopped'].includes(session.status)) {
+      const crashed: CompanySession = {
+        ...session,
+        status: 'crashed',
+        lastUsedAt: this.deps.now(),
+      };
+      delete crashed.insight;
       await this.commit(
         [
           {
             entity: 'session',
             op: 'put',
             id: session.id,
-            value: { ...session, status: 'crashed', lastUsedAt: this.deps.now() },
+            value: crashed,
           },
         ],
         this.state().revision,
@@ -1654,6 +1662,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
     }
     if (kind === 'usage') {
       this.onUsageEvent(run, event);
+      return;
+    }
+    if (kind === 'insight') {
+      this.onInsightEvent(run, event);
       return;
     }
     if (kind === 'quiescent') {
@@ -1784,6 +1796,46 @@ class NativeCompanyRuntime implements CompanyRuntime {
         if (this.usageCommits.get(sessionId) === next) this.usageCommits.delete(sessionId);
       });
     this.usageCommits.set(sessionId, next);
+  }
+
+  /** Insight commits per session, chained so each one re-reads the latest state. */
+  private readonly insightCommits = new Map<string, Promise<void>>();
+
+  private onInsightEvent(run: ActiveRun, event: Record<string, unknown>): void {
+    const insight = parseSessionInsight(event, this.deps.now());
+    if (insight === undefined) return;
+    this.enqueueInsightCommit(run.sessionId, run.runEpoch, insight);
+  }
+
+  private enqueueInsightCommit(
+    sessionId: string,
+    runEpoch: number,
+    insight: CompanySessionInsight,
+  ): void {
+    const previous = this.insightCommits.get(sessionId) ?? Promise.resolve();
+    const next = previous
+      .catch(() => undefined)
+      .then(async () => {
+        const session = this.state().sessions[sessionId];
+        if (session === undefined || session.runEpoch !== runEpoch) return;
+        // `observedAt` moves on every push, so compare the content alone.
+        const unchanged =
+          session.insight !== undefined &&
+          JSON.stringify({ ...session.insight, observedAt: '' }) ===
+            JSON.stringify({ ...insight, observedAt: '' });
+        if (unchanged) return;
+        await this.commit(
+          [{ entity: 'session', op: 'put', id: sessionId, value: { ...session, insight } }],
+          this.state().revision,
+        );
+      })
+      .catch((error: unknown) => {
+        console.error('[Company] could not persist a session insight.', error);
+      })
+      .finally(() => {
+        if (this.insightCommits.get(sessionId) === next) this.insightCommits.delete(sessionId);
+      });
+    this.insightCommits.set(sessionId, next);
   }
 
   /** The identity a native child is deduped and leased by. */
@@ -2236,6 +2288,13 @@ class NativeCompanyRuntime implements CompanyRuntime {
       return { status: 'archived' };
     }
     const run = this.runs.get(session.id);
+    if (
+      run === undefined &&
+      session.role === 'chat' &&
+      (action === 'resume' || action === 'restart')
+    ) {
+      return this.reopenChatSession(session);
+    }
     if (run === undefined || run.runEpoch !== runEpoch) {
       // No live process to act on: the truthful answer is the record's own
       // status, not a fabricated success.
@@ -2298,6 +2357,24 @@ class NativeCompanyRuntime implements CompanyRuntime {
       return this.startResult(restarted);
     }
     return { status: session.status };
+  }
+
+  /**
+   * Start a parked, stopped or crashed chat session again on the omp file its record
+   * holds, under the same session record. Runs inside the coordinator's lock, so it
+   * persists nothing: the coordinator commits the status from the returned result.
+   */
+  private async reopenChatSession(session: CompanySession): Promise<CompanySessionControlResult> {
+    if (session.nativeSessionPath === undefined) {
+      throw new CompanyError('session_reopen_refused', CHAT_REOPEN_WITHOUT_FILE_MESSAGE);
+    }
+    const reopened = await this.startRun(session, undefined, false, session.nativeSessionPath);
+    this.pool.upsert({ ...session, status: 'starting' });
+    this.logEntry(session.id, session.runEpoch, {
+      kind: 'state',
+      text: 'Phiên đã được mở lại từ file phiên OMP đã lưu.',
+    });
+    return this.startResult(reopened);
   }
 
   /**

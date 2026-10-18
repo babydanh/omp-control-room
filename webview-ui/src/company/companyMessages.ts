@@ -115,6 +115,11 @@ export function sessionControl(
   return { type: 'companySessionControl', requestId, sessionId, runEpoch, action };
 }
 
+/** Open a new omp chat session in the folder. No prompt is sent; the verdict carries the id. */
+export function chatNew(requestId: string): ClientMessage {
+  return { type: 'companyChatNew', requestId };
+}
+
 /** Withdraw a prompt no Contract holds yet; the server stops and deletes what planned it. */
 export function promptCancel(requestId: string, promptId: string): ClientMessage {
   return { type: 'companyPromptCancel', requestId, promptId };

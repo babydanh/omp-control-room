@@ -63,13 +63,13 @@ test('Company plans, asks, waits for approval, then verifies the approved work',
 
     await done.getByRole('button', { name: /result\.txt/ }).click();
     const drawer = company.getByTestId('session-drawer');
-    // A task opens the drawer on its session: Log, Lệnh (commands and the
-    // evidence they left), Terminal, Câu hỏi, Chi phí, Báo cáo.
-    await drawer.getByRole('button', { name: 'Lệnh', exact: true }).click();
+    // A task opens the drawer on its activity. The attempt's check sits under
+    // Việc; the report sits under Chi tiết.
+    await drawer.getByRole('button', { name: 'Việc', exact: true }).click();
     // The declared check ran against the real workspace and exited zero.
     await expect(drawer).toContainText('mã thoát 0');
 
-    await drawer.getByRole('button', { name: 'Báo cáo', exact: true }).click();
+    await drawer.getByRole('button', { name: 'Chi tiết', exact: true }).click();
     // The report names the file that changed and says the criterion passed.
     await expect(drawer).toContainText('result.txt');
     await expect(drawer).toContainText(/passed/i);

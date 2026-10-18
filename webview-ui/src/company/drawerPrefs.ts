@@ -79,6 +79,21 @@ export function effectiveDrawerWidth(width: number | null, boardWidth: number): 
 }
 
 /**
+ * The width a drawer asks for before the board clamps it: the width the reader last
+ * dragged to. Until they drag, a live chat session asks for the widest the board
+ * leaves room for, since its terminal is where the work happens; anything else
+ * keeps the default share.
+ */
+export function rememberedOrChatWidth(
+  width: number | null,
+  liveChat: boolean,
+  boardWidth: number,
+): number | null {
+  if (width !== null || !liveChat) return width;
+  return drawerWidthLimit(boardWidth);
+}
+
+/**
  * The width after a key press on the resize handle, or null when the handle does
  * not answer that key. The handle sits on the drawer's left edge, so Left widens
  * it; Home and End take the minimum and the largest width the board leaves room for.

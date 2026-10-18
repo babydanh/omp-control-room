@@ -98,6 +98,26 @@ const INTERRUPTIBLE_STATUSES: Partial<Record<CompanySession['status'], true>> = 
   busy: true,
   waiting_input: true,
 };
+/** Statuses in which a session holds no live process; resume or restart reopens it on its own omp file. */
+const REOPENABLE_STATUSES: Partial<Record<CompanySession['status'], true>> = {
+  parked: true,
+  stopped: true,
+  crashed: true,
+};
+/** Refusal for a parked or ended chat session whose record never learned its omp file. */
+export const CHAT_REOPEN_WITHOUT_FILE_MESSAGE =
+  'Phiên chat này chưa có file phiên OMP nên không thể mở lại.';
+/** What one resume of an OMP file does, decided under the write queue. */
+type OmpResumeTarget =
+  | { readonly kind: 'focus'; readonly sessionId: string }
+  | { readonly kind: 'open' }
+  | {
+      readonly kind: 'reopen';
+      readonly sessionId: string;
+      readonly action: 'resume' | 'restart';
+      readonly runEpoch: number;
+    };
+
 /** Statuses in which a session is starting, running or winding down; it cannot be deleted yet. */
 const DELETE_BLOCKING_STATUSES: Partial<Record<CompanySession['status'], true>> = {
   starting: true,
@@ -1149,6 +1169,7 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
       }
       this.assertActionAvailable(current, action);
       if (action === 'archive') this.assertArchivable(current);
+      if (action === 'resume' || action === 'restart') this.assertReopenable(current);
 
       // Prove ownership BEFORE anything durable moves. After this point the
       // epoch has already advanced and attempts are already interrupted, so a
@@ -1290,13 +1311,29 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
   }
 
   /**
-   * Open a saved OMP session as a chat session. A file a board session already
-   * holds answers with that session, and concurrent opens of one file are refused.
+   * Open a plain omp chat session in this workspace with no prompt. Nothing is
+   * sent: the session waits for the user's first message. Returns its board id.
+   */
+  async openNewChat(): Promise<string> {
+    // The guards run under the queue. The effect runs after it, because it
+    // commits through this same queue and would wait on itself inside it.
+    await this.serialize(async () => {
+      this.assertOwner();
+      this.assertStarted();
+    });
+    const session = await this.options.effects.openChatSession({});
+    return session.id;
+  }
+
+  /**
+   * Open a saved OMP session as a chat session. A live chat session that holds
+   * the file answers with that session. A parked or ended chat session reopens
+   * on its own file under the same record. Concurrent opens of one file are refused.
    */
   async resumeOmpSession(file: string): Promise<string> {
     const resolved = await assertOmpSessionFileIn(file, ompSessionDirForFolder(this.workspaceRoot));
     const key = comparableOmpPath(resolved);
-    const open = await this.serialize(async () => {
+    const target = await this.serialize(async (): Promise<OmpResumeTarget> => {
       this.assertOwner();
       this.assertStarted();
       if (this.resumingOmpFiles.has(key)) {
@@ -1307,13 +1344,35 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
           session.nativeSessionPath !== undefined &&
           comparableOmpPath(session.nativeSessionPath) === key,
       );
-      if (existing === undefined) this.resumingOmpFiles.add(key);
-      return existing;
+      if (existing === undefined) {
+        this.resumingOmpFiles.add(key);
+        return { kind: 'open' };
+      }
+      if (existing.status === 'archived') {
+        throw new CompanyError(
+          'omp_session_archived',
+          'Phiên OMP này thuộc một phiên đã lưu trữ nên không thể mở lại.',
+        );
+      }
+      if (existing.role !== 'chat' || REOPENABLE_STATUSES[existing.status] !== true) {
+        return { kind: 'focus', sessionId: existing.id };
+      }
+      this.resumingOmpFiles.add(key);
+      return {
+        kind: 'reopen',
+        sessionId: existing.id,
+        action: existing.status === 'parked' ? 'resume' : 'restart',
+        runEpoch: existing.runEpoch,
+      };
     });
-    if (open !== undefined) return open.id;
+    if (target.kind === 'focus') return target.sessionId;
     try {
-      const session = await this.options.effects.openChatSession({ resumeFile: resolved });
-      return session.id;
+      if (target.kind === 'open') {
+        const session = await this.options.effects.openChatSession({ resumeFile: resolved });
+        return session.id;
+      }
+      await this.controlSession(target.sessionId, target.action, target.runEpoch);
+      return target.sessionId;
     } finally {
       this.resumingOmpFiles.delete(key);
     }
@@ -1513,6 +1572,7 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
       ...(session.contextSnapshot === undefined
         ? {}
         : { contextSnapshot: projectContextSnapshot(session.contextSnapshot) }),
+      ...(session.insight === undefined ? {} : { insight: session.insight }),
     }));
     return {
       revision: this.state.revision,
@@ -1732,6 +1792,17 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
         'Một phiên đang có câu hỏi chờ trả lời không thể được lưu trữ.',
       );
     }
+  }
+
+  /**
+   * A parked or ended chat session reopens only on the omp file its record holds.
+   * Without one a run would start blank under the old session's name, so the
+   * refusal comes before any durable change.
+   */
+  private assertReopenable(session: CompanySession): void {
+    if (session.role !== 'chat' || session.nativeSessionPath !== undefined) return;
+    if (REOPENABLE_STATUSES[session.status] !== true) return;
+    throw new CompanyError('session_reopen_refused', CHAT_REOPEN_WITHOUT_FILE_MESSAGE);
   }
 
   private makeEvent(changes: CompanyEvent['changes']): CompanyEvent {

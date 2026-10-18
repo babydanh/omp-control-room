@@ -4,23 +4,22 @@ import { defaultDrawerTab, shortModelName } from '../src/company/drawerView.js';
 
 describe('defaultDrawerTab', () => {
   it.each(['starting', 'idle', 'busy', 'waiting_input'])(
-    'opens a live session (%s) on its terminal',
+    'opens a live session (%s) on its terminal, whatever was remembered',
     (status) => {
-      expect(defaultDrawerTab(status)).toBe('terminal');
+      expect(defaultDrawerTab(status, 'details')).toBe('terminal');
+      expect(defaultDrawerTab(status, null)).toBe('terminal');
     },
   );
 
-  it.each([
-    'parked',
-    'pausing',
-    'paused',
-    'stopping',
-    'stopped',
-    'crashed',
-    'archived',
-    'some-unknown-status',
-  ])('opens a session that is not live (%s) on its log', (status) => {
-    expect(defaultDrawerTab(status)).toBe('log');
+  it.each(['parked', 'pausing', 'paused', 'stopping', 'stopped', 'crashed', 'archived'])(
+    'opens a session that is not live (%s) on the tab remembered for it',
+    (status) => {
+      expect(defaultDrawerTab(status, 'tasks')).toBe('tasks');
+    },
+  );
+
+  it('opens a session that is not live on activity when nothing was remembered', () => {
+    expect(defaultDrawerTab('some-unknown-status', null)).toBe('activity');
   });
 });
 

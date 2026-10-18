@@ -8,25 +8,15 @@
 
 import { describe, expect, it } from 'vitest';
 
-import type { CompanyModelCatalogEntry } from '../../core/src/company.js';
 import {
   commandCompletionQuery,
   commandCompletions,
   lookupSlashCommand,
-  matchModelSelector,
-  modelCompletions,
   OMP_SLASH_COMMANDS,
   ompModelMessage,
   parseSlashCommand,
   resolveSlashCommand,
-  slashArgumentPrefix,
 } from '../src/company/slashCommands.js';
-import { catalogEntry } from './companyFixtures.js';
-
-const CATALOG: CompanyModelCatalogEntry[] = [
-  catalogEntry({ id: 'stealthy', provider: 'stealthy', model: 'bunnies', credentialsConfigured: true }),
-  catalogEntry({ id: 'gpt-bunnies', provider: 'openai', model: 'gpt-bunnies', credentialsConfigured: false }),
-];
 
 describe('the transcribed OMP vocabulary', () => {
   it('covers every registry file, not just the ones the box uses', () => {
@@ -78,12 +68,6 @@ describe('parsing a slash invocation (OMP helpers/parse.ts:22-36)', () => {
     expect(parseSlashCommand('/')).toBeNull();
     expect(parseSlashCommand('')).toBeNull();
   });
-
-  it('reads the argument tail raw, with no separator yielding none', () => {
-    expect(slashArgumentPrefix('/switch')).toBeNull();
-    expect(slashArgumentPrefix('/switch ')).toBe('');
-    expect(slashArgumentPrefix('/switch ste')).toBe('ste');
-  });
 });
 
 describe('the accept gate (OMP builtin-registry.ts:133-140)', () => {
@@ -132,29 +116,6 @@ describe('name completion (OMP completes only the first token)', () => {
     expect(commandCompletions('mo').map((command) => command.name)).toContain('model');
     expect(commandCompletions('models').map((command) => command.name)).toContain('model');
     expect(commandCompletions('zzz')).toEqual([]);
-  });
-});
-
-describe('model argument completion (OMP builtin-completions.ts:202-227)', () => {
-  it('substring-matches provider/id and appends a trailing space', () => {
-    // OMP iterates the model list and keeps its order (builtin-completions.ts:219-224).
-    expect(modelCompletions('bunn', CATALOG)).toEqual([
-      { value: 'stealthy/bunnies ', label: 'stealthy/bunnies', description: 'stealthy' },
-      { value: 'openai/gpt-bunnies ', label: 'openai/gpt-bunnies', description: 'gpt-bunnies (no credentials)' },
-    ]);
-  });
-
-  it('carries a :suffix through untouched and stops at a space', () => {
-    expect(modelCompletions('bunnies:high', CATALOG)[0]?.value).toBe('stealthy/bunnies:high ');
-    expect(modelCompletions('bunnies ', CATALOG)).toEqual([]);
-  });
-
-  it('resolves only what the server can prove, and refuses the rest', () => {
-    expect(matchModelSelector('stealthy/bunnies', CATALOG)?.id).toBe('stealthy');
-    expect(matchModelSelector('gpt-bunnies', CATALOG)?.id).toBe('gpt-bunnies');
-    expect(matchModelSelector('bunnies', CATALOG)).toBeNull();
-    expect(matchModelSelector('stealthy/bunnies:high', CATALOG)?.id).toBe('stealthy');
-    expect(matchModelSelector('', CATALOG)).toBeNull();
   });
 });
 

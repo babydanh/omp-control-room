@@ -81,6 +81,8 @@ export interface AgentRow {
   taskLine: string | null;
   /** What the session is doing, in one line; null when nothing is known yet. */
   summary: SummaryLine | null;
+  /** The session the row's progress line reads from; absent for a session of a folder the board is not showing. */
+  progressSource?: Pick<CompanySessionSummary, 'status' | 'insight'>;
 }
 
 export interface AgentRoleGroup {
@@ -234,6 +236,7 @@ function agentRow(
       taskLine,
       now,
     }),
+    progressSource: session,
   };
 }
 

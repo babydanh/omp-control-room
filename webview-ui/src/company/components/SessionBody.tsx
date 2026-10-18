@@ -1,46 +1,24 @@
 /**
- * SessionBody: one managed session in detail -- its identity and controls, then
- * a tab per kind of thing the user checks: the log, the commands it ran, the
- * live terminal, the questions it raised, what it cost, and what it produced.
+ * SessionBody: one managed session in detail, as four tabs: its activity timeline,
+ * its live terminal, the work it holds, and its details. A pending question sits
+ * above the tabs as a banner, because it blocks the work whatever tab is open.
  *
- * The header distinguishes what was REQUESTED from what is EFFECTIVE, and
- * "parked" from "paused": those are different states with different recovery
- * costs, and blurring them would send the user restarting a session that was
- * only waiting to be collected.
- *
- * Controls are the server's to accept, so the row is derived from the session's
- * reported status (sessionActions.ts) rather than always shown. Only the
- * selected tab is mounted, so ten parked sessions do not mean ten terminals.
+ * Only the selected tab is mounted, so ten parked sessions do not mean ten terminals.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
-import type { Attempt } from '../../../../core/src/company.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
+import { SESSION_DRAWER_TABS } from '../drawerTabPrefs.js';
 import { defaultDrawerTab } from '../drawerView.js';
-import { questionProvenance } from '../questionProvenance.js';
-import { companyRoleLabel } from '../roleProfiles.js';
 import { terminalPolicy } from '../sessionActions.js';
-import { DRAWER_TAB_LABELS, sessionStatusLabel } from '../statusLabels.js';
-import { contextOccupancy } from '../usageView.js';
-import { SessionInfoTab } from './AgentInfoTab.js';
-import { QuestionPanel } from './QuestionPanel.js';
-import { CommandsTab, SessionLogTab } from './SessionLog.js';
-import { TaskReport } from './TaskReport.js';
+import { DRAWER_TAB_LABELS } from '../statusLabels.js';
+import { SessionDetailsTab } from './SessionDetailsTab.js';
+import { SessionActivityTab } from './SessionLog.js';
+import { SessionTasksTab } from './SessionTasksTab.js';
 import type { TerminalJump } from './TerminalConsole.js';
 import { TerminalTab } from './TerminalTab.js';
-import { UsageTab } from './UsageTab.js';
-
-const TABS = [
-  'log',
-  'commands',
-  'terminal',
-  'questions',
-  'usage',
-  'report',
-  'info',
-] as const satisfies readonly CompanyDrawerTab[];
 
 /** The drawer tab in use for one session: the reader's pick, or a request from the shared selection. */
 interface TabChoice {
@@ -57,6 +35,11 @@ export interface SessionBodyProps {
   sessionId: string;
   /** The task the drawer is about, or null when it shows the session itself. */
   taskId: string | null;
+  /** The task's own facts, drawn at the top of the Việc tab when the drawer is about a task. */
+  tasksHeader?: ReactNode;
+  /** The tab the reader last picked for a session; null until they pick one. */
+  rememberedTab: CompanyDrawerTab | null;
+  onRememberTab: (tab: CompanyDrawerTab) => void;
   onOpenArtifact: (artifactId: string) => void;
   onOpenQuestion: (questionId: string) => void;
 }
@@ -66,11 +49,14 @@ export function SessionBody({
   state,
   sessionId,
   taskId,
+  tasksHeader,
+  rememberedTab,
+  onRememberTab,
   onOpenArtifact,
   onOpenQuestion,
 }: SessionBodyProps) {
   // The reader's tab for this session. A tab a card or bubble asked for, carried in the
-  // shared selection, overrides a pick; a new session starts on the drawer's default.
+  // shared selection, overrides a pick; a new session starts on the remembered tab.
   const [stored, setStored] = useState<TabChoice>(() => ({
     sessionId,
     selection: state.selection,
@@ -90,7 +76,7 @@ export function SessionBody({
     client.requestSessionLog(sessionId);
   }, [client, sessionId]);
 
-  // The command a Lệnh tab row asked the terminal to find. It is keyed to the session,
+  // The command an activity row asked the terminal to find. It is keyed to the session,
   // so a jump made for one session never lands in another.
   const [jumpState, setJumpState] = useState<{ sessionId: string; jump: TerminalJump } | null>(
     null,
@@ -102,7 +88,7 @@ export function SessionBody({
     return <p className="p-2 text-2xs text-text-muted">Phiên đó không còn thuộc công ty nữa.</p>;
   }
 
-  const tab = choice.tab ?? defaultDrawerTab(session.status);
+  const tab = choice.tab ?? defaultDrawerTab(session.status, rememberedTab);
   const live = terminalPolicy(session.status).attach;
   const jump = jumpState?.sessionId === sessionId ? jumpState.jump : null;
   const onJump = (command: string, output: string | null) => {
@@ -110,44 +96,42 @@ export function SessionBody({
     setJumpState({ sessionId, jump: { seq: jumpCounter.current, command, output } });
     setStored({ ...choice, tab: 'terminal' });
   };
-
-  const attempts: Attempt[] = Object.values(state.attempts).filter((attempt) =>
-    taskId === null ? attempt.sessionId === sessionId : attempt.taskId === taskId,
-  );
-  const pendingCount = Object.values(state.questions).filter(
+  const pending = Object.values(state.questions).filter(
     (question) => question.sessionId === sessionId && question.status === 'pending',
-  ).length;
-  const occupancy = contextOccupancy(session);
-  const reportTaskId = taskId ?? session.activeTaskId ?? null;
+  );
+  const pickTab = (entry: CompanyDrawerTab) => {
+    setStored({ ...choice, tab: entry });
+    onRememberTab(entry);
+  };
 
   return (
     <section className="flex min-h-0 flex-1 flex-col" data-testid="session-body">
-      <div className="px-3 py-2.5">
-        <p className="text-2xs text-text-muted">
-          {session.code} &middot; {sessionStatusLabel(session.status)} &middot;{' '}
-          {companyRoleLabel(session.role)} &middot; kỳ {session.runEpoch}
-        </p>
-        <p className="text-2xs text-text-muted">
-          đã yêu cầu {session.requestedModel}
-          {session.effectiveModel && session.effectiveModel !== session.requestedModel && (
-            <span className="text-warning"> &middot; đang chạy {session.effectiveModel}</span>
-          )}
-          {occupancy !== null && <> &middot; ngữ cảnh {Math.round(occupancy * 100)}%</>}
-        </p>
-        {session.nativeSessionId && (
-          <p className="truncate text-2xs text-text-muted" title={session.nativeSessionPath ?? ''}>
-            phiên gốc {session.nativeSessionId}
-            {session.nativeSessionPath ? ` (${session.nativeSessionPath})` : ''}
-          </p>
-        )}
-      </div>
+      {pending.length > 0 && (
+        <div
+          role="status"
+          className="mx-2 mt-2 flex items-center justify-between gap-2 rounded-(--company-radius-md) bg-warning/12 p-2 text-2xs"
+        >
+          <span className="min-w-0 truncate text-text">
+            {pending.length === 1
+              ? `Đang chờ bạn trả lời: ${pending[0].title}`
+              : `Đang chờ bạn trả lời ${pending.length} câu hỏi`}
+          </span>
+          <button
+            type="button"
+            onClick={() => onOpenQuestion(pending[0].id)}
+            className="shrink-0 cursor-pointer text-accent-bright"
+          >
+            Trả lời
+          </button>
+        </div>
+      )}
 
-      <nav aria-label="Phần của phiên" className="flex flex-wrap gap-1 px-2">
-        {TABS.map((entry) => (
+      <nav aria-label="Phần của phiên" className="flex flex-wrap gap-1 px-2 pt-2">
+        {SESSION_DRAWER_TABS.map((entry) => (
           <button
             key={entry}
             type="button"
-            onClick={() => setStored({ ...choice, tab: entry })}
+            onClick={() => pickTab(entry)}
             aria-current={tab === entry}
             className={`relative cursor-pointer px-2 py-1.5 text-2xs ${
               tab === entry
@@ -156,23 +140,13 @@ export function SessionBody({
             }`}
           >
             {DRAWER_TAB_LABELS[entry]}
-            {entry === 'questions' && pendingCount > 0 ? ` (${pendingCount})` : ''}
           </button>
         ))}
       </nav>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-        {tab === 'log' && (
-          <SessionLogTab
-            state={state}
-            sessionId={sessionId}
-            taskId={taskId}
-            attempts={attempts}
-            onOpenArtifact={onOpenArtifact}
-          />
-        )}
-        {tab === 'commands' && (
-          <CommandsTab
+        {tab === 'activity' && (
+          <SessionActivityTab
             state={state}
             sessionId={sessionId}
             taskId={taskId}
@@ -183,75 +157,25 @@ export function SessionBody({
         {tab === 'terminal' && (
           <TerminalTab client={client} state={state} sessionId={sessionId} jump={jump} />
         )}
-        {tab === 'questions' && (
-          <SessionQuestions
+        {tab === 'tasks' && (
+          <SessionTasksTab
+            state={state}
+            sessionId={sessionId}
+            taskId={taskId}
+            header={tasksHeader}
+            onOpenArtifact={onOpenArtifact}
+          />
+        )}
+        {tab === 'details' && (
+          <SessionDetailsTab
             client={client}
             state={state}
             sessionId={sessionId}
-            onOpenQuestion={onOpenQuestion}
+            taskId={taskId}
+            onOpenArtifact={onOpenArtifact}
           />
         )}
-        {tab === 'usage' && <UsageTab client={client} sessionId={sessionId} />}
-        {tab === 'report' && (
-          <TaskReport state={state} taskId={reportTaskId} onOpenArtifact={onOpenArtifact} />
-        )}
-        {tab === 'info' && <SessionInfoTab client={client} state={state} sessionId={sessionId} />}
       </div>
     </section>
-  );
-}
-
-/**
- * The session's questions. A pending one is answered in its own drawer, opened
- * from here, so the answer box exists once on screen; resolved ones stay here
- * as history.
- */
-function SessionQuestions({
-  client,
-  state,
-  sessionId,
-  onOpenQuestion,
-}: {
-  client: CompanyClient;
-  state: CompanyViewState;
-  sessionId: string;
-  onOpenQuestion: (questionId: string) => void;
-}) {
-  const questions = Object.values(state.questions).filter(
-    (question) => question.sessionId === sessionId,
-  );
-  if (questions.length === 0) {
-    return <p className="p-2 text-2xs text-text-muted">Không có câu hỏi nào từ phiên này.</p>;
-  }
-  return (
-    <div className="flex flex-col gap-2 p-2">
-      {questions
-        .filter((question) => question.status === 'pending')
-        .map((question) => (
-          <div
-            key={question.id}
-            className="flex items-center justify-between gap-2 rounded-(--company-radius-md) bg-warning/12 p-2 text-2xs"
-          >
-            <span className="min-w-0 truncate text-text">{question.title}</span>
-            <button
-              type="button"
-              onClick={() => onOpenQuestion(question.id)}
-              className="shrink-0 cursor-pointer text-accent-bright"
-            >
-              Trả lời
-            </button>
-          </div>
-        ))}
-      {questions
-        .filter((question) => question.status !== 'pending')
-        .map((question) => (
-          <QuestionPanel
-            key={question.id}
-            question={question}
-            onAnswer={(input) => client.answerQuestion(input)}
-            provenance={questionProvenance(state.streams[question.sessionId])}
-          />
-        ))}
-    </div>
   );
 }

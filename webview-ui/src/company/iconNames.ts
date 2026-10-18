@@ -38,4 +38,7 @@ export type IconName =
   | 'chevron-up'
   | 'git-branch'
   | 'send'
-  | 'alert-triangle';
+  | 'alert-triangle'
+  | 'search'
+  | 'keyboard'
+  | 'users';

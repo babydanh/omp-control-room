@@ -1,6 +1,6 @@
 /**
  * agentInfoView: an agent's info (folders, model, tools, MCP servers, skills, usage)
- * as the Thông tin tab shows it, as pure data.
+ * as the Chi tiết tab shows it, as pure data.
  *
  * Every grouping, ordering, and "what is unknown" line the tab prints is decided
  * here, so the rules are tested without a DOM. A section the source did not report

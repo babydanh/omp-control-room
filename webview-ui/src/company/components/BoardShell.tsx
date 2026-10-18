@@ -10,11 +10,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { type AgentMenuRequest, type SessionMenuTab } from '../agentMenu.js';
+import type { AgentMenuRequest } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
+import { buildPaletteItems, type PaletteActionId, type PaletteItem } from '../commandPalette.js';
 import type { CompanyClient } from '../companyClient.js';
+import type { CompanyDrawerTab } from '../companyState.js';
+import { startNewChat } from '../composerRouting.js';
 import { COMPANY_RAIL_WIDTH_PX } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
+import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
 import type { HerdrDrawerTab } from '../herdrView.js';
 import { sidebarPresentation } from '../layoutMode.js';
 import { ledgerStore } from '../ledger/ledgerClient.js';
@@ -28,9 +32,9 @@ import {
   selectionForSession,
   selectionForTask,
 } from '../selection.js';
+import { findShortcutId, matchShortcut } from '../shortcuts.js';
 import {
   clampSidebarWidth,
-  isSidebarToggleKey,
   isTypingTarget,
   readSidebarPrefs,
   type SidebarPrefs,
@@ -45,9 +49,11 @@ import { AgentRail } from './AgentRail.js';
 import { AgentSidebar } from './AgentSidebar.js';
 import { AttentionBar } from './AttentionBar.js';
 import { BoardTopBar } from './BoardTopBar.js';
+import { CommandPalette } from './CommandPalette.js';
 import { CompanyBoard } from './CompanyBoard.js';
 import { DetailDrawer } from './DetailDrawer.js';
 import { PromptComposer } from './PromptComposer.js';
+import { ShortcutsSheet } from './ShortcutsSheet.js';
 import { TerminalPreviewProvider } from './TerminalPreview.js';
 
 /**
@@ -61,6 +67,9 @@ function browserStorage(): Storage | null {
     return null;
   }
 }
+
+/** Apple platforms show ⌘ in shortcut hints; elsewhere the key names stay. */
+const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 export interface BoardShellProps {
   client: CompanyClient;
@@ -80,6 +89,10 @@ export function BoardShell({ client }: BoardShellProps) {
   const [drawerPrefs, setDrawerPrefs] = useState<DrawerPrefs>(() =>
     readDrawerPrefs(browserStorage()),
   );
+  const [tabPrefs, setTabPrefs] = useState(() => readDrawerTabPrefs(browserStorage()));
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [folderRequest, setFolderRequest] = useState(0);
   const [herdrTab, setHerdrTab] = useState<HerdrDrawerTab>('screen');
   const [menu, setMenu] = useState<(AgentMenuRequest & { token: number }) | null>(null);
   // Each open gets a new token, so the menu remounts and starts from its first view.
@@ -108,6 +121,18 @@ export function BoardShell({ client }: BoardShellProps) {
     () => Object.values(state.questions).filter((question) => question.status === 'pending'),
     [state.questions],
   );
+
+  // The palette's rows are built only while it is open: file listings can run long.
+  const paletteItems = useMemo(
+    () =>
+      paletteOpen
+        ? buildPaletteItems(state, {
+            activePath: state.settings?.workspacePath ?? null,
+            folders: (state.workspaces ?? []).map((entry) => entry.path),
+          })
+        : [],
+    [paletteOpen, state],
+  );
   const subject: DrawerSubject | null = drawerSubjectFor(state, opened);
   // A phone's full-screen drawer that has an input of its own (a herdr pane, a sleeping
   // pane, a question) takes the place of the board composer, so each screen has one input.
@@ -134,13 +159,27 @@ export function BoardShell({ client }: BoardShellProps) {
     writeDrawerPrefs(browserStorage(), drawerPrefs);
   }, [drawerPrefs]);
 
-  // Ctrl+B / ⌘B toggles the sidebar, except where the key is text or a shell key.
+  useEffect(() => {
+    writeDrawerTabPrefs(browserStorage(), tabPrefs);
+  }, [tabPrefs]);
+
+  // Board shortcuts come from the registry. Keys pressed inside a terminal belong to the
+  // shell, so none of them fire there; the palette key still works from a text field.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent): void {
-      if (!isSidebarToggleKey(event)) return;
-      if (isTypingTarget(event.target instanceof HTMLElement ? event.target : null)) return;
-      event.preventDefault();
-      setPrefs((current) => ({ ...current, collapsed: !current.collapsed }));
+      const target = event.target instanceof HTMLElement ? event.target : null;
+      if (target?.closest('.xterm')) return;
+      const id = findShortcutId(event, { typing: isTypingTarget(target), groups: ['board'] });
+      if (id === 'board.palette') {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+      } else if (id === 'board.sidebar') {
+        event.preventDefault();
+        setPrefs((current) => ({ ...current, collapsed: !current.collapsed }));
+      } else if (id === 'board.help') {
+        event.preventDefault();
+        setShortcutsOpen(true);
+      }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
@@ -171,7 +210,7 @@ export function BoardShell({ client }: BoardShellProps) {
   useEffect(() => {
     if (mode !== 'phone' || !sheetOpen) return;
     function onKey(event: KeyboardEvent): void {
-      if (event.key === 'Escape') setSheetOpen(false);
+      if (matchShortcut('board.escape', event)) setSheetOpen(false);
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -201,8 +240,9 @@ export function BoardShell({ client }: BoardShellProps) {
     dismissSheet();
   }
 
-  function openSessionTab(sessionId: string, tab: SessionMenuTab): void {
+  function openSessionTab(sessionId: string, tab: CompanyDrawerTab): void {
     setOpened(null);
+    setTabPrefs({ session: tab });
     client.select({ ...selectionForSession(state, sessionId), tab });
   }
 
@@ -230,6 +270,60 @@ export function BoardShell({ client }: BoardShellProps) {
     setDrawerPrefs((current) => ({ ...current, maximized: !current.maximized }));
   }
 
+  /** Runs the row the palette chose: select a session, task or agent, switch folder, or act. */
+  function runPaletteItem(item: PaletteItem): void {
+    setPaletteOpen(false);
+    const target = item.target;
+    switch (target.kind) {
+      case 'action':
+        runPaletteAction(target.action);
+        return;
+      case 'session':
+        selectSession(target.sessionId);
+        return;
+      case 'task':
+        selectTask(target.taskId);
+        return;
+      case 'herdr':
+        openHerdr(target.paneId);
+        return;
+      case 'sleeping':
+        openSleeping(target.paneId);
+        return;
+      case 'folder':
+        if (target.path !== state.settings?.workspacePath) client.openWorkspace(target.path);
+        return;
+      case 'file':
+        // The Tệp drawer opens; the chosen path is not yet passed to its browser.
+        setOpened({ kind: 'files' });
+        return;
+    }
+  }
+
+  function runPaletteAction(action: PaletteActionId): void {
+    switch (action) {
+      case 'new-chat':
+        startNewChat(client);
+        return;
+      case 'open-agents':
+        if (mode === 'phone') setSheetOpen(true);
+        else setPrefs((current) => ({ ...current, collapsed: false }));
+        return;
+      case 'open-git-tree':
+        if (ledger.privileged === true) setLedgerOpen(true);
+        return;
+      case 'open-files':
+        setOpened({ kind: 'files' });
+        return;
+      case 'open-folder':
+        setFolderRequest((count) => count + 1);
+        return;
+      case 'show-shortcuts':
+        setShortcutsOpen(true);
+        return;
+    }
+  }
+
   const boardAreaRef = useRef<HTMLDivElement>(null);
 
   return (
@@ -248,6 +342,10 @@ export function BoardShell({ client }: BoardShellProps) {
         ledgerAvailable={ledger.privileged === true}
         ledgerOpen={ledgerShown}
         onToggleLedger={() => setLedgerOpen((open) => !open)}
+        isMac={IS_MAC}
+        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
+        folderRequest={folderRequest}
       />
       {state.needsSnapshot && (
         <p className="bg-warning/12 px-3 py-1.5 text-2xs text-warning">
@@ -355,6 +453,8 @@ export function BoardShell({ client }: BoardShellProps) {
             onClose={closeDrawer}
             herdrTab={herdrTab}
             onHerdrTab={setHerdrTab}
+            sessionTab={tabPrefs.session}
+            onSessionTab={(tab) => setTabPrefs({ session: tab })}
             prefs={drawerPrefs}
             onPrefsChange={setDrawerPrefs}
             sidebarWidth={sidebarFootprint}
@@ -363,6 +463,14 @@ export function BoardShell({ client }: BoardShellProps) {
         </div>
       </TerminalPreviewProvider>
       {!composerHidden && <PromptComposer client={client} />}
+      {paletteOpen && (
+        <CommandPalette
+          items={paletteItems}
+          onRun={runPaletteItem}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
+      {shortcutsOpen && <ShortcutsSheet isMac={IS_MAC} onClose={() => setShortcutsOpen(false)} />}
       {menu !== null && (
         <AgentContextMenu
           key={menu.token}

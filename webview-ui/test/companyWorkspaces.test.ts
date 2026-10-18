@@ -102,7 +102,7 @@ function stateWithFolders(workspaces: CompanyWorkspaceEntry[] | null): CompanyVi
   return {
     ...stateFrom({ sessions: [session({ id: 's1' })] }),
     workspaces,
-    selection: { sessionId: 's1', taskId: null, tab: 'log', herdrPaneId: null },
+    selection: { sessionId: 's1', taskId: null, tab: 'activity', herdrPaneId: null },
     terminals: { s1: terminal('s1') },
     ompSessions: { requestId: 'r1', folder: DU_AN, sessions: [] },
     openingSessionId: 's2',

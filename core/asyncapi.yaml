@@ -204,6 +204,7 @@ components:
         - $ref: '#/components/schemas/CompanySessionLogRequestMessage'
         - $ref: '#/components/schemas/CompanySessionRenameMessage'
         - $ref: '#/components/schemas/CompanySessionInfoRequestMessage'
+        - $ref: '#/components/schemas/CompanyChatNewMessage'
         # Ledger (privileged; read-only views and one message command)
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
@@ -2131,6 +2132,8 @@ components:
         handoffArtifactId:
           type: string
           format: uuid
+        insight:
+          $ref: '#/components/schemas/CompanySessionInsight'
 
     CompanySessionSummary:
       type: object
@@ -2166,6 +2169,107 @@ components:
         contextSnapshot:
           type: object
           additionalProperties: true
+        insight:
+          $ref: '#/components/schemas/CompanySessionInsight'
+
+    CompanySessionInsight:
+      type: object
+      additionalProperties: false
+      required: [observedAt, planMode, subagents]
+      properties:
+        observedAt:
+          type: string
+          format: date-time
+        todo:
+          $ref: '#/components/schemas/CompanySessionTodo'
+        planMode:
+          type: string
+          maxLength: 64
+        subagents:
+          type: array
+          maxItems: 40
+          items:
+            $ref: '#/components/schemas/CompanySessionSubagent'
+
+    CompanySessionTodo:
+      type: object
+      additionalProperties: false
+      required: [phases]
+      properties:
+        phases:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/CompanySessionTodoPhase'
+
+    CompanySessionTodoPhase:
+      type: object
+      additionalProperties: false
+      required: [name, tasks]
+      properties:
+        name:
+          type: string
+          maxLength: 200
+        tasks:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/CompanySessionTodoTask'
+
+    CompanySessionTodoTask:
+      type: object
+      additionalProperties: false
+      required: [content, status]
+      properties:
+        content:
+          type: string
+          maxLength: 400
+        status:
+          type: string
+          enum: [pending, in_progress, completed, abandoned, blocked]
+        blocker:
+          type: string
+          maxLength: 400
+
+    CompanySessionSubagent:
+      type: object
+      additionalProperties: false
+      required: [id, agent, status, tokens, durationMs]
+      properties:
+        id:
+          type: string
+          maxLength: 200
+        agent:
+          type: string
+          maxLength: 80
+        status:
+          type: string
+          enum: [pending, running, completed, failed, aborted]
+        task:
+          type: string
+          maxLength: 400
+        currentTool:
+          type: string
+          maxLength: 80
+        tokens:
+          type: number
+          minimum: 0
+        contextTokens:
+          type: number
+          minimum: 0
+        contextWindow:
+          type: number
+          minimum: 0
+        costUsd:
+          type: number
+          minimum: 0
+        durationMs:
+          type: number
+          minimum: 0
+        completionPercent:
+          type: number
+          minimum: 0
+          maximum: 100
 
     QuestionOption:
       type: object
@@ -3222,6 +3326,20 @@ components:
         action:
           type: string
           enum: [pause, resume, kill, restart, archive, interrupt, delete]
+
+    CompanyChatNewMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      description: >-
+        Open a new omp chat session in the workspace folder. Its process starts in a terminal the
+        board can show at once; no prompt is sent. The command result carries the new session id.
+      properties:
+        type:
+          const: companyChatNew
+        requestId:
+          type: string
+          format: uuid
 
     CompanyPromptCancelMessage:
       type: object
