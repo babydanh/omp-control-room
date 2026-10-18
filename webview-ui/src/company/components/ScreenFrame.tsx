@@ -6,8 +6,9 @@
  */
 
 import type { ReactNode } from 'react';
-import { useContext } from 'react';
+import { useContext, useRef } from 'react';
 
+import { useStickToBottom } from '../useStickToBottom.js';
 import { WrapLinesContext } from '../wrapLines.js';
 
 export function ScreenFrame({ children }: { children: ReactNode }) {
@@ -18,6 +19,24 @@ export function ScreenFrame({ children }: { children: ReactNode }) {
       className={`flex min-h-0 min-w-0 flex-1 flex-col justify-end rounded-(--company-radius-md) bg-well p-3 ${clip}`}
     >
       {children}
+    </div>
+  );
+}
+
+/**
+ * PinnedScreenFrame: a screen frame that scrolls. It opens on its newest line and stays
+ * there until the reader scrolls up. A screen shorter than the frame sits at the bottom.
+ */
+export function PinnedScreenFrame({ children }: { children: ReactNode }) {
+  const scroller = useRef<HTMLDivElement>(null);
+  const onScroll = useStickToBottom(scroller);
+  return (
+    <div
+      ref={scroller}
+      onScroll={onScroll}
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-auto overscroll-contain rounded-(--company-radius-md) bg-well p-3"
+    >
+      <div className="mt-auto flex min-w-0 flex-col">{children}</div>
     </div>
   );
 }

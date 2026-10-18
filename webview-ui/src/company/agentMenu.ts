@@ -18,6 +18,7 @@
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 
 import type { HerdrDrawerTab } from './herdrView.js';
+import type { IconName } from './iconNames.js';
 import { HOLDS_WORK_REASON, sessionControls, type SessionControlSet } from './sessionActions.js';
 
 /** A drawer header that opened the menu: whether the drawer is currently maximized. */
@@ -76,6 +77,8 @@ export interface AgentMenuItem {
   /** Stable within one menu: a React key, and how tests find an item. */
   id: string;
   label: string;
+  /** The glyph drawn before the label, from the board's icon set. */
+  icon: IconName;
   action: AgentMenuAction;
   /** Shown dimmed and never run. Only a refused delete is ever disabled. */
   disabled: boolean;
@@ -112,17 +115,19 @@ const CONTROL_ITEMS: ReadonlyArray<{
   flag: keyof SessionControlSet;
   action: SessionControlAction;
   label: string;
+  icon: IconName;
 }> = [
-  { flag: 'interrupt', action: 'interrupt', label: 'Dừng lượt' },
-  { flag: 'pause', action: 'pause', label: 'Tạm dừng' },
-  { flag: 'resume', action: 'resume', label: 'Tiếp tục' },
-  { flag: 'restart', action: 'restart', label: 'Khởi động lại' },
-  { flag: 'archive', action: 'archive', label: 'Lưu trữ' },
+  { flag: 'interrupt', action: 'interrupt', label: 'Dừng lượt', icon: 'stop' },
+  { flag: 'pause', action: 'pause', label: 'Tạm dừng', icon: 'pause' },
+  { flag: 'resume', action: 'resume', label: 'Tiếp tục', icon: 'play' },
+  { flag: 'restart', action: 'restart', label: 'Khởi động lại', icon: 'refresh' },
+  { flag: 'archive', action: 'archive', label: 'Lưu trữ', icon: 'archive' },
 ];
 
 interface ItemSpec {
   id: string;
   label: string;
+  icon: IconName;
   action: AgentMenuAction;
   danger?: boolean;
   startsGroup?: boolean;
@@ -135,6 +140,7 @@ function item(spec: ItemSpec): AgentMenuItem {
   return {
     id: spec.id,
     label: spec.label,
+    icon: spec.icon,
     action: spec.action,
     disabled: spec.disabled ?? false,
     hint: spec.hint ?? null,
@@ -156,6 +162,7 @@ function maximizeItems(drawer: DrawerView | null): AgentMenuItem[] {
     item({
       id: 'maximize',
       label: drawer.maximized ? 'Thu nhỏ' : 'Phóng to',
+      icon: drawer.maximized ? 'minimize' : 'maximize',
       action: { kind: 'maximize' },
     }),
   ];
@@ -174,6 +181,7 @@ export function sessionMenuItems(
     item({
       id: `control-${control.action}`,
       label: control.label,
+      icon: control.icon,
       action: { kind: 'control', action: control.action },
     }),
   );
@@ -182,6 +190,7 @@ export function sessionMenuItems(
         item({
           id: 'control-kill',
           label: 'Tắt phiên',
+          icon: 'power',
           action: { kind: 'control', action: 'kill' },
           danger: true,
         }),
@@ -190,6 +199,7 @@ export function sessionMenuItems(
   const deleteItem = item({
     id: 'control-delete',
     label: 'Xoá phiên…',
+    icon: 'trash',
     action: { kind: 'control', action: 'delete' },
     danger: true,
     disabled: session.holdsWork,
@@ -197,11 +207,17 @@ export function sessionMenuItems(
     title: session.holdsWork ? HOLDS_WORK_REASON : null,
   });
   return [
-    item({ id: 'info', label: 'Xem thông tin', action: { kind: 'sessionTab', tab: 'info' } }),
-    item({ id: 'rename', label: 'Đổi tên…', action: { kind: 'rename' } }),
+    item({
+      id: 'info',
+      label: 'Xem thông tin',
+      icon: 'info',
+      action: { kind: 'sessionTab', tab: 'info' },
+    }),
+    item({ id: 'rename', label: 'Đổi tên…', icon: 'pencil', action: { kind: 'rename' } }),
     item({
       id: 'copy-code',
       label: 'Sao chép mã phiên',
+      icon: 'copy',
       action: { kind: 'copy', what: 'sessionCode' },
     }),
     ...(session.cwd === null
@@ -210,19 +226,27 @@ export function sessionMenuItems(
           item({
             id: 'copy-cwd',
             label: 'Sao chép thư mục làm việc',
+            icon: 'folder',
             action: { kind: 'copy', what: 'cwd' },
           }),
         ]),
     ...withGroupStart([
-      item({ id: 'tab-log', label: 'Mở Log', action: { kind: 'sessionTab', tab: 'log' } }),
+      item({
+        id: 'tab-log',
+        label: 'Mở Log',
+        icon: 'file-text',
+        action: { kind: 'sessionTab', tab: 'log' },
+      }),
       item({
         id: 'tab-commands',
         label: 'Mở Lệnh',
+        icon: 'list',
         action: { kind: 'sessionTab', tab: 'commands' },
       }),
       item({
         id: 'tab-terminal',
         label: 'Mở Terminal',
+        icon: 'terminal',
         action: { kind: 'sessionTab', tab: 'terminal' },
       }),
       ...maximizeItems(drawer),
@@ -235,19 +259,21 @@ export function sessionMenuItems(
 /** The task items a task card offers: its detail, its contract when it has one, its code. */
 function taskMenuItems(task: TaskMenuFacts): AgentMenuItem[] {
   return [
-    item({ id: 'task-open', label: 'Xem chi tiết', action: { kind: 'openTask' } }),
+    item({ id: 'task-open', label: 'Xem chi tiết', icon: 'eye', action: { kind: 'openTask' } }),
     ...(task.contractId === null
       ? []
       : [
           item({
             id: 'task-contract',
             label: 'Xem Contract',
+            icon: 'file-text',
             action: { kind: 'openContract', contractId: task.contractId },
           }),
         ]),
     item({
       id: 'copy-task',
       label: 'Sao chép mã việc',
+      icon: 'copy',
       action: { kind: 'copy', what: 'taskCode' },
     }),
   ];
@@ -275,12 +301,18 @@ export function planningMenuItems(hasSession: boolean): AgentMenuItem[] {
   const cancel = item({
     id: 'planning-cancel',
     label: 'Huỷ prompt này…',
+    icon: 'x-circle',
     action: { kind: 'cancelPrompt' },
     danger: true,
   });
   if (!hasSession) return [cancel];
   return [
-    item({ id: 'planning-session', label: 'Xem phiên Giám đốc', action: { kind: 'openSession' } }),
+    item({
+      id: 'planning-session',
+      label: 'Xem phiên Giám đốc',
+      icon: 'external',
+      action: { kind: 'openSession' },
+    }),
     { ...cancel, startsGroup: true },
   ];
 }
@@ -288,12 +320,27 @@ export function planningMenuItems(hasSession: boolean): AgentMenuItem[] {
 /** The items for a herdr agent: its views, its pane actions, then copies and maximize. */
 export function herdrMenuItems(folder: string | null, drawer: DrawerView | null): AgentMenuItem[] {
   return [
-    item({ id: 'info', label: 'Xem thông tin', action: { kind: 'herdrTab', tab: 'info' } }),
-    item({ id: 'rename', label: 'Đổi tên…', action: { kind: 'rename' } }),
+    item({
+      id: 'info',
+      label: 'Xem thông tin',
+      icon: 'info',
+      action: { kind: 'herdrTab', tab: 'info' },
+    }),
+    item({ id: 'rename', label: 'Đổi tên…', icon: 'pencil', action: { kind: 'rename' } }),
     ...withGroupStart([
-      item({ id: 'screen', label: 'Xem màn hình', action: { kind: 'herdrTab', tab: 'screen' } }),
-      item({ id: 'read', label: 'Đọc lại màn hình', action: { kind: 'readScreen' } }),
-      item({ id: 'focus', label: 'Mở trong herdr', action: { kind: 'focus' } }),
+      item({
+        id: 'screen',
+        label: 'Xem màn hình',
+        icon: 'monitor',
+        action: { kind: 'herdrTab', tab: 'screen' },
+      }),
+      item({
+        id: 'read',
+        label: 'Đọc lại màn hình',
+        icon: 'refresh',
+        action: { kind: 'readScreen' },
+      }),
+      item({ id: 'focus', label: 'Mở trong herdr', icon: 'external', action: { kind: 'focus' } }),
     ]),
     ...withGroupStart([
       ...(folder === null
@@ -302,12 +349,14 @@ export function herdrMenuItems(folder: string | null, drawer: DrawerView | null)
             item({
               id: 'copy-cwd',
               label: 'Sao chép thư mục',
+              icon: 'folder',
               action: { kind: 'copy', what: 'cwd' },
             }),
           ]),
       item({
         id: 'copy-pane',
         label: 'Sao chép pane id',
+        icon: 'copy',
         action: { kind: 'copy', what: 'paneId' },
       }),
       ...maximizeItems(drawer),
@@ -318,7 +367,7 @@ export function herdrMenuItems(folder: string | null, drawer: DrawerView | null)
 /** The items for a hibernated session: waking it, then maximize. Nothing else acts on a sleeping pane. */
 export function sleepingMenuItems(drawer: DrawerView | null): AgentMenuItem[] {
   return [
-    item({ id: 'wake', label: 'Đánh thức', action: { kind: 'wake' } }),
+    item({ id: 'wake', label: 'Đánh thức', icon: 'sun', action: { kind: 'wake' } }),
     ...withGroupStart(maximizeItems(drawer)),
   ];
 }
@@ -329,6 +378,7 @@ export function projectMenuItems(project: ProjectMenuFacts): AgentMenuItem[] {
     item({
       id: 'toggle',
       label: project.collapsed ? 'Mở rộng' : 'Thu gọn',
+      icon: project.collapsed ? 'chevron-down' : 'chevron-up',
       action: { kind: 'toggleProject' },
     }),
     ...(project.path === null
@@ -337,6 +387,7 @@ export function projectMenuItems(project: ProjectMenuFacts): AgentMenuItem[] {
           item({
             id: 'copy-path',
             label: 'Sao chép đường dẫn',
+            icon: 'copy',
             action: { kind: 'copy', what: 'path' },
           }),
         ]),
@@ -347,6 +398,7 @@ export function projectMenuItems(project: ProjectMenuFacts): AgentMenuItem[] {
             item({
               id: 'open-board',
               label: 'Mở thư mục này trên bảng',
+              icon: 'folder',
               action: { kind: 'openBoardFolder' },
             }),
           ],
@@ -358,6 +410,7 @@ export function projectMenuItems(project: ProjectMenuFacts): AgentMenuItem[] {
             item({
               id: 'clean',
               label: `Dọn ${project.cleanable.length} phiên lỗi…`,
+              icon: 'trash',
               action: { kind: 'cleanErrored' },
               danger: true,
             }),

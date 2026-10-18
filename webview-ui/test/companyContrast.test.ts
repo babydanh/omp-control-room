@@ -131,6 +131,18 @@ describe('board contrast tokens', () => {
     expect(shortfalls(pairs)).toEqual([]);
   });
 
+  it('keeps the prompt field edge at 3:1 or better on the page surfaces', () => {
+    // The field outlines itself with the border token. The hairline cannot do this: it is a
+    // seam and sits near 1.3:1 on the canvas.
+    const composer = readFileSync(
+      path.join(root, 'src/company/components/PromptComposer.tsx'),
+      'utf8',
+    );
+    const field = composer.match(/<textarea[\s\S]*?\/>/)?.[0] ?? '';
+    expect(field).toMatch(/\bborder border-border\b/);
+    expect(shortfalls(crossPairs(['border'], PAGE_SURFACES, CONTRAST_GRAPHIC_MIN))).toEqual([]);
+  });
+
   it('keeps status marks and lane colours at 3:1 or better on the page surfaces', () => {
     const marks = crossPairs(MARK_COLOURS, PAGE_SURFACES, CONTRAST_GRAPHIC_MIN);
     const laneMarks = Array.from(laneColours()).flatMap(([id, colour]) =>

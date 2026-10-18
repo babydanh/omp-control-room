@@ -75,10 +75,10 @@ describe('hover open', () => {
     expect(reducePreview(left.state, fire('open')).state).toStrictEqual(INITIAL_PREVIEW_STATE);
   });
 
-  it('schedules a 120 ms close when the pointer leaves an open row', () => {
+  it('schedules a 250 ms close when the pointer leaves an open row', () => {
     const left = reducePreview(OPEN_A, leaveRow(ROW_A));
     expect(left.state.target).toStrictEqual(ROW_A);
-    expect(left.effects).toStrictEqual([{ type: 'schedule', timer: 'close', delayMs: 120 }]);
+    expect(left.effects).toStrictEqual([{ type: 'schedule', timer: 'close', delayMs: 250 }]);
 
     const closed = reducePreview(left.state, fire('close'));
     expect(closed.state.target).toBeNull();
@@ -119,6 +119,64 @@ describe('hover open', () => {
     expect(reducePreview(OPEN_A, { type: 'blur', target: ROW_A })).toStrictEqual(
       reducePreview(OPEN_A, leaveRow(ROW_A)),
     );
+  });
+});
+
+describe('the open preview takes the pointer', () => {
+  it('stays open when the pointer crosses from its row into the preview', () => {
+    const left = reducePreview(OPEN_A, leaveRow(ROW_A));
+    const inside = reducePreview(left.state, { type: 'panelEnter', target: ROW_A });
+    expect(inside.state.target).toStrictEqual(ROW_A);
+    expect(inside.effects).toStrictEqual([{ type: 'cancel', timer: 'close' }]);
+  });
+
+  it('closes after the grace when the pointer leaves the preview', () => {
+    const left = reducePreview(OPEN_A, { type: 'panelLeave', target: ROW_A });
+    expect(left.state.target).toStrictEqual(ROW_A);
+    expect(left.effects).toStrictEqual([{ type: 'schedule', timer: 'close', delayMs: 250 }]);
+    expect(reducePreview(left.state, fire('close')).state.target).toBeNull();
+  });
+
+  it('closes once the pointer has left both the row and the preview', () => {
+    const away = run(
+      OPEN_A,
+      leaveRow(ROW_A),
+      { type: 'panelEnter', target: ROW_A },
+      { type: 'panelLeave', target: ROW_A },
+    );
+    expect(away.target).toStrictEqual(ROW_A);
+    expect(run(away, fire('close')).target).toBeNull();
+  });
+});
+
+describe('scrolling', () => {
+  const insideScroll: PreviewEvent = { type: 'scroll', insidePreview: true, movesRow: false };
+  const pageScroll: PreviewEvent = { type: 'scroll', insidePreview: false, movesRow: true };
+  const elsewhereScroll: PreviewEvent = { type: 'scroll', insidePreview: false, movesRow: false };
+
+  it('leaves the preview open while its own text scrolls', () => {
+    const scrolled = reducePreview(OPEN_A, insideScroll);
+    expect(scrolled.state.target).toStrictEqual(ROW_A);
+    expect(scrolled.effects).toStrictEqual([]);
+  });
+
+  it('closes the preview when the page or the row container moves', () => {
+    const scrolled = reducePreview(OPEN_A, pageScroll);
+    expect(scrolled.state.target).toBeNull();
+    expect(scrolled.state.anchor).toBeNull();
+    expect(scrolled.effects).toStrictEqual([
+      { type: 'cancel', timer: 'open' },
+      { type: 'cancel', timer: 'close' },
+    ]);
+  });
+
+  it('drops a pending open when the page moves', () => {
+    const pending = reducePreview(INITIAL_PREVIEW_STATE, enterRow(ROW_A)).state;
+    expect(reducePreview(pending, pageScroll).state).toStrictEqual(INITIAL_PREVIEW_STATE);
+  });
+
+  it('ignores a scroll that moves neither the page nor the row', () => {
+    expect(reducePreview(OPEN_A, elsewhereScroll)).toStrictEqual({ state: OPEN_A, effects: [] });
   });
 });
 

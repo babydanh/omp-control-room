@@ -1,7 +1,7 @@
 /**
  * TerminalMirror: a live terminal painted into a preview, with no console of its
  * own. It keeps an unopened xterm fed with the same frames the drawer's console
- * gets, and paints the last rows of its screen as coloured text. The lease it
+ * gets, and paints its newest rows, scrollback included, as coloured text. The lease it
  * needs is held as the 'preview' holder, so closing the preview releases it unless
  * the drawer still holds the same terminal.
  */
@@ -18,7 +18,7 @@ import type { CompanyClient } from '../companyClient.js';
 import type { TerminalFrame, TerminalView } from '../companyState.js';
 import { frameWrites } from '../terminalFrames.js';
 import { bufferLineSegments, type ScreenLine, tailScreen } from '../terminalScreen.js';
-import { ScreenFrame } from './ScreenFrame.js';
+import { PinnedScreenFrame } from './ScreenFrame.js';
 import { ScreenView } from './ScreenView.js';
 
 /** Used until the lease reports the shared PTY size. */
@@ -31,7 +31,7 @@ export interface TerminalMirrorProps {
   sessionId: string;
   runEpoch: number;
   terminal: TerminalView | undefined;
-  /** How many rows of the screen to paint, counted from the last used row. */
+  /** How many of the newest rows to keep, scrollback included; a preview scrolls through them. */
   rows: number;
 }
 
@@ -88,7 +88,7 @@ export function TerminalMirror({
     }
     // xterm parses queued writes in order, so this callback sees the whole batch.
     xterm.write('', () => {
-      if (xtermRef.current === xterm) setScreen(tailScreen(screenRows(xterm), rows));
+      if (xtermRef.current === xterm) setScreen(tailScreen(recentRows(xterm, rows), rows));
     });
   }, [frames, rows, runEpoch]);
 
@@ -101,18 +101,18 @@ export function TerminalMirror({
     return <p className="p-2 text-2xs text-text-muted">Đang chờ màn hình…</p>;
   }
   return (
-    <ScreenFrame>
+    <PinnedScreenFrame>
       <ScreenView lines={screen} className="shrink-0 p-2" />
-    </ScreenFrame>
+    </PinnedScreenFrame>
   );
 }
 
-/** The viewport's rows as segments, top to bottom. */
-function screenRows(xterm: Terminal): ScreenLine[] {
+/** The newest `count` lines of the buffer, scrollback included, as segments, top to bottom. */
+function recentRows(xterm: Terminal, count: number): ScreenLine[] {
   const buffer = xterm.buffer.active;
   const lines: ScreenLine[] = [];
-  for (let row = 0; row < xterm.rows; row += 1) {
-    const line = buffer.getLine(buffer.baseY + row);
+  for (let row = Math.max(0, buffer.length - count); row < buffer.length; row += 1) {
+    const line = buffer.getLine(row);
     lines.push(line ? bufferLineSegments(line) : []);
   }
   return lines;

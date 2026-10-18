@@ -48,6 +48,7 @@ import { deleteSessionsInOrder, removalNotice } from '../sessionRemoval.js';
 import { sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
+import { Icon } from './Icon.js';
 
 export interface AgentContextMenuProps {
   client: CompanyClient;
@@ -633,7 +634,13 @@ function MenuItemButton({
         onClick={() => onRun(item)}
         className={`touch-target flex h-7 w-full items-center justify-between gap-3 px-3 text-left outline-none ${tone}`}
       >
-        <span className="truncate">{item.label}</span>
+        <span className="flex min-w-0 items-center gap-2">
+          <Icon
+            name={item.icon}
+            className={`size-3.5 shrink-0 ${item.danger ? '' : 'text-text-muted'}`}
+          />
+          <span className="truncate">{item.label}</span>
+        </span>
         {item.hint !== null && (
           <span className="shrink-0 text-2xs text-text-muted">{item.hint}</span>
         )}

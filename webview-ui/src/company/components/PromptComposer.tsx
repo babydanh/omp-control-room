@@ -542,7 +542,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           placeholder="Nhập tin nhắn · / để gõ lệnh"
           aria-label="Tin nhắn"
           data-testid="prompt-input"
-          className="min-w-0 flex-1 resize-none rounded-[var(--company-radius-md)] bg-raised px-3 py-2 text-sm leading-5 text-text"
+          className="min-w-0 flex-1 resize-none rounded-[var(--company-radius-md)] border border-border bg-raised px-3 py-2 text-sm leading-5 text-text"
         />
         <CompanyButton
           size="sm"

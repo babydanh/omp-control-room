@@ -6,6 +6,8 @@
  * provider runs its timers, listens for Escape, scroll and resize, and paints the
  * panel into the body above the drawer. Rows report pointer and keyboard focus
  * through previewTriggers, so the sidebar and the rail need no preview logic.
+ *
+ * The panel takes the pointer, so its text can be read and scrolled with the wheel.
  */
 
 import type { ReactNode, RefObject } from 'react';
@@ -36,14 +38,14 @@ import {
 } from '../terminalPreview.js';
 import { type TerminalPreviewActions, TerminalPreviewContext } from '../terminalPreviewActions.js';
 import { parseAnsiScreen, tailScreen } from '../terminalScreen.js';
-import { ScreenFrame } from './ScreenFrame.js';
+import { PinnedScreenFrame } from './ScreenFrame.js';
 import { ScreenView } from './ScreenView.js';
 import { TerminalMirror } from './TerminalMirror.js';
 
-/** Rows of screen a preview paints. */
-const PREVIEW_SCREEN_ROWS = 14;
+/** Newest rows of screen and scrollback a preview keeps; the panel scrolls through them. */
+const PREVIEW_HISTORY_ROWS = 400;
 /** Log entries a preview reads when the session has no live terminal. */
-const PREVIEW_LOG_ENTRIES = 8;
+const PREVIEW_LOG_ENTRIES = 100;
 /** How often an open preview checks that its row is still on the page. */
 const PREVIEW_ANCHOR_CHECK_MS = 500;
 
@@ -70,6 +72,8 @@ export function TerminalPreviewProvider({
   const timersRef = useRef(new Map<PreviewTimer, number>());
   /** The row element the preview is anchored to; the reducer only keeps its rectangle. */
   const anchorRef = useRef<HTMLElement | null>(null);
+  /** The panel element. A press or a scroll inside it belongs to the preview. */
+  const panelRef = useRef<HTMLDivElement | null>(null);
 
   const dispatch = useCallback((event: PreviewEvent): void => {
     const result = reducePreview(previewRef.current, event);
@@ -140,16 +144,23 @@ export function TerminalPreviewProvider({
     const onScroll = (event: Event) => {
       const anchor = anchorRef.current;
       const scrolled = event.target;
-      // A container that holds the row moves the row. Scrolling anywhere else does not.
-      if (
-        scrolled === document ||
-        (scrolled instanceof Node && anchor !== null && scrolled.contains(anchor))
-      ) {
-        dispatch({ type: 'close' });
-      }
+      const node = scrolled instanceof Node ? scrolled : null;
+      dispatch({
+        type: 'scroll',
+        // A wheel or drag inside the preview moves its own text, not the row.
+        insidePreview: node !== null && panelRef.current?.contains(node) === true,
+        // The page, or a container that holds the row, moves the row away from its preview.
+        movesRow:
+          scrolled === document || (node !== null && anchor !== null && node.contains(anchor)),
+      });
     };
     const onResize = () => dispatch({ type: 'close' });
-    const onPointerDown = () => dispatch({ type: 'close' });
+    const onPointerDown = (event: PointerEvent) => {
+      // A press inside the preview belongs to it: its scrollbar and text stay usable.
+      const pressed = event.target;
+      if (pressed instanceof Node && panelRef.current?.contains(pressed) === true) return;
+      dispatch({ type: 'close' });
+    };
     const checkAnchor = window.setInterval(() => {
       const anchor = anchorRef.current;
       if (anchor !== null && !anchor.isConnected) dispatch({ type: 'close' });
@@ -184,6 +195,9 @@ export function TerminalPreviewProvider({
               target={openTarget}
               anchor={anchor}
               bounds={bounds}
+              panelRef={panelRef}
+              onPointerEnter={() => dispatch({ type: 'panelEnter', target: openTarget })}
+              onPointerLeave={() => dispatch({ type: 'panelLeave', target: openTarget })}
             />
           </div>,
           document.body,
@@ -213,25 +227,34 @@ function PreviewPanel({
   target,
   anchor,
   bounds,
+  panelRef,
+  onPointerEnter,
+  onPointerLeave,
 }: {
   client: CompanyClient;
   state: CompanyViewState;
   target: PreviewTarget;
   anchor: PreviewRect;
   bounds: PreviewRect;
+  panelRef: RefObject<HTMLDivElement | null>;
+  onPointerEnter: () => void;
+  onPointerLeave: () => void;
 }) {
   const box = placePreview(anchor, bounds);
   return (
     <div
+      ref={panelRef}
       aria-hidden="true"
       data-testid="terminal-preview"
-      className="company-fade-in pointer-events-none fixed z-40 flex flex-col overflow-hidden rounded-(--company-radius-md) border border-hairline bg-raised"
+      className="company-fade-in fixed z-40 flex flex-col overflow-hidden rounded-(--company-radius-md) border border-hairline bg-raised"
       style={{
         left: box.left,
         top: box.top,
         width: box.width,
         height: box.height,
       }}
+      onPointerEnter={onPointerEnter}
+      onPointerLeave={onPointerLeave}
     >
       {target.kind === 'herdr' ? (
         <HerdrPreview client={client} state={state} paneId={target.paneId} />
@@ -255,7 +278,7 @@ function HerdrPreview({
   const sleeping = state.herdr.sleeping.find((entry) => entry.paneId === paneId);
   const screen = state.herdr.screens[paneId];
   const lines = useMemo(
-    () => tailScreen(parseAnsiScreen(screen?.text ?? ''), PREVIEW_SCREEN_ROWS),
+    () => tailScreen(parseAnsiScreen(screen?.text ?? ''), PREVIEW_HISTORY_ROWS),
     [screen?.text],
   );
 
@@ -289,9 +312,9 @@ function HerdrPreview({
       {screen === undefined ? (
         <PreviewNotice text="Đang đọc màn hình…" />
       ) : (
-        <ScreenFrame>
+        <PinnedScreenFrame>
           <ScreenView lines={lines} className="shrink-0 p-2" />
-        </ScreenFrame>
+        </PinnedScreenFrame>
       )}
     </>
   );
@@ -322,7 +345,7 @@ function SessionPreview({
         sessionId={sessionId}
         runEpoch={session.runEpoch}
         terminal={state.terminals[sessionId]}
-        rows={PREVIEW_SCREEN_ROWS}
+        rows={PREVIEW_HISTORY_ROWS}
       />
     </>
   );
@@ -345,15 +368,15 @@ function LogTailPreview({
       {entries.length === 0 ? (
         <PreviewNotice text="Chưa có nhật ký." />
       ) : (
-        <ScreenFrame>
+        <PinnedScreenFrame>
           <ScreenView
             lines={tailScreen(
               parseAnsiScreen(entries.map((entry) => entry.text).join('\n')),
-              PREVIEW_SCREEN_ROWS,
+              PREVIEW_HISTORY_ROWS,
             )}
             className="shrink-0 p-2"
           />
-        </ScreenFrame>
+        </PinnedScreenFrame>
       )}
     </>
   );

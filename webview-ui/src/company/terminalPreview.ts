@@ -10,7 +10,8 @@
 import type { DrawerSubject } from './selection.js';
 
 export const PREVIEW_OPEN_DELAY_MS = 350;
-export const PREVIEW_CLOSE_GRACE_MS = 120;
+/** Gap a pointer may cross, from a row to its preview or back, before the preview closes. */
+export const PREVIEW_CLOSE_GRACE_MS = 250;
 export const PREVIEW_WIDTH_PX = 520;
 export const PREVIEW_HEIGHT_PX = 300;
 export const PREVIEW_GAP_PX = 8;
@@ -85,7 +86,11 @@ export type PreviewEvent =
   | { readonly type: 'press'; readonly target: PreviewTarget }
   | { readonly type: 'drawer'; readonly key: string | null }
   | { readonly type: 'escape' }
-  // Scroll, resize, or the anchor went away.
+  // A scroll: the page or the row's container moved (`movesRow`). A scroll inside the
+  // preview (`insidePreview`) moves only its own text.
+  | { readonly type: 'scroll'; readonly insidePreview: boolean; readonly movesRow: boolean }
+  | { readonly type: 'panelEnter' | 'panelLeave'; readonly target: PreviewTarget }
+  // Resize, or the anchor went away.
   | { readonly type: 'close' }
   | { readonly type: 'timer'; readonly timer: PreviewTimer };
 
@@ -147,6 +152,30 @@ function onLeave(state: PreviewState, target: PreviewTarget): PreviewStep {
     effects.push({ type: 'schedule', timer: 'close', delayMs: PREVIEW_CLOSE_GRACE_MS });
   }
   return step(next, effects);
+}
+
+/** The pointer reached the open preview: it stays open. */
+function onPanelEnter(state: PreviewState, target: PreviewTarget): PreviewStep {
+  if (sameTarget(state.target, previewKey(target))) return step(state, [cancel('close')]);
+  return step(state);
+}
+
+/** The pointer left the open preview: it closes after the grace, unless the pointer comes back. */
+function onPanelLeave(state: PreviewState, target: PreviewTarget): PreviewStep {
+  if (!sameTarget(state.target, previewKey(target))) return step(state);
+  return step(state, [{ type: 'schedule', timer: 'close', delayMs: PREVIEW_CLOSE_GRACE_MS }]);
+}
+
+/**
+ * Closes the preview only when the page or the row's container moved it away from its row.
+ * A wheel or drag inside the preview scrolls its own text and leaves it open.
+ */
+function onScroll(state: PreviewState, insidePreview: boolean, movesRow: boolean): PreviewStep {
+  if (insidePreview || !movesRow) return step(state);
+  return step({ ...state, target: null, anchor: null, pending: null, pendingAnchor: null }, [
+    cancel('open'),
+    cancel('close'),
+  ]);
 }
 
 /** A press on a row closes its preview and keeps it shut until the pointer leaves the row. */
@@ -220,6 +249,12 @@ export function reducePreview(state: PreviewState, event: PreviewEvent): Preview
         },
         [cancel('open'), cancel('close')],
       );
+    case 'panelEnter':
+      return onPanelEnter(state, event.target);
+    case 'panelLeave':
+      return onPanelLeave(state, event.target);
+    case 'scroll':
+      return onScroll(state, event.insidePreview, event.movesRow);
     case 'close':
       return step({ ...state, target: null, anchor: null, pending: null, pendingAnchor: null }, [
         cancel('open'),

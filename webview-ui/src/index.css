@@ -197,7 +197,7 @@
     --color-bg-thumb: #33333c;
     /* The one hairline: a seam where two same-tone surfaces meet. Decorative. */
     --color-hairline: #2b2b35;
-    /* Scrollbar thumbs and other edges that must read at 3:1 on their surface. */
+    /* Scrollbar thumbs, the prompt field's edge, and other control edges: each reads at 3:1. */
     --color-border: #707080;
     --color-accent: #f2a33a;
     --color-accent-bright: #ffc266;

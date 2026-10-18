@@ -105,6 +105,8 @@ describe('sessionMenuItems', () => {
 
     const maximized = sessionMenuItems(BUSY_SESSION, { maximized: true });
     expect(maximized.some((item) => item.label === 'Thu nhỏ')).toBe(true);
+    expect(open.find((item) => item.label === 'Phóng to')?.icon).toBe('maximize');
+    expect(maximized.find((item) => item.label === 'Thu nhỏ')?.icon).toBe('minimize');
 
     const fromSidebar = sessionMenuItems(BUSY_SESSION, null);
     expect(fromSidebar.some((item) => item.action.kind === 'maximize')).toBe(false);
@@ -278,6 +280,10 @@ describe('menu rules', () => {
 
   it.each(menus)('%s never opens a group with its first item', (_name, items) => {
     expect(items[0]?.startsGroup).toBe(false);
+  });
+
+  it.each(menus)('%s gives every item a glyph', (_name, items) => {
+    expect(items.every((item) => item.icon.length > 0)).toBe(true);
   });
 
   it.each(menus)('%s carries no filler line about a missing session', (_name, items) => {
