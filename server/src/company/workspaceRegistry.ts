@@ -19,6 +19,7 @@ import * as path from 'node:path';
 import type {
   CompanySnapshot,
   CompanyWorkspaceEntry,
+  CompanyWorkspaceSession,
   ServerMessage,
 } from '../../../core/src/messages.js';
 import { toPathKey } from '../pathKey.js';
@@ -78,13 +79,49 @@ function changesWorkCounts(message: ServerMessage): boolean {
   );
 }
 
-/** Work counts for one folder; a host that cannot answer yet counts as idle rather than failing the list. */
-function workOf(host: WorkspaceCompanyHost): CompanyWorkCounts {
+/** Work counts for a folder that cannot answer yet: it counts as idle rather than failing the list. */
+const IDLE_WORK: CompanyWorkCounts = { working: 0, waiting: 0 };
+
+/** The host's snapshot, or null while it cannot answer yet. */
+function snapshotOf(host: WorkspaceCompanyHost): CompanySnapshot | null {
   try {
-    return countCompanyWork(host.services.coordinator.snapshot());
+    return host.services.coordinator.snapshot();
   } catch {
-    return { working: 0, waiting: 0 };
+    return null;
   }
+}
+
+/** The most sessions one folder lists in the board's tree; the wire contract allows the same. */
+export const COMPANY_WORKSPACE_SESSION_LIMIT = 100;
+
+/** Where a session sorts in its folder's list: what waits on the user, then what is working, then the rest. */
+function sessionListRank(status: string): number {
+  if (status === 'waiting_input') return 0;
+  if (WORKING_SESSION_STATUSES[status] === true) return 1;
+  return 2;
+}
+
+/**
+ * One folder's sessions for the board's tree: its live ones (archived sessions are left out),
+ * ordered by {@link sessionListRank} and then by code, capped at {@link COMPANY_WORKSPACE_SESSION_LIMIT}.
+ */
+export function companyWorkspaceSessions(snapshot: CompanySnapshot): CompanyWorkspaceSession[] {
+  return snapshot.sessions
+    .filter((session) => session.status !== 'archived')
+    .sort(
+      (left, right) =>
+        sessionListRank(left.status) - sessionListRank(right.status) ||
+        left.code.localeCompare(right.code, 'en', { numeric: true }) ||
+        left.id.localeCompare(right.id),
+    )
+    .slice(0, COMPANY_WORKSPACE_SESSION_LIMIT)
+    .map((session) => ({
+      id: session.id,
+      code: session.code,
+      name: session.name,
+      role: session.role,
+      status: session.status,
+    }));
 }
 
 /** Options for {@link CompanyWorkspaceRegistry}. */
@@ -139,19 +176,25 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
     return this.folders.get(this.activeKey)?.host.services ?? null;
   }
 
-  /** Folders for the board: open ones in open order, then recently used ones that are not open. */
+  /**
+   * Folders for the board: open ones in open order, then recently used ones that are not open.
+   * An open folder carries its live sessions; a recent one carries none.
+   */
   entries(): CompanyWorkspaceEntry[] {
     const openKeys = new Set<string>();
     const openEntries: CompanyWorkspaceEntry[] = [];
     for (const folder of this.folders.values()) {
       openKeys.add(toPathKey(folder.path));
-      const work = workOf(folder.host);
+      const snapshot = snapshotOf(folder.host);
+      const work = snapshot === null ? IDLE_WORK : countCompanyWork(snapshot);
       openEntries.push({
         path: folder.path,
         active: folder.key === this.activeKey,
         open: true,
         working: work.working,
         waiting: work.waiting,
+        // Without a readable state the folder is listed by its counts alone, so no sessions are sent.
+        ...(snapshot === null ? {} : { sessions: companyWorkspaceSessions(snapshot) }),
       });
     }
     const recentEntries: CompanyWorkspaceEntry[] = this.recentPaths

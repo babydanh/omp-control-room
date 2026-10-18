@@ -46,6 +46,7 @@ export interface AgentRailProps {
   /** Expands the sidebar back to its full width. */
   onExpand: () => void;
   onSelectSession: (sessionId: string) => void;
+  onSelectWorkspaceSession: (path: string, sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
@@ -58,6 +59,7 @@ export function AgentRail({
   collapsedProjects,
   onExpand,
   onSelectSession,
+  onSelectWorkspaceSession,
   onOpenHerdr,
   onToggleProject,
   onMenu,
@@ -100,6 +102,7 @@ export function AgentRail({
             selectedPaneId={selectedPaneId}
             onExpand={onExpand}
             onSelectSession={onSelectSession}
+            onSelectWorkspaceSession={onSelectWorkspaceSession}
             onOpenHerdr={onOpenHerdr}
             onToggleProject={onToggleProject}
             onMenu={onMenu}
@@ -119,6 +122,8 @@ function railKey(entry: RailEntry, index: number): string {
       return `summary:${entry.project.key}`;
     case 'session':
       return `session:${entry.row.sessionId}`;
+    case 'remoteSession':
+      return `remote:${entry.row.sessionId}`;
     case 'pane':
       return `pane:${entry.row.paneId}`;
     case 'parked':
@@ -135,6 +140,7 @@ function RailEntryView({
   selectedPaneId,
   onExpand,
   onSelectSession,
+  onSelectWorkspaceSession,
   onOpenHerdr,
   onToggleProject,
   onMenu,
@@ -145,6 +151,7 @@ function RailEntryView({
   selectedPaneId: string | null;
   onExpand: () => void;
   onSelectSession: (sessionId: string) => void;
+  onSelectWorkspaceSession: (path: string, sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
@@ -190,6 +197,25 @@ function RailEntryView({
           onClick={() => onSelectSession(entry.row.sessionId)}
           triggers={agentMenuTriggers<HTMLButtonElement>(
             { kind: 'session', sessionId: entry.row.sessionId, drawer: null },
+            onMenu,
+          )}
+        />
+      );
+    case 'remoteSession':
+      return (
+        <RailBadge
+          testId={`rail-folder-session-${entry.row.code}`}
+          flightKey={`session:${entry.row.sessionId}`}
+          index={index}
+          label={sessionShortCode(entry.row.code)}
+          sub={entry.row.label}
+          tone={entry.row.tone}
+          edgeClass={ROLE_EDGE_CLASS[entry.row.role]}
+          title={agentTooltip(entry.row)}
+          selected={false}
+          onClick={() => onSelectWorkspaceSession(entry.path, entry.row.sessionId)}
+          triggers={agentMenuTriggers<HTMLButtonElement>(
+            { kind: 'project', project: entry.project },
             onMenu,
           )}
         />

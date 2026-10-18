@@ -16,9 +16,10 @@ import {
   type HerdrAgent,
   type RoleProfile,
 } from '../../../core/src/company.js';
+import type { CompanyWorkspaceSession } from '../../../core/src/messages.js';
 import type { CompanyViewState, HerdrView } from './companyState.js';
 import { HERDR_TONE_LABELS, HERDR_TONE_RANK, type HerdrTone, herdrToneFor } from './herdrView.js';
-import { COMPANY_ROLES, ROLE_LABELS, roleProfile } from './roleProfiles.js';
+import { COMPANY_ROLES, companyRoleLabel, ROLE_LABELS, roleProfile } from './roleProfiles.js';
 import { type LogTone, logTone, splitCommandText } from './sessionLogView.js';
 import { sessionStatusLabel } from './statusLabels.js';
 
@@ -178,7 +179,7 @@ export function buildAgentGroups(state: CompanyViewState, now: number): AgentRol
   });
 }
 
-function isFolded(row: AgentRow): boolean {
+export function isFolded(row: AgentRow): boolean {
   return row.tone === 'parked' || (row.tone === 'error' && row.taskLine === null);
 }
 
@@ -222,6 +223,25 @@ function agentLabel(tone: AgentTone, status: string): string {
   if (tone === 'error') return 'lỗi';
   if (status === 'idle') return 'rảnh';
   return sessionStatusLabel(status);
+}
+
+/**
+ * A session of a folder the board is not showing, as a row. The folder list carries no
+ * pending question or log line, so the row's second line is its role.
+ */
+export function workspaceSessionRow(session: CompanyWorkspaceSession): AgentRow {
+  const tone = sessionTone(session.status, false);
+  return {
+    sessionId: session.id,
+    role: session.role,
+    code: session.code,
+    name: session.name,
+    tone,
+    needsYou: tone === 'needs',
+    label: agentLabel(tone, session.status),
+    taskLine: null,
+    summary: { glyph: '', text: companyRoleLabel(session.role), age: null },
+  };
 }
 
 /** Rows that need the user come first; the rest sort by session code. */

@@ -236,3 +236,87 @@ describe('opening a folder through the client', () => {
     expect(client.getState().pendingWorkspaceOpen).toBeNull();
   });
 });
+
+describe('choosing a session in another folder through the client', () => {
+  it('selects the session once the switch is accepted and the new folder snapshot holds it', () => {
+    const { client } = clientWithSession();
+    const handle = client.openWorkspaceSession(KHAC, 's2');
+    expect(client.getState().pendingWorkspaceOpen).toBe(handle.requestId);
+    expect(client.getState().pendingWorkspaceSelection).toEqual({
+      requestId: handle.requestId,
+      path: KHAC,
+      sessionId: 's2',
+      confirmed: false,
+    });
+
+    client.accept({ type: 'companyCommandResult', requestId: handle.requestId, ok: true });
+    expect(client.getState().pendingWorkspaceSelection).toMatchObject({ confirmed: true });
+    expect(client.getState().selection.sessionId).toBeNull();
+
+    client.accept({
+      type: 'companySnapshot',
+      requestId: randomUUID(),
+      snapshot: snapshot({ sessions: [session({ id: 's2' })] }),
+    });
+    expect(client.getState().pendingWorkspaceSelection).toBeNull();
+    expect(client.getState().selection.sessionId).toBe('s2');
+  });
+
+  it('says why a refused switch selected nothing, and keeps the current selection', () => {
+    const { client } = clientWithSession();
+    const handle = client.openWorkspaceSession(KHAC, 's2');
+    client.accept({
+      type: 'companyCommandResult',
+      requestId: handle.requestId,
+      ok: false,
+      errorCode: 'workspace_invalid',
+      message: 'Thư mục không tồn tại.',
+    });
+    const state = client.getState();
+    expect(state.pendingWorkspaceSelection).toBeNull();
+    expect(state.workspaceSelectionNotice).toBe('Thư mục không tồn tại.');
+    expect(state.selection.sessionId).toBe('s1');
+  });
+
+  it('drops the choice with a reason when the new folder snapshot lacks the session', () => {
+    const { client } = clientWithSession();
+    const handle = client.openWorkspaceSession(KHAC, 's2');
+    client.accept({ type: 'companyCommandResult', requestId: handle.requestId, ok: true });
+    client.accept({
+      type: 'companySnapshot',
+      requestId: randomUUID(),
+      snapshot: snapshot({ sessions: [session({ id: 's9' })] }),
+    });
+    const state = client.getState();
+    expect(state.pendingWorkspaceSelection).toBeNull();
+    expect(state.workspaceSelectionNotice).toBe('Phiên không còn trong thư mục này.');
+    expect(state.selection.sessionId).toBeNull();
+  });
+
+  it('a plain folder switch clears a pending session choice', () => {
+    const { client } = clientWithSession();
+    client.openWorkspaceSession(KHAC, 's2');
+    client.openWorkspace(KHAC);
+    expect(client.getState().pendingWorkspaceSelection).toBeNull();
+  });
+
+  it('a new choice replaces the pending one', () => {
+    const { client } = clientWithSession();
+    client.openWorkspaceSession(KHAC, 's2');
+    const second = client.openWorkspaceSession(KHAC, 's3');
+    expect(client.getState().pendingWorkspaceSelection).toMatchObject({
+      requestId: second.requestId,
+      sessionId: 's3',
+    });
+  });
+
+  it('a send the transport refuses holds no choice and names the failure', () => {
+    const { client, setConnected } = clientWithSession();
+    setConnected(false);
+    const handle = client.openWorkspaceSession(KHAC, 's2');
+    const state = client.getState();
+    expect(handle.ok).toBe(false);
+    expect(state.pendingWorkspaceSelection).toBeNull();
+    expect(state.workspaceSelectionNotice).not.toBeNull();
+  });
+});

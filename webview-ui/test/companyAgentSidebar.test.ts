@@ -6,14 +6,16 @@ import {
   type HerdrGroup,
   herdrGroup,
   type HerdrRepoGroup,
+  isFolded,
   pendingQuestionSessionIds,
+  workspaceSessionRow,
 } from '../src/company/agentSidebarView.js';
 import {
   type CompanyViewState,
   emptyHerdrView,
   type HerdrView,
 } from '../src/company/companyState.js';
-import { COMPANY_ROLES } from '../src/company/roleProfiles.js';
+import { COMPANY_ROLES, companyRoleLabel } from '../src/company/roleProfiles.js';
 import { question, session, stateFrom, task } from './companyFixtures.js';
 
 /** A fixed clock for the relative times: the view never reads the real one. */
@@ -284,5 +286,46 @@ describe('herdrGroup repo placement', () => {
     );
 
     expect(repos[0]?.rows[0]).toMatchObject({ branch: null, worktreeRoot: null });
+  });
+});
+
+describe('workspaceSessionRow', () => {
+  it("shows a folder's session as its row, with its role on the second line", () => {
+    const row = workspaceSessionRow({
+      id: 's7',
+      code: 'PA-S0007',
+      name: 'Tên',
+      role: 'qa',
+      status: 'waiting_input',
+    });
+
+    expect(row).toMatchObject({
+      sessionId: 's7',
+      code: 'PA-S0007',
+      role: 'qa',
+      needsYou: true,
+      taskLine: null,
+      summary: { text: companyRoleLabel('qa'), age: null },
+    });
+  });
+
+  it('folds a paused folder session with the parked ones, and keeps a busy one live', () => {
+    const paused = workspaceSessionRow({
+      id: 's1',
+      code: 'PA-S0001',
+      name: 'Tên',
+      role: 'worker',
+      status: 'paused',
+    });
+    const busy = workspaceSessionRow({
+      id: 's2',
+      code: 'PA-S0002',
+      name: 'Tên',
+      role: 'worker',
+      status: 'busy',
+    });
+
+    expect(isFolded(paused)).toBe(true);
+    expect(isFolded(busy)).toBe(false);
   });
 });

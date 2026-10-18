@@ -22,7 +22,7 @@ import { TRANSPORT_DISCONNECTED_ERROR } from '../../../core/src/messageDelivery.
 import type { ClientMessage, HerdrKey, ServerMessage } from '../../../core/src/messages.js';
 import type { MessageTransport } from '../transport/types.js';
 import { decodeBase64ToBytes } from './base64.js';
-import type { CommandResultView } from './commandResults.js';
+import { type CommandResultView, failureNotice } from './commandResults.js';
 import * as commands from './companyMessages.js';
 import {
   applyCompanyMessage,
@@ -383,10 +383,38 @@ export class CompanyClient {
    * handle's requestId; a success is followed by a snapshot and a companyWorkspaces.
    */
   openWorkspace(path: string): CompanyCommandHandle {
+    return this.sendWorkspaceOpen(path, null);
+  }
+
+  /**
+   * Point the board at another folder and select one of its sessions once the switch is
+   * accepted and the folder's snapshot holds that session. A refused switch selects nothing
+   * and leaves a notice saying why.
+   */
+  openWorkspaceSession(path: string, sessionId: string): CompanyCommandHandle {
+    return this.sendWorkspaceOpen(path, sessionId);
+  }
+
+  /** Send one folder switch; a session chosen with it waits for the switch's verdict. */
+  private sendWorkspaceOpen(path: string, sessionId: string | null): CompanyCommandHandle {
     const requestId = commands.newRequestId();
-    this.state = { ...this.state, pendingWorkspaceOpen: requestId };
+    const pending = sessionId === null ? null : { requestId, path, sessionId, confirmed: false };
+    this.state = {
+      ...this.state,
+      pendingWorkspaceOpen: requestId,
+      pendingWorkspaceSelection: pending,
+      workspaceSelectionNotice: null,
+    };
     const outcome = this.send(commands.workspaceOpen(requestId, path));
-    if (!outcome.ok) this.state = { ...this.state, pendingWorkspaceOpen: null };
+    if (!outcome.ok) {
+      this.state = {
+        ...this.state,
+        pendingWorkspaceOpen: null,
+        pendingWorkspaceSelection: null,
+        workspaceSelectionNotice:
+          pending === null ? null : failureNotice(outcome, 'Không gửi được yêu cầu mở thư mục.'),
+      };
+    }
     this.emit();
     return { requestId, ...outcome };
   }

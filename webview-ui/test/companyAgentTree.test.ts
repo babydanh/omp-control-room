@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { HerdrAgent } from '../../core/src/company.js';
-import type { CompanyWorkspaceEntry } from '../../core/src/messages.js';
+import type { CompanyWorkspaceEntry, CompanyWorkspaceSession } from '../../core/src/messages.js';
 import {
   buildProjectTree,
   buildRailTree,
@@ -18,6 +18,7 @@ import {
   emptyHerdrView,
   type HerdrView,
 } from '../src/company/companyState.js';
+import { companyRoleLabel } from '../src/company/roleProfiles.js';
 import { session, stateFrom } from './companyFixtures.js';
 
 const NOW = Date.parse('2026-05-01T10:30:00.000Z');
@@ -31,6 +32,20 @@ function workspace(
   waiting: number,
 ): CompanyWorkspaceEntry {
   return { path, active, open: active, working, waiting };
+}
+
+/** A folder the board is not showing, open, with the sessions its folder list reports. */
+function openFolder(path: string, sessions: CompanyWorkspaceSession[]): CompanyWorkspaceEntry {
+  return { path, active: false, open: true, working: 0, waiting: 0, sessions };
+}
+
+/** A session as an open folder's list reports it. */
+function folderSession(
+  code: string,
+  status: CompanyWorkspaceSession['status'],
+  role: CompanyWorkspaceSession['role'] = 'worker',
+): CompanyWorkspaceSession {
+  return { id: `id-${code}`, code, name: `Tên ${code}`, role, status };
 }
 
 function herdrAgent(overrides: Partial<HerdrAgent>): HerdrAgent {
@@ -51,6 +66,8 @@ function shape(entries: readonly RailEntry[]): string[] {
         return `summary ${entry.project.name}`;
       case 'session':
         return `session ${entry.row.code}`;
+      case 'remoteSession':
+        return `remote ${entry.project.name} ${entry.row.code}`;
       case 'pane':
         return `pane ${entry.row.paneId}`;
       case 'parked':
@@ -168,6 +185,76 @@ describe('buildProjectTree', () => {
     );
     expect(folded?.collapsed).toBe(true);
   });
+
+  it("lists an open background folder's sessions as its rows, in the folder list's order", () => {
+    const state: CompanyViewState = {
+      ...stateFrom(),
+      workspaces: [
+        workspace('/work/alpha', true, 0, 0),
+        openFolder('/work/beta', [
+          folderSession('PA-S0002', 'waiting_input'),
+          folderSession('PA-S0001', 'busy'),
+        ]),
+      ],
+    };
+    const tree = buildProjectTree(state, NOW, new Set());
+    const beta = tree.projects[1];
+
+    expect(tree.projects[0]?.folderRows).toBeNull();
+    expect(beta).toMatchObject({ notOpen: false, switchTo: '/work/beta' });
+    expect(beta?.folderRows?.path).toBe('/work/beta');
+    expect(beta?.folderRows?.live.map((row) => row.code)).toEqual(['PA-S0002', 'PA-S0001']);
+    expect(beta?.folderRows?.live[0]).toMatchObject({
+      sessionId: 'id-PA-S0002',
+      needsYou: true,
+      summary: { text: companyRoleLabel('worker'), age: null },
+    });
+  });
+
+  it("folds an open background folder's parked sessions into their own list", () => {
+    const state: CompanyViewState = {
+      ...stateFrom(),
+      workspaces: [
+        workspace('/work/alpha', true, 0, 0),
+        openFolder('/work/beta', [
+          folderSession('PA-S0001', 'busy'),
+          folderSession('PA-S0002', 'paused'),
+          folderSession('PA-S0003', 'crashed'),
+        ]),
+      ],
+    };
+    const beta = buildProjectTree(state, NOW, new Set()).projects[1];
+
+    expect(beta?.folderRows?.live.map((row) => row.code)).toEqual(['PA-S0001']);
+    expect(beta?.folderRows?.parked.map((row) => row.code)).toEqual(['PA-S0002', 'PA-S0003']);
+  });
+
+  it('lists no rows for a folder that is not open, and marks it as not open', () => {
+    const state: CompanyViewState = {
+      ...stateFrom(),
+      workspaces: [workspace('/work/alpha', true, 0, 0), workspace('/work/beta', false, 0, 0)],
+    };
+    const beta = buildProjectTree(state, NOW, new Set()).projects[1];
+
+    expect(beta).toMatchObject({ notOpen: true, folderRows: null, switchTo: '/work/beta' });
+  });
+
+  it('keeps only the counts for an open folder whose sessions the host did not send', () => {
+    const state: CompanyViewState = {
+      ...stateFrom(),
+      workspaces: [
+        workspace('/work/alpha', true, 0, 0),
+        { path: '/work/beta', active: false, open: true, working: 2, waiting: 1 },
+      ],
+    };
+    const beta = buildProjectTree(state, NOW, new Set()).projects[1];
+
+    expect(beta).toMatchObject({
+      notOpen: false,
+      folderRows: null,
+      counts: { working: 2, needs: 1, idle: 0, error: 0 },
+    });
+  });
 });
 
 describe('buildRailTree', () => {
@@ -245,6 +332,63 @@ describe('buildRailTree', () => {
     expect(rail.find((entry) => entry.kind === 'session')).toMatchObject({
       projectKey: ACTIVE_KEY,
     });
+  });
+
+  it("lists a background folder's live sessions after its marker, and its parked ones as one badge", () => {
+    const state: CompanyViewState = {
+      ...stateFrom(),
+      workspaces: [
+        workspace('/work/alpha', true, 0, 0),
+        openFolder('/work/beta', [
+          folderSession('PA-S0002', 'waiting_input'),
+          folderSession('PA-S0003', 'busy'),
+          folderSession('PA-S0004', 'paused'),
+        ]),
+      ],
+    };
+
+    expect(shape(buildRailTree(buildProjectTree(state, NOW, new Set()).projects))).toEqual([
+      'project alpha',
+      'break',
+      'project beta',
+      'remote beta PA-S0002',
+      'remote beta PA-S0003',
+      'parked 1',
+    ]);
+  });
+
+  it('gives a background folder session badge the folder it switches the board to', () => {
+    const state: CompanyViewState = {
+      ...stateFrom(),
+      workspaces: [
+        workspace('/work/alpha', true, 0, 0),
+        openFolder('/work/beta', [folderSession('PA-S0002', 'busy')]),
+      ],
+    };
+    const rail = buildRailTree(buildProjectTree(state, NOW, new Set()).projects);
+
+    expect(rail.find((entry) => entry.kind === 'remoteSession')).toMatchObject({
+      path: '/work/beta',
+      project: { key: 'board:/work/beta' },
+    });
+  });
+
+  it('shows a folded background folder as one summary badge, with none of its sessions', () => {
+    const state: CompanyViewState = {
+      ...stateFrom(),
+      workspaces: [
+        workspace('/work/alpha', true, 0, 0),
+        openFolder('/work/beta', [folderSession('PA-S0002', 'busy')]),
+      ],
+    };
+    const projects = buildProjectTree(state, NOW, new Set(['board:/work/beta'])).projects;
+
+    expect(shape(buildRailTree(projects))).toEqual([
+      'project alpha',
+      'break',
+      'project beta',
+      'summary beta',
+    ]);
   });
 });
 

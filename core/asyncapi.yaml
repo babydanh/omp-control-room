@@ -3724,6 +3724,29 @@ components:
           type: integer
           minimum: 0
           description: Sessions or Contracts waiting on the user.
+        sessions:
+          type: array
+          maxItems: 100
+          description: The folder's live (not archived) sessions, so the board's tree shows what is inside a folder it is not showing.
+          items:
+            $ref: '#/components/schemas/CompanyWorkspaceSession'
+
+    CompanyWorkspaceSession:
+      type: object
+      additionalProperties: false
+      required: [id, code, name, role, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        status:
+          type: string
 
     CompanyWorkspacesMessage:
       type: object

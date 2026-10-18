@@ -16,7 +16,9 @@ import type {
 } from '../src/company/workspaceCompanyHost.js';
 import {
   COMPANY_WORKSPACE_PUSH_REQUEST_ID,
+  COMPANY_WORKSPACE_SESSION_LIMIT,
   CompanyWorkspaceRegistry,
+  companyWorkspaceSessions,
   countCompanyWork,
 } from '../src/company/workspaceRegistry.js';
 
@@ -24,7 +26,7 @@ import {
 interface FakeHost {
   readonly host: WorkspaceCompanyHost;
   readonly options: WorkspaceCompanyHostOptions;
-  readonly state: { snapshot: CompanySnapshot; disposeCalls: number };
+  readonly state: { snapshot: CompanySnapshot; disposeCalls: number; unreadable: boolean };
   emit(message: ServerMessage): void;
 }
 
@@ -37,22 +39,47 @@ interface Harness {
   readonly control: { failNextOpen: boolean; openCalls: number };
 }
 
+/** A session as the coordinator lists it; the folder list keeps five of these fields and no more. */
+interface SessionFixture {
+  id: string;
+  code: string;
+  name: string;
+  role: string;
+  status: string;
+}
+
+function sessionOf(code: string, status: string): SessionFixture {
+  return { id: `id-${code}`, code, name: `Tên ${code}`, role: 'worker', status };
+}
+
+/** A snapshot holding exactly these sessions, for the ordering and cap rules. */
+function snapshotOfSessions(sessions: SessionFixture[]): CompanySnapshot {
+  return { sessions, questions: [], contracts: [] } as unknown as CompanySnapshot;
+}
+
 function snapshotWith(parts: {
   sessions?: string[];
   questions?: string[];
   contracts?: string[];
 }): CompanySnapshot {
   return {
-    sessions: (parts.sessions ?? []).map((status) => ({ status })),
+    sessions: (parts.sessions ?? []).map((status, index) =>
+      sessionOf(`PA-S${String(index + 1).padStart(4, '0')}`, status),
+    ),
     questions: (parts.questions ?? []).map((status) => ({ status })),
     contracts: (parts.contracts ?? []).map((status) => ({ status })),
   } as unknown as CompanySnapshot;
 }
 
 function createFakeHost(options: WorkspaceCompanyHostOptions): FakeHost {
-  const state = { snapshot: snapshotWith({}), disposeCalls: 0 };
+  const state = { snapshot: snapshotWith({}), disposeCalls: 0, unreadable: false };
   const services = {
-    coordinator: { snapshot: () => state.snapshot },
+    coordinator: {
+      snapshot: () => {
+        if (state.unreadable) throw new Error('coordinator still starting');
+        return state.snapshot;
+      },
+    },
   } as unknown as CompanyCommandServices;
   const host: WorkspaceCompanyHost = {
     workspacePath: options.workspacePath,
@@ -136,6 +163,56 @@ describe('countCompanyWork', () => {
   });
 });
 
+describe('companyWorkspaceSessions', () => {
+  it('lists live sessions only: those waiting on the user first, then those working, then the rest, each by code', () => {
+    const listed = companyWorkspaceSessions(
+      snapshotOfSessions([
+        sessionOf('PA-S0001', 'idle'),
+        sessionOf('PA-S0002', 'busy'),
+        sessionOf('PA-S0003', 'archived'),
+        sessionOf('PA-S0004', 'waiting_input'),
+        sessionOf('PA-S0005', 'starting'),
+        sessionOf('PA-S0006', 'paused'),
+      ]),
+    );
+    expect(listed.map((session) => session.code)).toEqual([
+      'PA-S0004',
+      'PA-S0002',
+      'PA-S0005',
+      'PA-S0001',
+      'PA-S0006',
+    ]);
+  });
+
+  it('orders codes by number, so PA-S0009 comes before PA-S0010', () => {
+    const listed = companyWorkspaceSessions(
+      snapshotOfSessions([sessionOf('PA-S0010', 'idle'), sessionOf('PA-S0009', 'idle')]),
+    );
+    expect(listed.map((session) => session.code)).toEqual(['PA-S0009', 'PA-S0010']);
+  });
+
+  it('carries only the fields the board needs', () => {
+    const listed = companyWorkspaceSessions({
+      sessions: [{ ...sessionOf('PA-S0001', 'busy'), requestedModel: 'model', runEpoch: 1 }],
+    } as unknown as CompanySnapshot);
+    expect(listed).toEqual([sessionOf('PA-S0001', 'busy')]);
+  });
+
+  it('caps the list at COMPANY_WORKSPACE_SESSION_LIMIT, keeping the sessions that wait on the user', () => {
+    const sessions = Array.from({ length: 150 }, (_, index) =>
+      sessionOf(`PA-S${String(index + 1).padStart(4, '0')}`, 'idle'),
+    );
+    sessions.push(sessionOf('PA-S9999', 'waiting_input'));
+
+    const listed = companyWorkspaceSessions(snapshotOfSessions(sessions));
+
+    expect(COMPANY_WORKSPACE_SESSION_LIMIT).toBe(100);
+    expect(listed).toHaveLength(100);
+    expect(listed[0]?.code).toBe('PA-S9999');
+    expect(listed.at(-1)?.code).toBe('PA-S0099');
+  });
+});
+
 describe('CompanyWorkspaceRegistry', () => {
   let root: string;
   let alpha: string;
@@ -173,7 +250,7 @@ describe('CompanyWorkspaceRegistry', () => {
     });
     expect(h.registry.activeServices()).toBe(hostAt(h.hosts, 0).host.services);
     expect(workspaceLists(h.broadcasts).at(-1)).toEqual([
-      { path: alphaReal, active: true, open: true, working: 0, waiting: 0 },
+      { path: alphaReal, active: true, open: true, working: 0, waiting: 0, sessions: [] },
     ]);
     expect(h.broadcasts).toContainEqual(
       expect.objectContaining({
@@ -193,8 +270,8 @@ describe('CompanyWorkspaceRegistry', () => {
     expect(h.registry.activeServices()).toBe(hostAt(h.hosts, 1).host.services);
     expect(hostAt(h.hosts, 0).state.disposeCalls).toBe(0);
     expect(workspaceLists(h.broadcasts).at(-1)).toEqual([
-      { path: alphaReal, active: false, open: true, working: 0, waiting: 0 },
-      { path: betaReal, active: true, open: true, working: 0, waiting: 0 },
+      { path: alphaReal, active: false, open: true, working: 0, waiting: 0, sessions: [] },
+      { path: betaReal, active: true, open: true, working: 0, waiting: 0, sessions: [] },
     ]);
   });
 
@@ -240,7 +317,7 @@ describe('CompanyWorkspaceRegistry', () => {
     });
     expect(h.registry.activeServices()).toBe(hostAt(h.hosts, 0).host.services);
     expect(workspaceLists(h.broadcasts).at(-1)).toEqual([
-      { path: alphaReal, active: true, open: true, working: 0, waiting: 0 },
+      { path: alphaReal, active: true, open: true, working: 0, waiting: 0, sessions: [] },
     ]);
   });
 
@@ -274,8 +351,20 @@ describe('CompanyWorkspaceRegistry', () => {
     await h.registry.open(beta);
 
     expect(h.registry.entries()).toEqual([
-      { path: alphaReal, active: false, open: true, working: 2, waiting: 3 },
-      { path: betaReal, active: true, open: true, working: 0, waiting: 0 },
+      {
+        path: alphaReal,
+        active: false,
+        open: true,
+        working: 2,
+        waiting: 3,
+        sessions: [
+          sessionOf('PA-S0003', 'waiting_input'),
+          sessionOf('PA-S0001', 'busy'),
+          sessionOf('PA-S0002', 'starting'),
+          sessionOf('PA-S0004', 'idle'),
+        ],
+      },
+      { path: betaReal, active: true, open: true, working: 0, waiting: 0, sessions: [] },
     ]);
   });
 
@@ -291,7 +380,7 @@ describe('CompanyWorkspaceRegistry', () => {
     await h.registry.open(alpha);
 
     expect(h.registry.entries()).toEqual([
-      { path: alphaReal, active: true, open: true, working: 0, waiting: 0 },
+      { path: alphaReal, active: true, open: true, working: 0, waiting: 0, sessions: [] },
       { path: gone, active: false, open: false, working: 0, waiting: 0 },
     ]);
   });
@@ -315,7 +404,14 @@ describe('CompanyWorkspaceRegistry', () => {
     const lists = workspaceLists(h.broadcasts);
     expect(lists).toHaveLength(listsBefore + 1);
     expect(lists.at(-1)).toEqual([
-      { path: alphaReal, active: true, open: true, working: 1, waiting: 0 },
+      {
+        path: alphaReal,
+        active: true,
+        open: true,
+        working: 1,
+        waiting: 0,
+        sessions: [sessionOf('PA-S0001', 'busy')],
+      },
     ]);
 
     alphaHost.emit(marker('d'));
@@ -389,5 +485,47 @@ describe('CompanyWorkspaceRegistry', () => {
     expect(h.hosts).toHaveLength(1);
     expect(hostAt(h.hosts, 0).state.disposeCalls).toBe(1);
     expect(h.registry.activeServices()).toBeNull();
+  });
+
+  it('republishes the folder list when a background folder sessions change, and only then', async () => {
+    const h = createHarness();
+    await h.registry.open(alpha);
+    await h.registry.open(beta);
+    const alphaHost = hostAt(h.hosts, 0);
+    const listsBefore = workspaceLists(h.broadcasts).length;
+
+    vi.useFakeTimers();
+    alphaHost.state.snapshot = snapshotOfSessions([sessionOf('PA-S0001', 'waiting_input')]);
+    alphaHost.emit(marker('a'));
+    await vi.advanceTimersByTimeAsync(250);
+
+    const lists = workspaceLists(h.broadcasts);
+    expect(lists).toHaveLength(listsBefore + 1);
+    expect(lists.at(-1)).toEqual([
+      {
+        path: alphaReal,
+        active: false,
+        open: true,
+        working: 0,
+        waiting: 1,
+        sessions: [sessionOf('PA-S0001', 'waiting_input')],
+      },
+      { path: betaReal, active: true, open: true, working: 0, waiting: 0, sessions: [] },
+    ]);
+
+    alphaHost.emit(marker('b'));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(workspaceLists(h.broadcasts)).toHaveLength(listsBefore + 1);
+  });
+
+  it('lists a folder whose state cannot be read yet by its counts alone, without sessions', async () => {
+    const h = createHarness();
+    await h.registry.open(alpha);
+    hostAt(h.hosts, 0).state.snapshot = snapshotOfSessions([sessionOf('PA-S0001', 'busy')]);
+    hostAt(h.hosts, 0).state.unreadable = true;
+
+    const [entry] = h.registry.entries();
+    expect(entry).toEqual({ path: alphaReal, active: true, open: true, working: 0, waiting: 0 });
+    expect(entry).not.toHaveProperty('sessions');
   });
 });

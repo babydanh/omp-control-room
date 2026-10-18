@@ -54,7 +54,7 @@ import type {
   OmpSessionEntry,
   ServerMessage,
 } from '../../../core/src/messages.js';
-import { type CommandResultView, viewCommandResult } from './commandResults.js';
+import { type CommandResultView, failureNotice, viewCommandResult } from './commandResults.js';
 import {
   COMPANY_SESSION_LOG_MAX_ENTRIES,
   COMPANY_TERMINAL_FRAME_QUEUE_MAX,
@@ -66,6 +66,7 @@ import {
   EMPTY_PROMPT_DRAFT,
   type PromptDraftState,
 } from './promptSubmission.js';
+import { selectionForSession } from './selection.js';
 import { excerptLine } from './textExcerpt.js';
 
 export type CompanyPutChange = Exclude<
@@ -213,6 +214,16 @@ export interface OmpSessionsView {
   sessions: OmpSessionEntry[];
 }
 
+/** A folder switch carrying a session choice, held until the switch's verdict and the folder's snapshot. */
+export interface PendingWorkspaceSelection {
+  /** The folder switch's command: its verdict decides whether the choice stands. */
+  requestId: string;
+  path: string;
+  sessionId: string;
+  /** True once the server accepted the switch; the selection then waits for the snapshot. */
+  confirmed: boolean;
+}
+
 export interface CompanyViewState {
   /** Last revision the client can account for; null before the first snapshot. */
   revision: number | null;
@@ -257,6 +268,10 @@ export interface CompanyViewState {
   pendingWorkspaceOpen: string | null;
   /** A session a successful command named that is not on the board yet; selected once it is. */
   openingSessionId: string | null;
+  /** A session chosen in a folder the board is switching to; selected once that folder's snapshot holds it. */
+  pendingWorkspaceSelection: PendingWorkspaceSelection | null;
+  /** Why the last choice of a session in another folder did not land; null when none failed. */
+  workspaceSelectionNotice: string | null;
 }
 
 export function emptyCompanyState(): CompanyViewState {
@@ -293,6 +308,8 @@ export function emptyCompanyState(): CompanyViewState {
     workspaces: null,
     pendingWorkspaceOpen: null,
     openingSessionId: null,
+    pendingWorkspaceSelection: null,
+    workspaceSelectionNotice: null,
   };
 }
 
@@ -726,12 +743,13 @@ function applyCommandResult(
     // prompt, a refused upload, or an answer to something else all leave it be.
     prompt: applySubmitResult(state.prompt, result),
   };
+  const withSelection = applyWorkspaceSelectionVerdict(recorded, result);
   if (state.pendingWorkspaceOpen === result.requestId) {
-    if (!result.ok) return { state: { ...recorded, pendingWorkspaceOpen: null }, effects: [] };
+    if (!result.ok) return { state: { ...withSelection, pendingWorkspaceOpen: null }, effects: [] };
     // The board now points at another folder: nothing selected belonged to the old one.
     return {
       state: {
-        ...recorded,
+        ...withSelection,
         pendingWorkspaceOpen: null,
         ompSessions: null,
         openingSessionId: null,
@@ -742,9 +760,61 @@ function applyCommandResult(
   }
   // A command that opened or resumed a session names it; the board selects it once it is on screen.
   if (result.ok && result.sessionId !== undefined) {
-    return { state: { ...recorded, openingSessionId: result.sessionId }, effects: [] };
+    return { state: { ...withSelection, openingSessionId: result.sessionId }, effects: [] };
   }
-  return { state: recorded, effects: [] };
+  return { state: withSelection, effects: [] };
+}
+
+/**
+ * The verdict on a session chosen in another folder. A refused switch drops that choice and
+ * says why; an accepted one waits for the new folder's snapshot, which is what holds the session.
+ */
+function applyWorkspaceSelectionVerdict(
+  state: CompanyViewState,
+  result: CommandResultView,
+): CompanyViewState {
+  const pending = state.pendingWorkspaceSelection;
+  if (pending === null || pending.requestId !== result.requestId) return state;
+  if (result.ok) return { ...state, pendingWorkspaceSelection: { ...pending, confirmed: true } };
+  return {
+    ...state,
+    pendingWorkspaceSelection: null,
+    workspaceSelectionNotice: failureNotice(result, 'Không mở được thư mục.'),
+  };
+}
+
+/**
+ * Select a session chosen in another folder once the switch was accepted and the folder's
+ * snapshot holds the session. Before that the board still shows the folder it left.
+ */
+function settleWorkspaceSelection(result: CompanyResult): CompanyResult {
+  const { state } = result;
+  const pending = state.pendingWorkspaceSelection;
+  if (pending === null || !pending.confirmed || state.sessions[pending.sessionId] === undefined) {
+    return result;
+  }
+  return {
+    ...result,
+    state: {
+      ...state,
+      pendingWorkspaceSelection: null,
+      workspaceSelectionNotice: null,
+      selection: selectionForSession(state, pending.sessionId),
+    },
+  };
+}
+
+/** A confirmed switch whose folder's snapshot lacks the session drops the choice, with a reason. */
+function dropMissingWorkspaceSelection(state: CompanyViewState): CompanyViewState {
+  const pending = state.pendingWorkspaceSelection;
+  if (pending === null || !pending.confirmed || state.sessions[pending.sessionId] !== undefined) {
+    return state;
+  }
+  return {
+    ...state,
+    pendingWorkspaceSelection: null,
+    workspaceSelectionNotice: 'Phiên không còn trong thư mục này.',
+  };
 }
 
 /**
@@ -793,13 +863,13 @@ export function applyCompanyMessage(
   state: CompanyViewState,
   message: ServerMessage,
 ): CompanyResult {
-  return settleSelection(reduceMessage(state, message));
+  return settleWorkspaceSelection(settleSelection(reduceMessage(state, message)));
 }
 
 function reduceMessage(state: CompanyViewState, message: ServerMessage): CompanyResult {
   switch (message.type) {
     case 'companySnapshot':
-      return unchanged(applySnapshot(state, message.snapshot));
+      return unchanged(dropMissingWorkspaceSelection(applySnapshot(state, message.snapshot)));
     case 'companyStateChanged':
       return applyStateChanged(state, message);
     case 'companyCommandResult':

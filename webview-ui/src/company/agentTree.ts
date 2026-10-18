@@ -10,7 +10,7 @@
  * followed by its badges, so collapsing the sidebar never leaves an agent unnamed.
  */
 
-import type { CompanyWorkspaceEntry } from '../../../core/src/messages.js';
+import type { CompanyWorkspaceEntry, CompanyWorkspaceSession } from '../../../core/src/messages.js';
 import {
   type ActivityCounts,
   type AgentRoleGroup,
@@ -19,7 +19,9 @@ import {
   type HerdrGroup,
   herdrGroup,
   type HerdrRow,
+  isFolded,
   type RepoPlacement,
+  workspaceSessionRow,
 } from './agentSidebarView.js';
 import type { CompanyViewState } from './companyState.js';
 import { removableErroredSessionIds } from './sessionRemoval.js';
@@ -42,6 +44,14 @@ const REPO_SOURCE_TITLE: Readonly<Record<RepoPlacement['source'], string>> = {
   other: 'Chưa rõ repository, workspace hay thư mục',
 };
 
+/** A background folder's sessions as the tree lists them: live rows, and parked rows folded under "Tạm trữ". */
+export interface FolderRows {
+  /** The folder's path: a click on one of its sessions switches the board to it. */
+  path: string;
+  live: AgentRow[];
+  parked: AgentRow[];
+}
+
 export interface ProjectNode {
   /** Stable identity: `board:<path>` for a folder, `herdr:<repo key>` for a herdr group. */
   key: string;
@@ -55,6 +65,8 @@ export interface ProjectNode {
   active: boolean;
   /** A board folder that is not active: the folder the board switches to. Null otherwise. */
   switchTo: string | null;
+  /** A board folder the board remembers but has not opened: switching to it opens it. */
+  notOpen: boolean;
   /** The git branch a herdr group reports, shown as a chip; null when none does. */
   branch: string | null;
   /** The colour slot of the project's left tick, 0 up to PROJECT_TONE_COUNT. */
@@ -65,6 +77,11 @@ export interface ProjectNode {
   groups: AgentRoleGroup[];
   /** A herdr group's agents, most urgent first. */
   panes: HerdrRow[];
+  /**
+   * A background folder's sessions from the folder list. Null for the active folder, for a
+   * folder that is not open, and when the server sent no sessions (the tree then shows counts).
+   */
+  folderRows: FolderRows | null;
   /** Parked sessions under the active folder, counted across its roles. */
   parkedCount: number;
   /** Session ids the errored-session cleanup may delete under the active folder. */
@@ -82,6 +99,7 @@ export type RailEntry =
   | { kind: 'project'; project: ProjectNode }
   | { kind: 'summary'; project: ProjectNode }
   | { kind: 'session'; row: AgentRow; projectKey: string }
+  | { kind: 'remoteSession'; row: AgentRow; project: ProjectNode; path: string }
   | { kind: 'pane'; row: HerdrRow; projectKey: string }
   | { kind: 'parked'; count: number; projectKey: string }
   | { kind: 'break' };
@@ -123,12 +141,14 @@ export function buildProjectTree(
             : `${REPO_SOURCE_TITLE[repo.source]} · ${path}`,
         active: false,
         switchTo: null,
+        notOpen: false,
         branch: repo.rows.find((row) => row.branch !== null)?.branch ?? null,
         tone: projectTone(key),
         counts: countTones(repo.rows.map((row) => row.tone)),
         collapsed: collapsed.has(key),
         groups: [],
         panes: repo.rows,
+        folderRows: null,
         parkedCount: 0,
         cleanable: [],
       });
@@ -152,12 +172,14 @@ function activeBoardProject(
     tooltip: activePath ?? COMPANY_PROJECT_NAME,
     active: true,
     switchTo: null,
+    notOpen: false,
     branch: null,
     tone: projectTone(key),
     counts: countTones(groups.flatMap((group) => group.active.map((row) => row.tone))),
     collapsed: collapsed.has(key),
     groups,
     panes: [],
+    folderRows: null,
     parkedCount: groups.reduce((sum, group) => sum + group.parked.length, 0),
     cleanable: groups.flatMap((group) => removableErroredSessionIds(state, group)),
   };
@@ -168,6 +190,7 @@ function inactiveBoardProject(
   collapsed: ReadonlySet<string>,
 ): ProjectNode {
   const key = boardProjectKey(entry.path);
+  const sessions = entry.open ? entry.sessions : undefined;
   return {
     key,
     kind: 'board',
@@ -176,14 +199,29 @@ function inactiveBoardProject(
     tooltip: entry.path,
     active: false,
     switchTo: entry.path,
+    notOpen: !entry.open,
     branch: null,
     tone: projectTone(key),
     counts: { working: entry.working, needs: entry.waiting, idle: 0, error: 0 },
     collapsed: collapsed.has(key),
     groups: [],
     panes: [],
+    folderRows: sessions === undefined ? null : folderRowsOf(entry.path, sessions),
     parkedCount: 0,
     cleanable: [],
+  };
+}
+
+/**
+ * A background folder's sessions as its tree lists them: the live ones in the server's
+ * order (waiting on the user first), and the parked ones, which fold under "Tạm trữ".
+ */
+function folderRowsOf(path: string, sessions: readonly CompanyWorkspaceSession[]): FolderRows {
+  const rows = sessions.map(workspaceSessionRow);
+  return {
+    path,
+    live: rows.filter((row) => !isFolded(row)),
+    parked: rows.filter((row) => isFolded(row)),
   };
 }
 
@@ -253,6 +291,23 @@ export function buildRailTree(projects: readonly ProjectNode[]): RailEntry[] {
       }
       if (project.parkedCount > 0) {
         entries.push({ kind: 'parked', count: project.parkedCount, projectKey: project.key });
+      }
+    }
+    if (project.folderRows !== null) {
+      for (const row of project.folderRows.live) {
+        entries.push({
+          kind: 'remoteSession',
+          row,
+          project,
+          path: project.folderRows.path,
+        });
+      }
+      if (project.folderRows.parked.length > 0) {
+        entries.push({
+          kind: 'parked',
+          count: project.folderRows.parked.length,
+          projectKey: project.key,
+        });
       }
     }
     for (const row of project.panes) {

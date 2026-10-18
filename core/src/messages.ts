@@ -1105,6 +1105,15 @@ export interface CompanyWorkspaceEntry {
   open: boolean;
   working: number;
   waiting: number;
+  sessions?: CompanyWorkspaceSession[];
+}
+
+export interface CompanyWorkspaceSession {
+  id: string;
+  code: string;
+  name: string;
+  role: CompanyRole;
+  status: string;
 }
 
 export interface CompanyArtifactPageMessage {
@@ -1132,12 +1141,12 @@ export interface CompanyFileListMessage {
 export interface CompanyFileEntry {
   name: string;
   path: string;
-  kind: AnonymousSchema_638;
+  kind: AnonymousSchema_643;
   sizeBytes?: number;
   modifiedAt?: string;
 }
 
-export type AnonymousSchema_638 = 'file' | 'directory';
+export type AnonymousSchema_643 = 'file' | 'directory';
 
 export interface CompanyFileReadMessage {
   type: 'companyFileRead';
@@ -1149,14 +1158,14 @@ export interface CompanyFileContent {
   path: string;
   totalBytes: number;
   offset: number;
-  encoding: AnonymousSchema_646;
+  encoding: AnonymousSchema_651;
   text?: string;
   dataBase64?: string;
   mediaType?: string;
   truncated: boolean;
 }
 
-export type AnonymousSchema_646 = 'utf8' | 'base64';
+export type AnonymousSchema_651 = 'utf8' | 'base64';
 
 export interface CompanyAttachmentUploadedMessage {
   type: 'companyAttachmentUploaded';
@@ -1329,25 +1338,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_728;
-  mode?: AnonymousSchema_729;
+  delivery: AnonymousSchema_733;
+  mode?: AnonymousSchema_734;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_728 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_733 = 'prompt' | 'steer' | 'follow_up';
 
-export type AnonymousSchema_729 = 'chat' | 'company';
+export type AnonymousSchema_734 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_735;
+  decision: AnonymousSchema_740;
   note?: string;
 }
 
-export type AnonymousSchema_735 = 'approve' | 'reject';
+export type AnonymousSchema_740 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1360,7 +1369,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_747;
+  decision?: AnonymousSchema_752;
 }
 
 export interface QuestionAnswer {
@@ -1369,17 +1378,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_747 = 'approve_once' | 'reject';
+export type AnonymousSchema_752 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_752;
+  action: AnonymousSchema_757;
 }
 
-export type AnonymousSchema_752 =
+export type AnonymousSchema_757 =
   'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
 
 export interface CompanyPromptCancelMessage {

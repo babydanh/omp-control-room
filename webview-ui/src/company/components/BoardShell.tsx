@@ -151,6 +151,12 @@ export function BoardShell({ client }: BoardShellProps) {
     client.select({ ...selectionForSession(state, sessionId), tab });
   }
 
+  /** Switch the board to another folder; the session is selected once that folder's snapshot holds it. */
+  function selectWorkspaceSession(path: string, sessionId: string): void {
+    setOpened(null);
+    client.openWorkspaceSession(path, sessionId);
+  }
+
   function openContract(contractId: string | null): void {
     setOpened({ kind: 'contract', contractId });
   }
@@ -186,6 +192,15 @@ export function BoardShell({ client }: BoardShellProps) {
           Có thay đổi đã bị bỏ sót; đang chờ một bản chụp mới từ máy chủ.
         </p>
       )}
+      {state.workspaceSelectionNotice !== null && (
+        <p
+          role="status"
+          data-testid="workspace-selection-notice"
+          className="border-b border-warning px-3 py-1 text-2xs text-warning"
+        >
+          {state.workspaceSelectionNotice}
+        </p>
+      )}
       <AttentionBar
         contract={pendingContract(state)}
         questions={pendingQuestions}
@@ -209,6 +224,7 @@ export function BoardShell({ client }: BoardShellProps) {
             collapsedProjects={collapsedProjects}
             onExpand={toggleSidebar}
             onSelectSession={selectSession}
+            onSelectWorkspaceSession={selectWorkspaceSession}
             onOpenHerdr={openHerdr}
             onToggleProject={toggleProject}
             onMenu={openMenu}
@@ -227,6 +243,7 @@ export function BoardShell({ client }: BoardShellProps) {
             }
             onCollapse={toggleSidebar}
             onSelectSession={selectSession}
+            onSelectWorkspaceSession={selectWorkspaceSession}
             onOpenHerdr={openHerdr}
             onToggleProject={toggleProject}
             onMenu={openMenu}

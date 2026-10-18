@@ -4,6 +4,8 @@
  * sessions, and the herdr agents sit under the repository they work in, one
  * project per repo. A project folds with its header, and the fold is remembered.
  *
+ * An open background folder lists its sessions too; a click switches the board to it.
+ *
  * A row that waits on the user is red and sorts first. A role's parked sessions
  * sit collapsed under "Tạm trữ" so live work stays in view. The role header opens
  * that role's model picker inline; the server applies a change at the role's next
@@ -15,7 +17,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { Fragment, useRef, useState } from 'react';
 
 import type { CompanyRole, RoleProfile } from '../../../../core/src/company.js';
-import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
+import { type AgentMenuRequest, type AgentMenuSubject, agentMenuTriggers } from '../agentMenu.js';
 import {
   activityCounts,
   type AgentRoleGroup,
@@ -27,7 +29,12 @@ import {
   herdrTooltip,
   type SummaryLine,
 } from '../agentSidebarView.js';
-import { buildProjectTree, projectCountsText, type ProjectNode } from '../agentTree.js';
+import {
+  buildProjectTree,
+  type FolderRows,
+  projectCountsText,
+  type ProjectNode,
+} from '../agentTree.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
@@ -57,6 +64,7 @@ export interface AgentSidebarProps {
   onWidthChange: (width: number) => void;
   onCollapse: () => void;
   onSelectSession: (sessionId: string) => void;
+  onSelectWorkspaceSession: (path: string, sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
@@ -72,6 +80,10 @@ interface TreeView {
   onToggleEdit: (role: CompanyRole) => void;
   onPick: (role: CompanyRole, modelId: string, thinking: string | undefined) => void;
   onSelectSession: (sessionId: string) => void;
+  onSelectWorkspaceSession: (path: string, sessionId: string) => void;
+  onOpenWorkspace: (path: string) => void;
+  /** The folder the board is switching to for a session chosen in another folder; null when none. */
+  switchingPath: string | null;
   onOpenHerdr: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
@@ -88,6 +100,7 @@ export function AgentSidebar({
   onWidthChange,
   onCollapse,
   onSelectSession,
+  onSelectWorkspaceSession,
   onOpenHerdr,
   onToggleProject,
   onMenu,
@@ -127,6 +140,11 @@ export function AgentSidebar({
     onToggleEdit: (role) => setEditingRole((current) => (current === role ? null : role)),
     onPick: changeRole,
     onSelectSession,
+    onSelectWorkspaceSession,
+    onOpenWorkspace: (path) => {
+      client.openWorkspace(path);
+    },
+    switchingPath: state.pendingWorkspaceSelection?.path ?? null,
     onOpenHerdr,
     onToggleProject,
     onMenu,
@@ -241,6 +259,21 @@ function ProjectBody({ project, view }: { project: ProjectNode; view: TreeView }
     );
   }
   if (!project.active) {
+    if (project.folderRows !== null) {
+      return <WorkspaceSessions folder={project.folderRows} project={project} view={view} />;
+    }
+    if (project.notOpen && project.switchTo !== null) {
+      const path = project.switchTo;
+      return (
+        <button
+          type="button"
+          onClick={() => view.onOpenWorkspace(path)}
+          className="cursor-pointer px-4 pb-2 text-left text-xs text-text-muted hover:text-text"
+        >
+          chưa mở — bấm để mở
+        </button>
+      );
+    }
     return (
       <p className="px-4 pb-2 text-xs text-text-muted">Mở thư mục này trên bảng để xem phiên.</p>
     );
@@ -255,6 +288,77 @@ function ProjectBody({ project, view }: { project: ProjectNode; view: TreeView }
           <RoleSection group={group} profile={view.profileOf(group.role)} view={view} />
         </Fragment>
       ))}
+    </div>
+  );
+}
+
+/**
+ * A background folder's sessions, as the folder list reports them. A click switches the
+ * board to that folder and selects the session there; the right-click menu is the folder's.
+ */
+function WorkspaceSessions({
+  folder,
+  project,
+  view,
+}: {
+  folder: FolderRows;
+  project: ProjectNode;
+  view: TreeView;
+}) {
+  const [showParked, setShowParked] = useState(false);
+  const empty = folder.live.length === 0 && folder.parked.length === 0;
+  return (
+    <div className="ml-4 border-l border-border pb-1 pl-1">
+      {view.switchingPath === folder.path && (
+        <p className="px-2 py-1 text-xs text-text-muted">Đang chuyển sang thư mục này…</p>
+      )}
+      {empty && <p className="px-2 py-1 text-xs text-text-muted">Chưa có phiên nào.</p>}
+      <ul>
+        {folder.live.map((row, index) => (
+          <li key={row.sessionId}>
+            <AgentRowButton
+              row={row}
+              testId={`folder-row-${row.code}`}
+              lane={`folder:${folder.path}`}
+              index={index}
+              selected={false}
+              menu={{ kind: 'project', project }}
+              onSelect={() => view.onSelectWorkspaceSession(folder.path, row.sessionId)}
+              onMenu={view.onMenu}
+            />
+          </li>
+        ))}
+      </ul>
+      {folder.parked.length > 0 && (
+        <div className="px-2">
+          <button
+            type="button"
+            aria-expanded={showParked}
+            onClick={() => setShowParked((current) => !current)}
+            className="cursor-pointer py-0.5 text-xs text-text-muted hover:text-text"
+          >
+            Tạm trữ ({folder.parked.length}) {showParked ? '▴' : '▾'}
+          </button>
+          {showParked && (
+            <ul>
+              {folder.parked.map((row, index) => (
+                <li key={row.sessionId}>
+                  <AgentRowButton
+                    row={row}
+                    testId={`folder-row-${row.code}`}
+                    lane={`folder:${folder.path}:parked`}
+                    index={index}
+                    selected={false}
+                    menu={{ kind: 'project', project }}
+                    onSelect={() => view.onSelectWorkspaceSession(folder.path, row.sessionId)}
+                    onMenu={view.onMenu}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -339,6 +443,8 @@ function RoleSection({
           <li key={row.sessionId}>
             <AgentRowButton
               row={row}
+              testId={`agent-row-${row.code}`}
+              menu={{ kind: 'session', sessionId: row.sessionId, drawer: null }}
               lane={group.role}
               index={index}
               selected={row.sessionId === view.selectedSessionId}
@@ -365,6 +471,8 @@ function RoleSection({
                 <li key={row.sessionId}>
                   <AgentRowButton
                     row={row}
+                    testId={`agent-row-${row.code}`}
+                    menu={{ kind: 'session', sessionId: row.sessionId, drawer: null }}
                     lane={`${group.role}:parked`}
                     index={index}
                     selected={row.sessionId === view.selectedSessionId}
@@ -396,23 +504,25 @@ function SummaryText({ summary }: { summary: SummaryLine }) {
 
 function AgentRowButton({
   row,
+  testId,
   lane,
   index,
   selected,
+  menu,
   onSelect,
   onMenu,
 }: {
   row: AgentRow;
+  testId: string;
   lane: string;
   index: number;
   selected: boolean;
+  /** What the row's right-click menu acts on: the session itself, or the folder it belongs to. */
+  menu: AgentMenuSubject;
   onSelect: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
-  const triggers = agentMenuTriggers<HTMLButtonElement>(
-    { kind: 'session', sessionId: row.sessionId, drawer: null },
-    onMenu,
-  );
+  const triggers = agentMenuTriggers<HTMLButtonElement>(menu, onMenu);
   return (
     <button
       type="button"
@@ -420,7 +530,7 @@ function AgentRowButton({
       {...triggers}
       aria-pressed={selected}
       title={agentTooltip(row)}
-      data-testid={`agent-row-${row.code}`}
+      data-testid={testId}
       data-flight-key={`session:${row.sessionId}`}
       data-lane={lane}
       data-index={index}
