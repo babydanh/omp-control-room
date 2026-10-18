@@ -59,6 +59,7 @@ export type DrawerSubject =
   | { kind: 'task'; taskId: string }
   | { kind: 'session'; sessionId: string }
   | { kind: 'herdr'; paneId: string }
+  | { kind: 'sleeping'; paneId: string }
   | { kind: 'contract'; contractId: string | null }
   | { kind: 'question'; questionId: string }
   | { kind: 'files' };
@@ -92,6 +93,8 @@ export function drawerSubjectKey(subject: DrawerSubject): string {
       return `session:${subject.sessionId}`;
     case 'herdr':
       return `herdr:${subject.paneId}`;
+    case 'sleeping':
+      return `sleeping:${subject.paneId}`;
     case 'question':
       return `question:${subject.questionId}`;
     case 'contract':

@@ -25,6 +25,7 @@ import {
   agentMenuTriggers,
   type DrawerView,
 } from '../agentMenu.js';
+import { sleepingName } from '../agentSidebarView.js';
 import type { BoardCard, BoardLane } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
@@ -51,6 +52,7 @@ import { ContractPanel } from './ContractPanel.js';
 import { HerdrPanel } from './HerdrPanel.js';
 import { QuestionPanel } from './QuestionPanel.js';
 import { SessionBody } from './SessionBody.js';
+import { SleepingPanel } from './SleepingPanel.js';
 import { TaskReport } from './TaskReport.js';
 import { WorkspaceFileBrowser } from './WorkspaceFileBrowser.js';
 
@@ -251,6 +253,10 @@ function DrawerContent(props: ContentProps) {
           onTabChange={props.onHerdrTab}
         />
       );
+    case 'sleeping':
+      return (
+        <SleepingPanel key={subject.paneId} client={client} state={state} paneId={subject.paneId} />
+      );
     case 'contract':
       return <ContractSubject client={client} state={state} contractId={subject.contractId} />;
     case 'question':
@@ -299,6 +305,11 @@ function headingFor(
         status: agent ? HERDR_TONE_LABELS[herdrToneFor(agent.status)] : null,
       };
     }
+    case 'sleeping': {
+      const session = state.herdr.sleeping.find((entry) => entry.paneId === subject.paneId);
+      if (session === undefined) return { title: 'Phiên ngủ đông', status: null };
+      return { title: sleepingName(session), status: 'Ngủ đông' };
+    }
     case 'contract': {
       if (subject.contractId === null) return { title: 'Kế hoạch chờ duyệt', status: null };
       const contract = state.contracts[subject.contractId];
@@ -334,6 +345,8 @@ function drawerMenuSubject(
       return { kind: 'session', sessionId: subject.sessionId, drawer };
     case 'herdr':
       return { kind: 'herdr', paneId: subject.paneId, drawer };
+    case 'sleeping':
+      return { kind: 'sleeping', paneId: subject.paneId, drawer };
     case 'contract':
     case 'question':
     case 'files':

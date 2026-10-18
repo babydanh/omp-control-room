@@ -13,6 +13,7 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { AgentInfo, CompanySessionSummary, HerdrAgent } from '../../../../core/src/company.js';
+import type { HerdrSleepingSession } from '../../../../core/src/messages.js';
 import { workingFolder } from '../agentInfoView.js';
 import {
   type AgentMenuAction,
@@ -33,9 +34,10 @@ import {
   sessionMenuItems,
   type SessionMenuTab,
   sessionNameProblem,
+  sleepingMenuItems,
   taskCardMenuItems,
 } from '../agentMenu.js';
-import { pendingQuestionSessionIds } from '../agentSidebarView.js';
+import { pendingQuestionSessionIds, sleepingName } from '../agentSidebarView.js';
 import { copyText } from '../clipboard.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
@@ -82,6 +84,7 @@ interface MenuFacts {
   session: CompanySessionSummary | undefined;
   sessionFacts: SessionMenuFacts | null;
   agent: HerdrAgent | undefined;
+  sleeping: HerdrSleepingSession | undefined;
   task: { code: string; title: string; status: string } | undefined;
   prompt: { preview: string } | undefined;
   folder: string | null;
@@ -101,6 +104,7 @@ function actingSessionId(subject: AgentMenuSubject): string | null {
     case 'planning':
       return subject.sessionId;
     case 'herdr':
+    case 'sleeping':
     case 'project':
       return null;
   }
@@ -129,6 +133,8 @@ function itemsFor(subject: AgentMenuSubject, facts: MenuFacts): AgentMenuItem[] 
       return facts.prompt === undefined ? null : planningMenuItems(facts.session !== undefined);
     case 'herdr':
       return facts.agent === undefined ? null : herdrMenuItems(facts.folder, subject.drawer);
+    case 'sleeping':
+      return facts.sleeping === undefined ? null : sleepingMenuItems(subject.drawer);
     case 'project':
       return projectMenuItems(subject.project);
   }
@@ -161,6 +167,9 @@ function headerLines(
         title: `${facts.agent.kind} · ${facts.agent.paneId}`,
         subtitle: HERDR_TONE_LABELS[herdrToneFor(facts.agent.status)],
       };
+    case 'sleeping':
+      if (facts.sleeping === undefined) return { title: 'Phiên ngủ đông không còn', subtitle: '' };
+      return { title: sleepingName(facts.sleeping), subtitle: 'Ngủ đông' };
     case 'project':
       return { title: subject.project.name, subtitle: subject.project.path ?? '' };
   }
@@ -201,13 +210,17 @@ export function AgentContextMenu({
 }: AgentContextMenuProps) {
   const { subject, anchor, returnFocus } = request;
   const sessionId = actingSessionId(subject);
-  const paneId = subject.kind === 'herdr' ? subject.paneId : null;
+  const paneId = subject.kind === 'herdr' || subject.kind === 'sleeping' ? subject.paneId : null;
   const isHerdr = subject.kind === 'herdr';
   const session = sessionId === null ? undefined : state.sessions[sessionId];
   const sessionInfo = sessionId === null ? undefined : state.sessionInfos[sessionId];
   const agent =
     paneId === null ? undefined : state.herdr.agents.find((entry) => entry.paneId === paneId);
   const paneInfo = paneId === null ? undefined : state.herdr.infos[paneId];
+  const sleeping =
+    subject.kind === 'sleeping'
+      ? state.herdr.sleeping.find((entry) => entry.paneId === subject.paneId)
+      : undefined;
   const task = subject.kind === 'task' ? state.tasks[subject.taskId] : undefined;
   const prompt =
     subject.kind === 'planning'
@@ -225,6 +238,7 @@ export function AgentContextMenu({
     session,
     sessionFacts: session === undefined ? null : { status: session.status, cwd: folder, holdsWork },
     agent,
+    sleeping,
     task,
     prompt,
     folder,
@@ -476,6 +490,9 @@ export function AgentContextMenu({
       case 'cleanErrored':
         setNotice(null);
         setMode('clean');
+        return;
+      case 'wake':
+        if (paneId !== null) track(client.herdrWake(paneId));
         return;
     }
   }

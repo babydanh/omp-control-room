@@ -70,6 +70,8 @@ function shape(entries: readonly RailEntry[]): string[] {
         return `remote ${entry.project.name} ${entry.row.code}`;
       case 'pane':
         return `pane ${entry.row.paneId}`;
+      case 'sleeping':
+        return `sleeping ${entry.row.paneId}`;
       case 'parked':
         return `parked ${entry.count}`;
       case 'break':

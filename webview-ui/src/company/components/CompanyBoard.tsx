@@ -15,7 +15,9 @@
  *
  * Each lane names who holds its cards, and a card in review names whether QA or
  * the Trọng tài holds it. A card sent back after a failed verification says so.
- * When a card changes lane, it flies there (flip.ts); reduced motion skips it.
+ * When a card changes lane, it flies there (flip.ts); reduced motion skips it. A lane
+ * with no cards folds to a strip that a click opens, and a card that lands in an empty
+ * lane opens that lane first, so the flight has room to land.
  *
  * A card is a button, not a draggable: the only thing clicking does is select,
  * because status is the server's to change.
@@ -23,20 +25,20 @@
  * An agent with work of its own and no task card (a herdr pane, or a company
  * session) shows as a dashed card after the task cards. Clicking it opens that
  * agent; hovering previews its terminal, and right-click opens its menu.
+ *
+ * Hibernated sessions sit in a lane after the others, and that lane folds to a strip while
+ * it is empty. A card there opens the session's drawer, where it can be woken.
  */
 
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 
 import type { AgentBoardCard, AgentCardSubject } from '../agentBoard.js';
 import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
+import { type SleepingRow, sleepingTooltip } from '../agentSidebarView.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
-import {
-  COMPANY_LANE_EMPTY_WIDTH_PX,
-  COMPANY_LANE_ICONS,
-  COMPANY_LANE_MIN_WIDTH_PX,
-  COMPANY_LANE_OWNERS,
-} from '../constants.js';
+import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS, type CompanyLaneId } from '../constants.js';
+import { isLaneCollapsed, laneColumnStyle } from '../laneLayout.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { taskStatusLabel } from '../statusLabels.js';
 import type { PreviewTarget } from '../terminalPreview.js';
@@ -53,41 +55,41 @@ export interface CompanyBoardProps {
   onSelectSession: (sessionId: string) => void;
   /** Opens the drawer on a herdr pane's agent card. */
   onOpenHerdr: (paneId: string) => void;
+  /** Opens a hibernated session's drawer, where it can be woken. */
+  onOpenSleeping: (paneId: string) => void;
+  /** The hibernated sessions, most recently slept first. */
+  sleeping: readonly SleepingRow[];
   /** The herdr pane and session the drawer shows, so their agent cards read as pressed. */
   selectedPaneId: string | null;
   selectedSessionId: string | null;
   onMenu: (request: AgentMenuRequest) => void;
 }
 
-/** How loud a card's status line is. Red marks a card that needs the user or failed. */
-type CardTone = 'live' | 'ok' | 'alert' | 'plain';
-
-const CARD_TONE_CLASS: Readonly<Record<CardTone, string>> = {
-  live: 'text-accent',
-  ok: 'text-status-success',
-  alert: 'text-warning',
-  plain: 'text-text-muted',
-};
-
-/** The chip shape the owner and sent-back tags share. */
-const PILL_CLASS = 'mt-1 inline-block rounded-full bg-btn-bg px-2 text-2xs';
-
-/** The status line an agent card prints, in the colour of the lane it sits in. */
-const AGENT_STATUS_CLASS: Readonly<Record<AgentBoardCard['lane'], string>> = {
-  planned: 'text-text-muted',
-  ready: 'text-text-muted',
-  running: 'text-accent',
-  needs_input: 'text-warning',
-  review: 'text-text-muted',
-  done: 'text-status-success',
-  failed: 'text-warning',
-};
-
-function cardTone(card: BoardCard): CardTone {
-  if (card.sentBack || card.lane === 'needs_input' || card.lane === 'failed') return 'alert';
-  if (card.lane === 'done') return 'ok';
-  if (card.lane === 'running') return 'live';
-  return 'plain';
+/**
+ * The detail a compact task card leaves out: its status word, contract, session,
+ * evidence and route reason. It reads from the card's tooltip; the drawer shows the rest.
+ */
+function taskDetail(card: BoardCard): string {
+  const lines = [
+    `${card.code} ${card.title}`,
+    taskStatusLabel(card.status),
+    `${card.contractCode} · ${card.phaseTitle}`,
+  ];
+  if (card.session) {
+    const model = card.session.effectiveModel ?? card.session.requestedModel;
+    const mismatch =
+      card.session.effectiveModel !== null &&
+      card.session.effectiveModel !== card.session.requestedModel;
+    lines.push(
+      `${card.session.code} · ${companyRoleLabel(card.session.role)} · ${model}${mismatch ? ' (khác với mô hình đã yêu cầu)' : ''}`,
+    );
+  }
+  if (card.evidence.total > 0) {
+    const failed = card.evidence.failed > 0 ? ` (${card.evidence.failed} thất bại)` : '';
+    lines.push(`bằng chứng ${card.evidence.passed}/${card.evidence.total}${failed}`);
+  }
+  if (card.routeReason) lines.push(card.routeReason);
+  return lines.join('\n');
 }
 
 /**
@@ -121,18 +123,21 @@ function PlanningCard({
       data-flight-key={`prompt:${prompt.promptId}`}
       data-lane="planned"
       data-index={index}
-      className={`company-card w-full border-dashed border-l-4 px-2.5 py-2 text-left ${prompt.session === null ? 'cursor-default' : 'cursor-pointer'} ${ROLE_EDGE_CLASS.director}`}
+      className={`company-card w-full border-dashed border-l-4 p-2 text-left ${prompt.session === null ? 'cursor-default' : 'cursor-pointer'} ${ROLE_EDGE_CLASS.director}`}
     >
-      <span className="line-clamp-3 break-normal text-base font-medium leading-[1.35] text-text">
+      <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         {prompt.preview}
       </span>
-      <span className="mt-1 block text-xs text-text-muted">Giám đốc đang lập kế hoạch</span>
-      {prompt.session && (
-        <span className="mt-1 block text-xs text-text-muted">
-          <span className="font-mono">{prompt.session.code}</span> &middot;{' '}
-          {prompt.session.effectiveModel ?? prompt.session.requestedModel}
-        </span>
-      )}
+      <span className="mt-0.5 block truncate text-2xs text-text-muted">
+        Giám đốc đang lập kế hoạch
+        {prompt.session && (
+          <>
+            {' '}
+            &middot; <span className="font-mono">{prompt.session.code}</span> &middot;{' '}
+            {prompt.session.effectiveModel ?? prompt.session.requestedModel}
+          </>
+        )}
+      </span>
     </button>
   );
 }
@@ -165,27 +170,38 @@ function FlowStrip({ flow }: { flow: BoardFlow }) {
   );
 }
 
-function EvidenceBadges({ card }: { card: BoardCard }) {
-  if (card.evidence.total === 0 && card.pendingQuestions === 0) return null;
+/**
+ * The one meta line under a task's title. It names what holds the card: sent back,
+ * the reviewer it waits on, or why it is not moving. A card that nothing holds
+ * shows its contract and phase instead. Everything else reads from the tooltip.
+ */
+function TaskMeta({ card }: { card: BoardCard }) {
+  if (!card.sentBack && card.reviewOwner === null && !card.waitReason) {
+    return (
+      <span className="mt-0.5 block truncate text-2xs text-text-muted">
+        {card.contractCode} &middot; {card.phaseTitle}
+      </span>
+    );
+  }
   return (
-    <p className="mt-1 flex flex-wrap gap-2 text-2xs text-text-muted">
-      {card.evidence.total > 0 && (
-        <span>
-          bằng chứng {card.evidence.passed}/{card.evidence.total}
-          {card.evidence.failed > 0 && (
-            <span className="text-warning"> ({card.evidence.failed} thất bại)</span>
-          )}
+    <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-2xs">
+      {card.sentBack && <span className="shrink-0 text-warning">trả lại</span>}
+      {card.reviewOwner !== null && (
+        <span
+          className={`shrink-0 ${card.reviewOwner === 'QA' ? 'text-status-active' : 'text-orchid'}`}
+        >
+          chờ {card.reviewOwner}
         </span>
       )}
-    </p>
+      {card.waitReason && (
+        <span className="min-w-0 truncate text-warning" data-testid={`wait-${card.code}`}>
+          {card.waitReason === 'blocked_by_dependencies'
+            ? `${WAIT_REASON_LABELS[card.waitReason]} (${card.blockedByCodes.join(', ')})`
+            : WAIT_REASON_LABELS[card.waitReason]}
+        </span>
+      )}
+    </span>
   );
-}
-
-/** Who a card in review waits on, as a chip; nothing for other lanes. */
-function OwnerChip({ card }: { card: BoardCard }) {
-  if (card.reviewOwner === null) return null;
-  const tone = card.reviewOwner === 'QA' ? 'text-status-active' : 'text-orchid';
-  return <span className={`${PILL_CLASS} ${tone}`}>chờ {card.reviewOwner}</span>;
 }
 
 function TaskCard({
@@ -214,54 +230,26 @@ function TaskCard({
         ? previewTriggers(actions, { kind: 'session', sessionId: card.session.id })
         : {})}
       aria-pressed={card.selected}
-      title={`${card.code} ${card.title}`}
+      title={taskDetail(card)}
       data-testid={`task-card-${card.code}`}
       data-task-id={card.taskId}
       data-flight-key={`task:${card.taskId}`}
       data-lane={card.lane}
       data-index={index}
-      className={`company-card w-full cursor-pointer border-l-4 px-2.5 py-2 text-left ${edge} ${card.sentBack ? 'company-sent-back' : ''}`}
+      className={`company-card w-full cursor-pointer border-l-4 p-2 text-left ${edge} ${card.sentBack ? 'company-sent-back' : ''}`}
     >
-      <span className="line-clamp-3 break-normal text-base font-medium leading-[1.35] text-text">
-        <span className="font-mono text-xs text-text-muted">{card.code}</span> {card.title}
+      <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
+        <span className="font-mono text-2xs text-text-muted">{card.code}</span> {card.title}
       </span>
-      <span className={`mt-1 block text-xs ${CARD_TONE_CLASS[cardTone(card)]}`}>
-        {taskStatusLabel(card.status)}
-      </span>
-      {card.sentBack && <span className={`${PILL_CLASS} text-warning`}>trả lại</span>}
-      <OwnerChip card={card} />
-      {card.waitReason && (
-        <span className="mt-1 block text-xs text-warning" data-testid={`wait-${card.code}`}>
-          {card.waitReason === 'blocked_by_dependencies'
-            ? `${WAIT_REASON_LABELS[card.waitReason]} (${card.blockedByCodes.join(', ')})`
-            : WAIT_REASON_LABELS[card.waitReason]}
-        </span>
-      )}
-      <span className="mt-1 block text-xs text-text-muted">
-        {card.contractCode} &middot; {card.phaseTitle}
-      </span>
-      {card.session && (
-        <span className="mt-1 block text-xs text-text-muted">
-          <span className="font-mono">{card.session.code}</span> &middot;{' '}
-          {companyRoleLabel(card.session.role)} &middot;{' '}
-          {card.session.effectiveModel ?? card.session.requestedModel}
-          {card.session.effectiveModel !== null &&
-            card.session.effectiveModel !== card.session.requestedModel && (
-              <span className="text-warning"> (khác với mô hình đã yêu cầu)</span>
-            )}
-        </span>
-      )}
-      {card.routeReason && (
-        <span className="mt-1 block text-xs italic text-text-muted">{card.routeReason}</span>
-      )}
-      <EvidenceBadges card={card} />
+      <TaskMeta card={card} />
     </button>
   );
 }
 
 /**
  * An agent with work of its own and no task card: a herdr pane or a company
- * session. Its card is dashed, so it never reads as the company's own work.
+ * session. Its card is dashed, so it never reads as the company's own work. The
+ * lane already names its status, so the card shows only the repo and the title.
  */
 function AgentCard({
   card,
@@ -295,28 +283,183 @@ function AgentCard({
       {...triggers}
       {...previewTriggers(actions, target)}
       aria-pressed={selected}
-      title={card.title}
+      title={`${card.tag} · ${card.project} · ${card.title} · ${card.statusLabel}`}
       data-testid="agent-card"
       data-agent-kind={subject.kind}
       data-flight-key={card.key}
       data-lane={card.lane}
       data-index={index}
-      className="company-card w-full cursor-pointer border-dashed px-2.5 py-2 text-left"
+      className="company-card flex w-full cursor-pointer items-start gap-1.5 border-dashed p-2 text-left"
     >
-      <span className="flex min-w-0 items-center gap-1.5 text-2xs">
+      <span className="mt-1 flex shrink-0">
         <StatusDot tone={card.tone} />
-        <span className="shrink-0 rounded-[3px] border border-border px-1 font-mono text-text-muted">
-          {card.tag}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-text-muted">{card.project}</span>
       </span>
-      <span className="mt-1 line-clamp-3 break-normal text-sm font-medium leading-[1.35] text-text">
-        {card.title}
-      </span>
-      <span className={`mt-1 block text-xs ${AGENT_STATUS_CLASS[card.lane]}`}>
-        {card.statusLabel}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-2xs text-text-muted">{card.project}</span>
+        <span className="block truncate text-sm font-medium text-text">{card.title}</span>
       </span>
     </button>
+  );
+}
+
+/**
+ * An empty lane folded to a strip: its mark, its count and its name, read top to
+ * bottom. The lane's colour rule runs along the strip's top edge. A click opens the
+ * lane. The words stay in the DOM for screen readers and text search.
+ */
+function LaneStrip({
+  lane,
+  count,
+  onOpen,
+}: {
+  lane: BoardLane;
+  count: number;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={`Mở cột ${lane.label}`}
+      className="flex h-full w-full cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-btn-hover hover:text-text"
+    >
+      <span aria-hidden="true">{COMPANY_LANE_ICONS[lane.id]}</span>
+      <span className="text-2xs font-semibold text-text">{count}</span>
+      <span className="flex-1 whitespace-nowrap text-xs [writing-mode:vertical-rl]">
+        {lane.label}
+      </span>
+      <span className="sr-only">Không có gì ở đây.</span>
+    </button>
+  );
+}
+
+/**
+ * A hibernated session on the board: dashed like an agent card, with the sleep glyph and
+ * when it slept. Its click opens the drawer, where it can be woken; its menu offers the wake.
+ */
+function SleepingCard({
+  row,
+  index,
+  selected,
+  onOpen,
+  onMenu,
+}: {
+  row: SleepingRow;
+  index: number;
+  selected: boolean;
+  onOpen: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
+}) {
+  const triggers = agentMenuTriggers<HTMLButtonElement>(
+    { kind: 'sleeping', paneId: row.paneId, drawer: null },
+    onMenu,
+  );
+  const actions = useTerminalPreview();
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      {...triggers}
+      {...previewTriggers(actions, { kind: 'herdr', paneId: row.paneId })}
+      aria-pressed={selected}
+      title={sleepingTooltip(row)}
+      data-testid="sleeping-card"
+      data-flight-key={`sleeping:${row.paneId}`}
+      data-lane="sleeping"
+      data-index={index}
+      className="company-card flex w-full cursor-pointer items-start gap-1.5 border-dashed p-2 text-left opacity-75"
+    >
+      <span aria-hidden="true" className="mt-0.5 shrink-0 text-xs">
+        💤
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-2xs text-text-muted">{row.repo.label}</span>
+        <span className="block truncate text-sm font-medium text-text">{row.name}</span>
+        {row.sleptLabel !== null && (
+          <span className="block truncate text-2xs text-text-muted">{row.sleptLabel}</span>
+        )}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * The sleeping lane, after the board's lanes. It folds to a strip while it holds nothing and
+ * its reader has not opened it, the same rule as an empty task lane.
+ */
+function SleepingLane({
+  sleeping,
+  selectedPaneId,
+  onOpen,
+  onMenu,
+}: {
+  sleeping: readonly SleepingRow[];
+  selectedPaneId: string | null;
+  onOpen: (paneId: string) => void;
+  onMenu: (request: AgentMenuRequest) => void;
+}) {
+  const [opened, setOpened] = useState(false);
+  const count = sleeping.length;
+  const collapsed = isLaneCollapsed(count, opened);
+  return (
+    <section
+      aria-label="Ngủ đông"
+      data-testid="company-lane-sleeping"
+      data-lane="sleeping"
+      data-collapsed={collapsed}
+      className="company-lane"
+      style={laneColumnStyle(collapsed)}
+    >
+      {collapsed ? (
+        <button
+          type="button"
+          onClick={() => setOpened(true)}
+          title="Mở cột Ngủ đông"
+          className="flex h-full w-full cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-btn-hover hover:text-text"
+        >
+          <span aria-hidden="true">💤</span>
+          <span className="text-2xs font-semibold text-text">{count}</span>
+          <span className="flex-1 whitespace-nowrap text-xs [writing-mode:vertical-rl]">
+            Ngủ đông
+          </span>
+          <span className="sr-only">Không có phiên nào ngủ đông.</span>
+        </button>
+      ) : (
+        <>
+          <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1">
+            <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
+              <span className="min-w-0">💤 Ngủ đông</span>
+              <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
+            </h3>
+            <p className="truncate text-xs text-text-muted">Mở một phiên để đánh thức</p>
+          </header>
+          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
+            {count === 0 && (
+              <div className="flex flex-col items-start gap-1 px-1">
+                <p className="text-xs text-text-muted">Không có phiên nào ngủ đông.</p>
+                <button
+                  type="button"
+                  onClick={() => setOpened(false)}
+                  className="cursor-pointer text-2xs text-text-muted hover:text-text"
+                >
+                  Thu gọn cột
+                </button>
+              </div>
+            )}
+            {sleeping.map((row, index) => (
+              <SleepingCard
+                key={row.paneId}
+                row={row}
+                index={index}
+                selected={row.paneId === selectedPaneId}
+                onOpen={() => onOpen(row.paneId)}
+                onMenu={onMenu}
+              />
+            ))}
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 
@@ -327,12 +470,25 @@ export function CompanyBoard({
   onSelectTask,
   onSelectSession,
   onOpenHerdr,
+  onOpenSleeping,
+  sleeping,
   selectedPaneId,
   selectedSessionId,
   onMenu,
 }: CompanyBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   useFlightLayout(boardRef);
+  // Empty lanes the reader opened from their strip. A lane with cards is open whatever this holds.
+  const [openedLanes, setOpenedLanes] = useState<ReadonlySet<CompanyLaneId>>(() => new Set());
+
+  function toggleLane(laneId: CompanyLaneId): void {
+    setOpenedLanes((current) => {
+      const next = new Set(current);
+      if (next.has(laneId)) next.delete(laneId);
+      else next.add(laneId);
+      return next;
+    });
+  }
 
   function openAgent(subject: AgentCardSubject): void {
     if (subject.kind === 'herdr') onOpenHerdr(subject.paneId);
@@ -350,68 +506,89 @@ export function CompanyBoard({
         {lanes.map((lane) => {
           const drafts = lane.id === 'planned' ? planning : [];
           const count = lane.cards.length + drafts.length + lane.agents.length;
+          const collapsed = isLaneCollapsed(count, openedLanes.has(lane.id));
           return (
             <section
               key={lane.id}
               aria-label={lane.label}
               data-testid={`company-lane-${lane.id}`}
               data-lane={lane.id}
-              className={`company-lane ${count === 0 ? 'flex-none' : 'flex-1'}`}
-              style={
-                count === 0
-                  ? { width: COMPANY_LANE_EMPTY_WIDTH_PX }
-                  : { minWidth: COMPANY_LANE_MIN_WIDTH_PX }
-              }
+              data-collapsed={collapsed}
+              className="company-lane"
+              style={laneColumnStyle(collapsed)}
             >
-              <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1.5">
-                <h3 className="flex items-baseline justify-between gap-2 text-base font-semibold text-text">
-                  <span className="min-w-0">
-                    {COMPANY_LANE_ICONS[lane.id]} {lane.label}
-                  </span>
-                  <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
-                </h3>
-                <p className="truncate text-xs text-status-active">
-                  {COMPANY_LANE_OWNERS[lane.id]}
-                </p>
-              </header>
-              <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-1.5">
-                {count === 0 && <p className="px-1 text-xs text-text-muted">Không có gì ở đây.</p>}
-                {drafts.map((prompt, index) => (
-                  <PlanningCard
-                    key={prompt.promptId}
-                    prompt={prompt}
-                    index={index}
-                    onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
-                    onMenu={onMenu}
-                  />
-                ))}
-                {lane.cards.map((card, index) => (
-                  <TaskCard
-                    key={card.taskId}
-                    card={card}
-                    index={index}
-                    onSelect={() => onSelectTask(card.taskId)}
-                    onMenu={onMenu}
-                  />
-                ))}
-                {lane.agents.map((agent, index) => (
-                  <AgentCard
-                    key={agent.key}
-                    card={agent}
-                    index={lane.cards.length + drafts.length + index}
-                    selected={
-                      agent.subject.kind === 'herdr'
-                        ? agent.subject.paneId === selectedPaneId
-                        : agent.subject.sessionId === selectedSessionId
-                    }
-                    onOpen={() => openAgent(agent.subject)}
-                    onMenu={onMenu}
-                  />
-                ))}
-              </div>
+              {collapsed ? (
+                <LaneStrip lane={lane} count={count} onOpen={() => toggleLane(lane.id)} />
+              ) : (
+                <>
+                  <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1">
+                    <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
+                      <span className="min-w-0">
+                        {COMPANY_LANE_ICONS[lane.id]} {lane.label}
+                      </span>
+                      <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
+                    </h3>
+                    <p className="truncate text-xs text-status-active">
+                      {COMPANY_LANE_OWNERS[lane.id]}
+                    </p>
+                  </header>
+                  <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
+                    {count === 0 && (
+                      <div className="flex flex-col items-start gap-1 px-1">
+                        <p className="text-xs text-text-muted">Không có gì ở đây.</p>
+                        <button
+                          type="button"
+                          onClick={() => toggleLane(lane.id)}
+                          className="cursor-pointer text-2xs text-text-muted hover:text-text"
+                        >
+                          Thu gọn cột
+                        </button>
+                      </div>
+                    )}
+                    {drafts.map((prompt, index) => (
+                      <PlanningCard
+                        key={prompt.promptId}
+                        prompt={prompt}
+                        index={index}
+                        onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
+                        onMenu={onMenu}
+                      />
+                    ))}
+                    {lane.cards.map((card, index) => (
+                      <TaskCard
+                        key={card.taskId}
+                        card={card}
+                        index={index}
+                        onSelect={() => onSelectTask(card.taskId)}
+                        onMenu={onMenu}
+                      />
+                    ))}
+                    {lane.agents.map((agent, index) => (
+                      <AgentCard
+                        key={agent.key}
+                        card={agent}
+                        index={lane.cards.length + drafts.length + index}
+                        selected={
+                          agent.subject.kind === 'herdr'
+                            ? agent.subject.paneId === selectedPaneId
+                            : agent.subject.sessionId === selectedSessionId
+                        }
+                        onOpen={() => openAgent(agent.subject)}
+                        onMenu={onMenu}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
             </section>
           );
         })}
+        <SleepingLane
+          sleeping={sleeping}
+          selectedPaneId={selectedPaneId}
+          onOpen={onOpenSleeping}
+          onMenu={onMenu}
+        />
       </div>
     </div>
   );

@@ -27,6 +27,8 @@ import {
   type HerdrRow,
   herdrRowCount,
   herdrTooltip,
+  type SleepingRow,
+  sleepingTooltip,
   type SummaryLine,
 } from '../agentSidebarView.js';
 import {
@@ -68,6 +70,8 @@ export interface AgentSidebarProps {
   onSelectSession: (sessionId: string) => void;
   onSelectWorkspaceSession: (path: string, sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
+  /** Opens a hibernated session's drawer, where its wake control is. */
+  onOpenSleeping: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
 }
@@ -87,6 +91,7 @@ interface TreeView {
   /** The folder the board is switching to for a session chosen in another folder; null when none. */
   switchingPath: string | null;
   onOpenHerdr: (paneId: string) => void;
+  onOpenSleeping: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
 }
@@ -104,6 +109,7 @@ export function AgentSidebar({
   onSelectSession,
   onSelectWorkspaceSession,
   onOpenHerdr,
+  onOpenSleeping,
   onToggleProject,
   onMenu,
 }: AgentSidebarProps) {
@@ -148,6 +154,7 @@ export function AgentSidebar({
     },
     switchingPath: state.pendingWorkspaceSelection?.path ?? null,
     onOpenHerdr,
+    onOpenSleeping,
     onToggleProject,
     onMenu,
   };
@@ -244,20 +251,23 @@ function ProjectSection({ project, view }: { project: ProjectNode; view: TreeVie
 function ProjectBody({ project, view }: { project: ProjectNode; view: TreeView }) {
   if (project.kind === 'herdr') {
     return (
-      <ul className="ml-4 border-l border-border pb-1 pl-1">
-        {project.panes.map((row, index) => (
-          <li key={row.paneId}>
-            <HerdrRowButton
-              row={row}
-              lane={project.key}
-              index={index}
-              selected={row.paneId === view.selectedPaneId}
-              onOpen={() => view.onOpenHerdr(row.paneId)}
-              onMenu={view.onMenu}
-            />
-          </li>
-        ))}
-      </ul>
+      <>
+        <ul className="ml-4 border-l border-border pb-1 pl-1">
+          {project.panes.map((row, index) => (
+            <li key={row.paneId}>
+              <HerdrRowButton
+                row={row}
+                lane={project.key}
+                index={index}
+                selected={row.paneId === view.selectedPaneId}
+                onOpen={() => view.onOpenHerdr(row.paneId)}
+                onMenu={view.onMenu}
+              />
+            </li>
+          ))}
+        </ul>
+        <SleepingGroup rows={project.sleeping} view={view} />
+      </>
     );
   }
   if (!project.active) {
@@ -614,6 +624,90 @@ function HerdrRowButton({
           <span className="shrink-0 text-xs text-text-muted">{row.label}</span>
         </span>
         {row.summary !== null && <SummaryText summary={row.summary} />}
+      </span>
+    </button>
+  );
+}
+
+/**
+ * A repo's hibernated sessions, under a toggle that opens them; open by default. Their
+ * rows open the session's drawer, where it can be woken. Nothing here sends a command.
+ */
+function SleepingGroup({ rows, view }: { rows: readonly SleepingRow[]; view: TreeView }) {
+  const [open, setOpen] = useState(true);
+  if (rows.length === 0) return null;
+  return (
+    <div className="ml-4 border-l border-border pb-1 pl-1" data-testid="sleeping-group">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((current) => !current)}
+        className="cursor-pointer py-0.5 text-xs text-text-muted hover:text-text"
+      >
+        Ngủ đông ({rows.length}) {open ? '▴' : '▾'}
+      </button>
+      {open && (
+        <ul>
+          {rows.map((row, index) => (
+            <li key={row.paneId}>
+              <SleepingRowButton
+                row={row}
+                index={index}
+                selected={row.paneId === view.selectedPaneId}
+                onOpen={() => view.onOpenSleeping(row.paneId)}
+                onMenu={view.onMenu}
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function SleepingRowButton({
+  row,
+  index,
+  selected,
+  onOpen,
+  onMenu,
+}: {
+  row: SleepingRow;
+  index: number;
+  selected: boolean;
+  onOpen: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
+}) {
+  const triggers = agentMenuTriggers<HTMLButtonElement>(
+    { kind: 'sleeping', paneId: row.paneId, drawer: null },
+    onMenu,
+  );
+  const actions = useTerminalPreview();
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      {...triggers}
+      {...previewTriggers(actions, { kind: 'herdr', paneId: row.paneId })}
+      aria-pressed={selected}
+      title={sleepingTooltip(row)}
+      data-testid={`sleeping-row-${row.paneId}`}
+      data-flight-key={`sleeping:${row.paneId}`}
+      data-lane={`sleeping:${row.repo.key}`}
+      data-index={index}
+      className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left opacity-75 hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
+    >
+      <span
+        aria-hidden="true"
+        className="flex h-4 w-3 shrink-0 items-center justify-center text-xs"
+      >
+        💤
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-medium text-text">{row.name}</span>
+        {row.sleptLabel !== null && (
+          <span className="block truncate text-xs text-text-muted">{row.sleptLabel}</span>
+        )}
       </span>
     </button>
   );

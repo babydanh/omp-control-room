@@ -27,12 +27,15 @@ export function previewKey(target: PreviewTarget): string {
 
 /**
  * The row a drawer subject stands for, so that row's preview stays shut while the drawer
- * shows it. Herdr panes and sessions have rows; other subjects have none.
+ * shows it. Herdr panes, hibernated sessions (which share their pane id) and sessions have
+ * rows; other subjects have none.
  */
 export function previewTargetOfSubject(subject: DrawerSubject | null): PreviewTarget | null {
   if (subject === null) return null;
   switch (subject.kind) {
     case 'herdr':
+      return { kind: 'herdr', paneId: subject.paneId };
+    case 'sleeping':
       return { kind: 'herdr', paneId: subject.paneId };
     case 'session':
       return { kind: 'session', sessionId: subject.sessionId };

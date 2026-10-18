@@ -251,16 +251,19 @@ describe('activityCounts', () => {
         session({ role: 'worker', status: 'paused' }),
       ],
     });
-    const herdr = herdrGroup({
-      ...emptyHerdrView(),
-      loaded: true,
-      available: true,
-      agents: [
-        { paneId: 'a', kind: 'claude', status: 'working', workspaceId: 'ws' },
-        { paneId: 'b', kind: 'claude', status: 'blocked', workspaceId: 'ws' },
-        { paneId: 'c', kind: 'claude', status: 'done', workspaceId: 'ws' },
-      ],
-    });
+    const herdr = herdrGroup(
+      {
+        ...emptyHerdrView(),
+        loaded: true,
+        available: true,
+        agents: [
+          { paneId: 'a', kind: 'claude', status: 'working', workspaceId: 'ws' },
+          { paneId: 'b', kind: 'claude', status: 'blocked', workspaceId: 'ws' },
+          { paneId: 'c', kind: 'claude', status: 'done', workspaceId: 'ws' },
+        ],
+      },
+      NOW,
+    );
 
     expect(activityCounts(buildAgentGroups(state, NOW), herdr)).toEqual({
       working: 2,

@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { TERMINAL_THEME } from '../../constants.js';
+import { sleepingName } from '../agentSidebarView.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { HERDR_SCREEN_POLL_MS } from '../constants.js';
@@ -252,6 +253,7 @@ function HerdrPreview({
   paneId: string;
 }) {
   const agent = state.herdr.agents.find((entry) => entry.paneId === paneId);
+  const sleeping = state.herdr.sleeping.find((entry) => entry.paneId === paneId);
   const screen = state.herdr.screens[paneId];
   const lines = useMemo(
     () => tailScreen(parseAnsiScreen(screen?.text ?? ''), PREVIEW_SCREEN_ROWS),
@@ -271,13 +273,20 @@ function HerdrPreview({
     return () => window.clearInterval(timer);
   }, [client, paneId, polling]);
 
-  if (agent === undefined) return <PreviewNotice text="Agent này không còn trong herdr." />;
+  // A hibernated session has no live agent: its header names it, and its screen still reads.
+  const header =
+    agent !== undefined
+      ? {
+          title: `${agent.kind} · ${agent.paneId}`,
+          note: HERDR_TONE_LABELS[herdrToneFor(agent.status)],
+        }
+      : sleeping !== undefined
+        ? { title: sleepingName(sleeping), note: 'Ngủ đông' }
+        : null;
+  if (header === null) return <PreviewNotice text="Agent này không còn trong herdr." />;
   return (
     <>
-      <PreviewHeader
-        title={`${agent.kind} · ${agent.paneId}`}
-        note={HERDR_TONE_LABELS[herdrToneFor(agent.status)]}
-      />
+      <PreviewHeader title={header.title} note={header.note} />
       {screen === undefined ? (
         <PreviewNotice text="Đang đọc màn hình…" />
       ) : (

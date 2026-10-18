@@ -4,7 +4,8 @@
  * and the full name in the tooltip. Clicking the marker folds or opens the
  * project. An open project lists one badge per agent, the ones that wait on the
  * user first, and one "+N" badge for its parked sessions; a folded project shows a
- * single summary. A badge's tooltip carries its name, status and summary.
+ * single summary. A badge's tooltip carries its name, status and summary. A repo's
+ * hibernated sessions follow its agents as dimmed 💤 badges.
  */
 import { useRef } from 'react';
 
@@ -15,6 +16,8 @@ import {
   herdrTooltip,
   paneShortCode,
   sessionShortCode,
+  type SleepingRow,
+  sleepingTooltip,
 } from '../agentSidebarView.js';
 import {
   buildProjectTree,
@@ -50,6 +53,7 @@ export interface AgentRailProps {
   onSelectSession: (sessionId: string) => void;
   onSelectWorkspaceSession: (path: string, sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
+  onOpenSleeping: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
 }
@@ -63,6 +67,7 @@ export function AgentRail({
   onSelectSession,
   onSelectWorkspaceSession,
   onOpenHerdr,
+  onOpenSleeping,
   onToggleProject,
   onMenu,
 }: AgentRailProps) {
@@ -106,6 +111,7 @@ export function AgentRail({
             onSelectSession={onSelectSession}
             onSelectWorkspaceSession={onSelectWorkspaceSession}
             onOpenHerdr={onOpenHerdr}
+            onOpenSleeping={onOpenSleeping}
             onToggleProject={onToggleProject}
             onMenu={onMenu}
           />
@@ -128,6 +134,8 @@ function railKey(entry: RailEntry, index: number): string {
       return `remote:${entry.row.sessionId}`;
     case 'pane':
       return `pane:${entry.row.paneId}`;
+    case 'sleeping':
+      return `sleeping:${entry.row.paneId}`;
     case 'parked':
       return `parked:${entry.projectKey}`;
     case 'break':
@@ -144,6 +152,7 @@ function RailEntryView({
   onSelectSession,
   onSelectWorkspaceSession,
   onOpenHerdr,
+  onOpenSleeping,
   onToggleProject,
   onMenu,
 }: {
@@ -155,6 +164,7 @@ function RailEntryView({
   onSelectSession: (sessionId: string) => void;
   onSelectWorkspaceSession: (path: string, sessionId: string) => void;
   onOpenHerdr: (paneId: string) => void;
+  onOpenSleeping: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
@@ -241,6 +251,16 @@ function RailEntryView({
             { kind: 'herdr', paneId: entry.row.paneId, drawer: null },
             onMenu,
           )}
+        />
+      );
+    case 'sleeping':
+      return (
+        <RailSleepingBadge
+          row={entry.row}
+          index={index}
+          selected={entry.row.paneId === selectedPaneId}
+          onOpen={() => onOpenSleeping(entry.row.paneId)}
+          onMenu={onMenu}
         />
       );
     case 'parked':
@@ -350,6 +370,52 @@ function RailBadge({
       <span className="absolute right-1.5 top-1.5 flex h-3 w-3 items-center justify-center">
         <StatusDot tone={tone} />
       </span>
+    </button>
+  );
+}
+
+/**
+ * A hibernated session's badge: dimmed, with the sleep glyph where a status dot would be.
+ * Its tooltip names the session, when it slept and the file it resumes from.
+ */
+function RailSleepingBadge({
+  row,
+  index,
+  selected,
+  onOpen,
+  onMenu,
+}: {
+  row: SleepingRow;
+  index: number;
+  selected: boolean;
+  onOpen: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
+}) {
+  const actions = useTerminalPreview();
+  const triggers = agentMenuTriggers<HTMLButtonElement>(
+    { kind: 'sleeping', paneId: row.paneId, drawer: null },
+    onMenu,
+  );
+  const title = sleepingTooltip(row);
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      {...triggers}
+      {...previewTriggers(actions, { kind: 'herdr', paneId: row.paneId })}
+      aria-pressed={selected}
+      aria-label={title}
+      title={title}
+      data-testid={`rail-sleeping-${row.paneId}`}
+      data-flight-key={`sleeping:${row.paneId}`}
+      data-lane="rail"
+      data-index={index}
+      className={`relative flex h-11 w-[84px] shrink-0 cursor-pointer flex-col items-start justify-center rounded-[5px] border-l-4 border-dashed border-l-text-muted pl-2 pr-4 text-left opacity-60 hover:bg-btn-hover ${selected ? 'bg-btn-bg ring-1 ring-accent' : ''}`}
+    >
+      <span className="w-full truncate font-mono text-xs text-text">
+        <span aria-hidden="true">💤</span> {paneShortCode(row.paneId)}
+      </span>
+      <span className="w-full truncate text-xs text-text-muted">{row.name}</span>
     </button>
   );
 }

@@ -9,6 +9,7 @@ import type {
   HerdrAgentsMessage,
   HerdrKey,
   HerdrScreenMessage,
+  HerdrSleepingSession,
 } from '../../../core/src/messages.js';
 import { jsonField } from './jsonField.js';
 import {
@@ -17,6 +18,13 @@ import {
   type OmpTranscriptSummary,
   readOmpTranscript,
 } from './ompTranscript.js';
+import { isHerdrPaneId } from './paneId.js';
+import {
+  type PaneFact,
+  type SleepDropReason,
+  type SleepingSession,
+  SleepRegistry,
+} from './sleepingSessions.js';
 
 /** Protocol generation this board speaks; herdr reports it in `ping`. */
 export const HERDR_PROTOCOL_VERSION = 22;
@@ -42,9 +50,6 @@ const HERDR_KEY_SET: Record<HerdrKey, true> = {
   n: true,
 };
 
-/** Pane ids look like `wA:p2`; this keeps arbitrary client strings out of herdr targets. */
-const PANE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/;
-
 /** herdr agent names: lowercase, starting with a letter, at most 32 characters. */
 const HERDR_AGENT_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;
 /** Executables omp runs as: `omp` or `omp.exe`. */
@@ -62,6 +67,12 @@ const GIT_CACHE_TTL_MS = 30_000;
 const REFRESH_DELAY_MS = 150;
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_MAX_MS = 30_000;
+/** Re-reads the roster this often, since a sleep writes the registry without any herdr event. */
+const SLEEP_POLL_MS = 10_000;
+/** A pane whose wake was sent refuses another wake this long, while herdr brings omp back up. */
+const WAKE_PENDING_MS = 20_000;
+/** Longest prompt a wake types into a sleeping pane. */
+const WAKE_PROMPT_MAX_CHARS = 4_000;
 /** A screen watch stays open this long after the most recent read of its pane. */
 const SCREEN_WATCH_MS = 30_000;
 const SCREEN_THROTTLE_MS = 500;
@@ -90,6 +101,23 @@ const INVALID_KEYS_MESSAGE = 'Danh sách phím không hợp lệ.';
 const INVALID_LINES_MESSAGE = 'Số dòng cần đọc phải từ 1 đến 2000.';
 const INVALID_AGENT_NAME_MESSAGE =
   'Tên agent chỉ gồm chữ thường a-z, số, "_" hoặc "-", bắt đầu bằng chữ cái và tối đa 32 ký tự.';
+
+const INVALID_WAKE_PROMPT_MESSAGE = 'Nội dung đánh thức không được để trống.';
+const WAKE_PROMPT_TOO_LONG_MESSAGE = `Nội dung đánh thức quá dài (tối đa ${WAKE_PROMPT_MAX_CHARS} ký tự).`;
+const WAKE_PROMPT_ONE_LINE_MESSAGE =
+  'Nội dung đánh thức chỉ được một dòng, không chứa ký tự điều khiển.';
+const WAKE_PENDING_MESSAGE = 'Đang đánh thức phiên này, hãy chờ omp chạy lại.';
+const WAKE_NOT_FOUND_MESSAGE = 'Phiên này không còn ngủ đông. Hãy làm mới bảng.';
+/** Why a session that stood asleep can no longer be woken, keyed by the judge's reason. */
+const WAKE_REFUSALS: Record<SleepDropReason, string> = {
+  'exit-requested': 'Phiên omp vẫn đang thoát, chưa ngủ xong. Thử lại sau vài giây.',
+  superseded: 'Thông tin ngủ đông của phiên này đã cũ. Hãy làm mới bảng.',
+  'pane-closed': 'Pane của phiên ngủ đông đã đóng, không thể đánh thức.',
+  awake: 'Pane này đang chạy agent, phiên không còn ngủ đông.',
+  'pane-changed': 'Pane này đã dùng cho việc khác, không còn là phiên ngủ đông.',
+  'open-elsewhere': 'Phiên này đang mở ở pane khác, không thể đánh thức ở đây.',
+};
+
 const NOTE_NOT_OMP = 'Agent này không chạy omp, nên chỉ có thư mục làm việc từ herdr.';
 const NOTE_NO_SESSION_PATH = 'omp chưa báo đường dẫn transcript, nên chỉ có thông tin từ herdr.';
 const NOTE_NO_TRANSCRIPT = 'Không đọc được transcript của omp, nên chỉ có thông tin từ herdr.';
@@ -104,7 +132,8 @@ export type HerdrErrorCode =
   | 'herdr_timeout'
   | 'herdr_rejected'
   | 'agent_not_found'
-  | 'agent_blocked';
+  | 'agent_blocked'
+  | 'not_sleeping';
 
 /** Carries a Vietnamese message that is safe to show to the board user. */
 export class HerdrError extends Error {
@@ -155,6 +184,10 @@ export interface HerdrLinkOptions {
   readonly scheduler?: HerdrScheduler;
   /** Runs git for checkout lookups. Defaults to the `git` on PATH; tests inject a stub. */
   readonly runGit?: HerdrGitRunner;
+  /** The sleep registry the omp sleep script keeps. Defaults to `~/.omp/agent/omp-ngu.json`. */
+  readonly sleepRegistryFile?: string;
+  /** Receives problems with the sleep registry, once per distinct problem. Defaults to `console.warn`. */
+  readonly warn?: (message: string) => void;
 }
 
 export interface HerdrLink {
@@ -173,11 +206,14 @@ export interface HerdrLink {
   rename(paneId: string, name: string): Promise<void>;
   /** Where the agent in a pane runs, and what omp reports about it. Read-only. */
   info(paneId: string): Promise<BoardAgentInfo>;
+  /**
+   * Wakes a sleeping omp session by resuming it in its pane, typing `prompt` first when one is
+   * given. Refuses unless herdr and the sleep registry still show the pane holding that session.
+   */
+  wake(paneId: string, prompt?: string): Promise<void>;
 }
 
-export function isHerdrPaneId(value: unknown): value is string {
-  return typeof value === 'string' && PANE_ID_PATTERN.test(value);
-}
+export { isHerdrPaneId };
 
 export function isHerdrKey(value: unknown): value is HerdrKey {
   return typeof value === 'string' && Object.hasOwn(HERDR_KEY_SET, value);
@@ -300,6 +336,7 @@ interface ScreenWatch {
 interface RosterSnapshot {
   readonly agents: readonly HerdrAgent[];
   readonly labels: ReadonlyMap<string, string>;
+  readonly sleeping: readonly SleepingSession[];
 }
 
 /** Git facts for the checkout a cwd sits in. `branch` is absent on a detached HEAD. */
@@ -339,6 +376,7 @@ class HerdrLinkImpl implements HerdrLink {
     available: false,
     reason: NOT_CONNECTED_MESSAGE,
     agents: [],
+    sleeping: [],
   };
   private running = false;
   /** Bumped whenever pending work must be dropped (stop, failure). */
@@ -350,15 +388,23 @@ class HerdrLinkImpl implements HerdrLink {
   private events?: HerdrEventStream;
   private eventsKey?: string;
   private readonly runGit: HerdrGitRunner;
-  private roster: RosterSnapshot = { agents: [], labels: new Map<string, string>() };
+  private roster: RosterSnapshot = { agents: [], labels: new Map<string, string>(), sleeping: [] };
   /** Checkout lookups by cwd; `undefined` marks a cwd outside any git checkout. */
   private readonly checkouts = new Map<string, GitCheckout | undefined>();
   private readonly pendingCheckouts = new Set<string>();
+  private readonly sleepRegistry: SleepRegistry;
+  /** Cancels the expiry of each pane whose wake is in flight, keyed by pane id. */
+  private readonly pendingWakes = new Map<string, () => void>();
+  private cancelSleepPoll?: () => void;
 
   constructor(options: HerdrLinkOptions) {
     this.endpoint = herdrEndpoint(options.socketPath ?? resolveHerdrSocketPath(process.env));
     this.scheduler = options.scheduler ?? herdrTimerScheduler;
     this.runGit = options.runGit ?? runGitCommand;
+    this.sleepRegistry = new SleepRegistry({
+      file: options.sleepRegistryFile ?? path.join(os.homedir(), '.omp', 'agent', 'omp-ngu.json'),
+      warn: options.warn ?? ((message: string) => console.warn(message)),
+    });
   }
 
   start(): void {
@@ -374,6 +420,10 @@ class HerdrLinkImpl implements HerdrLink {
     this.cancelReconnect = undefined;
     this.cancelRefresh?.();
     this.cancelRefresh = undefined;
+    this.cancelSleepPoll?.();
+    this.cancelSleepPoll = undefined;
+    for (const cancelExpiry of this.pendingWakes.values()) cancelExpiry();
+    this.pendingWakes.clear();
     this.closeEvents();
     for (const paneId of [...this.watches.keys()]) this.closeWatch(paneId);
   }
@@ -449,6 +499,41 @@ class HerdrLinkImpl implements HerdrLink {
     });
   }
 
+  async wake(paneId: string, prompt?: string): Promise<void> {
+    assertPaneId(paneId);
+    if (prompt !== undefined) assertWakePrompt(prompt);
+    if (this.pendingWakes.has(paneId)) throw new HerdrError('not_sleeping', WAKE_PENDING_MESSAGE);
+    this.pendingWakes.set(
+      paneId,
+      this.scheduler.schedule(() => {
+        this.pendingWakes.delete(paneId);
+      }, WAKE_PENDING_MS),
+    );
+    try {
+      await this.assertSleeping(paneId);
+      if (prompt !== undefined)
+        await this.call('pane.send_text', { pane_id: paneId, text: prompt });
+      await this.call('pane.send_keys', { pane_id: paneId, keys: ['enter'] });
+    } catch (error) {
+      this.pendingWakes.get(paneId)?.();
+      this.pendingWakes.delete(paneId);
+      throw error;
+    }
+    if (this.running) this.scheduleRefresh();
+  }
+
+  /** Refuses unless herdr's panes and the sleep registry still show this pane holding a sleeping session. */
+  private async assertSleeping(paneId: string): Promise<void> {
+    const panes = parsePaneList(await this.call('pane.list', {}));
+    const judgements = await this.sleepRegistry.judge(panes);
+    // The registry lists records in write order, so the last one for a pane is its live state.
+    const latest = judgements.filter((judgement) => judgement.paneId === paneId).at(-1);
+    if (latest === undefined) throw new HerdrError('not_sleeping', WAKE_NOT_FOUND_MESSAGE);
+    if (latest.status === 'dropped') {
+      throw new HerdrError('not_sleeping', WAKE_REFUSALS[latest.reason]);
+    }
+  }
+
   /** Working directory of the pane's foreground process; `undefined` when herdr cannot say. */
   private async foregroundCwd(paneId: string): Promise<string | undefined> {
     try {
@@ -522,12 +607,15 @@ class HerdrLinkImpl implements HerdrLink {
     this.generation += 1;
     this.cancelRefresh?.();
     this.cancelRefresh = undefined;
+    this.cancelSleepPoll?.();
+    this.cancelSleepPoll = undefined;
     this.closeEvents();
     this.publish({
       type: 'herdrAgents',
       available: false,
       reason: error instanceof HerdrError ? error.message : UNKNOWN_MESSAGE,
       agents: [],
+      sleeping: [],
     });
     this.scheduleReconnect();
   }
@@ -594,25 +682,34 @@ class HerdrLinkImpl implements HerdrLink {
     for (const agent of roster.agents) {
       if (agent.cwd !== undefined) this.lookupCheckout(agent.cwd);
     }
+    for (const session of roster.sleeping) {
+      if (session.cwd !== undefined) this.lookupCheckout(session.cwd);
+    }
+    this.scheduleSleepPoll();
   }
 
   /** Publishes the last roster with the workspace labels and checkout facts known so far. */
   private publishRoster(): void {
-    const { agents, labels } = this.roster;
+    const { agents, labels, sleeping } = this.roster;
     this.publish({
       type: 'herdrAgents',
       available: true,
       agents: agents.map((agent) => withRosterFields(agent, labels, this.checkouts)),
+      sleeping: sleeping.map((session) => withSleepingFields(session, labels, this.checkouts)),
     });
   }
 
-  /** Reads agents and workspace labels together; a failed label read only drops the labels. */
+  /**
+   * Reads agents, workspace labels, and sleeping sessions together. A failed label read only
+   * drops the labels; a failed pane read only drops the sleeping sessions.
+   */
   private async readRoster(): Promise<RosterSnapshot> {
-    const [agentsReply, labels] = await Promise.all([
+    const [agentsReply, labels, sleeping] = await Promise.all([
       this.call('agent.list', {}),
       this.readWorkspaceLabels(),
+      this.readSleeping(),
     ]);
-    return { agents: parseAgentList(agentsReply), labels };
+    return { agents: parseAgentList(agentsReply), labels, sleeping };
   }
 
   private async readWorkspaceLabels(): Promise<ReadonlyMap<string, string>> {
@@ -622,6 +719,31 @@ class HerdrLinkImpl implements HerdrLink {
       // Labels are decoration: a failed workspace.list must not drop the roster.
       return new Map<string, string>();
     }
+  }
+
+  /**
+   * Sleeping sessions as herdr's panes show them now. A failed pane read lists none, so no
+   * session is offered that herdr could not confirm.
+   */
+  private async readSleeping(): Promise<readonly SleepingSession[]> {
+    let panes: PaneFact[];
+    try {
+      panes = parsePaneList(await this.call('pane.list', {}));
+    } catch (error) {
+      if (error instanceof HerdrError) return [];
+      throw error;
+    }
+    return this.sleepRegistry.sleepingSessions(panes);
+  }
+
+  /** Re-reads the roster on a timer too, since a sleep writes the registry without any herdr event. */
+  private scheduleSleepPoll(): void {
+    this.cancelSleepPoll?.();
+    const generation = this.generation;
+    this.cancelSleepPoll = this.scheduler.schedule(() => {
+      this.cancelSleepPoll = undefined;
+      void this.refresh(generation);
+    }, SLEEP_POLL_MS);
   }
 
   /** Starts a git lookup for `cwd` unless one is cached or running; the roster never waits. */
@@ -979,12 +1101,65 @@ function withRosterFields(
   const label = labels.get(agent.workspaceId);
   if (label !== undefined) result.workspaceLabel = label;
   const checkout = agent.cwd === undefined ? undefined : checkouts.get(agent.cwd);
-  if (checkout !== undefined) {
-    if (checkout.repo !== undefined) result.repo = checkout.repo;
-    if (checkout.branch !== undefined) result.branch = checkout.branch;
-    result.worktreeRoot = checkout.worktreeRoot;
-  }
+  applyCheckout(result, checkout);
   return result;
+}
+
+/** Copies the checkout facts a lookup found; a lookup that found nothing leaves the target as it is. */
+function applyCheckout(
+  target: { repo?: string; branch?: string; worktreeRoot?: string },
+  checkout: GitCheckout | undefined,
+): void {
+  if (checkout === undefined) return;
+  if (checkout.repo !== undefined) target.repo = checkout.repo;
+  if (checkout.branch !== undefined) target.branch = checkout.branch;
+  target.worktreeRoot = checkout.worktreeRoot;
+}
+
+/** The board's view of a sleeping session: its workspace label and checkout facts when known. */
+function withSleepingFields(
+  session: SleepingSession,
+  labels: ReadonlyMap<string, string>,
+  checkouts: ReadonlyMap<string, GitCheckout | undefined>,
+): HerdrSleepingSession {
+  const result: HerdrSleepingSession = {
+    paneId: session.paneId,
+    title: session.title,
+    sessionFile: session.sessionFile,
+    sleptAt: session.sleptAt,
+  };
+  if (session.cwd !== undefined) result.cwd = session.cwd;
+  const label = session.workspaceId === undefined ? undefined : labels.get(session.workspaceId);
+  if (label !== undefined) result.workspaceLabel = label;
+  const checkout = session.cwd === undefined ? undefined : checkouts.get(session.cwd);
+  applyCheckout(result, checkout);
+  return result;
+}
+
+/** Panes from a `pane.list` reply; an entry without a pane id is skipped. */
+function parsePaneList(result: unknown): PaneFact[] {
+  const list: unknown = jsonField(result, 'panes');
+  if (!Array.isArray(list)) throw new HerdrError('herdr_rejected', INVALID_REPLY_MESSAGE);
+  const panes: PaneFact[] = [];
+  for (const info of list as unknown[]) {
+    const paneId = jsonField(info, 'pane_id');
+    if (typeof paneId !== 'string') continue;
+    const session = jsonField(info, 'agent_session');
+    const sessionFile =
+      jsonField(session, 'kind') === 'path'
+        ? nonEmptyString(jsonField(session, 'value'))
+        : undefined;
+    panes.push({
+      paneId,
+      workspaceId: nonEmptyString(jsonField(info, 'workspace_id')),
+      terminalId: nonEmptyString(jsonField(info, 'terminal_id')),
+      cwd: nonEmptyString(jsonField(info, 'cwd')),
+      label: nonEmptyString(jsonField(info, 'label')),
+      agent: nonEmptyString(jsonField(info, 'agent')),
+      sessionFile,
+    });
+  }
+  return panes;
 }
 
 /** Maps workspace id to label; entries without a usable label are skipped. */
@@ -1075,6 +1250,19 @@ function assertPrompt(text: string): void {
   if (text.trim() === '') throw new HerdrError('invalid_request', INVALID_PROMPT_MESSAGE);
   if (Buffer.byteLength(text, 'utf8') > HERDR_PROMPT_MAX_BYTES) {
     throw new HerdrError('invalid_request', PROMPT_TOO_LARGE_MESSAGE);
+  }
+}
+
+function assertWakePrompt(text: string): void {
+  if (text.trim() === '') throw new HerdrError('invalid_request', INVALID_WAKE_PROMPT_MESSAGE);
+  if (text.length > WAKE_PROMPT_MAX_CHARS) {
+    throw new HerdrError('invalid_request', WAKE_PROMPT_TOO_LONG_MESSAGE);
+  }
+  for (const character of text) {
+    const code = character.codePointAt(0) ?? 0;
+    if (code < 0x20 || code === 0x7f) {
+      throw new HerdrError('invalid_request', WAKE_PROMPT_ONE_LINE_MESSAGE);
+    }
   }
 }
 

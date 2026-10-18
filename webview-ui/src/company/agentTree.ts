@@ -21,6 +21,7 @@ import {
   type HerdrRow,
   isFolded,
   type RepoPlacement,
+  type SleepingRow,
   workspaceSessionRow,
 } from './agentSidebarView.js';
 import type { CompanyViewState } from './companyState.js';
@@ -77,6 +78,8 @@ export interface ProjectNode {
   groups: AgentRoleGroup[];
   /** A herdr group's agents, most urgent first. */
   panes: HerdrRow[];
+  /** A herdr group's hibernated sessions, most recently slept first; listed after its panes. */
+  sleeping: SleepingRow[];
   /**
    * A background folder's sessions from the folder list. Null for the active folder, for a
    * folder that is not open, and when the server sent no sessions (the tree then shows counts).
@@ -101,6 +104,7 @@ export type RailEntry =
   | { kind: 'session'; row: AgentRow; projectKey: string }
   | { kind: 'remoteSession'; row: AgentRow; project: ProjectNode; path: string }
   | { kind: 'pane'; row: HerdrRow; projectKey: string }
+  | { kind: 'sleeping'; row: SleepingRow; projectKey: string }
   | { kind: 'parked'; count: number; projectKey: string }
   | { kind: 'break' };
 
@@ -116,7 +120,7 @@ export function buildProjectTree(
   collapsed: ReadonlySet<string>,
 ): AgentTree {
   const groups = buildAgentGroups(state, now);
-  const herdr = herdrGroup(state.herdr);
+  const herdr = herdrGroup(state.herdr, now);
   const listed = state.workspaces ?? [];
   const activePath =
     listed.find((entry) => entry.active)?.path ?? state.settings?.workspacePath ?? null;
@@ -129,7 +133,8 @@ export function buildProjectTree(
   if (herdr.kind === 'ready') {
     for (const repo of herdr.repos) {
       const key = `herdr:${repo.key}`;
-      const path = repo.rows.find((row) => row.worktreeRoot !== null)?.worktreeRoot ?? null;
+      const placed = [...repo.rows, ...repo.sleeping];
+      const path = placed.find((row) => row.worktreeRoot !== null)?.worktreeRoot ?? null;
       projects.push({
         key,
         kind: 'herdr',
@@ -142,12 +147,13 @@ export function buildProjectTree(
         active: false,
         switchTo: null,
         notOpen: false,
-        branch: repo.rows.find((row) => row.branch !== null)?.branch ?? null,
+        branch: placed.find((row) => row.branch !== null)?.branch ?? null,
         tone: projectTone(key),
         counts: countTones(repo.rows.map((row) => row.tone)),
         collapsed: collapsed.has(key),
         groups: [],
         panes: repo.rows,
+        sleeping: repo.sleeping,
         folderRows: null,
         parkedCount: 0,
         cleanable: [],
@@ -179,6 +185,7 @@ function activeBoardProject(
     collapsed: collapsed.has(key),
     groups,
     panes: [],
+    sleeping: [],
     folderRows: null,
     parkedCount: groups.reduce((sum, group) => sum + group.parked.length, 0),
     cleanable: groups.flatMap((group) => removableErroredSessionIds(state, group)),
@@ -206,6 +213,7 @@ function inactiveBoardProject(
     collapsed: collapsed.has(key),
     groups: [],
     panes: [],
+    sleeping: [],
     folderRows: sessions === undefined ? null : folderRowsOf(entry.path, sessions),
     parkedCount: 0,
     cleanable: [],
@@ -269,8 +277,8 @@ export function shortProjectName(name: string): string {
  * The rail, top to bottom. Each project opens with its marker. An expanded
  * active folder shows the sessions that wait on the user first, then the other
  * live sessions in role order, then one "+N" badge for its parked sessions. An
- * expanded herdr group shows its panes. A collapsed project shows one summary
- * badge instead. A break separates projects.
+ * expanded herdr group shows its panes, then its hibernated sessions. A collapsed
+ * project shows one summary badge instead. A break separates projects.
  */
 export function buildRailTree(projects: readonly ProjectNode[]): RailEntry[] {
   const entries: RailEntry[] = [];
@@ -312,6 +320,9 @@ export function buildRailTree(projects: readonly ProjectNode[]): RailEntry[] {
     }
     for (const row of project.panes) {
       entries.push({ kind: 'pane', row, projectKey: project.key });
+    }
+    for (const row of project.sleeping) {
+      entries.push({ kind: 'sleeping', row, projectKey: project.key });
     }
   });
   return entries;

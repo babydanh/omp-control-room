@@ -43,6 +43,7 @@ export type AgentMenuSubject =
   | { kind: 'task'; taskId: string; sessionId: string | null; drawer: DrawerView | null }
   | { kind: 'planning'; promptId: string; sessionId: string | null }
   | { kind: 'herdr'; paneId: string; drawer: DrawerView | null }
+  | { kind: 'sleeping'; paneId: string; drawer: DrawerView | null }
   | { kind: 'project'; project: ProjectMenuFacts };
 
 /** The drawer tabs a session's menu can open. */
@@ -68,7 +69,8 @@ export type AgentMenuAction =
   | { kind: 'cancelPrompt' }
   | { kind: 'toggleProject' }
   | { kind: 'openBoardFolder' }
-  | { kind: 'cleanErrored' };
+  | { kind: 'cleanErrored' }
+  | { kind: 'wake' };
 
 export interface AgentMenuItem {
   /** Stable within one menu: a React key, and how tests find an item. */
@@ -310,6 +312,14 @@ export function herdrMenuItems(folder: string | null, drawer: DrawerView | null)
       }),
       ...maximizeItems(drawer),
     ]),
+  ];
+}
+
+/** The items for a hibernated session: waking it, then maximize. Nothing else acts on a sleeping pane. */
+export function sleepingMenuItems(drawer: DrawerView | null): AgentMenuItem[] {
+  return [
+    item({ id: 'wake', label: 'Đánh thức', action: { kind: 'wake' } }),
+    ...withGroupStart(maximizeItems(drawer)),
   ];
 }
 

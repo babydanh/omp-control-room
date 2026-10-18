@@ -481,6 +481,14 @@ export class CompanyClient {
   }
 
   /**
+   * Wake a hibernated session. The answer is the standard command result under the
+   * handle's requestId: ok, or a refusal the server words for the user.
+   */
+  herdrWake(paneId: string, prompt?: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.herdrWake(requestId, paneId, prompt));
+  }
+
+  /**
    * Ask for an agent's info. The answer is a herdrInfo; a refusal is a
    * companyCommandResult under the handle's requestId.
    */

@@ -168,6 +168,7 @@ const HERDR_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'herdrFocus',
   'herdrRename',
   'herdrInfoRequest',
+  'herdrWake',
 ]);
 const HERDR_NOT_LINKED_MESSAGE = 'Máy chủ này chưa kết nối herdr.';
 const HERDR_NOT_LINKED_ROSTER: HerdrAgentsMessage = {
@@ -175,6 +176,7 @@ const HERDR_NOT_LINKED_ROSTER: HerdrAgentsMessage = {
   available: false,
   reason: HERDR_NOT_LINKED_MESSAGE,
   agents: [],
+  sleeping: [],
 };
 const INVALID_HERDR_REQUEST_MESSAGE = 'Yêu cầu herdr không hợp lệ.';
 const HERDR_FAILED_MESSAGE = 'Không thực hiện được lệnh herdr.';
@@ -489,6 +491,16 @@ async function herdrCommand(
         await herdr.focus(paneId);
         ok(send, requestId);
         return;
+      case 'herdrWake': {
+        const prompt = msg.prompt === undefined ? undefined : stringField(msg, 'prompt');
+        if (prompt === null) {
+          fail(send, requestId, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
+          return;
+        }
+        await herdr.wake(paneId, prompt);
+        ok(send, requestId);
+        return;
+      }
       case 'herdrRename': {
         const name = stringField(msg, 'name');
         if (name === null) {

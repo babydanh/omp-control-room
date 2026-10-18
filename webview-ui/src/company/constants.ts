@@ -118,8 +118,11 @@ export const COMPANY_DRAWER_DEFAULT_SHARE = 0.4;
 /** The narrowest a lane with work gets; the lanes row scrolls sideways instead of squeezing it. */
 export const COMPANY_LANE_MIN_WIDTH_PX = 220;
 
-/** An empty lane's fixed width, so the lanes with work get the room. */
-export const COMPANY_LANE_EMPTY_WIDTH_PX = 160;
+/** A lane with no cards collapses to a strip this wide, so the lanes with work get the room. */
+export const COMPANY_LANE_STRIP_WIDTH_PX = 40;
+
+/** The composer's text box grows one row per line of text, up to this many rows, then scrolls. */
+export const COMPOSER_MAX_ROWS = 8;
 
 /** How many lanes stay visible beside a docked drawer. */
 export const COMPANY_LANES_VISIBLE_MIN = 2;

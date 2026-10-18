@@ -35,6 +35,7 @@ describe('herdr reducer', () => {
       type: 'herdrAgents',
       available: true,
       agents: [agent],
+      sleeping: [],
     } satisfies ServerMessage);
 
     expect(result.state.herdr).toMatchObject({
@@ -51,6 +52,7 @@ describe('herdr reducer', () => {
       available: false,
       reason: 'socket missing',
       agents: [],
+      sleeping: [],
     } satisfies ServerMessage);
 
     expect(result.state.herdr).toMatchObject({ available: false, reason: 'socket missing' });

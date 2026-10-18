@@ -4,8 +4,9 @@
  * these in agentTree.ts.
  *
  * Every session the server knows appears under its role, and every herdr agent
- * under one repo group. A row that waits on the user sorts first and never sits
- * in the parked group, so nothing waiting for a click is out of sight.
+ * and hibernated session under one repo group. A row that waits on the user sorts
+ * first and never sits in the parked group, so nothing waiting for a click is out
+ * of sight. Hibernated sessions are not agents that run, so no count includes them.
  */
 
 import {
@@ -16,7 +17,7 @@ import {
   type HerdrAgent,
   type RoleProfile,
 } from '../../../core/src/company.js';
-import type { CompanyWorkspaceSession } from '../../../core/src/messages.js';
+import type { CompanyWorkspaceSession, HerdrSleepingSession } from '../../../core/src/messages.js';
 import type { CompanyViewState, HerdrView } from './companyState.js';
 import { HERDR_TONE_LABELS, HERDR_TONE_RANK, type HerdrTone, herdrToneFor } from './herdrView.js';
 import { COMPANY_ROLES, companyRoleLabel, ROLE_LABELS, roleProfile } from './roleProfiles.js';
@@ -122,11 +123,29 @@ export interface HerdrRow {
   repo: RepoPlacement;
 }
 
+/** A hibernated omp session: its pane is still held, but no live agent runs in it. */
+export interface SleepingRow {
+  paneId: string;
+  /** The session's title, else its pane number; what the row prints. */
+  name: string;
+  /** "ngủ từ 5 phút trước"; null when the server's time is not a time. */
+  sleptLabel: string | null;
+  sessionFile: string;
+  /** The moment it went to sleep, as the server sent it (ISO). */
+  sleptAt: string;
+  branch: string | null;
+  worktreeRoot: string | null;
+  cwd: string | null;
+  repo: RepoPlacement;
+}
+
 export interface HerdrRepoGroup {
   key: string;
   label: string;
   source: RepoPlacement['source'];
   rows: HerdrRow[];
+  /** Hibernated sessions under this repo, most recently slept first. */
+  sleeping: SleepingRow[];
 }
 
 export type HerdrGroup =
@@ -407,7 +426,11 @@ export function herdrTooltip(row: HerdrRow): string {
   ]);
 }
 
-export function herdrGroup(herdr: HerdrView): HerdrGroup {
+/**
+ * The herdr group the sidebar, rail and board draw. `now` dates the sleeping
+ * rows' "ngủ từ" labels, so one snapshot reads differently as time passes.
+ */
+export function herdrGroup(herdr: HerdrView, now: number): HerdrGroup {
   if (!herdr.loaded) return { kind: 'hidden' };
   if (!herdr.available) {
     return {
@@ -417,7 +440,10 @@ export function herdrGroup(herdr: HerdrView): HerdrGroup {
     };
   }
   const rows = herdr.agents.map(herdrRowFor).sort(compareHerdrRows);
-  return { kind: 'ready', repos: groupByRepo(rows) };
+  const sleeping = herdr.sleeping
+    .map((session) => sleepingRowFor(session, now))
+    .sort(compareSleepingRows);
+  return { kind: 'ready', repos: groupByRepo(rows, sleeping) };
 }
 
 /** How many herdr agents the group holds. */
@@ -435,24 +461,32 @@ function compareHerdrRows(left: HerdrRow, right: HerdrRow): number {
 
 /**
  * Groups rows that are already sorted, so each group sits where its most urgent
- * agent sorts: a repo with an agent that needs the user comes first.
+ * agent sorts: a repo with an agent that needs the user comes first. A repo that
+ * holds only hibernated sessions comes after the live groups.
  */
-function groupByRepo(rows: readonly HerdrRow[]): HerdrRepoGroup[] {
+function groupByRepo(
+  rows: readonly HerdrRow[],
+  sleeping: readonly SleepingRow[],
+): HerdrRepoGroup[] {
   const groups = new Map<string, HerdrRepoGroup>();
-  for (const row of rows) {
-    const existing = groups.get(row.repo.key);
-    if (existing !== undefined) {
-      existing.rows.push(row);
-      continue;
-    }
-    groups.set(row.repo.key, {
-      key: row.repo.key,
-      label: row.repo.label,
-      source: row.repo.source,
-      rows: [row],
-    });
-  }
+  for (const row of rows) groupFor(groups, row.repo).rows.push(row);
+  for (const row of sleeping) groupFor(groups, row.repo).sleeping.push(row);
   return [...groups.values()];
+}
+
+/** The group a placement belongs to, created the first time it is seen. */
+function groupFor(groups: Map<string, HerdrRepoGroup>, repo: RepoPlacement): HerdrRepoGroup {
+  const existing = groups.get(repo.key);
+  if (existing !== undefined) return existing;
+  const created: HerdrRepoGroup = {
+    key: repo.key,
+    label: repo.label,
+    source: repo.source,
+    rows: [],
+    sleeping: [],
+  };
+  groups.set(repo.key, created);
+  return created;
 }
 
 function herdrRowFor(agent: HerdrAgent): HerdrRow {
@@ -468,6 +502,57 @@ function herdrRowFor(agent: HerdrAgent): HerdrRow {
     summary: herdrSummary(agent.title, agent.cwd),
     repo: repoPlacement(agent),
   };
+}
+
+/** A hibernated session as a sidebar row, placed under its repo like a live agent. */
+export function sleepingRowFor(session: HerdrSleepingSession, now: number): SleepingRow {
+  return {
+    paneId: session.paneId,
+    name: sleepingName(session),
+    sleptLabel: sleptLabelOf(session.sleptAt, now),
+    sessionFile: session.sessionFile,
+    sleptAt: session.sleptAt,
+    branch: nonEmpty(session.branch),
+    worktreeRoot: nonEmpty(session.worktreeRoot),
+    cwd: nonEmpty(session.cwd),
+    repo: repoPlacement(session),
+  };
+}
+
+/** A hibernated session's name: its title, else its pane number. */
+export function sleepingName(session: Pick<HerdrSleepingSession, 'title' | 'paneId'>): string {
+  return nonEmpty(session.title) ?? session.paneId;
+}
+
+/** "ngủ từ 5 phút trước", or "ngủ vừa xong" just now; null when the time is not a time. */
+export function sleptLabelOf(sleptAt: string, now: number): string | null {
+  const ago = relativeTimeVi(sleptAt, now);
+  if (ago === null) return null;
+  return ago === 'vừa xong' ? 'ngủ vừa xong' : `ngủ từ ${ago}`;
+}
+
+/** Every hibernated session the group holds, most recently slept first. */
+export function sleepingRows(herdr: HerdrGroup): SleepingRow[] {
+  if (herdr.kind !== 'ready') return [];
+  return herdr.repos.flatMap((repo) => repo.sleeping).sort(compareSleepingRows);
+}
+
+/** A sleeping row's tooltip: its name, when it slept, and the session file it resumes from. */
+export function sleepingTooltip(row: SleepingRow): string {
+  return joinTooltip([row.name, row.sleptLabel, row.sessionFile]);
+}
+
+/** Most recently slept first; a time that cannot be read sorts last. Ties read by name. */
+function compareSleepingRows(left: SleepingRow, right: SleepingRow): number {
+  return (
+    sleptTime(right) - sleptTime(left) ||
+    left.name.localeCompare(right.name, 'en', { numeric: true })
+  );
+}
+
+function sleptTime(row: SleepingRow): number {
+  const time = Date.parse(row.sleptAt);
+  return Number.isNaN(time) ? 0 : time;
 }
 
 /**

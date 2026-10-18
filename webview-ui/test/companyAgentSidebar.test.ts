@@ -50,6 +50,11 @@ function herdrPaneIds(group: HerdrGroup): string[] {
   return readyRepos(group).flatMap((repo) => repo.rows.map((row) => row.paneId));
 }
 
+/** A herdr group read at the fixed clock, so its relative times are stable. */
+function herdrGroupNow(herdr: HerdrView): HerdrGroup {
+  return herdrGroup(herdr, NOW);
+}
+
 describe('buildAgentGroups', () => {
   it('lists every role in the company order, including roles with no agents', () => {
     const groups = buildAgentGroups(stateFrom(), NOW);
@@ -133,22 +138,22 @@ describe('pendingQuestionSessionIds', () => {
 
 describe('herdrGroup', () => {
   it('stays hidden until the server has answered the herdr question', () => {
-    expect(herdrGroup(emptyHerdrView())).toEqual({ kind: 'hidden' });
+    expect(herdrGroupNow(emptyHerdrView())).toEqual({ kind: 'hidden' });
   });
 
   it('explains an unavailable herdr, with the reason when the server gave one', () => {
-    expect(herdrGroup(herdrView({ available: false, reason: 'socket missing' }))).toEqual({
+    expect(herdrGroupNow(herdrView({ available: false, reason: 'socket missing' }))).toEqual({
       kind: 'unavailable',
       message: 'herdr không khả dụng: socket missing',
     });
-    expect(herdrGroup(herdrView({ available: false }))).toEqual({
+    expect(herdrGroupNow(herdrView({ available: false }))).toEqual({
       kind: 'unavailable',
       message: 'herdr không khả dụng.',
     });
   });
 
   it('sorts agents that need the user first, then working, idle, done and unknown', () => {
-    const group = herdrGroup(
+    const group = herdrGroupNow(
       herdrView({
         agents: [
           herdrAgent({ paneId: 'a', name: 'zeta', status: 'idle' }),
@@ -165,7 +170,7 @@ describe('herdrGroup', () => {
   });
 
   it('labels a blocked agent as waiting on the user and falls back to the working directory', () => {
-    const group = herdrGroup(
+    const group = herdrGroupNow(
       herdrView({
         agents: [herdrAgent({ paneId: 'p', name: 'claude', status: 'blocked', cwd: 'C:/repo' })],
       }),
@@ -183,7 +188,7 @@ describe('herdrGroup', () => {
 describe('herdrGroup repo placement', () => {
   it('groups agents by repository across workspaces, each group where its most urgent agent sorts', () => {
     const repos = readyRepos(
-      herdrGroup(
+      herdrGroupNow(
         herdrView({
           agents: [
             herdrAgent({
@@ -221,7 +226,7 @@ describe('herdrGroup repo placement', () => {
 
   it('keeps a repository and a workspace of the same name in separate groups', () => {
     const repos = readyRepos(
-      herdrGroup(
+      herdrGroupNow(
         herdrView({
           agents: [
             herdrAgent({ paneId: 'r', repo: 'shared' }),
@@ -236,7 +241,7 @@ describe('herdrGroup repo placement', () => {
 
   it('places an agent with no repository under its workspace, then its folder, then khác', () => {
     const repos = readyRepos(
-      herdrGroup(
+      herdrGroupNow(
         herdrView({
           agents: [
             herdrAgent({ paneId: 'w', workspaceLabel: 'Scratch', cwd: 'C:/tmp/x' }),
@@ -256,7 +261,7 @@ describe('herdrGroup repo placement', () => {
 
   it('carries the branch and worktree root of an agent that works in a git worktree', () => {
     const repos = readyRepos(
-      herdrGroup(
+      herdrGroupNow(
         herdrView({
           agents: [
             herdrAgent({
@@ -280,7 +285,7 @@ describe('herdrGroup repo placement', () => {
 
   it('reads a blank branch or worktree root as none', () => {
     const repos = readyRepos(
-      herdrGroup(
+      herdrGroupNow(
         herdrView({ agents: [herdrAgent({ paneId: 'p', branch: '   ', worktreeRoot: '' })] }),
       ),
     );

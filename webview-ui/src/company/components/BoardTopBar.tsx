@@ -21,16 +21,23 @@ export interface BoardTopBarProps {
   onToggleFiles: () => void;
 }
 
-/** The class every reading in the top bar shares: a small chip, muted until it matters. */
+/**
+ * The class every reading in the top bar shares: a small chip, muted until it matters.
+ * Chips shrink and truncate rather than push the buttons off the bar; the container
+ * query classes hide the ones that no longer fit.
+ */
 const CHIP_CLASS =
-  'max-w-full truncate rounded-full border border-border px-2 py-0.5 text-2xs text-text-muted';
+  'min-w-0 max-w-full truncate rounded-full border border-border px-2 py-0.5 text-2xs text-text-muted';
 
 function CatalogStatus({ entries }: { entries: readonly CompanyModelCatalogEntry[] }) {
-  if (entries.length === 0) return <span className={CHIP_CLASS}>danh mục mô hình: chưa tải</span>;
   const usable = entries.filter((entry) => entry.credentialsConfigured).length;
+  const text =
+    entries.length === 0
+      ? 'danh mục mô hình: chưa tải'
+      : `mô hình: ${usable}/${entries.length} dùng được`;
   return (
-    <span className={CHIP_CLASS}>
-      mô hình: {usable}/{entries.length} dùng được
+    <span className={CHIP_CLASS} title={text}>
+      {text}
     </span>
   );
 }
@@ -45,7 +52,11 @@ function QuotaStatus({ state }: { state: CompanyViewState }) {
   return (
     <>
       {windows.map((text) => (
-        <span key={text} title="Còn lại theo tài khoản nhà cung cấp" className={CHIP_CLASS}>
+        <span
+          key={text}
+          title="Còn lại theo tài khoản nhà cung cấp"
+          className={`${CHIP_CLASS} hidden @min-[640px]:block`}
+        >
           {text}
         </span>
       ))}
@@ -68,22 +79,29 @@ export function BoardTopBar({
   onToggleFiles,
 }: BoardTopBarProps) {
   const diagnostics = state.diagnostics;
+  const runner = diagnostics
+    ? `omp đang chạy ${diagnostics.liveRunners}/${diagnostics.modelLeases} · xếp hàng ${diagnostics.queuedTasks} · giữ lại ${diagnostics.retainedSessions}`
+    : null;
   return (
-    <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-2">
-      <h1 className="text-base text-text">OMP Board</h1>
+    <header className="flex items-center gap-3 border-b border-border px-3 py-2">
+      <h1 className="shrink-0 text-base text-text">OMP Board</h1>
       <WorkspaceSwitcher client={client} state={state} />
-      <span className="flex flex-wrap gap-1.5">
-        <span className={CHIP_CLASS}>bản sửa {state.revision ?? '-'}</span>
+      <span className="@container flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
+        <span className={`${CHIP_CLASS} hidden @min-[760px]:block`}>
+          bản sửa {state.revision ?? '-'}
+        </span>
         <CatalogStatus entries={state.modelCatalog} />
-        {diagnostics && (
+        {runner !== null && (
           <span className={CHIP_CLASS}>
-            omp đang chạy {diagnostics.liveRunners}/{diagnostics.modelLeases} · xếp hàng{' '}
-            {diagnostics.queuedTasks} · giữ lại {diagnostics.retainedSessions}
+            <span className="hidden @min-[560px]:inline">{runner}</span>
+            <span className="@min-[560px]:hidden" title={runner}>
+              omp
+            </span>
           </span>
         )}
         <QuotaStatus state={state} />
       </span>
-      <nav className="ml-auto flex shrink-0 gap-1.5" aria-label="Thanh công cụ">
+      <nav className="flex shrink-0 gap-1.5" aria-label="Thanh công cụ">
         <button
           type="button"
           onClick={onToggleSidebar}

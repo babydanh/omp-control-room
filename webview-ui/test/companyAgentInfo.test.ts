@@ -343,6 +343,7 @@ describe('agent info reducer', () => {
       type: 'herdrAgents',
       available: true,
       agents: [herdrAgent({ paneId: 'p1' }), herdrAgent({ paneId: 'p2' })],
+      sleeping: [],
     }).state;
     state = applyCompanyMessage(state, {
       type: 'herdrInfo',
@@ -362,6 +363,7 @@ describe('agent info reducer', () => {
       type: 'herdrAgents',
       available: true,
       agents: [herdrAgent({ paneId: 'p1' })],
+      sleeping: [],
     }).state;
     expect(Object.keys(state.herdr.infos)).toEqual(['p1']);
   });
@@ -372,6 +374,7 @@ describe('agent info reducer', () => {
       type: 'herdrAgents',
       available: true,
       agents: [herdrAgent({ paneId: 'p1' })],
+      sleeping: [],
     }).state;
     const newer = agentInfo({
       collectedFrom: 'herdr',

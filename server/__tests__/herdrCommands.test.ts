@@ -15,6 +15,7 @@ const ROSTER: HerdrAgentsMessage = {
   type: 'herdrAgents',
   available: true,
   agents: [{ paneId: 'wA:p2', workspaceId: 'wA', kind: 'omp', status: 'idle' }],
+  sleeping: [],
 };
 
 const SCREEN_TEXT = 'màn hình';
@@ -43,6 +44,7 @@ function stubLink(overrides: Partial<HerdrLink> = {}): HerdrLink {
     focus: vi.fn(async (): Promise<void> => undefined),
     rename: vi.fn(async (): Promise<void> => undefined),
     info: vi.fn(async (): Promise<AgentInfo> => INFO),
+    wake: vi.fn(async (): Promise<void> => undefined),
     ...overrides,
   };
 }
@@ -106,6 +108,7 @@ describe('herdr board commands', () => {
       'herdrFocus',
       'herdrRename',
       'herdrInfoRequest',
+      'herdrWake',
     ]) {
       expect(isCompanyCommand({ type })).toBe(true);
     }
@@ -156,6 +159,7 @@ describe('herdr board commands', () => {
       { type: 'herdrPrompt', requestId: 'r-1', paneId: 'wA:p2', text: 'tiếp tục' },
       { type: 'herdrKeys', requestId: 'r-2', paneId: 'wA:p2', keys: ['enter'] },
       { type: 'herdrFocus', requestId: 'r-3', paneId: 'wA:p2' },
+      { type: 'herdrWake', requestId: 'r-4', paneId: 'wA:p2', prompt: 'tiếp tục' },
     ];
 
     for (const message of messages) {
@@ -171,6 +175,58 @@ describe('herdr board commands', () => {
     expect(herdr.prompt).not.toHaveBeenCalled();
     expect(herdr.keys).not.toHaveBeenCalled();
     expect(herdr.focus).not.toHaveBeenCalled();
+    expect(herdr.wake).not.toHaveBeenCalled();
+  });
+
+  it('wakes a sleeping session with the typed prompt and answers ok', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrWake', requestId: 'w-1', paneId: 'wF:p2', prompt: 'tiếp tục' },
+      rec.send,
+      context({ herdr }),
+    );
+
+    expect(await rec.next()).toEqual({ type: 'companyCommandResult', requestId: 'w-1', ok: true });
+    expect(herdr.wake).toHaveBeenCalledWith('wF:p2', 'tiếp tục');
+  });
+
+  it('wakes a sleeping session without a prompt when none is given', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrWake', requestId: 'w-2', paneId: 'wF:p2' },
+      rec.send,
+      context({ herdr }),
+    );
+
+    expect(await rec.next()).toMatchObject({ requestId: 'w-2', ok: true });
+    expect(herdr.wake).toHaveBeenCalledWith('wF:p2', undefined);
+  });
+
+  it('reports a refused wake with the herdr error code and message', async () => {
+    const herdr = stubLink({
+      wake: vi.fn(async (): Promise<void> => {
+        throw new HerdrError('not_sleeping', 'Phiên này không còn ngủ đông. Hãy làm mới bảng.');
+      }),
+    });
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrWake', requestId: 'w-3', paneId: 'wF:p2' },
+      rec.send,
+      context({ herdr }),
+    );
+
+    expect(await rec.next()).toEqual({
+      type: 'companyCommandResult',
+      requestId: 'w-3',
+      ok: false,
+      errorCode: 'not_sleeping',
+      message: 'Phiên này không còn ngủ đông. Hãy làm mới bảng.',
+    });
   });
 
   it('reads the default window of 200 lines and answers with the request id', async () => {
@@ -354,6 +410,7 @@ describe('herdr board commands', () => {
       available: false,
       reason: 'Máy chủ này chưa kết nối herdr.',
       agents: [],
+      sleeping: [],
     });
   });
 

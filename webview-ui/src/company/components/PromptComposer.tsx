@@ -24,12 +24,21 @@
  * and the Company route never dispatch a command; they send the text as a prompt.
  */
 
-import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
+import {
+  type ChangeEvent,
+  type KeyboardEvent,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 
 import type { CompanyModelCatalogEntry, CompanyRole } from '../../../../core/src/company.js';
 import type { OmpSessionEntry } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient } from '../companyClient.js';
+import { composerInputHeight } from '../composerHeight.js';
 import {
   chatRoute,
   companyRoute,
@@ -64,6 +73,10 @@ import { OmpSessionPicker } from './OmpSessionPicker.js';
 /** The notice `/new` shows: the next send opens a new omp chat. */
 const NEW_CHAT_NOTICE = 'Phiên mới: lần gửi tới sẽ mở một phiên omp mới.';
 
+/** The keys this box answers to, shown in the `?` tooltip beside the target line. */
+const COMPOSER_HINTS =
+  'Enter gửi tới phiên đang chọn · Shift+Enter xuống dòng · Ctrl+Enter để gửi tiếp · Ctrl+Shift+Enter để giao cho công ty · / để gõ lệnh';
+
 /** A row in the completion popup. */
 type CompletionRow =
   | { kind: 'command'; command: OmpSlashCommand; insert: string }
@@ -77,6 +90,21 @@ export interface PromptComposerProps {
   client: CompanyClient;
 }
 
+/**
+ * Size the composer's text box to its text: one row when empty, a row more for each
+ * line, and at most COMPOSER_MAX_ROWS rows before it scrolls. The box is set to `auto`
+ * first, so deleted lines shrink it back.
+ */
+function fitTextarea(el: HTMLTextAreaElement | null): void {
+  if (el === null) return;
+  el.style.height = 'auto';
+  const style = getComputedStyle(el);
+  const border = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+  const chrome = border + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+  const fit = el.scrollHeight + border;
+  el.style.height = `${composerInputHeight(fit, parseFloat(style.lineHeight), chrome)}px`;
+}
+
 export function PromptComposer({ client }: PromptComposerProps) {
   const state = useCompanyState(client);
   const draft = state.prompt;
@@ -84,6 +112,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
   /** The popup open over the box, if any. A model picker keeps the command that opened it. */
   const [picker, setPicker] = useState<ComposerPicker | null>(null);
   const [highlight, setHighlight] = useState(0);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const selectedSession =
     state.selection.sessionId === null ? null : (state.sessions[state.selection.sessionId] ?? null);
@@ -103,6 +132,14 @@ export function PromptComposer({ client }: PromptComposerProps) {
   useEffect(() => {
     if (state.modelCatalog.length === 0) client.requestModelCatalog();
   }, [client, state.modelCatalog.length]);
+
+  // Grow the box with its text. Wrapping changes with the window width, so re-measure on resize too.
+  useLayoutEffect(() => fitTextarea(inputRef.current), [draft.text]);
+  useEffect(() => {
+    const refit = () => fitTextarea(inputRef.current);
+    window.addEventListener('resize', refit);
+    return () => window.removeEventListener('resize', refit);
+  }, []);
 
   // OMP's status line names the model as `provider/id`
   // (builtin-modes.ts:456-459). A model the server holds but this catalog does
@@ -334,7 +371,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const error = draft.error?.message ?? draft.error?.errorCode ?? null;
 
   return (
-    <section className="border-t border-border bg-bg p-2" data-testid="prompt-composer">
+    <section className="border-t border-border bg-bg px-2 py-1" data-testid="prompt-composer">
       {rows.length > 0 && (
         <ul
           className="mb-1 max-h-40 overflow-auto rounded-[6px] border border-border"
@@ -397,23 +434,52 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
       {resumeView !== null && <OmpSessionPicker view={resumeView} onChoose={resumeEntry} />}
 
-      <p className="mb-1 text-2xs text-text-muted" data-testid="prompt-target">
-        {sendTargetLabel(selectedSession)}
-      </p>
-      <textarea
-        value={draft.text}
-        onChange={onChange}
-        onKeyDown={onKeyDown}
-        rows={4}
-        placeholder="Enter gửi tới phiên đang chọn · Ctrl+Shift+Enter giao cho công ty · / để gõ lệnh"
-        data-testid="prompt-input"
-        className="w-full rounded-[6px] border border-border bg-bg-dark p-2 text-sm text-text"
-      />
-
-      <p className="mt-1 flex flex-wrap items-center gap-2 text-2xs text-text-muted">
-        <span>{modelLabel}</span>
-        <span>Ctrl+Enter để gửi tiếp</span>
-        <span>Ctrl+Shift+Enter để giao cho công ty</span>
+      <div className="flex items-end gap-1.5">
+        <textarea
+          ref={inputRef}
+          value={draft.text}
+          onChange={onChange}
+          onKeyDown={onKeyDown}
+          rows={1}
+          placeholder="Nhập tin nhắn · / để gõ lệnh"
+          aria-label="Tin nhắn"
+          data-testid="prompt-input"
+          className="min-w-0 flex-1 resize-none rounded-[6px] border border-border bg-bg-dark px-2 py-1 text-sm leading-5 text-text"
+        />
+        <CompanyButton
+          size="sm"
+          variant="default"
+          className="shrink-0 whitespace-nowrap"
+          disabled={blocker !== null || busy || picker !== null}
+          onClick={() => send(companyRoute(selectedSession))}
+        >
+          Giao cho công ty
+        </CompanyButton>
+        <CompanyButton
+          size="sm"
+          variant="accent"
+          className="shrink-0"
+          disabled={blocker !== null || busy || picker !== null}
+          onClick={onSubmitKey}
+        >
+          {busy ? 'Đang gửi...' : 'Gửi'}
+        </CompanyButton>
+      </div>
+      <p className="mt-1 flex min-w-0 items-center gap-2 text-2xs text-text-muted">
+        <span className="min-w-0 truncate" data-testid="prompt-target">
+          {sendTargetLabel(selectedSession)}
+        </span>
+        <span className="min-w-0 truncate" title={modelLabel}>
+          {modelLabel}
+        </span>
+        <span
+          tabIndex={0}
+          title={COMPOSER_HINTS}
+          aria-label={COMPOSER_HINTS}
+          className="ml-auto shrink-0 cursor-help rounded-full border border-border px-1.5"
+        >
+          ?
+        </span>
       </p>
       {notice !== null && (
         <p className="mt-1 text-2xs text-warning" data-testid="prompt-notice">
@@ -425,26 +491,6 @@ export function PromptComposer({ client }: PromptComposerProps) {
           {error}
         </p>
       )}
-
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="flex-1" />
-        <CompanyButton
-          size="sm"
-          variant="default"
-          disabled={blocker !== null || busy || picker !== null}
-          onClick={() => send(companyRoute(selectedSession))}
-        >
-          Giao cho công ty
-        </CompanyButton>
-        <CompanyButton
-          size="sm"
-          variant="accent"
-          disabled={blocker !== null || busy || picker !== null}
-          onClick={onSubmitKey}
-        >
-          {busy ? 'Đang gửi...' : 'Gửi'}
-        </CompanyButton>
-      </div>
       {blocker !== null && draft.text.trim().length > 0 && (
         <p className="mt-1 text-2xs text-text-muted">{blocker}</p>
       )}

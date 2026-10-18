@@ -51,6 +51,7 @@ import type {
   CompanyRemoveChange,
   CompanyStateChangedMessage,
   CompanyWorkspaceEntry,
+  HerdrSleepingSession,
   OmpSessionEntry,
   ServerMessage,
 } from '../../../core/src/messages.js';
@@ -200,6 +201,8 @@ export interface HerdrView {
   available: boolean;
   reason: string | null;
   agents: HerdrAgent[];
+  /** Hibernated omp sessions: a pane the herdr server still holds, with no live agent. Replaced whole by each herdrAgents. */
+  sleeping: HerdrSleepingSession[];
   /** Latest screen per pane; a late reply older than the one held is dropped. */
   screens: Record<string, HerdrScreenView>;
   /** Latest agent info per pane; a late reply older than the one held is dropped. */
@@ -207,7 +210,15 @@ export interface HerdrView {
 }
 
 export function emptyHerdrView(): HerdrView {
-  return { loaded: false, available: false, reason: null, agents: [], screens: {}, infos: {} };
+  return {
+    loaded: false,
+    available: false,
+    reason: null,
+    agents: [],
+    sleeping: [],
+    screens: {},
+    infos: {},
+  };
 }
 
 /** The omp sessions the resume picker lists: the latest answer to a request for them. */
@@ -987,6 +998,7 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
           available: message.available,
           reason: message.reason ?? null,
           agents: [...message.agents],
+          sleeping: [...message.sleeping],
           infos: keepLive(state.herdr.infos, (paneId) =>
             message.agents.some((agent) => agent.paneId === paneId),
           ),

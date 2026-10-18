@@ -222,6 +222,14 @@ export function herdrFocus(requestId: string, paneId: string): ClientMessage {
   return { type: 'herdrFocus', requestId, paneId };
 }
 
+/** Wakes a hibernated session. The prompt goes only when the user typed something; a blank one is left out. */
+export function herdrWake(requestId: string, paneId: string, prompt?: string): ClientMessage {
+  const text = prompt?.trim() ?? '';
+  return text === ''
+    ? { type: 'herdrWake', requestId, paneId }
+    : { type: 'herdrWake', requestId, paneId, prompt: text };
+}
+
 export function herdrRename(requestId: string, paneId: string, name: string): ClientMessage {
   return { type: 'herdrRename', requestId, paneId, name };
 }

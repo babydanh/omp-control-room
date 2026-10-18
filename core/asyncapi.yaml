@@ -206,6 +206,7 @@ components:
         - $ref: '#/components/schemas/HerdrFocusMessage'
         - $ref: '#/components/schemas/HerdrRenameMessage'
         - $ref: '#/components/schemas/HerdrInfoRequestMessage'
+        - $ref: '#/components/schemas/HerdrWakeMessage'
         # Native terminal
         - $ref: '#/components/schemas/TerminalAttachMessage'
         - $ref: '#/components/schemas/TerminalInputMessage'
@@ -3532,6 +3533,25 @@ components:
           type: string
           maxLength: 64
 
+    HerdrWakeMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId]
+      properties:
+        type:
+          const: herdrWake
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+        prompt:
+          type: string
+          description: One line sent with Enter to the sleeping pane, so the session resumes with it. Omit to resume without a prompt.
+          minLength: 1
+          maxLength: 4000
+
     TerminalAttachMessage:
       type: object
       additionalProperties: false
@@ -3787,10 +3807,43 @@ components:
         focused:
           type: boolean
 
+    HerdrSleepingSession:
+      type: object
+      additionalProperties: false
+      required: [paneId, title, sessionFile, sleptAt]
+      properties:
+        paneId:
+          type: string
+        title:
+          type: string
+          minLength: 1
+          description: The name the sleeping pane gives the session (its -Viec text), else the session file's own title or first prompt.
+        sessionFile:
+          type: string
+          description: Path of the omp session file the wake resumes.
+        sleptAt:
+          type: string
+          format: date-time
+          description: When the session was put to sleep (the moment its exit was requested).
+        cwd:
+          type: string
+          description: Working directory the sleeping pane stands in; the wake resumes the session there.
+        workspaceLabel:
+          type: string
+          description: The herdr workspace's label.
+        repo:
+          type: string
+          description: Name of the git repository the cwd belongs to; same grouping as herdr agents.
+        branch:
+          type: string
+        worktreeRoot:
+          type: string
+          description: Top-level directory of the git worktree the session works in.
+
     HerdrAgentsMessage:
       type: object
       additionalProperties: false
-      required: [type, available, agents]
+      required: [type, available, agents, sleeping]
       properties:
         type:
           const: herdrAgents
@@ -3803,6 +3856,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/HerdrAgent'
+        sleeping:
+          type: array
+          description: Omp sessions asleep in a herdr pane, waiting for a wake. A session leaves this list once herdr reports its omp agent running.
+          items:
+            $ref: '#/components/schemas/HerdrSleepingSession'
 
     HerdrScreenMessage:
       type: object

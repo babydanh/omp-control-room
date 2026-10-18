@@ -503,6 +503,7 @@ describe('HerdrLink against a herdr socket', () => {
           focused: true,
         },
       ],
+      sleeping: [],
     });
     expect(link.snapshot().available).toBe(true);
   });
@@ -1211,5 +1212,210 @@ describe('HerdrLink against a herdr socket', () => {
       // Every call and the transcript read have settled, so no 5 s timer may stay armed.
       expect(scheduler.liveCount(5_000)).toBe(0);
     });
+  });
+});
+
+describe('HerdrLink sleeping sessions and wake', () => {
+  const SESSION_FILE = 'C:/omp/sessions/2026-01-01_1f2e3d4c-5b6a-4978-8a9b-000087572576.jsonl';
+  const SID8 = '87572576';
+  const SLEPT = {
+    pane: 'wD:p4',
+    terminal: 'term_slept',
+    file: SESSION_FILE,
+    cwd: 'V:\\Duancanhan',
+    phase: 'sleeping',
+    ts: '2026-01-01T00:00:00Z',
+  };
+  let dir: string;
+  let registryFile: string;
+  let fake: FakeHerdr;
+  let scheduler: ManualScheduler;
+  let warnings: string[];
+  let link: HerdrLink;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'omp-herdr-sleep-'));
+    registryFile = path.join(dir, 'omp-ngu.json');
+    fake = new FakeHerdr();
+    await fake.listen();
+    scheduler = new ManualScheduler();
+    warnings = [];
+    const git = new FakeGit();
+    link = createHerdrLink({
+      socketPath: fake.endpoint,
+      scheduler,
+      runGit: git.run,
+      sleepRegistryFile: registryFile,
+      warn: (message) => warnings.push(message),
+    });
+  });
+
+  afterEach(async () => {
+    link.stop();
+    await fake.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  /** A `pane.list` entry for the sleeping session's pane; each test overrides what changed. */
+  function sleepingPane(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      pane_id: 'wD:p4',
+      workspace_id: 'wD',
+      terminal_id: 'term_slept',
+      cwd: 'V:\\Duancanhan',
+      label: `zz omp: Refactor modal #${SID8}`,
+      ...overrides,
+    };
+  }
+
+  async function writeRegistry(entries: readonly Record<string, unknown>[]): Promise<void> {
+    await fs.writeFile(registryFile, JSON.stringify(entries));
+  }
+
+  it('lists a sleeping session on the roster with its title and slept time', async () => {
+    await writeRegistry([SLEPT]);
+    fake.reply('pane.list', () => ({ panes: [sleepingPane()] }));
+    const roster = nextAgents(link, (message) => message.sleeping.length > 0);
+
+    link.start();
+
+    const message = await roster;
+    expect(message.sleeping).toEqual([
+      {
+        paneId: 'wD:p4',
+        title: 'Refactor modal',
+        sessionFile: SESSION_FILE,
+        sleptAt: '2026-01-01T00:00:00.000Z',
+        cwd: 'V:\\Duancanhan',
+      },
+    ]);
+    expect(message.agents).toEqual([]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('keeps the agents and lists no sleeping session when the pane read fails', async () => {
+    fake.reply('agent.list', () => ({ agents: [agentInfo()] }));
+    fake.reply('pane.list', () => {
+      throw new ReplyError('agent_not_found');
+    });
+    const roster = nextAgents(link, (message) => message.available && message.agents.length === 1);
+
+    link.start();
+
+    expect((await roster).sleeping).toEqual([]);
+  });
+
+  it('wakes a sleeping session by typing the prompt and pressing Enter in its pane', async () => {
+    await writeRegistry([SLEPT]);
+    fake.reply('pane.list', () => ({ panes: [sleepingPane()] }));
+    fake.reply('pane.send_text', () => ({ type: 'ok' }));
+    fake.reply('pane.send_keys', () => ({ type: 'ok' }));
+
+    await link.wake('wD:p4', 'tiếp tục');
+
+    expect(fake.requestsTo('pane.send_text')).toEqual([
+      { method: 'pane.send_text', params: { pane_id: 'wD:p4', text: 'tiếp tục' } },
+    ]);
+    expect(fake.requestsTo('pane.send_keys')).toEqual([
+      { method: 'pane.send_keys', params: { pane_id: 'wD:p4', keys: ['enter'] } },
+    ]);
+  });
+
+  it('wakes without typing anything when no prompt is given', async () => {
+    await writeRegistry([SLEPT]);
+    fake.reply('pane.list', () => ({ panes: [sleepingPane()] }));
+    fake.reply('pane.send_keys', () => ({ type: 'ok' }));
+
+    await link.wake('wD:p4');
+
+    expect(fake.requestsTo('pane.send_text')).toEqual([]);
+    expect(fake.requestsTo('pane.send_keys')).toHaveLength(1);
+  });
+
+  it('refuses a pane that has started an agent and sends nothing', async () => {
+    await writeRegistry([SLEPT]);
+    fake.reply('pane.list', () => ({ panes: [sleepingPane({ agent: 'omp' })] }));
+
+    const error = await herdrFailure(link.wake('wD:p4'));
+
+    expect(error.code).toBe('not_sleeping');
+    expect(error.message).toBe('Pane này đang chạy agent, phiên không còn ngủ đông.');
+    expect(fake.requestsTo('pane.send_keys')).toEqual([]);
+  });
+
+  it('refuses a session that is no longer in the registry', async () => {
+    await writeRegistry([]);
+    fake.reply('pane.list', () => ({ panes: [sleepingPane()] }));
+
+    const error = await herdrFailure(link.wake('wD:p4'));
+
+    expect(error.code).toBe('not_sleeping');
+    expect(error.message).toBe('Phiên này không còn ngủ đông. Hãy làm mới bảng.');
+    expect(fake.requestsTo('pane.send_keys')).toEqual([]);
+  });
+
+  it('refuses a session whose exit has not finished yet', async () => {
+    await writeRegistry([{ ...SLEPT, phase: 'exit-requested' }]);
+    fake.reply('pane.list', () => ({ panes: [sleepingPane()] }));
+
+    const error = await herdrFailure(link.wake('wD:p4'));
+
+    expect(error.message).toBe('Phiên omp vẫn đang thoát, chưa ngủ xong. Thử lại sau vài giây.');
+    expect(fake.requestsTo('pane.send_keys')).toEqual([]);
+  });
+
+  it('holds a second wake of the same pane until the hold window passes', async () => {
+    await writeRegistry([SLEPT]);
+    fake.reply('pane.list', () => ({ panes: [sleepingPane()] }));
+    fake.reply('pane.send_keys', () => ({ type: 'ok' }));
+
+    await link.wake('wD:p4');
+    const second = await herdrFailure(link.wake('wD:p4'));
+
+    expect(second.code).toBe('not_sleeping');
+    expect(second.message).toBe('Đang đánh thức phiên này, hãy chờ omp chạy lại.');
+    expect(fake.requestsTo('pane.send_keys')).toHaveLength(1);
+
+    // The hold lasts 20 seconds; firing that delay ends it.
+    scheduler.fire(20_000);
+    await link.wake('wD:p4');
+    expect(fake.requestsTo('pane.send_keys')).toHaveLength(2);
+  });
+
+  it('releases the hold when a wake is refused, so the next attempt is judged afresh', async () => {
+    await writeRegistry([SLEPT]);
+    fake.reply('pane.list', () => ({ panes: [sleepingPane({ agent: 'omp' })] }));
+    fake.reply('pane.send_keys', () => ({ type: 'ok' }));
+    await herdrFailure(link.wake('wD:p4'));
+
+    fake.reply('pane.list', () => ({ panes: [sleepingPane()] }));
+    await link.wake('wD:p4');
+
+    expect(fake.requestsTo('pane.send_keys')).toHaveLength(1);
+  });
+
+  it('rejects blank, multi-line, and oversized prompts before contacting herdr', async () => {
+    expect((await herdrFailure(link.wake('wD:p4', '   '))).code).toBe('invalid_request');
+    expect((await herdrFailure(link.wake('wD:p4', 'dòng một\ndòng hai'))).code).toBe(
+      'invalid_request',
+    );
+    expect((await herdrFailure(link.wake('wD:p4', 'x'.repeat(4001)))).code).toBe('invalid_request');
+    expect(fake.requests).toHaveLength(0);
+  });
+
+  it('re-reads the registry on the poll timer, so a new sleep appears without a herdr event', async () => {
+    fake.reply('pane.list', () => ({ panes: [sleepingPane()] }));
+    const first = nextAgents(link, (message) => message.available);
+
+    link.start();
+
+    expect((await first).sleeping).toEqual([]);
+    expect(scheduler.liveCount(10_000)).toBe(1);
+    await writeRegistry([SLEPT]);
+    const later = nextAgents(link, (message) => message.sleeping.length === 1);
+
+    scheduler.fire(10_000);
+
+    expect((await later).sleeping).toHaveLength(1);
   });
 });

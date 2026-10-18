@@ -31,6 +31,7 @@ function withHerdr(
     type: 'herdrAgents',
     available,
     agents,
+    sleeping: [],
   } satisfies ServerMessage).state;
 }
 
