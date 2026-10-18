@@ -8,7 +8,6 @@ import {
   herdrGroup,
   paneShortCode,
   type RailEntry,
-  repoTag,
   sessionShortCode,
 } from '../src/company/agentSidebarView.js';
 import { emptyHerdrView, type HerdrView } from '../src/company/companyState.js';
@@ -26,7 +25,7 @@ function shape(entries: readonly RailEntry[]): string[] {
       case 'pane':
         return `pane ${entry.row.paneId}`;
       case 'repo':
-        return `repo ${entry.tag}`;
+        return `repo ${entry.label}`;
       case 'parked':
         return `parked ${entry.count}`;
       case 'break':
@@ -96,19 +95,19 @@ describe('buildRail', () => {
     expect(badges + parked).toBe(Object.keys(state.sessions).length);
   });
 
-  it('opens each herdr repo with its tag, its panes under it, and a break before the block', () => {
+  it('opens each herdr repo with its name, its panes under it, and a break before the block', () => {
     const herdr = herdrReady([
       herdrAgent({ paneId: 'p1', repo: 'pixel-agents', status: 'idle' }),
       herdrAgent({ paneId: 'p2', repo: 'pixel-agents', status: 'blocked' }),
     ]);
 
-    expect(shape(buildRail([], herdr))).toEqual(['repo PA', 'pane p2', 'pane p1']);
+    expect(shape(buildRail([], herdr))).toEqual(['repo pixel-agents', 'pane p2', 'pane p1']);
 
     const state = stateFrom({ sessions: [session({ code: 'PA-S0001', role: 'worker' })] });
     expect(shape(buildRail(buildAgentGroups(state, NOW), herdr))).toEqual([
       'session PA-S0001',
       'break',
-      'repo PA',
+      'repo pixel-agents',
       'pane p2',
       'pane p1',
     ]);
@@ -135,18 +134,5 @@ describe('paneShortCode', () => {
 
   it('falls back to the first characters of a pane id with no number', () => {
     expect(paneShortCode('abcdef')).toBe('abcd');
-  });
-});
-
-describe('repoTag', () => {
-  it('takes the initials of a name split on dashes or underscores', () => {
-    expect(repoTag('pixel-agents')).toBe('PA');
-    expect(repoTag('Project_QuanLyGiaiDau')).toBe('PQ');
-    expect(repoTag('a - b')).toBe('AB');
-  });
-
-  it('takes the first two letters of a one-word name, and a dot for an empty one', () => {
-    expect(repoTag('omp')).toBe('OM');
-    expect(repoTag('')).toBe('·');
   });
 });

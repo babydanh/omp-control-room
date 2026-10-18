@@ -210,9 +210,9 @@ describe('herdrGroup repo placement', () => {
       ),
     );
 
-    expect(repos.map((repo) => [repo.label, repo.source, repo.tag])).toEqual([
-      ['pixel-agents', 'repo', 'PA'],
-      ['omp', 'repo', 'OM'],
+    expect(repos.map((repo) => [repo.label, repo.source])).toEqual([
+      ['pixel-agents', 'repo'],
+      ['omp', 'repo'],
     ]);
     expect(repos[0]?.rows.map((row) => row.paneId)).toEqual(['c', 'a']);
   });
@@ -245,10 +245,10 @@ describe('herdrGroup repo placement', () => {
       ),
     );
 
-    expect(repos.map((repo) => [repo.source, repo.label, repo.tag])).toEqual([
-      ['workspace', 'Scratch', 'SC'],
-      ['folder', 'notes', 'NO'],
-      ['other', 'khác', 'KH'],
+    expect(repos.map((repo) => [repo.source, repo.label])).toEqual([
+      ['workspace', 'Scratch'],
+      ['folder', 'notes'],
+      ['other', 'khác'],
     ]);
   });
 

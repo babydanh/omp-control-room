@@ -123,6 +123,7 @@ function RailEntryView({
         <RailBadge
           testId={`rail-session-${entry.row.code}`}
           label={sessionShortCode(entry.row.code)}
+          sub={entry.row.label}
           tone={entry.row.tone}
           edgeClass={ROLE_EDGE_CLASS[entry.row.role]}
           title={agentTooltip(entry.row)}
@@ -134,7 +135,8 @@ function RailEntryView({
       return (
         <RailBadge
           testId={`rail-pane-${entry.row.paneId}`}
-          label={paneShortCode(entry.row.paneId)}
+          label={`${entry.row.kind} ${paneShortCode(entry.row.paneId)}`}
+          sub={entry.row.label}
           tone={entry.row.tone}
           edgeClass={PANE_EDGE_CLASS}
           title={herdrTooltip(entry.row)}
@@ -147,9 +149,9 @@ function RailEntryView({
         <span
           title={entry.label}
           data-testid={`rail-repo-${entry.key}`}
-          className="font-mono text-2xs leading-4 text-text-muted"
+          className="w-full truncate px-2 pt-1 font-mono text-2xs leading-4 text-text-muted"
         >
-          {entry.tag}
+          {entry.label}
         </span>
       );
     case 'parked':
@@ -160,19 +162,20 @@ function RailEntryView({
           aria-label={`${entry.count} agent đã tạm trữ`}
           title={`${entry.count} agent tạm trữ · mở rộng để xem`}
           data-testid="rail-parked"
-          className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-dashed border-border font-mono text-2xs text-text-muted hover:text-text"
+          className="flex h-8 w-[84px] shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-dashed border-border text-2xs text-text-muted hover:text-text"
         >
-          +{entry.count}
+          +{entry.count} tạm trữ
         </button>
       );
     case 'break':
-      return <hr className="my-1 w-7 border-border" />;
+      return <hr className="my-1 w-16 border-border" />;
   }
 }
 
 function RailBadge({
   testId,
   label,
+  sub,
   tone,
   edgeClass,
   title,
@@ -181,6 +184,8 @@ function RailBadge({
 }: {
   testId: string;
   label: string;
+  /** The status word under the code, so the rail reads without hovering. */
+  sub: string;
   tone: DotTone;
   edgeClass: string;
   title: string;
@@ -195,10 +200,11 @@ function RailBadge({
       aria-label={title}
       title={title}
       data-testid={testId}
-      className={`relative flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-[5px] border-l-4 font-mono text-2xs text-text hover:bg-btn-hover ${edgeClass} ${selected ? 'bg-btn-bg ring-1 ring-accent' : ''}`}
+      className={`relative flex h-11 w-[84px] shrink-0 cursor-pointer flex-col items-start justify-center rounded-[5px] border-l-4 pl-2 pr-4 text-left hover:bg-btn-hover ${edgeClass} ${selected ? 'bg-btn-bg ring-1 ring-accent' : ''}`}
     >
-      {label}
-      <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3 items-center justify-center rounded-full bg-bg-dark">
+      <span className="w-full truncate font-mono text-xs text-text">{label}</span>
+      <span className="w-full truncate text-2xs text-text-muted">{sub}</span>
+      <span className="absolute right-1.5 top-1.5 flex h-3 w-3 items-center justify-center">
         <StatusDot tone={tone} />
       </span>
     </button>

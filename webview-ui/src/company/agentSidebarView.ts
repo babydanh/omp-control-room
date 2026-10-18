@@ -126,8 +126,6 @@ export interface HerdrRepoGroup {
   key: string;
   label: string;
   source: RepoPlacement['source'];
-  /** Two letters that stand for the group in the rail. */
-  tag: string;
   rows: HerdrRow[];
 }
 
@@ -140,7 +138,7 @@ export type HerdrGroup =
 export type RailEntry =
   | { kind: 'session'; row: AgentRow }
   | { kind: 'pane'; row: HerdrRow }
-  | { kind: 'repo'; key: string; label: string; tag: string }
+  | { kind: 'repo'; key: string; label: string }
   | { kind: 'parked'; count: number }
   | { kind: 'break' };
 
@@ -390,8 +388,8 @@ export function buildRail(groups: readonly AgentRoleGroup[], herdr: HerdrGroup):
 }
 
 function repoEntries(repo: HerdrRepoGroup): RailEntry[] {
-  const tag: RailEntry = { kind: 'repo', key: repo.key, label: repo.label, tag: repo.tag };
-  return [tag, ...repo.rows.map((row): RailEntry => ({ kind: 'pane', row }))];
+  const header: RailEntry = { kind: 'repo', key: repo.key, label: repo.label };
+  return [header, ...repo.rows.map((row): RailEntry => ({ kind: 'pane', row }))];
 }
 
 /** "PA-S0002" reads as "S2": the session's letter and its number, without zero padding. */
@@ -404,24 +402,6 @@ export function sessionShortCode(code: string): string {
 export function paneShortCode(paneId: string): string {
   const match = /(\d+)$/.exec(paneId);
   return match === null ? paneId.slice(0, 4) : String(Number(match[1]));
-}
-
-/**
- * Two letters for a repo group: the initials of a name split on dashes, dots or
- * underscores ("pixel-agents" → "PA"), else the name's first two letters.
- */
-export function repoTag(label: string): string {
-  const words = label.split(/[^\p{L}\p{N}]+/u).filter((word) => word !== '');
-  const letters =
-    words.length >= 2
-      ? words
-          .slice(0, 2)
-          .map((word) => Array.from(word)[0] ?? '')
-          .join('')
-      : Array.from(words[0] ?? '')
-          .slice(0, 2)
-          .join('');
-  return letters.toLocaleUpperCase('en') || '·';
 }
 
 /** A tooltip's parts, joined by middots; empty parts are left out. */
@@ -492,7 +472,6 @@ function groupByRepo(rows: readonly HerdrRow[]): HerdrRepoGroup[] {
       key: row.repo.key,
       label: row.repo.label,
       source: row.repo.source,
-      tag: repoTag(row.repo.label),
       rows: [row],
     });
   }
