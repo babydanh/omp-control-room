@@ -235,25 +235,40 @@ interface PreviewBox {
 }
 
 /**
- * Where the preview sits beside its row: to the right when it fits, otherwise to
- * the left, clamped inside the viewport margin.
+ * Where the preview sits, kept inside `bounds`: the board area above the composer, cut
+ * short by an open drawer. Beside its row, to the right when that fits, otherwise to the
+ * left. Level with the row, flipped up when it would run past the bottom of the area.
  */
-export function placePreview(
-  anchor: PreviewRect,
-  viewport: { readonly width: number; readonly height: number },
-): PreviewBox {
-  const width = Math.max(0, Math.min(PREVIEW_WIDTH_PX, viewport.width - 2 * PREVIEW_MARGIN_PX));
-  const height = Math.max(0, Math.min(PREVIEW_HEIGHT_PX, viewport.height - 2 * PREVIEW_MARGIN_PX));
+export function placePreview(anchor: PreviewRect, bounds: PreviewRect): PreviewBox {
+  const width = Math.max(
+    0,
+    Math.min(PREVIEW_WIDTH_PX, bounds.right - bounds.left - 2 * PREVIEW_MARGIN_PX),
+  );
+  const height = Math.max(
+    0,
+    Math.min(PREVIEW_HEIGHT_PX, bounds.bottom - bounds.top - 2 * PREVIEW_MARGIN_PX),
+  );
   let left = anchor.right + PREVIEW_GAP_PX;
-  if (left + width > viewport.width - PREVIEW_MARGIN_PX) {
-    left = anchor.left - PREVIEW_GAP_PX - width;
-  }
-  const maxLeft = Math.max(PREVIEW_MARGIN_PX, viewport.width - PREVIEW_MARGIN_PX - width);
-  const maxTop = Math.max(PREVIEW_MARGIN_PX, viewport.height - PREVIEW_MARGIN_PX - height);
+  if (left + width > bounds.right - PREVIEW_MARGIN_PX) left = anchor.left - PREVIEW_GAP_PX - width;
+  let top = anchor.top;
+  if (top + height > bounds.bottom - PREVIEW_MARGIN_PX) top = anchor.bottom - height;
   return {
-    left: Math.min(Math.max(left, PREVIEW_MARGIN_PX), maxLeft),
-    top: Math.min(Math.max(anchor.top, PREVIEW_MARGIN_PX), maxTop),
+    left: clampInside(
+      left,
+      bounds.left + PREVIEW_MARGIN_PX,
+      bounds.right - PREVIEW_MARGIN_PX - width,
+    ),
+    top: clampInside(
+      top,
+      bounds.top + PREVIEW_MARGIN_PX,
+      bounds.bottom - PREVIEW_MARGIN_PX - height,
+    ),
     width,
     height,
   };
+}
+
+/** Clamps `value` into [min, max]; an empty range keeps the minimum. */
+function clampInside(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), Math.max(min, max));
 }

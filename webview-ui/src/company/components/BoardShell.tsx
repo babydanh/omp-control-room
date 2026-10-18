@@ -8,7 +8,7 @@
  * menu; the surfaces keep only their content controls.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { type AgentMenuRequest, type SessionMenuTab } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
@@ -175,6 +175,8 @@ export function BoardShell({ client }: BoardShellProps) {
     setDrawerPrefs((current) => ({ ...current, maximized: !current.maximized }));
   }
 
+  const boardAreaRef = useRef<HTMLDivElement>(null);
+
   return (
     <div
       className="company-ui flex h-full w-full flex-col overflow-hidden bg-bg"
@@ -208,8 +210,13 @@ export function BoardShell({ client }: BoardShellProps) {
         onOpenContract={() => openContract(null)}
         onOpenQuestion={(questionId) => setOpened({ kind: 'question', questionId })}
       />
-      <TerminalPreviewProvider client={client} state={state} drawerSubject={subject}>
-        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+      <TerminalPreviewProvider
+        client={client}
+        state={state}
+        drawerSubject={subject}
+        boardAreaRef={boardAreaRef}
+      >
+        <div ref={boardAreaRef} className="relative flex min-h-0 flex-1 overflow-hidden">
           {!prefs.collapsed && overlay && (
             <button
               type="button"

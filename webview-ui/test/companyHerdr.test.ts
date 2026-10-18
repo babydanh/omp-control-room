@@ -115,6 +115,8 @@ describe('herdr tones and polling', () => {
     expect(herdrNeedsScreenPolling('working')).toBe(true);
     expect(herdrNeedsScreenPolling('blocked')).toBe(false);
     expect(herdrNeedsScreenPolling('idle')).toBe(false);
+    expect(herdrNeedsScreenPolling('done')).toBe(false);
+    expect(herdrNeedsScreenPolling('unknown')).toBe(false);
   });
 
   it('offers the choice keys a waiting agent can take, in the order the drawer shows them', () => {

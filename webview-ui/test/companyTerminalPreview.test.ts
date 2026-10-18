@@ -312,8 +312,11 @@ describe('timers that no longer apply', () => {
 });
 
 describe('placePreview', () => {
+  // A board area 1000 px wide and 600 px tall, starting at the window's origin.
+  const BOARD: PreviewRect = { left: 0, top: 0, right: 1000, bottom: 600 };
+
   it('places the preview to the right of its row when there is room', () => {
-    expect(placePreview(ANCHOR_A, { width: 1000, height: 600 })).toStrictEqual({
+    expect(placePreview(ANCHOR_A, BOARD)).toStrictEqual({
       left: 308,
       top: 50,
       width: 520,
@@ -323,7 +326,7 @@ describe('placePreview', () => {
 
   it('flips to the left of its row near the right edge', () => {
     const nearEdge: PreviewRect = { left: 900, top: 50, right: 950, bottom: 70 };
-    expect(placePreview(nearEdge, { width: 1000, height: 600 })).toStrictEqual({
+    expect(placePreview(nearEdge, BOARD)).toStrictEqual({
       left: 372,
       top: 50,
       width: 520,
@@ -331,19 +334,46 @@ describe('placePreview', () => {
     });
   });
 
-  it('clamps the top to the bottom margin', () => {
+  it('flips upward when the row sits near the bottom of the board area', () => {
+    const lowRow: PreviewRect = { left: 100, top: 540, right: 300, bottom: 560 };
+    expect(placePreview(lowRow, BOARD)).toStrictEqual({
+      left: 308,
+      top: 260,
+      width: 520,
+      height: 300,
+    });
+  });
+
+  it('keeps a flipped preview above the bottom margin, clear of the composer', () => {
     const lowRow: PreviewRect = { left: 100, top: 580, right: 300, bottom: 600 };
-    expect(placePreview(lowRow, { width: 1000, height: 600 }).top).toBe(292);
+    const box = placePreview(lowRow, BOARD);
+    expect(box.top).toBe(292);
+    expect(box.top + box.height).toBeLessThanOrEqual(BOARD.bottom - 8);
   });
 
   it('clamps the top to the top margin', () => {
     const aboveView: PreviewRect = { left: 100, top: -20, right: 300, bottom: 0 };
-    expect(placePreview(aboveView, { width: 1000, height: 600 }).top).toBe(8);
+    expect(placePreview(aboveView, BOARD).top).toBe(8);
   });
 
-  it('fits a viewport smaller than the preview inside the margins', () => {
+  it('stays inside the board area beside an open drawer', () => {
+    // On a 1024 px board the open drawer starts at x = 464, so the preview must end before it.
+    const beforeDrawer: PreviewRect = { left: 0, top: 0, right: 464, bottom: 600 };
+    const box = placePreview(ANCHOR_A, beforeDrawer);
+    expect(box).toStrictEqual({ left: 8, top: 50, width: 448, height: 300 });
+    expect(box.left + box.width).toBeLessThanOrEqual(464 - 8);
+  });
+
+  it('keeps the preview inside a board area that does not start at the window origin', () => {
+    // The sidebar takes 300 px on the left and the top bar 90 px at the top.
+    const board: PreviewRect = { left: 300, top: 90, right: 1000, bottom: 600 };
+    const row: PreviewRect = { left: 100, top: 40, right: 290, bottom: 60 };
+    expect(placePreview(row, board)).toStrictEqual({ left: 308, top: 98, width: 520, height: 300 });
+  });
+
+  it('fits a board area smaller than the preview inside the margins', () => {
     const smallAnchor: PreviewRect = { left: 150, top: 100, right: 200, bottom: 120 };
-    expect(placePreview(smallAnchor, { width: 300, height: 200 })).toStrictEqual({
+    expect(placePreview(smallAnchor, { left: 0, top: 0, right: 300, bottom: 200 })).toStrictEqual({
       left: 8,
       top: 8,
       width: 284,
@@ -353,7 +383,7 @@ describe('placePreview', () => {
 
   it('never returns a negative size', () => {
     const tiny: PreviewRect = { left: 1, top: 1, right: 2, bottom: 2 };
-    expect(placePreview(tiny, { width: 4, height: 4 })).toStrictEqual({
+    expect(placePreview(tiny, { left: 0, top: 0, right: 4, bottom: 4 })).toStrictEqual({
       left: 8,
       top: 8,
       width: 0,

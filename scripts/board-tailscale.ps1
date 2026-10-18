@@ -30,7 +30,8 @@ if (-not (Test-Path $ts)) {
 }
 
 if ($Off) {
-  & $ts serve reset
+  # Remove only the HTTPS:443 mapping `serve --bg <port>` created; `serve reset` would wipe every Serve config.
+  & $ts serve --https=443 off
   Write-Host 'Đã tắt chia sẻ board qua Tailscale.' -ForegroundColor Green
   exit 0
 }

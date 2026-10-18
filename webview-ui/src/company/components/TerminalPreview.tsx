@@ -8,7 +8,7 @@
  * through previewTriggers, so the sidebar and the rail need no preview logic.
  */
 
-import type { ReactNode } from 'react';
+import type { ReactNode, RefObject } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -16,7 +16,7 @@ import { TERMINAL_THEME } from '../../constants.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { HERDR_SCREEN_POLL_MS } from '../constants.js';
-import { HERDR_TONE_LABELS, herdrToneFor } from '../herdrView.js';
+import { HERDR_TONE_LABELS, herdrNeedsScreenPolling, herdrToneFor } from '../herdrView.js';
 import { companyRoleLabel } from '../roleProfiles.js';
 import type { DrawerSubject } from '../selection.js';
 import { terminalPolicy } from '../sessionActions.js';
@@ -51,6 +51,8 @@ export interface TerminalPreviewProviderProps {
   state: CompanyViewState;
   /** What the detail drawer shows; its row gets no preview while it does. */
   drawerSubject: DrawerSubject | null;
+  /** The board area the preview stays inside: the rows above the composer, beside the drawer. */
+  boardAreaRef: RefObject<HTMLElement | null>;
   children: ReactNode;
 }
 
@@ -58,10 +60,12 @@ export function TerminalPreviewProvider({
   client,
   state,
   drawerSubject,
+  boardAreaRef,
   children,
 }: TerminalPreviewProviderProps) {
   const [preview, setPreview] = useState<PreviewState>(INITIAL_PREVIEW_STATE);
   const previewRef = useRef<PreviewState>(INITIAL_PREVIEW_STATE);
+  const [bounds, setBounds] = useState<PreviewRect | null>(null);
   const timersRef = useRef(new Map<PreviewTimer, number>());
   /** The row element the preview is anchored to; the reducer only keeps its rectangle. */
   const anchorRef = useRef<HTMLElement | null>(null);
@@ -92,17 +96,19 @@ export function TerminalPreviewProvider({
     () => ({
       enter: (target, element) => {
         anchorRef.current = element;
+        setBounds(previewBoundsOf(boardAreaRef.current));
         dispatch({ type: 'enter', target, anchor: rectOf(element) });
       },
       leave: (target) => dispatch({ type: 'leave', target }),
       press: (target) => dispatch({ type: 'press', target }),
       focus: (target, element) => {
         anchorRef.current = element;
+        setBounds(previewBoundsOf(boardAreaRef.current));
         dispatch({ type: 'focus', target, anchor: rectOf(element) });
       },
       blur: (target) => dispatch({ type: 'blur', target }),
     }),
-    [dispatch],
+    [dispatch, boardAreaRef],
   );
 
   // Clear any pending timers when the board goes away.
@@ -166,10 +172,18 @@ export function TerminalPreviewProvider({
       {children}
       {openTarget !== null &&
         anchor !== null &&
+        bounds !== null &&
         createPortal(
           // The company scale (spacing, text sizes) and reduced motion live on .company-ui.
           <div className="company-ui">
-            <PreviewPanel client={client} state={state} target={openTarget} anchor={anchor} />
+            <PreviewPanel
+              key={previewKey(openTarget)}
+              client={client}
+              state={state}
+              target={openTarget}
+              anchor={anchor}
+              bounds={bounds}
+            />
           </div>,
           document.body,
         )}
@@ -182,18 +196,30 @@ function rectOf(element: HTMLElement): PreviewRect {
   return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
 }
 
+/** The area a preview may cover: the board above the composer, cut short by an open drawer. */
+function previewBoundsOf(board: HTMLElement | null): PreviewRect {
+  if (board === null)
+    return { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
+  const area = rectOf(board);
+  const drawer = board.querySelector<HTMLElement>('[data-testid="session-drawer"]');
+  if (drawer === null || drawer.getAttribute('aria-hidden') === 'true') return area;
+  return { ...area, right: Math.min(area.right, drawer.getBoundingClientRect().left) };
+}
+
 function PreviewPanel({
   client,
   state,
   target,
   anchor,
+  bounds,
 }: {
   client: CompanyClient;
   state: CompanyViewState;
   target: PreviewTarget;
   anchor: PreviewRect;
+  bounds: PreviewRect;
 }) {
-  const box = placePreview(anchor, { width: window.innerWidth, height: window.innerHeight });
+  const box = placePreview(anchor, bounds);
   return (
     <div
       aria-hidden="true"
@@ -232,12 +258,18 @@ function HerdrPreview({
     [screen?.text],
   );
 
-  // Read on open, then at the same cadence as the drawer's screen tab.
+  // Read on open and whenever the agent's status moves. As the drawer's screen tab does, poll
+  // at HERDR_SCREEN_POLL_MS only while the agent works.
+  const status = agent?.status;
   useEffect(() => {
     client.herdrRead(paneId);
+  }, [client, paneId, status]);
+  const polling = status !== undefined && herdrNeedsScreenPolling(status);
+  useEffect(() => {
+    if (!polling) return undefined;
     const timer = window.setInterval(() => client.herdrRead(paneId), HERDR_SCREEN_POLL_MS);
     return () => window.clearInterval(timer);
-  }, [client, paneId]);
+  }, [client, paneId, polling]);
 
   if (agent === undefined) return <PreviewNotice text="Agent này không còn trong herdr." />;
   return (
