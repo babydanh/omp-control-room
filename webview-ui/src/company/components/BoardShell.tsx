@@ -13,9 +13,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type AgentMenuRequest, type SessionMenuTab } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
-import { COMPANY_RAIL_WIDTH_PX, COMPANY_SIDEBAR_OVERLAY_MAX_PX } from '../constants.js';
+import { COMPANY_RAIL_WIDTH_PX } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import type { HerdrDrawerTab } from '../herdrView.js';
+import { sidebarPresentation } from '../layoutMode.js';
 import {
   type DrawerSubject,
   drawerSubjectFor,
@@ -34,7 +35,7 @@ import {
   writeSidebarPrefs,
 } from '../sidebarPrefs.js';
 import { useCompanyState } from '../useCompanyState.js';
-import { useMediaQuery } from '../useMediaQuery.js';
+import { useLayoutMode } from '../useLayoutMode.js';
 import { useSessionLogBackfill } from '../useSessionLogBackfill.js';
 import { AgentContextMenu } from './AgentContextMenu.js';
 import { AgentRail } from './AgentRail.js';
@@ -68,6 +69,8 @@ export function BoardShell({ client }: BoardShellProps) {
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<SidebarPrefs>(() => readSidebarPrefs(browserStorage()));
+  // A phone's sidebar sheet starts closed and is not remembered; other layouts keep the saved pref.
+  const [sheetOpen, setSheetOpen] = useState(false);
   const [drawerPrefs, setDrawerPrefs] = useState<DrawerPrefs>(() =>
     readDrawerPrefs(browserStorage()),
   );
@@ -78,13 +81,16 @@ export function BoardShell({ client }: BoardShellProps) {
     setMenu((current) => ({ ...request, token: (current?.token ?? 0) + 1 }));
   }, []);
   const closeMenu = useCallback(() => setMenu(null), []);
-  const overlay = useMediaQuery(`(max-width: ${COMPANY_SIDEBAR_OVERLAY_MAX_PX}px)`);
-  // The width the sidebar (or its rail) takes in the row beside the board; an open sidebar that floats takes none.
-  let sidebarFootprint = prefs.width;
-  if (prefs.collapsed) {
+  const mode = useLayoutMode();
+  const sidebarCollapsed = mode === 'phone' ? !sheetOpen : prefs.collapsed;
+  const sidebar = sidebarPresentation(mode, sidebarCollapsed);
+  // The width the sidebar (or its rail) takes in the row beside the board. A sidebar that
+  // floats over the board, or is a phone's sheet, takes none.
+  let sidebarFootprint = 0;
+  if (sidebar === 'docked') {
+    sidebarFootprint = prefs.width;
+  } else if (sidebar === 'rail') {
     sidebarFootprint = COMPANY_RAIL_WIDTH_PX;
-  } else if (overlay) {
-    sidebarFootprint = 0;
   }
   const collapsedProjects = useMemo(
     () => new Set(prefs.collapsedProjects),
@@ -130,6 +136,10 @@ export function BoardShell({ client }: BoardShellProps) {
   }, []);
 
   function toggleSidebar(): void {
+    if (mode === 'phone') {
+      setSheetOpen((open) => !open);
+      return;
+    }
     setPrefs((current) => ({ ...current, collapsed: !current.collapsed }));
   }
 
@@ -140,23 +150,33 @@ export function BoardShell({ client }: BoardShellProps) {
     }));
   }
 
+  // On a phone the sidebar is a sheet over the lanes; picking an agent closes it so its drawer shows.
+  function dismissSheet(): void {
+    if (mode !== 'phone') return;
+    setSheetOpen(false);
+  }
+
   function selectSession(sessionId: string): void {
     setOpened(null);
+    dismissSheet();
     client.select(selectionForSession(state, sessionId));
   }
 
   function selectTask(taskId: string): void {
     setOpened(null);
+    dismissSheet();
     client.select(selectionForTask(state, taskId));
   }
 
   function openHerdr(paneId: string, tab: HerdrDrawerTab = 'screen'): void {
     setOpened({ kind: 'herdr', paneId });
     setHerdrTab(tab);
+    dismissSheet();
   }
 
   function openSleeping(paneId: string): void {
     setOpened({ kind: 'sleeping', paneId });
+    dismissSheet();
   }
 
   function openSessionTab(sessionId: string, tab: SessionMenuTab): void {
@@ -167,6 +187,7 @@ export function BoardShell({ client }: BoardShellProps) {
   /** Switch the board to another folder; the session is selected once that folder's snapshot holds it. */
   function selectWorkspaceSession(path: string, sessionId: string): void {
     setOpened(null);
+    dismissSheet();
     client.openWorkspaceSession(path, sessionId);
   }
 
@@ -197,7 +218,8 @@ export function BoardShell({ client }: BoardShellProps) {
       <BoardTopBar
         state={state}
         client={client}
-        sidebarCollapsed={prefs.collapsed}
+        sidebarCollapsed={sidebarCollapsed}
+        mode={mode}
         onToggleSidebar={toggleSidebar}
         filesOpen={opened?.kind === 'files'}
         onToggleFiles={toggleFiles}
@@ -229,7 +251,7 @@ export function BoardShell({ client }: BoardShellProps) {
         boardAreaRef={boardAreaRef}
       >
         <div ref={boardAreaRef} className="relative flex min-h-0 flex-1 overflow-hidden">
-          {!prefs.collapsed && overlay && (
+          {(sidebar === 'overlay' || sidebar === 'sheet') && (
             <button
               type="button"
               aria-label="Thu gọn đàn agent"
@@ -237,7 +259,7 @@ export function BoardShell({ client }: BoardShellProps) {
               className="absolute inset-0 z-20 cursor-default bg-black/40"
             />
           )}
-          {prefs.collapsed ? (
+          {sidebar === 'rail' && (
             <AgentRail
               state={state}
               selectedSessionId={selectedSessionId}
@@ -251,14 +273,15 @@ export function BoardShell({ client }: BoardShellProps) {
               onToggleProject={toggleProject}
               onMenu={openMenu}
             />
-          ) : (
+          )}
+          {(sidebar === 'docked' || sidebar === 'overlay' || sidebar === 'sheet') && (
             <AgentSidebar
               client={client}
               state={state}
               selectedSessionId={selectedSessionId}
               selectedPaneId={selectedPaneId}
               width={prefs.width}
-              overlay={overlay}
+              presentation={sidebar}
               collapsedProjects={collapsedProjects}
               onWidthChange={(width) =>
                 setPrefs((current) => ({ ...current, width: clampSidebarWidth(width) }))

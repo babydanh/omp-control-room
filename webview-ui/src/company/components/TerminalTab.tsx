@@ -7,11 +7,12 @@
  * why there is no terminal and, where the server accepts it, offers to resume.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useContext, useEffect, useState } from 'react';
 
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { terminalPolicy } from '../sessionActions.js';
+import { textWrapClass, WrapLinesContext } from '../wrapLines.js';
 import { CompanyButton } from './CompanyButton.js';
 import { TerminalConsole, type TerminalJump } from './TerminalConsole.js';
 
@@ -93,11 +94,14 @@ export function TerminalTab({ client, state, sessionId, jump }: TerminalTabProps
 
 /** Shown when the jumped command has scrolled out of the terminal's buffer. */
 function JumpMissNote({ output }: { output: string | null }) {
+  const wrap = useContext(WrapLinesContext);
   return (
-    <div className="shrink-0 border-b border-border px-3 py-2 text-2xs text-text-muted">
+    <div className="min-w-0 shrink-0 border-b border-border px-3 py-2 text-2xs text-text-muted">
       <p>Lệnh này không còn trong bộ đệm terminal.</p>
       {output ? (
-        <pre className="mt-1 max-h-40 overflow-auto font-mono whitespace-pre-wrap">{output}</pre>
+        <pre className={`mt-1 max-h-40 overflow-auto font-mono ${textWrapClass(wrap)}`}>
+          {output}
+        </pre>
       ) : (
         <p className="mt-1">Nhật ký không có kết quả của lệnh này.</p>
       )}

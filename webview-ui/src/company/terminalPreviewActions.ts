@@ -38,8 +38,12 @@ export function useTerminalPreview(): TerminalPreviewActions {
 /** Pointer and focus handlers that open the preview for one row. */
 export function previewTriggers(actions: TerminalPreviewActions, target: PreviewTarget) {
   return {
-    onPointerEnter: (event: PointerEvent<HTMLElement>) =>
-      actions.enter(target, event.currentTarget),
+    onPointerEnter: (event: PointerEvent<HTMLElement>) => {
+      // Touch and pen fire pointerenter on tap. A preview there would sit over the tap target,
+      // so only a mouse hover opens one.
+      if (event.pointerType !== 'mouse') return;
+      actions.enter(target, event.currentTarget);
+    },
     onPointerLeave: () => actions.leave(target),
     onPointerDown: () => actions.press(target),
     onFocus: (event: FocusEvent<HTMLElement>) => {

@@ -18,6 +18,7 @@ import type { CompanyClient } from '../companyClient.js';
 import type { TerminalFrame, TerminalView } from '../companyState.js';
 import { frameWrites } from '../terminalFrames.js';
 import { bufferLineSegments, type ScreenLine, tailScreen } from '../terminalScreen.js';
+import { ScreenFrame } from './ScreenFrame.js';
 import { ScreenView } from './ScreenView.js';
 
 /** Used until the lease reports the shared PTY size. */
@@ -99,7 +100,11 @@ export function TerminalMirror({
   if (screen.length === 0) {
     return <p className="p-2 text-2xs text-text-muted">Đang chờ màn hình…</p>;
   }
-  return <ScreenView lines={screen} className="min-h-0 flex-1 overflow-hidden p-2" />;
+  return (
+    <ScreenFrame>
+      <ScreenView lines={screen} className="shrink-0 p-2" />
+    </ScreenFrame>
+  );
 }
 
 /** The viewport's rows as segments, top to bottom. */

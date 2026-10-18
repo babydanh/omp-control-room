@@ -8,7 +8,7 @@
  * any other expands in place to its output.
  */
 
-import { useRef, useState } from 'react';
+import { useContext, useRef, useState } from 'react';
 
 import type { Attempt, CompanySessionLogEntry } from '../../../../core/src/company.js';
 import type { CompanyViewState } from '../companyState.js';
@@ -27,6 +27,7 @@ import {
   streamingLine,
 } from '../sessionLogView.js';
 import { useStickToBottom } from '../useStickToBottom.js';
+import { textWrapClass, WrapLinesContext } from '../wrapLines.js';
 import { AttemptRow } from './AttemptRow.js';
 
 const LOG_TONE_CLASS: Readonly<Record<LogTone, string>> = {
@@ -69,6 +70,7 @@ export function SessionLogTab({
   const running = status === 'busy' ? runningToolName(logEntriesFor(state, sessionId, null)) : null;
   const scrollRef = useRef<HTMLDivElement>(null);
   const onScroll = useStickToBottom(scrollRef);
+  const wrap = useContext(WrapLinesContext);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -108,7 +110,7 @@ export function SessionLogTab({
           >
             {running !== null && <p className="text-status-active">Đang chạy công cụ {running}</p>}
             {writing !== null && (
-              <p className="break-words text-text">
+              <p className={`min-w-0 text-text ${textWrapClass(wrap)}`}>
                 <span className="text-text-muted">đang viết…</span> {writing}
               </p>
             )}
@@ -122,15 +124,16 @@ export function SessionLogTab({
 function LogRow({ entry }: { entry: CompanySessionLogEntry }) {
   const tone = logTone(entry);
   const text = entry.kind === 'command' ? splitCommandText(entry.text).command : entry.text;
+  const wrap = useContext(WrapLinesContext);
   return (
-    <li className="company-fade-in grid grid-cols-[64px_72px_1fr] gap-2 text-2xs">
+    <li className="company-fade-in grid min-w-0 grid-cols-[64px_72px_minmax(0,1fr)] gap-2 text-2xs">
       <time dateTime={entry.at} className="tabular-nums text-text-muted">
         {formatLogTime(entry.at)}
       </time>
       <span className={`uppercase tracking-wide ${LOG_TONE_CLASS[tone]}`}>
         {LOG_KIND_LABELS[entry.kind]}
       </span>
-      <span className="min-w-0 whitespace-pre-wrap break-words text-text">{text}</span>
+      <span className={`min-w-0 text-text ${textWrapClass(wrap)}`}>{text}</span>
     </li>
   );
 }
@@ -175,8 +178,9 @@ function CommandRow({
 }) {
   const { command, output } = splitCommandText(entry.text);
   const [expanded, setExpanded] = useState(false);
+  const wrap = useContext(WrapLinesContext);
   return (
-    <li className="company-fade-in rounded-[6px] border border-border p-2">
+    <li className="company-fade-in min-w-0 rounded-[6px] border border-border p-2">
       <button
         type="button"
         aria-expanded={live ? undefined : expanded}
@@ -184,7 +188,7 @@ function CommandRow({
         onClick={() => (live ? onJump(command, output) : setExpanded((value) => !value))}
         className="flex w-full cursor-pointer items-baseline justify-between gap-2 text-left text-2xs"
       >
-        <span className="min-w-0 truncate font-mono text-text">{command}</span>
+        <span className={`min-w-0 font-mono text-text ${textWrapClass(wrap)}`}>{command}</span>
         <span className={`shrink-0 ${COMMAND_TONE_CLASS[commandTone(entry)]}`}>
           {commandExitLabel(entry)}
         </span>
@@ -195,7 +199,9 @@ function CommandRow({
             <time dateTime={entry.at}>{formatLogTime(entry.at)}</time>
           </p>
           {output !== null ? (
-            <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-[5px] bg-bg p-1 text-2xs text-text">
+            <pre
+              className={`mt-1 max-h-60 overflow-auto rounded-[5px] bg-bg p-1 text-2xs text-text ${textWrapClass(wrap)}`}
+            >
               {output}
             </pre>
           ) : (

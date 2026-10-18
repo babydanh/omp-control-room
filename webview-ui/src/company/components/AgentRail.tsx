@@ -91,7 +91,7 @@ export function AgentRail({
         onClick={onExpand}
         aria-label="Mở rộng đàn agent"
         title="Mở rộng đàn agent (Ctrl+B)"
-        className="flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center text-2xs text-text-muted hover:text-text"
+        className="touch-target flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center text-2xs text-text-muted hover:text-text"
       >
         ⟩
       </button>
@@ -271,7 +271,7 @@ function RailEntryView({
           aria-label={`${entry.count} agent đã tạm trữ`}
           title={`${entry.count} agent tạm trữ · mở rộng để xem`}
           data-testid="rail-parked"
-          className="flex h-8 w-[84px] shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-dashed border-border text-2xs text-text-muted hover:text-text"
+          className="touch-target flex h-8 w-[84px] shrink-0 cursor-pointer items-center justify-center rounded-[5px] border border-dashed border-border text-2xs text-text-muted hover:text-text"
         >
           +{entry.count} tạm trữ
         </button>

@@ -27,20 +27,34 @@
  * agent; hovering previews its terminal, and right-click opens its menu.
  */
 
-import { useRef, useState } from 'react';
+import {
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+  useRef,
+  useState,
+} from 'react';
 
 import type { AgentBoardCard, AgentCardSubject } from '../agentBoard.js';
-import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
+import type { AgentMenuRequest } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS, type CompanyLaneId } from '../constants.js';
-import { isLaneCollapsed, laneColumnStyle } from '../laneLayout.js';
+import { isLaneCollapsed, packLanes } from '../laneLayout.js';
+import {
+  defaultActiveLane,
+  LANE_SWIPE_THRESHOLD_PX,
+  stepActiveLane,
+  swipeStep,
+} from '../layoutMode.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { taskStatusLabel } from '../statusLabels.js';
 import type { PreviewTarget } from '../terminalPreview.js';
 import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
+import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
+import { useElementWidth } from '../useElementWidth.js';
 import { useFlightLayout } from '../useFlightLayout.js';
+import { useLayoutMode } from '../useLayoutMode.js';
 import { useNow } from '../useNow.js';
 import { StatusDot } from './StatusDot.js';
 
@@ -102,7 +116,7 @@ function PlanningCard({
   onSelect: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
-  const triggers = agentMenuTriggers<HTMLButtonElement>(
+  const triggers = useAgentMenuGestures<HTMLButtonElement>(
     { kind: 'planning', promptId: prompt.promptId, sessionId: prompt.session?.id ?? null },
     onMenu,
   );
@@ -210,19 +224,21 @@ function TaskCard({
   onMenu: (request: AgentMenuRequest) => void;
 }) {
   const edge = card.session ? ROLE_EDGE_CLASS[card.session.role] : 'border-l-border';
-  const triggers = agentMenuTriggers<HTMLButtonElement>(
+  const actions = useTerminalPreview();
+  const previewTarget: PreviewTarget | null = card.session
+    ? { kind: 'session', sessionId: card.session.id }
+    : null;
+  const triggers = useAgentMenuGestures<HTMLButtonElement>(
     { kind: 'task', taskId: card.taskId, sessionId: card.session?.id ?? null, drawer: null },
     onMenu,
+    previewTarget === null ? undefined : () => actions.press(previewTarget),
   );
-  const actions = useTerminalPreview();
   return (
     <button
       type="button"
       onClick={onSelect}
+      {...(previewTarget === null ? {} : previewTriggers(actions, previewTarget))}
       {...triggers}
-      {...(card.session
-        ? previewTriggers(actions, { kind: 'session', sessionId: card.session.id })
-        : {})}
       aria-pressed={card.selected}
       title={taskDetail(card)}
       data-testid={`task-card-${card.code}`}
@@ -262,24 +278,25 @@ function AgentCard({
   now: number;
 }) {
   const { subject } = card;
-  const triggers = agentMenuTriggers<HTMLButtonElement>(
-    subject.kind === 'herdr'
-      ? { kind: 'herdr', paneId: subject.paneId, drawer: null }
-      : { kind: 'session', sessionId: subject.sessionId, drawer: null },
-    onMenu,
-  );
   const target: PreviewTarget =
     subject.kind === 'herdr'
       ? { kind: 'herdr', paneId: subject.paneId }
       : { kind: 'session', sessionId: subject.sessionId };
   const actions = useTerminalPreview();
+  const triggers = useAgentMenuGestures<HTMLButtonElement>(
+    subject.kind === 'herdr'
+      ? { kind: 'herdr', paneId: subject.paneId, drawer: null }
+      : { kind: 'session', sessionId: subject.sessionId, drawer: null },
+    onMenu,
+    () => actions.press(target),
+  );
   const updated = card.updatedAt === null ? null : relativeTimeVi(card.updatedAt, now);
   return (
     <button
       type="button"
       onClick={onOpen}
-      {...triggers}
       {...previewTriggers(actions, target)}
+      {...triggers}
       aria-pressed={selected}
       title={`${card.tag} · ${card.project} · ${card.title} · ${card.statusLabel}`}
       data-testid="agent-card"
@@ -303,10 +320,8 @@ function AgentCard({
       <span className="line-clamp-3 break-normal text-sm font-medium leading-[1.3] text-text">
         {card.title}
       </span>
-      {card.activity.length > 0 && (
-        <span className="line-clamp-2 break-normal text-2xs text-text-muted">
-          {card.activity.join(' · ')}
-        </span>
+      {card.activity !== null && (
+        <span className="line-clamp-2 break-words text-2xs text-text-muted">{card.activity}</span>
       )}
       {updated !== null && <span className="text-2xs text-text-muted">cập nhật {updated}</span>}
     </button>
@@ -344,6 +359,28 @@ function LaneStrip({
   );
 }
 
+/** The lane a phone opens on when the reader has not picked one: where attention is needed first. */
+const LANE_ATTENTION_ORDER: readonly CompanyLaneId[] = [
+  'needs_input',
+  'running',
+  'review',
+  'ready',
+  'planned',
+  'failed',
+  'done',
+];
+
+/** The lanes row's padding on each side (p-1.5), taken out of the width the lanes pack into. */
+const LANES_PADDING_PX = 6;
+
+/** One lane as the board draws it: its drafts, its card count and whether it folds to a strip. */
+interface LaneView {
+  lane: BoardLane;
+  drafts: readonly PlanningPrompt[];
+  count: number;
+  collapsed: boolean;
+}
+
 export function CompanyBoard({
   lanes,
   flow,
@@ -356,10 +393,34 @@ export function CompanyBoard({
   onMenu,
 }: CompanyBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
+  const lanesRef = useRef<HTMLDivElement>(null);
   useFlightLayout(boardRef);
   const now = useNow();
+  const mode = useLayoutMode();
+  const lanesWidth = useElementWidth(lanesRef, mode);
   // Empty lanes the reader opened from their strip. A lane with cards is open whatever this holds.
   const [openedLanes, setOpenedLanes] = useState<ReadonlySet<CompanyLaneId>>(() => new Set());
+  // The lane a phone shows, once the reader has picked one; until then the attention default.
+  const [pickedLane, setPickedLane] = useState<CompanyLaneId | null>(null);
+  const swipeStart = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+
+  const views: LaneView[] = lanes.map((lane) => {
+    const drafts = lane.id === 'planned' ? planning : [];
+    const count = lane.cards.length + drafts.length + lane.agents.length;
+    // A phone shows its one lane open, so an empty lane is never folded there.
+    const collapsed = mode !== 'phone' && isLaneCollapsed(count, openedLanes.has(lane.id));
+    return { lane, drafts, count, collapsed };
+  });
+  const shownLane =
+    pickedLane ??
+    defaultActiveLane(
+      views.map(({ lane, count }) => ({ id: lane.id, count })),
+      LANE_ATTENTION_ORDER,
+    );
+  const packing = packLanes(
+    views.map((view) => ({ collapsed: view.collapsed })),
+    lanesWidth - 2 * LANES_PADDING_PX,
+  );
 
   function toggleLane(laneId: CompanyLaneId): void {
     setOpenedLanes((current) => {
@@ -375,6 +436,113 @@ export function CompanyBoard({
     else onSelectSession(subject.sessionId);
   }
 
+  // A phone's lanes move by swipe: a horizontal drag past the threshold steps one lane.
+  function onSwipeStart(event: ReactPointerEvent<HTMLDivElement>): void {
+    swipeStart.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+
+  function onSwipeEnd(event: ReactPointerEvent<HTMLDivElement>): void {
+    const start = swipeStart.current;
+    swipeStart.current = null;
+    if (start === null || start.pointerId !== event.pointerId || shownLane === null) return;
+    const step = swipeStep(
+      event.clientX - start.x,
+      event.clientY - start.y,
+      LANE_SWIPE_THRESHOLD_PX,
+    );
+    if (step === 0) return;
+    const next = stepActiveLane(
+      views.map((view) => view.lane.id),
+      shownLane,
+      step,
+    );
+    if (next !== null) setPickedLane(next);
+  }
+
+  function cancelSwipe(): void {
+    swipeStart.current = null;
+  }
+
+  function renderLane(view: LaneView, fill: boolean, style?: CSSProperties) {
+    const { lane, drafts, count, collapsed } = view;
+    return (
+      <section
+        key={lane.id}
+        aria-label={lane.label}
+        data-testid={`company-lane-${lane.id}`}
+        data-lane={lane.id}
+        data-collapsed={collapsed}
+        className={`company-lane min-h-0 min-w-0 ${fill ? 'flex-1' : ''}`}
+        style={style}
+      >
+        {collapsed ? (
+          <LaneStrip lane={lane} count={count} onOpen={() => toggleLane(lane.id)} />
+        ) : (
+          <>
+            <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1">
+              <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
+                <span className="min-w-0">
+                  <span aria-hidden="true">{COMPANY_LANE_ICONS[lane.id]}</span> {lane.label}
+                </span>
+                <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
+              </h3>
+              <p className="truncate text-xs text-status-active">{COMPANY_LANE_OWNERS[lane.id]}</p>
+            </header>
+            <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
+              {count === 0 && (
+                <div className="flex flex-col items-start gap-1 px-1">
+                  <p className="text-xs text-text-muted">Chưa có việc nào ở cột này.</p>
+                  {mode !== 'phone' && (
+                    <button
+                      type="button"
+                      onClick={() => toggleLane(lane.id)}
+                      className="company-icon-btn touch-target px-1 text-2xs"
+                    >
+                      Thu gọn cột
+                    </button>
+                  )}
+                </div>
+              )}
+              {drafts.map((prompt, index) => (
+                <PlanningCard
+                  key={prompt.promptId}
+                  prompt={prompt}
+                  index={index}
+                  onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
+                  onMenu={onMenu}
+                />
+              ))}
+              {lane.cards.map((card, index) => (
+                <TaskCard
+                  key={card.taskId}
+                  card={card}
+                  index={index}
+                  onSelect={() => onSelectTask(card.taskId)}
+                  onMenu={onMenu}
+                />
+              ))}
+              {lane.agents.map((agent, index) => (
+                <AgentCard
+                  key={agent.key}
+                  card={agent}
+                  index={lane.cards.length + drafts.length + index}
+                  now={now}
+                  selected={
+                    agent.subject.kind === 'herdr'
+                      ? agent.subject.paneId === selectedPaneId
+                      : agent.subject.sessionId === selectedSessionId
+                  }
+                  onOpen={() => openAgent(agent.subject)}
+                  onMenu={onMenu}
+                />
+              ))}
+            </div>
+          </>
+        )}
+      </section>
+    );
+  }
+
   return (
     <div
       ref={boardRef}
@@ -382,89 +550,58 @@ export function CompanyBoard({
       data-testid="company-board"
     >
       <FlowStrip flow={flow} />
-      <div className="company-lanes flex min-h-0 flex-1 gap-1.5 overflow-x-auto p-1.5">
-        {lanes.map((lane) => {
-          const drafts = lane.id === 'planned' ? planning : [];
-          const count = lane.cards.length + drafts.length + lane.agents.length;
-          const collapsed = isLaneCollapsed(count, openedLanes.has(lane.id));
-          return (
-            <section
-              key={lane.id}
-              aria-label={lane.label}
-              data-testid={`company-lane-${lane.id}`}
-              data-lane={lane.id}
-              data-collapsed={collapsed}
-              className="company-lane"
-              style={laneColumnStyle(collapsed)}
-            >
-              {collapsed ? (
-                <LaneStrip lane={lane} count={count} onOpen={() => toggleLane(lane.id)} />
-              ) : (
-                <>
-                  <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1">
-                    <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
-                      <span className="min-w-0">
-                        {COMPANY_LANE_ICONS[lane.id]} {lane.label}
-                      </span>
-                      <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
-                    </h3>
-                    <p className="truncate text-xs text-status-active">
-                      {COMPANY_LANE_OWNERS[lane.id]}
-                    </p>
-                  </header>
-                  <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
-                    {count === 0 && (
-                      <div className="flex flex-col items-start gap-1 px-1">
-                        <p className="text-xs text-text-muted">Không có gì ở đây.</p>
-                        <button
-                          type="button"
-                          onClick={() => toggleLane(lane.id)}
-                          className="cursor-pointer text-2xs text-text-muted hover:text-text"
-                        >
-                          Thu gọn cột
-                        </button>
-                      </div>
-                    )}
-                    {drafts.map((prompt, index) => (
-                      <PlanningCard
-                        key={prompt.promptId}
-                        prompt={prompt}
-                        index={index}
-                        onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
-                        onMenu={onMenu}
-                      />
-                    ))}
-                    {lane.cards.map((card, index) => (
-                      <TaskCard
-                        key={card.taskId}
-                        card={card}
-                        index={index}
-                        onSelect={() => onSelectTask(card.taskId)}
-                        onMenu={onMenu}
-                      />
-                    ))}
-                    {lane.agents.map((agent, index) => (
-                      <AgentCard
-                        key={agent.key}
-                        card={agent}
-                        index={lane.cards.length + drafts.length + index}
-                        now={now}
-                        selected={
-                          agent.subject.kind === 'herdr'
-                            ? agent.subject.paneId === selectedPaneId
-                            : agent.subject.sessionId === selectedSessionId
-                        }
-                        onOpen={() => openAgent(agent.subject)}
-                        onMenu={onMenu}
-                      />
-                    ))}
-                  </div>
-                </>
-              )}
-            </section>
-          );
-        })}
-      </div>
+      {mode === 'phone' ? (
+        <>
+          <div
+            role="group"
+            aria-label="Chọn cột việc"
+            className="grid grid-flow-col auto-cols-fr gap-1 px-2 pt-1.5 pb-1"
+          >
+            {views.map(({ lane, count }) => (
+              <button
+                key={lane.id}
+                type="button"
+                aria-pressed={lane.id === shownLane}
+                aria-label={`${lane.label}, ${count} việc`}
+                onClick={() => setPickedLane(lane.id)}
+                className="touch-target flex min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[5px] border border-border px-1 py-1 text-2xs text-text-muted aria-pressed:border-accent aria-pressed:bg-active-bg aria-pressed:text-text"
+              >
+                <span aria-hidden="true">{COMPANY_LANE_ICONS[lane.id]}</span>
+                <span className="font-semibold tabular-nums text-text">{count}</span>
+              </button>
+            ))}
+          </div>
+          <div
+            className="flex min-h-0 min-w-0 flex-1 flex-col p-1.5"
+            data-testid="company-lane-swipe"
+            onPointerDown={onSwipeStart}
+            onPointerUp={onSwipeEnd}
+            onPointerCancel={cancelSwipe}
+          >
+            {views
+              .filter((view) => view.lane.id === shownLane)
+              .map((view) => renderLane(view, true))}
+          </div>
+        </>
+      ) : (
+        <div
+          ref={lanesRef}
+          className="company-lanes flex min-h-0 flex-1 flex-col gap-1.5 overflow-hidden p-1.5"
+          data-testid="company-lanes"
+          data-layout={mode}
+        >
+          {packing.rows.map((row) => (
+            <div key={row.join(',')} className="flex min-h-0 min-w-0 flex-1 gap-1.5">
+              {row.map((index) => {
+                const view = views[index];
+                const width = packing.widths[index];
+                if (view === undefined || width === undefined) return null;
+                return renderLane(view, false, { flex: `0 0 ${width}px`, width });
+              })}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

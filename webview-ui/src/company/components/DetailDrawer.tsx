@@ -39,6 +39,7 @@ import {
   effectiveDrawerWidth,
 } from '../drawerPrefs.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
+import { drawerPresentation, layoutModeFor } from '../layoutMode.js';
 import { questionProvenance } from '../questionProvenance.js';
 import {
   type DrawerSubject,
@@ -47,6 +48,8 @@ import {
   pendingContract,
 } from '../selection.js';
 import { contractStatusLabel, sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
+import { useViewportWidth } from '../useLayoutMode.js';
+import { WrapLinesContext } from '../wrapLines.js';
 import { AttemptRow } from './AttemptRow.js';
 import { ContractPanel } from './ContractPanel.js';
 import { HerdrPanel } from './HerdrPanel.js';
@@ -109,6 +112,7 @@ export function DetailDrawer({
   }, [open]);
 
   const viewportWidth = useViewportWidth();
+  const mode = layoutModeFor(viewportWidth);
   // The board is what the viewport leaves beside the sidebar; the drawer takes its width from that.
   const boardWidth = Math.max(0, viewportWidth - sidebarWidth);
   const dragStart = useRef<{ pointerId: number; x: number; width: number } | null>(null);
@@ -117,6 +121,9 @@ export function DetailDrawer({
   const heading = headingFor(rest.state, retained, rest.lanes);
   const width = effectiveDrawerWidth(prefs.width, boardWidth);
   const limit = drawerWidthLimit(boardWidth);
+  const presentation = drawerPresentation(mode, prefs.maximized);
+  const wrapToggleShown =
+    retained.kind === 'task' || retained.kind === 'session' || retained.kind === 'herdr';
   const menuSubject = drawerMenuSubject(rest.lanes, retained, prefs.maximized);
   const headerTriggers =
     menuSubject === null ? null : agentMenuTriggers<HTMLElement>(menuSubject, rest.onMenu);
@@ -159,10 +166,11 @@ export function DetailDrawer({
       data-testid="session-drawer"
       data-subject={retained.kind}
       data-maximized={prefs.maximized}
+      data-presentation={presentation}
       style={style}
-      className={`company-drawer z-30 flex flex-col border-l border-border bg-bg shadow-lg ${open ? 'company-drawer-in' : 'pointer-events-none translate-x-full'}`}
+      className={`company-drawer z-30 flex min-w-0 flex-col border-l border-border bg-bg ${open ? 'company-drawer-in' : 'pointer-events-none translate-x-full'}`}
     >
-      {!prefs.maximized && (
+      {presentation === 'docked' && (
         <div
           role="separator"
           aria-orientation="vertical"
@@ -185,9 +193,20 @@ export function DetailDrawer({
           onPrefsChange((current) => ({ ...current, maximized: !current.maximized }))
         }
         {...(headerTriggers ?? {})}
-        className="flex select-none items-center justify-between gap-3 border-b border-border px-3.5 py-2.5"
+        className="flex select-none items-center gap-3 border-b border-border px-3.5 py-2.5"
       >
-        <div className="flex min-w-0 items-center gap-2">
+        {presentation === 'fullscreen' && (
+          <button
+            type="button"
+            onClick={onClose}
+            onDoubleClick={(event) => event.stopPropagation()}
+            aria-label="Quay lại danh sách"
+            className="company-icon-btn touch-target shrink-0 px-2 text-sm"
+          >
+            ‹ Quay lại
+          </button>
+        )}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
           <h2 className="min-w-0 truncate text-[15px] font-semibold leading-snug text-text">
             {heading.title}
           </h2>
@@ -197,20 +216,39 @@ export function DetailDrawer({
             </span>
           )}
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          onDoubleClick={(event) => event.stopPropagation()}
-          aria-label="Đóng chi tiết"
-          title="Đóng"
-          className="shrink-0 cursor-pointer rounded-[5px] px-1.5 py-0.5 text-sm leading-none text-text-muted hover:bg-btn-hover hover:text-text"
-        >
-          ✕
-        </button>
+        {presentation !== 'fullscreen' && (
+          <button
+            type="button"
+            onClick={onClose}
+            onDoubleClick={(event) => event.stopPropagation()}
+            aria-label="Đóng chi tiết"
+            title="Đóng"
+            className="company-icon-btn touch-target shrink-0 px-1.5 text-sm"
+          >
+            ✕
+          </button>
+        )}
       </header>
-      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-        <DrawerContent {...rest} subject={retained} />
-      </div>
+      {wrapToggleShown && (
+        <div className="flex justify-end border-b border-border px-3.5 py-1">
+          <button
+            type="button"
+            aria-pressed={!prefs.wrapLines}
+            title="Giữ nguyên chiều rộng dòng và cuộn ngang khi dòng dài"
+            onClick={() =>
+              onPrefsChange((current) => ({ ...current, wrapLines: !current.wrapLines }))
+            }
+            className="company-toggle touch-target"
+          >
+            Không ngắt dòng
+          </button>
+        </div>
+      )}
+      <WrapLinesContext.Provider value={prefs.wrapLines}>
+        <div className="flex min-h-0 flex-1 flex-col overflow-auto">
+          <DrawerContent {...rest} subject={retained} />
+        </div>
+      </WrapLinesContext.Provider>
     </aside>
   );
 }
@@ -509,15 +547,4 @@ function QuestionSubject({
       />
     </div>
   );
-}
-
-/** The window's width, kept current: it bounds how wide the drawer may be. */
-function useViewportWidth(): number {
-  const [width, setWidth] = useState(() => window.innerWidth);
-  useEffect(() => {
-    const onResize = (): void => setWidth(window.innerWidth);
-    window.addEventListener('resize', onResize);
-    return () => window.removeEventListener('resize', onResize);
-  }, []);
-  return width;
 }

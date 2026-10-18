@@ -313,14 +313,12 @@
     animation: company-fade-in 240ms ease-out both;
   }
   .company-sent-back {
-    box-shadow:
-      0 0 0 2px var(--color-warning),
-      0 0 12px color-mix(in srgb, var(--color-warning) 40%, transparent);
+    box-shadow: 0 0 0 2px var(--color-warning);
   }
-  /* The detail drawer: the whole board on a phone. From md up, unless maximized,
-     it is a column beside the lanes, as wide as the reader dragged it
-     (--company-drawer-width, set inline), so the lanes give it their room.
-     Below md, or maximized, it floats over the board. */
+  /* The detail drawer has four presentations, chosen by data-presentation, which the
+     board sets from its layout (layoutMode.ts). Docked (desktop) is a column beside the
+     lanes at the width the reader dragged; overlay (tablet) floats over the board;
+     fullscreen (phone) fills the screen; maximized fills the board. */
   .company-drawer {
     position: absolute;
     top: 0;
@@ -330,25 +328,24 @@
     transition-property: translate;
     transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
   }
-  @media (min-width: 768px) {
-    .company-drawer {
-      width: var(--company-drawer-width, 560px);
-    }
-    .company-drawer[data-maximized='false'] {
-      position: relative;
-      flex-shrink: 0;
-    }
+  .company-drawer[data-presentation='docked'] {
+    position: relative;
+    flex-shrink: 0;
+    width: var(--company-drawer-width, 560px);
   }
-  .company-drawer[data-maximized='true'] {
+  .company-drawer[data-presentation='overlay'] {
+    width: clamp(320px, 56%, 600px);
+  }
+  .company-drawer[data-presentation='maximized'],
+  .company-drawer[data-presentation='fullscreen'] {
     width: 100%;
   }
   .company-drawer-in {
     animation: company-drawer-in 320ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  /* The handle on the drawer's left edge that resizes it. It shows only from md
-     up, where the drawer is a column. */
+  /* The handle on the drawer's left edge that resizes a docked drawer. The board
+     renders it only while the drawer is docked. */
   .company-drawer-grip {
-    display: none;
     position: absolute;
     top: 0;
     bottom: 0;
@@ -357,11 +354,6 @@
     width: 8px;
     cursor: col-resize;
     touch-action: none;
-  }
-  @media (min-width: 768px) {
-    .company-drawer-grip {
-      display: block;
-    }
   }
   .company-drawer-grip:hover,
   .company-drawer-grip:active {
@@ -408,23 +400,6 @@
   .company-lane-head {
     border-radius: 4px 4px 0 0;
     background: color-mix(in srgb, var(--lane-color) 14%, var(--color-lane));
-  }
-
-  /* The lanes row: when the lanes do not fit beside the drawer the row scrolls
-     sideways, and its bar is light enough to see on the ink. */
-  .company-lanes {
-    scrollbar-width: thin;
-    scrollbar-color: var(--color-card-hover) var(--color-lane);
-  }
-  .company-lanes::-webkit-scrollbar {
-    height: 8px;
-  }
-  .company-lanes::-webkit-scrollbar-track {
-    background: var(--color-lane);
-  }
-  .company-lanes::-webkit-scrollbar-thumb {
-    background: var(--color-card-hover);
-    border-radius: 4px;
   }
 
   /* Cards sit on the card surface; hover lightens the edge, and the selected
@@ -526,6 +501,69 @@
   }
   to {
     translate: 0 0;
+  }
+}
+
+/* Keyboard focus is always visible: a 2px accent ring, offset from the control so it
+     reads on the card and lane surfaces too (ui-ux-pro-max: visible focus). */
+.company-ui :focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Icon-only and text ghost controls: muted until hovered, with no layout shift. */
+.company-icon-btn {
+  cursor: pointer;
+  border-radius: 5px;
+  color: var(--color-text-muted);
+  transition:
+    color 120ms ease,
+    background-color 120ms ease;
+}
+.company-icon-btn:hover:not(:disabled) {
+  background: var(--color-btn-hover);
+  color: var(--color-text);
+}
+
+/* A filter-style toggle. aria-pressed carries its state, and the look follows it. */
+.company-toggle {
+  cursor: pointer;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 2px 10px;
+  font-size: var(--text-2xs);
+  color: var(--color-text-muted);
+  transition:
+    border-color 120ms ease,
+    color 120ms ease,
+    background-color 120ms ease;
+}
+.company-toggle:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+.company-toggle[aria-pressed='true'] {
+  border-color: var(--color-accent);
+  background: var(--color-active-bg);
+  color: var(--color-text);
+}
+
+/* A finger needs a 44px target. Coarse pointers and phone widths both get one,
+     since a phone's controls are the only ones it has to hit (ui-ux-pro-max). */
+@media (pointer: coarse), (max-width: 767px) {
+  .company-ui .touch-target,
+  .company-ui .company-btn {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* iOS zooms into any field set below 16px, so a phone's fields are 16px. */
+@media (max-width: 767px) {
+  .company-ui input,
+  .company-ui textarea,
+  .company-ui select {
+    font-size: 16px;
   }
 }
 

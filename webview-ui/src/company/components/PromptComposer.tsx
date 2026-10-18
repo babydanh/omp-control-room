@@ -448,7 +448,10 @@ export function PromptComposer({ client }: PromptComposerProps) {
   }
 
   return (
-    <section className="border-t border-border bg-bg px-2 py-1" data-testid="prompt-composer">
+    <section
+      className="border-t border-border bg-bg px-2 pt-1 pb-[max(4px,env(safe-area-inset-bottom))]"
+      data-testid="prompt-composer"
+    >
       {rows.length > 0 && (
         <ul
           className="mb-1 max-h-40 overflow-auto rounded-[6px] border border-border"
@@ -487,7 +490,9 @@ export function PromptComposer({ client }: PromptComposerProps) {
           data-testid="model-picker"
         >
           {state.modelCatalog.length === 0 && (
-            <li className="px-2 py-1 text-2xs text-text-muted">Danh mục mô hình đang trống.</li>
+            <li className="px-2 py-1 text-2xs text-text-muted">
+              {state.modelCatalogLoaded ? 'Không có mô hình nào.' : 'Đang tải mô hình…'}
+            </li>
           )}
           {state.modelCatalog.map((entry) => (
             <li key={entry.id}>
@@ -523,7 +528,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
         onPointerUp={endResize}
         onPointerCancel={endResize}
         onKeyDown={nudgeResize}
-        className="flex h-1.5 cursor-row-resize touch-none items-center justify-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
+        className="max-md:hidden flex h-1.5 cursor-row-resize touch-none items-center justify-center focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent"
       >
         <span aria-hidden="true" className="h-0.5 w-8 rounded-full bg-border" />
       </div>

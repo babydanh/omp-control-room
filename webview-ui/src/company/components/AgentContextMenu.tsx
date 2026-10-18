@@ -534,7 +534,7 @@ export function AgentContextMenu({
       data-testid="agent-menu"
       tabIndex={-1}
       onKeyDown={onMenuKeyDown}
-      className="fixed z-50 min-w-[220px] max-w-[280px] rounded-[6px] border border-border bg-bg-dark py-1 text-xs text-text shadow-lg"
+      className="fixed z-50 min-w-[220px] max-w-[min(280px,calc(100vw-16px))] rounded-[6px] border border-border bg-bg-dark py-1 text-xs text-text"
       style={{ left: position.x, top: position.y }}
     >
       <div className="border-b border-border px-3 py-1.5">
@@ -631,7 +631,7 @@ function MenuItemButton({
         aria-disabled={item.disabled}
         title={item.title ?? undefined}
         onClick={() => onRun(item)}
-        className={`flex h-7 w-full items-center justify-between gap-3 px-3 text-left outline-none ${tone}`}
+        className={`touch-target flex h-7 w-full items-center justify-between gap-3 px-3 text-left outline-none ${tone}`}
       >
         <span className="truncate">{item.label}</span>
         {item.hint !== null && (

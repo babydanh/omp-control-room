@@ -37,6 +37,7 @@ import {
 } from '../terminalPreview.js';
 import { type TerminalPreviewActions, TerminalPreviewContext } from '../terminalPreviewActions.js';
 import { parseAnsiScreen, tailScreen } from '../terminalScreen.js';
+import { ScreenFrame } from './ScreenFrame.js';
 import { ScreenView } from './ScreenView.js';
 import { TerminalMirror } from './TerminalMirror.js';
 
@@ -290,7 +291,9 @@ function HerdrPreview({
       {screen === undefined ? (
         <PreviewNotice text="Đang đọc màn hình…" />
       ) : (
-        <ScreenView lines={lines} className="min-h-0 flex-1 overflow-hidden p-2" />
+        <ScreenFrame>
+          <ScreenView lines={lines} className="shrink-0 p-2" />
+        </ScreenFrame>
       )}
     </>
   );
@@ -344,13 +347,15 @@ function LogTailPreview({
       {entries.length === 0 ? (
         <PreviewNotice text="Chưa có nhật ký." />
       ) : (
-        <ScreenView
-          lines={tailScreen(
-            parseAnsiScreen(entries.map((entry) => entry.text).join('\n')),
-            PREVIEW_SCREEN_ROWS,
-          )}
-          className="min-h-0 flex-1 overflow-hidden p-2"
-        />
+        <ScreenFrame>
+          <ScreenView
+            lines={tailScreen(
+              parseAnsiScreen(entries.map((entry) => entry.text).join('\n')),
+              PREVIEW_SCREEN_ROWS,
+            )}
+            className="shrink-0 p-2"
+          />
+        </ScreenFrame>
       )}
     </>
   );

@@ -154,7 +154,7 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
             </div>
           )}
 
-          <div className="flex min-h-0 flex-1 flex-col gap-1">
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1">
             {screen && (
               <p className="text-2xs text-text-muted">màn hình lúc {formatLogTime(screen.at)}</p>
             )}
@@ -199,7 +199,7 @@ function HerdrScreenView({ lines }: { lines: readonly ScreenLine[] }) {
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="min-h-0 flex-1 overflow-auto rounded-[6px] border border-border p-2"
+      className="min-h-0 min-w-0 flex-1 overflow-auto rounded-[6px] border border-border p-2"
     >
       <ScreenView testId="herdr-screen" lines={lines} />
     </div>

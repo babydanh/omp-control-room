@@ -25,6 +25,7 @@ import type { CompanyViewState, HerdrScreenView, HerdrView } from './companyStat
 import type { CompanyLaneId } from './constants.js';
 import { HERDR_TONE_LABELS, type HerdrTone, herdrToneFor } from './herdrView.js';
 import { companyRoleLabel } from './roleProfiles.js';
+import { screenActivityLine } from './screenActivity.js';
 import { sessionStatusLabel } from './statusLabels.js';
 import { parseAnsiScreen } from './terminalScreen.js';
 
@@ -49,8 +50,8 @@ export interface AgentBoardCard {
   statusLabel: string;
   /** The git branch a pane works on; null when herdr reported none, and for a session. */
   branch: string | null;
-  /** The newest lines the agent printed or logged, oldest first; at most two. */
-  activity: string[];
+  /** The line the agent is doing now, from its screen or log; null when neither shows one. */
+  activity: string | null;
   /** When the agent last changed, as an ISO time; null when none is known. */
   updatedAt: string | null;
 }
@@ -83,32 +84,26 @@ function sessionTone(
   return null;
 }
 
-/** How many lines of recent activity a card shows. */
-const ACTIVITY_LINES = 2;
-
 /** Collapse a line to single spaces and bound its length for a card. */
 function collapseSpaces(text: string): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, 240);
 }
 
-/** A pane's newest non-empty screen lines, plain text, oldest first. */
-function recentScreenLines(text: string | undefined): string[] {
-  if (text === undefined) return [];
-  const lines = parseAnsiScreen(text).map((line) =>
-    collapseSpaces(line.map((segment) => segment.text).join('')),
-  );
-  return lines.filter((line) => line !== '').slice(-ACTIVITY_LINES);
+/** A pane's activity line from its screen text; null when herdr has sent no screen. */
+function paneActivity(text: string | undefined): string | null {
+  if (text === undefined) return null;
+  const plain = parseAnsiScreen(text).map((line) => line.map((segment) => segment.text).join(''));
+  return screenActivityLine(plain);
 }
 
-/** A session's newest logged lines of text, oldest first. */
-function recentLogLines(entries: readonly CompanySessionLogEntry[]): string[] {
-  const lines: string[] = [];
-  for (let i = entries.length - 1; i >= 0 && lines.length < ACTIVITY_LINES; i--) {
+/** A session's newest logged line of text, collapsed; null when no entry has text. */
+function latestLogLine(entries: readonly CompanySessionLogEntry[]): string | null {
+  for (let i = entries.length - 1; i >= 0; i--) {
     const entry: CompanySessionLogEntry | undefined = entries[i];
     const line = collapseSpaces(entry?.text ?? '');
-    if (line !== '') lines.unshift(line);
+    if (line !== '') return line;
   }
-  return lines;
+  return null;
 }
 
 function herdrCard(agent: HerdrAgent, screen: HerdrScreenView | undefined): AgentBoardCard | null {
@@ -125,7 +120,7 @@ function herdrCard(agent: HerdrAgent, screen: HerdrScreenView | undefined): Agen
     title: herdrSummary(agent.title, agent.cwd)?.text ?? `${agent.kind} · ${agent.paneId}`,
     statusLabel: HERDR_TONE_LABELS[tone],
     branch: agent.branch || null,
-    activity: recentScreenLines(screen?.text),
+    activity: paneActivity(screen?.text),
     updatedAt: screen?.at ?? null,
   };
 }
@@ -148,7 +143,7 @@ function sessionCard(
     title: session.name,
     statusLabel: tone === 'needs' ? HERDR_TONE_LABELS.needs : sessionStatusLabel(session.status),
     branch: null,
-    activity: recentLogLines(entries),
+    activity: latestLogLine(entries),
     updatedAt: session.lastUsedAt,
   };
 }

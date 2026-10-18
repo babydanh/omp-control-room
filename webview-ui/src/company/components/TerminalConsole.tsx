@@ -186,7 +186,11 @@ export function TerminalConsole({
           {closedReason ? `đã kết thúc: ${closedReason}` : 'đang chạy'}
         </span>
       </div>
-      <div ref={containerRef} className="min-h-0 flex-1" data-testid="terminal-console" />
+      <div
+        ref={containerRef}
+        className="min-h-0 min-w-0 flex-1 overflow-hidden"
+        data-testid="terminal-console"
+      />
     </div>
   );
 }

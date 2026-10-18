@@ -17,7 +17,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerE
 import { Fragment, useRef, useState } from 'react';
 
 import type { CompanyRole, RoleProfile } from '../../../../core/src/company.js';
-import { type AgentMenuRequest, type AgentMenuSubject, agentMenuTriggers } from '../agentMenu.js';
+import type { AgentMenuRequest, AgentMenuSubject } from '../agentMenu.js';
 import {
   activityCounts,
   type AgentRoleGroup,
@@ -40,10 +40,12 @@ import {
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
+import type { SidebarPresentation } from '../layoutMode.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS, withRoleModel } from '../roleProfiles.js';
 import { clampSidebarWidth } from '../sidebarPrefs.js';
 import type { PreviewTarget } from '../terminalPreview.js';
 import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
+import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useNow } from '../useNow.js';
 import { ActivityChips } from './ActivityCounts.js';
@@ -61,8 +63,8 @@ export interface AgentSidebarProps {
   /** The herdr pane the drawer shows, so its row reads as selected. */
   selectedPaneId: string | null;
   width: number;
-  /** True below the overlay breakpoint: the sidebar floats over the board. */
-  overlay: boolean;
+  /** Where the sidebar sits: docked beside the board, floating over it, or a phone's sheet. */
+  presentation: Extract<SidebarPresentation, 'docked' | 'overlay' | 'sheet'>;
   /** The keys of the projects the user folded. */
   collapsedProjects: ReadonlySet<string>;
   onWidthChange: (width: number) => void;
@@ -102,7 +104,7 @@ export function AgentSidebar({
   selectedSessionId,
   selectedPaneId,
   width,
-  overlay,
+  presentation,
   collapsedProjects,
   onWidthChange,
   onCollapse,
@@ -163,8 +165,8 @@ export function AgentSidebar({
     <aside
       aria-label="Đàn agent"
       data-testid="agent-sidebar"
-      className={`flex h-full shrink-0 flex-col border-r border-border bg-bg-dark ${overlay ? 'absolute inset-y-0 left-0 z-30 shadow-lg' : 'relative'}`}
-      style={{ width: `${width}px` }}
+      className={`flex h-full shrink-0 flex-col border-r border-border bg-bg-dark ${presentation === 'docked' ? 'relative' : 'absolute inset-y-0 left-0 z-30'} ${presentation === 'sheet' ? 'w-[min(88vw,360px)]' : ''}`}
+      style={presentation === 'sheet' ? undefined : { width: `${width}px` }}
     >
       <header className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
         <h2 className="text-xs font-semibold text-text-muted">Đàn agent · {total}</h2>
@@ -173,7 +175,7 @@ export function AgentSidebar({
           onClick={onCollapse}
           aria-label="Thu gọn đàn agent"
           title="Thu gọn thành thanh biểu tượng (Ctrl+B)"
-          className="cursor-pointer px-1 text-2xs text-text-muted hover:text-text"
+          className="company-icon-btn touch-target px-1 text-2xs"
         >
           ⟨
         </button>
@@ -197,14 +199,17 @@ export function AgentSidebar({
         </p>
       )}
 
-      <ResizeEdge width={width} onWidthChange={onWidthChange} />
+      {presentation !== 'sheet' && <ResizeEdge width={width} onWidthChange={onWidthChange} />}
     </aside>
   );
 }
 
 /** A project's header, and its children when it is open. */
 function ProjectSection({ project, view }: { project: ProjectNode; view: TreeView }) {
-  const triggers = agentMenuTriggers<HTMLButtonElement>({ kind: 'project', project }, view.onMenu);
+  const triggers = useAgentMenuGestures<HTMLButtonElement>(
+    { kind: 'project', project },
+    view.onMenu,
+  );
   return (
     <section
       aria-label={project.name}
@@ -538,14 +543,18 @@ function AgentRowButton({
   onSelect: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
-  const triggers = agentMenuTriggers<HTMLButtonElement>(menu, onMenu);
   const actions = useTerminalPreview();
+  const triggers = useAgentMenuGestures<HTMLButtonElement>(
+    menu,
+    onMenu,
+    previewTarget === undefined ? undefined : () => actions.press(previewTarget),
+  );
   return (
     <button
       type="button"
       onClick={onSelect}
-      {...triggers}
       {...(previewTarget === undefined ? {} : previewTriggers(actions, previewTarget))}
+      {...triggers}
       aria-pressed={selected}
       title={agentTooltip(row)}
       data-testid={testId}
@@ -586,17 +595,19 @@ function HerdrRowButton({
   onOpen: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
-  const triggers = agentMenuTriggers<HTMLButtonElement>(
+  const actions = useTerminalPreview();
+  const herdrTarget: PreviewTarget = { kind: 'herdr', paneId: row.paneId };
+  const triggers = useAgentMenuGestures<HTMLButtonElement>(
     { kind: 'herdr', paneId: row.paneId, drawer: null },
     onMenu,
+    () => actions.press(herdrTarget),
   );
-  const actions = useTerminalPreview();
   return (
     <button
       type="button"
       onClick={onOpen}
+      {...previewTriggers(actions, herdrTarget)}
       {...triggers}
-      {...previewTriggers(actions, { kind: 'herdr', paneId: row.paneId })}
       aria-pressed={selected}
       title={herdrTooltip(row)}
       data-testid={`herdr-row-${row.paneId}`}
@@ -678,17 +689,19 @@ function SleepingRowButton({
   onOpen: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
-  const triggers = agentMenuTriggers<HTMLButtonElement>(
+  const actions = useTerminalPreview();
+  const sleepingTarget: PreviewTarget = { kind: 'herdr', paneId: row.paneId };
+  const triggers = useAgentMenuGestures<HTMLButtonElement>(
     { kind: 'sleeping', paneId: row.paneId, drawer: null },
     onMenu,
+    () => actions.press(sleepingTarget),
   );
-  const actions = useTerminalPreview();
   return (
     <button
       type="button"
       onClick={onOpen}
+      {...previewTriggers(actions, sleepingTarget)}
       {...triggers}
-      {...previewTriggers(actions, { kind: 'herdr', paneId: row.paneId })}
       aria-pressed={selected}
       title={sleepingTooltip(row)}
       data-testid={`sleeping-row-${row.paneId}`}
@@ -699,9 +712,9 @@ function SleepingRowButton({
     >
       <span
         aria-hidden="true"
-        className="flex h-4 w-3 shrink-0 items-center justify-center text-xs"
+        className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-2xs leading-none text-text-muted"
       >
-        💤
+        zz
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-text">{row.name}</span>

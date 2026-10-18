@@ -23,6 +23,8 @@ export interface DrawerPrefs {
   width: number | null;
   /** Whether the drawer fills the board instead of sitting beside its content. */
   maximized: boolean;
+  /** Whether screen and log lines wrap to the drawer's width. Off keeps each line whole and scrolls sideways. */
+  wrapLines: boolean;
 }
 
 /**
@@ -40,6 +42,7 @@ export interface DrawerStorage {
 export const DEFAULT_DRAWER_PREFS: DrawerPrefs = {
   width: null,
   maximized: false,
+  wrapLines: true,
 };
 
 /**
@@ -119,7 +122,8 @@ export function readDrawerPrefs(storage: DrawerStorage | null): DrawerPrefs {
       ? wholeWidth(parsed.width)
       : null;
   const maximized = 'maximized' in parsed && parsed.maximized === true;
-  return { width, maximized };
+  const wrapLines = 'wrapLines' in parsed ? parsed.wrapLines !== false : true;
+  return { width, maximized, wrapLines };
 }
 
 export function writeDrawerPrefs(storage: DrawerStorage | null, prefs: DrawerPrefs): void {
@@ -128,6 +132,7 @@ export function writeDrawerPrefs(storage: DrawerStorage | null, prefs: DrawerPre
     JSON.stringify({
       width: prefs.width === null ? null : wholeWidth(prefs.width),
       maximized: prefs.maximized,
+      wrapLines: prefs.wrapLines,
     }),
   );
 }

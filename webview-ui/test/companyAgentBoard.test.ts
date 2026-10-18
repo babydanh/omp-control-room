@@ -84,7 +84,7 @@ describe('herdr panes as agent cards', () => {
     expect(buildAgentCards(state, new Set())[0]?.title).toBe('claude · p-9');
   });
 
-  it('carries the pane branch, its newest screen lines and when the screen last changed', () => {
+  it('carries the pane branch, its activity line and when the screen last changed', () => {
     const state = withHerdr(stateFrom(), [herdrAgent({ paneId: 'p-2', branch: 'feat/cards' })]);
     const withScreen: CompanyViewState = {
       ...state,
@@ -102,7 +102,7 @@ describe('herdr panes as agent cards', () => {
 
     expect(buildAgentCards(withScreen, new Set())[0]).toMatchObject({
       branch: 'feat/cards',
-      activity: ['build ok', 'running tests'],
+      activity: 'running tests',
       updatedAt: '2026-10-02T10:05:00.000Z',
     });
   });
@@ -112,7 +112,7 @@ describe('herdr panes as agent cards', () => {
 
     expect(buildAgentCards(state, new Set())[0]).toMatchObject({
       branch: null,
-      activity: [],
+      activity: null,
       updatedAt: null,
     });
   });
@@ -157,7 +157,7 @@ describe('company sessions as agent cards', () => {
     });
   });
 
-  it('shows the newest logged lines of a session and when it was last used', () => {
+  it('shows the newest logged line of a session and when it was last used', () => {
     const state = applyCompanyMessage(
       stateFrom({ sessions: [session({ id: 's-log', lastUsedAt: '2026-10-02T10:20:00.000Z' })] }),
       {
@@ -174,7 +174,7 @@ describe('company sessions as agent cards', () => {
 
     expect(buildAgentCards(state, new Set())[0]).toMatchObject({
       branch: null,
-      activity: ['reading the spec', 'writing the fix'],
+      activity: 'writing the fix',
       updatedAt: '2026-10-02T10:20:00.000Z',
     });
   });

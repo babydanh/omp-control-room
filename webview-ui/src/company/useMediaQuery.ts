@@ -1,6 +1,6 @@
 /**
- * useMediaQuery: whether a CSS media query currently matches. The board uses it
- * to switch the agent sidebar between in-flow and overlay layouts.
+ * useMediaQuery: whether a CSS media query currently matches. The flight layout
+ * reads it for reduced motion.
  */
 
 import { useEffect, useState } from 'react';

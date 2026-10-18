@@ -1,20 +1,25 @@
 /**
  * BoardTopBar: where the board is pointed and how healthy the company is, with
- * the two toggles that open the agent sidebar and the workspace files.
+ * the toggles that open the agent sidebar and the workspace files. On a phone the
+ * bar keeps the sidebar toggle, the workspace and a menu; the menu holds the
+ * readings and the files toggle.
  *
  * Every number is read from a server message; a value the server has not sent
  * yet reads as unknown, never as zero.
  */
 
-import type { CompanyModelCatalogEntry } from '../../../../core/src/company.js';
+import { useState } from 'react';
+
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
+import type { LayoutMode } from '../layoutMode.js';
 import { quotaRows } from '../usageView.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 
 export interface BoardTopBarProps {
   client: CompanyClient;
   state: CompanyViewState;
+  mode: LayoutMode;
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   filesOpen: boolean;
@@ -29,11 +34,14 @@ export interface BoardTopBarProps {
 const CHIP_CLASS =
   'min-w-0 max-w-full truncate rounded-full border border-border px-2 py-0.5 text-2xs text-text-muted';
 
-function CatalogStatus({ entries }: { entries: readonly CompanyModelCatalogEntry[] }) {
+/** The catalog chip: loading until the server has answered, then how many models are usable. */
+function CatalogStatus({ state }: { state: CompanyViewState }) {
+  const entries = state.modelCatalog;
   const usable = entries.filter((entry) => entry.credentialsConfigured).length;
-  const text =
-    entries.length === 0
-      ? 'danh mục mô hình: chưa tải'
+  const text = !state.modelCatalogLoaded
+    ? 'đang tải mô hình…'
+    : entries.length === 0
+      ? 'không có mô hình nào'
       : `mô hình: ${usable}/${entries.length} dùng được`;
   return (
     <span className={CHIP_CLASS} title={text}>
@@ -42,7 +50,16 @@ function CatalogStatus({ entries }: { entries: readonly CompanyModelCatalogEntry
   );
 }
 
-function QuotaStatus({ state }: { state: CompanyViewState }) {
+/**
+ * The readings a bar shows: the revision, the model catalog, the omp runner and the
+ * provider quota. A `compact` bar lets its container query decide which of them fit;
+ * the phone menu shows them all in full.
+ */
+function StatusChips({ state, compact }: { state: CompanyViewState; compact: boolean }) {
+  const diagnostics = state.diagnostics;
+  const runner = diagnostics
+    ? `omp đang chạy ${diagnostics.liveRunners}/${diagnostics.modelLeases} · xếp hàng ${diagnostics.queuedTasks} · giữ lại ${diagnostics.retainedSessions}`
+    : null;
   const windows = quotaRows(Object.values(state.quotas)).flatMap((row) =>
     row.windows.map(
       (quotaWindow) =>
@@ -51,11 +68,25 @@ function QuotaStatus({ state }: { state: CompanyViewState }) {
   );
   return (
     <>
+      <span className={compact ? `${CHIP_CLASS} hidden @min-[760px]:block` : CHIP_CLASS}>
+        bản sửa {state.revision ?? '-'}
+      </span>
+      <CatalogStatus state={state} />
+      {runner !== null && (
+        <span className={CHIP_CLASS}>
+          <span className={compact ? 'hidden @min-[560px]:inline' : undefined}>{runner}</span>
+          {compact && (
+            <span className="@min-[560px]:hidden" title={runner}>
+              omp
+            </span>
+          )}
+        </span>
+      )}
       {windows.map((text) => (
         <span
           key={text}
           title="Còn lại theo tài khoản nhà cung cấp"
-          className={`${CHIP_CLASS} hidden @min-[640px]:block`}
+          className={compact ? `${CHIP_CLASS} hidden @min-[640px]:block` : CHIP_CLASS}
         >
           {text}
         </span>
@@ -64,42 +95,76 @@ function QuotaStatus({ state }: { state: CompanyViewState }) {
   );
 }
 
-function toggleClass(pressed: boolean): string {
-  return pressed
-    ? 'cursor-pointer rounded-[5px] border border-accent bg-active-bg px-2.5 py-1 text-2xs text-text'
-    : 'cursor-pointer rounded-[5px] border border-border px-2.5 py-1 text-2xs text-text-muted hover:border-accent hover:text-text';
-}
-
 export function BoardTopBar({
   client,
   state,
+  mode,
   sidebarCollapsed,
   onToggleSidebar,
   filesOpen,
   onToggleFiles,
 }: BoardTopBarProps) {
-  const diagnostics = state.diagnostics;
-  const runner = diagnostics
-    ? `omp đang chạy ${diagnostics.liveRunners}/${diagnostics.modelLeases} · xếp hàng ${diagnostics.queuedTasks} · giữ lại ${diagnostics.retainedSessions}`
-    : null;
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  if (mode === 'phone') {
+    return (
+      <>
+        <header className="flex items-center gap-2 border-b border-border px-2 py-1.5">
+          <button
+            type="button"
+            onClick={onToggleSidebar}
+            aria-label="Đàn agent"
+            aria-expanded={!sidebarCollapsed}
+            className="company-icon-btn touch-target shrink-0 px-2 text-sm"
+          >
+            <span aria-hidden="true">☰</span>
+          </button>
+          <h1 className="min-w-0 shrink truncate text-base text-text">OMP Board</h1>
+          <div className="min-w-0 flex-1">
+            <WorkspaceSwitcher client={client} state={state} />
+          </div>
+          <button
+            type="button"
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-label="Trạng thái và công cụ"
+            aria-expanded={menuOpen}
+            aria-controls="company-status-menu"
+            className="company-icon-btn touch-target shrink-0 px-2 text-sm"
+          >
+            <span aria-hidden="true">⋯</span>
+          </button>
+        </header>
+        {menuOpen && (
+          <div
+            id="company-status-menu"
+            className="flex flex-col items-start gap-2 border-b border-border bg-bg-dark px-2 py-2"
+          >
+            <div className="flex w-full flex-wrap gap-1.5">
+              <StatusChips state={state} compact={false} />
+            </div>
+            <button
+              type="button"
+              aria-pressed={filesOpen}
+              onClick={() => {
+                setMenuOpen(false);
+                onToggleFiles();
+              }}
+              className="company-toggle touch-target"
+            >
+              Tệp
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
+
   return (
     <header className="flex items-center gap-3 border-b border-border px-3 py-2">
       <h1 className="shrink-0 text-base text-text">OMP Board</h1>
       <WorkspaceSwitcher client={client} state={state} />
       <span className="@container flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-        <span className={`${CHIP_CLASS} hidden @min-[760px]:block`}>
-          bản sửa {state.revision ?? '-'}
-        </span>
-        <CatalogStatus entries={state.modelCatalog} />
-        {runner !== null && (
-          <span className={CHIP_CLASS}>
-            <span className="hidden @min-[560px]:inline">{runner}</span>
-            <span className="@min-[560px]:hidden" title={runner}>
-              omp
-            </span>
-          </span>
-        )}
-        <QuotaStatus state={state} />
+        <StatusChips state={state} compact />
       </span>
       <nav className="flex shrink-0 gap-1.5" aria-label="Thanh công cụ">
         <button
@@ -107,7 +172,7 @@ export function BoardTopBar({
           onClick={onToggleSidebar}
           aria-pressed={!sidebarCollapsed}
           title="Mở rộng hoặc thu gọn đàn agent (Ctrl+B)"
-          className={toggleClass(!sidebarCollapsed)}
+          className="company-toggle touch-target"
         >
           Đàn agent
         </button>
@@ -115,7 +180,7 @@ export function BoardTopBar({
           type="button"
           onClick={onToggleFiles}
           aria-pressed={filesOpen}
-          className={toggleClass(filesOpen)}
+          className="company-toggle touch-target"
         >
           Tệp
         </button>

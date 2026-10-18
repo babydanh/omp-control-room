@@ -133,6 +133,7 @@ describe('readDrawerPrefs', () => {
     expect(readDrawerPrefs(memoryStorage('{"width":"wide","maximized":"yes"}'))).toEqual({
       width: null,
       maximized: false,
+      wrapLines: true,
     });
   });
 
@@ -144,6 +145,7 @@ describe('readDrawerPrefs', () => {
     expect(readDrawerPrefs(memoryStorage('{"width":100,"maximized":true}'))).toEqual({
       width: 280,
       maximized: true,
+      wrapLines: true,
     });
   });
 
@@ -151,25 +153,32 @@ describe('readDrawerPrefs', () => {
     expect(readDrawerPrefs(memoryStorage('{"width":420.6,"maximized":false}'))).toEqual({
       width: 421,
       maximized: false,
+      wrapLines: true,
     });
+  });
+
+  it('turns wrapping off only when the stored pref says so', () => {
+    expect(readDrawerPrefs(memoryStorage('{"wrapLines":false}')).wrapLines).toBe(false);
+    expect(readDrawerPrefs(memoryStorage('{"wrapLines":"no"}')).wrapLines).toBe(true);
   });
 });
 
 describe('writeDrawerPrefs', () => {
   it('stores the prefs under the drawer key, and reads them back', () => {
     const storage = memoryStorage();
-    writeDrawerPrefs(storage, { width: 612.7, maximized: true });
+    writeDrawerPrefs(storage, { width: 612.7, maximized: true, wrapLines: false });
 
     expect(JSON.parse(storage.cells.get(DRAWER_PREFS_KEY) ?? 'null')).toEqual({
       width: 613,
       maximized: true,
+      wrapLines: false,
     });
-    expect(readDrawerPrefs(storage)).toEqual({ width: 613, maximized: true });
+    expect(readDrawerPrefs(storage)).toEqual({ width: 613, maximized: true, wrapLines: false });
   });
 
   it('never stores a width below the minimum', () => {
     const storage = memoryStorage();
-    writeDrawerPrefs(storage, { width: 10, maximized: false });
+    writeDrawerPrefs(storage, { width: 10, maximized: false, wrapLines: true });
 
     expect(readDrawerPrefs(storage).width).toBe(280);
   });

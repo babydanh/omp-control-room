@@ -77,7 +77,7 @@ export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
           value={active?.path ?? ''}
           disabled={opening}
           onChange={(event) => openFolder(event.target.value)}
-          className="max-w-[260px] rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text disabled:opacity-50"
+          className="min-w-0 max-w-[min(260px,100%)] rounded-[5px] border border-border bg-bg px-2 py-1 text-2xs text-text disabled:opacity-50"
         >
           {workspaces.map((entry) => (
             <option key={entry.path} value={entry.path} title={entry.path}>

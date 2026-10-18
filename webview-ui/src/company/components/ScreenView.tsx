@@ -9,10 +9,11 @@
  */
 
 import type { CSSProperties } from 'react';
-import { Fragment } from 'react';
+import { Fragment, useContext } from 'react';
 
 import { TERMINAL_THEME } from '../../constants.js';
 import type { ScreenLine, ScreenStyle } from '../terminalScreen.js';
+import { WrapLinesContext } from '../wrapLines.js';
 
 const SCREEN_COLORS: CSSProperties = {
   backgroundColor: TERMINAL_THEME.background,
@@ -26,10 +27,15 @@ export interface ScreenViewProps {
 }
 
 export function ScreenView({ lines, className = '', testId }: ScreenViewProps) {
+  const wrap = useContext(WrapLinesContext);
+  // Wrapped lines keep the screen whole at the drawer's width; unwrapped lines keep
+  // their columns and scroll sideways inside the screen's own frame.
+  const wrapClass = wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre';
   return (
     <pre
       data-testid={testId}
-      className={`m-0 whitespace-pre font-mono text-2xs leading-4 ${className}`}
+      data-wrap={wrap ? 'on' : 'off'}
+      className={`m-0 min-w-0 max-w-full font-mono text-2xs leading-4 ${wrapClass} ${className}`}
       style={SCREEN_COLORS}
     >
       {lines.map((line, row) => (

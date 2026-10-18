@@ -94,9 +94,6 @@ export const COMPANY_SIDEBAR_MIN_WIDTH_PX = 240;
 export const COMPANY_SIDEBAR_MAX_WIDTH_PX = 480;
 export const COMPANY_SIDEBAR_DEFAULT_WIDTH_PX = 300;
 
-/** At or below this viewport width the sidebar floats over the board instead of pushing it. */
-export const COMPANY_SIDEBAR_OVERLAY_MAX_PX = 1023;
-
 /** The collapsed agent rail's width: an 84px badge (code over status word) per agent, with a margin either side. */
 export const COMPANY_RAIL_WIDTH_PX = 96;
 
@@ -116,13 +113,24 @@ export const COMPANY_DRAWER_DEFAULT_WIDTH_PX = 560;
 export const COMPANY_DRAWER_DEFAULT_SHARE = 0.4;
 
 /**
- * An open lane's fixed column width, wide enough for a card's repo, branch,
- * title and activity. Spare width stays empty on the row's right.
+ * An open lane's widest column. Lanes shrink from here toward
+ * COMPANY_LANE_MIN_WIDTH_PX before a row wraps onto another line; spare width stays
+ * empty on the row's right.
  */
 export const COMPANY_LANE_WIDTH_PX = 272;
 
+/** The narrowest an open lane gets: below this a card's title and activity cannot be read. */
+export const COMPANY_LANE_MIN_WIDTH_PX = 200;
+
 /** A lane with no cards collapses to a strip this wide, so the lanes with work get the room. */
 export const COMPANY_LANE_STRIP_WIDTH_PX = 40;
+
+/** The gap between lane columns: 6px, the 1.5 step of the 4px rhythm. */
+export const COMPANY_LANE_GAP_PX = 6;
+
+/** Viewport widths that pick the board's layout: a phone below 768px, a tablet below 1024px. */
+export const COMPANY_PHONE_MAX_PX = 767;
+export const COMPANY_TABLET_MAX_PX = 1023;
 
 /** The composer's text box idles at this many rows and grows with its text. */
 export const COMPOSER_MIN_ROWS = 4;

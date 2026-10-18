@@ -259,6 +259,8 @@ export interface CompanyViewState {
   diagnostics: CompanyDiagnostics | null;
   commandResults: Record<string, CommandResultView>;
   modelCatalog: CompanyModelCatalogEntry[];
+  /** False until the server has answered the catalog request; an empty catalog before that is loading, not empty. */
+  modelCatalogLoaded: boolean;
   streams: Record<string, TextStreamView>;
   terminals: Record<string, TerminalView>;
   artifacts: Record<string, ArtifactView>;
@@ -307,6 +309,7 @@ export function emptyCompanyState(): CompanyViewState {
     diagnostics: null,
     commandResults: {},
     modelCatalog: [],
+    modelCatalogLoaded: false,
     streams: {},
     terminals: {},
     artifacts: {},
@@ -897,7 +900,7 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
       // picked that the catalog no longer lists stays selected: the server
       // answers for it with `model_unavailable`, which is more truthful than
       // silently switching the user to something else.
-      return unchanged({ ...state, modelCatalog: [...message.entries] });
+      return unchanged({ ...state, modelCatalog: [...message.entries], modelCatalogLoaded: true });
     case 'companyOmpSessions':
       return unchanged({
         ...state,
