@@ -63,6 +63,10 @@ export type ServerMessage =
   | CompanyFileListMessage
   | CompanyFileReadMessage
   | CompanyAttachmentUploadedMessage
+  | LedgerSnapshotMessage
+  | LedgerTimelineMessage
+  | LedgerFileDiffMessage
+  | LedgerCommandResultMessage
   | TerminalAttachedMessage
   | TerminalSnapshotMessage
   | TerminalDataMessage
@@ -114,6 +118,10 @@ export type ClientMessage =
   | CompanySessionLogRequestMessage
   | CompanySessionRenameMessage
   | CompanySessionInfoRequestMessage
+  | LedgerViewRequestMessage
+  | LedgerTimelineRequestMessage
+  | LedgerFileDiffRequestMessage
+  | LedgerSendMessage
   | HerdrReadMessage
   | HerdrPromptMessage
   | HerdrKeysMessage
@@ -1248,6 +1256,223 @@ export interface CompanyAttachmentUploadedMessage {
   attachment: PromptAttachment;
 }
 
+export interface LedgerSnapshotMessage {
+  type: 'ledgerSnapshot';
+  requestId?: string;
+  view: LedgerView;
+}
+
+export interface LedgerView {
+  generatedAt: string;
+  database: LedgerDatabaseStatus;
+  repos: LedgerRepo[];
+  unscannedFolders: string[];
+  sessions: LedgerSession[];
+  pending: LedgerPending[];
+  notices: LedgerNotice[];
+  mainWrites: LedgerMainWrite[];
+  overlaps: LedgerOverlapScan[];
+  spamRule: LedgerSpamRule;
+}
+
+export interface LedgerDatabaseStatus {
+  state: AnonymousSchema_692;
+  error?: string;
+}
+
+export type AnonymousSchema_692 = 'ok' | 'missing' | 'unreadable';
+
+export interface LedgerRepo {
+  repo: string;
+  name: string;
+  worktrees: LedgerWorktree[];
+}
+
+export interface LedgerWorktree {
+  path: string;
+  name: string;
+  branch: string | null;
+  head: string;
+  isMain: boolean;
+  ahead: number;
+  behind: number;
+  dirtyCount: number;
+  dirtyFiles: LedgerDirtyFile[];
+  merged: boolean;
+  hasUpstream: boolean;
+  lastCommitSubject: string;
+  lastCommitAt: string | null;
+  sessionIds: string[];
+  gitError?: string;
+}
+
+export interface LedgerDirtyFile {
+  path: string;
+  status: string;
+}
+
+export interface LedgerSession {
+  sessionId: string;
+  agentKind: string;
+  agentName: string;
+  parentId?: string | null;
+  open: boolean;
+  live: boolean;
+  state: string;
+  cwd: string;
+  repo: string | null;
+  checkout: string | null;
+  branch: string | null;
+  lastIntent: string | null;
+  lastCallAt: string | null;
+  calls5m: number;
+  calls30m: number;
+  spamming: boolean;
+  spamReason: string | null;
+  pid: number | null;
+}
+
+export interface LedgerPending {
+  checkout: string;
+  sessionId: string | null;
+  branch: string | null;
+  dirty: number;
+  unpushed: number;
+  notInMain: number;
+  hasRemote: boolean;
+  ts: string;
+}
+
+export interface LedgerNotice {
+  id: number;
+  ts: string;
+  toSession: string;
+  fromSession: string | null;
+  relKey: string | null;
+  content: string;
+}
+
+export interface LedgerMainWrite {
+  sessionId: string;
+  ts: string;
+  tool: string | null;
+  path: string | null;
+  intent: string | null;
+}
+
+export interface LedgerOverlapScan {
+  repo: string;
+  state: AnonymousSchema_761;
+  startedAt: string | null;
+  finishedAt: string | null;
+  base: string | null;
+  lanes: number;
+  pairs: LedgerOverlapPair[];
+  main: LedgerOverlapMain[];
+  pending: string[];
+  complete: boolean;
+  error: string | null;
+}
+
+export type AnonymousSchema_761 = 'idle' | 'running' | 'done' | 'partial' | 'error';
+
+export interface LedgerOverlapPair {
+  a: string;
+  b: string;
+  aLabel: string;
+  bLabel: string;
+  conflicts: LedgerOverlapConflict[];
+  auto: string[];
+}
+
+export interface LedgerOverlapConflict {
+  file: string;
+  hunks: LedgerOverlapHunk[];
+}
+
+export interface LedgerOverlapHunk {
+  line: number;
+  symbol: string;
+  ours: string[];
+  theirs: string[];
+}
+
+export interface LedgerOverlapMain {
+  lane: string;
+  label: string;
+  conflicts: LedgerOverlapConflict[];
+}
+
+export interface LedgerSpamRule {
+  windowMinutes: number;
+  callsPerWindow: number;
+  sameIntentPerWindow: number;
+  lookbackMinutes: number;
+}
+
+export interface LedgerTimelineMessage {
+  type: 'ledgerTimeline';
+  requestId: string;
+  timeline: LedgerTimeline;
+}
+
+export interface LedgerTimeline {
+  windowMinutes: number;
+  bucketSeconds: number;
+  startedAt: string;
+  endedAt: string;
+  lanes: LedgerTimelineLane[];
+  shared: LedgerSharedFile[];
+  truncated: boolean;
+}
+
+export interface LedgerTimelineLane {
+  sessionId: string;
+  agentKind: string;
+  agentName: string;
+  repo: string | null;
+  spamming: boolean;
+  spamReason: string | null;
+  total: number;
+  buckets: LedgerTimelineBucket[];
+}
+
+export interface LedgerTimelineBucket {
+  index: number;
+  edit: number;
+  bash: number;
+  read: number;
+  other: number;
+  intents: string[];
+  files: string[];
+}
+
+export interface LedgerSharedFile {
+  a: string;
+  b: string;
+  path: string;
+  bucket: number;
+}
+
+export interface LedgerFileDiffMessage {
+  type: 'ledgerFileDiff';
+  requestId: string;
+  ok: boolean;
+  worktree: string;
+  path: string;
+  diff: string;
+  truncated: boolean;
+  reason?: string;
+}
+
+export interface LedgerCommandResultMessage {
+  type: 'ledgerCommandResult';
+  requestId: string;
+  ok: boolean;
+  reason?: string;
+  delivered?: string[];
+}
+
 export interface TerminalAttachedMessage {
   type: 'terminalAttached';
   requestId: string;
@@ -1438,25 +1663,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_774;
-  mode?: AnonymousSchema_775;
+  delivery: AnonymousSchema_923;
+  mode?: AnonymousSchema_924;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_774 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_923 = 'prompt' | 'steer' | 'follow_up';
 
-export type AnonymousSchema_775 = 'chat' | 'company';
+export type AnonymousSchema_924 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_781;
+  decision: AnonymousSchema_930;
   note?: string;
 }
 
-export type AnonymousSchema_781 = 'approve' | 'reject';
+export type AnonymousSchema_930 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1469,7 +1694,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_793;
+  decision?: AnonymousSchema_942;
 }
 
 export interface QuestionAnswer {
@@ -1478,17 +1703,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_793 = 'approve_once' | 'reject';
+export type AnonymousSchema_942 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_798;
+  action: AnonymousSchema_947;
 }
 
-export type AnonymousSchema_798 =
+export type AnonymousSchema_947 =
   'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
 
 export interface CompanyPromptCancelMessage {
@@ -1573,6 +1798,33 @@ export interface CompanySessionInfoRequestMessage {
   type: 'companySessionInfoRequest';
   requestId: string;
   sessionId: string;
+}
+
+export interface LedgerViewRequestMessage {
+  type: 'ledgerViewRequest';
+  requestId: string;
+}
+
+export interface LedgerTimelineRequestMessage {
+  type: 'ledgerTimelineRequest';
+  requestId: string;
+  windowMinutes: AnonymousSchema_997;
+}
+
+export type AnonymousSchema_997 = 15 | 60 | 360 | 1440;
+
+export interface LedgerFileDiffRequestMessage {
+  type: 'ledgerFileDiffRequest';
+  requestId: string;
+  worktree: string;
+  path: string;
+}
+
+export interface LedgerSendMessage {
+  type: 'ledgerSendMessage';
+  requestId: string;
+  sessionId: string;
+  text: string;
 }
 
 export interface HerdrReadMessage {

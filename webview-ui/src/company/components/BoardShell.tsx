@@ -17,6 +17,9 @@ import { COMPANY_RAIL_WIDTH_PX } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import type { HerdrDrawerTab } from '../herdrView.js';
 import { sidebarPresentation } from '../layoutMode.js';
+import { ledgerStore } from '../ledger/ledgerClient.js';
+import { useLedgerState } from '../ledger/ledgerStore.js';
+import { LedgerView } from '../ledger/LedgerView.js';
 import {
   type DrawerSubject,
   drawerSubjectFor,
@@ -66,6 +69,9 @@ export interface BoardShellProps {
 export function BoardShell({ client }: BoardShellProps) {
   const state = useCompanyState(client);
   useSessionLogBackfill(client, state);
+  const ledger = useLedgerState(ledgerStore);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
+  const ledgerShown = ledgerOpen && ledger.privileged === true;
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<SidebarPrefs>(() => readSidebarPrefs(browserStorage()));
@@ -186,6 +192,7 @@ export function BoardShell({ client }: BoardShellProps) {
   function openHerdr(paneId: string, tab: HerdrDrawerTab = 'screen'): void {
     setOpened({ kind: 'herdr', paneId });
     setHerdrTab(tab);
+    client.select({ herdrPaneId: paneId });
     dismissSheet();
   }
 
@@ -238,6 +245,9 @@ export function BoardShell({ client }: BoardShellProps) {
         onToggleSidebar={toggleSidebar}
         filesOpen={opened?.kind === 'files'}
         onToggleFiles={toggleFiles}
+        ledgerAvailable={ledger.privileged === true}
+        ledgerOpen={ledgerShown}
+        onToggleLedger={() => setLedgerOpen((open) => !open)}
       />
       {state.needsSnapshot && (
         <p className="bg-warning/12 px-3 py-1.5 text-2xs text-warning">
@@ -311,17 +321,25 @@ export function BoardShell({ client }: BoardShellProps) {
               onDismiss={dismissSheet}
             />
           )}
-          <CompanyBoard
-            lanes={lanes}
-            flow={boardFlow(lanes, state.settings?.maxWorkers ?? null)}
-            planning={planningPrompts(state)}
-            onSelectSession={selectSession}
-            onSelectTask={selectTask}
-            onOpenHerdr={openHerdr}
-            selectedPaneId={selectedPaneId}
-            selectedSessionId={selectedSessionId}
-            onMenu={openMenu}
-          />
+          {ledgerShown ? (
+            <LedgerView
+              boardSessions={state.sessions}
+              onOpenBoardSession={selectSession}
+              onClose={() => setLedgerOpen(false)}
+            />
+          ) : (
+            <CompanyBoard
+              lanes={lanes}
+              flow={boardFlow(lanes, state.settings?.maxWorkers ?? null)}
+              planning={planningPrompts(state)}
+              onSelectSession={selectSession}
+              onSelectTask={selectTask}
+              onOpenHerdr={openHerdr}
+              selectedPaneId={selectedPaneId}
+              selectedSessionId={selectedSessionId}
+              onMenu={openMenu}
+            />
+          )}
           <DetailDrawer
             client={client}
             state={state}

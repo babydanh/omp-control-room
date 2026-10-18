@@ -59,6 +59,8 @@ import {
   watchLayoutFile,
   writeLayoutToFile,
 } from '../../server/src/layoutPersistence.js';
+import { handleLedgerMessage } from '../../server/src/ledger/handler.js';
+import { createLedgerService } from '../../server/src/ledger/ledgerRuntime.js';
 import { PathSet } from '../../server/src/pathKey.js';
 import type { ConsentEffects } from '../../server/src/providers/hook/consentExecutor.js';
 import { applyConsentChoice } from '../../server/src/providers/hook/consentExecutor.js';
@@ -143,6 +145,11 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
   private companyHost: WorkspaceCompanyHost | null = null;
   private readonly companyReady: Promise<void>;
   private companyDisposed = false;
+  /** Cây git board: its polls and scans run only while this webview is watching. */
+  private readonly ledger = createLedgerService({
+    extraRepoPaths: () => (this.companyServices ? [this.companyServices.workspaceRoot] : []),
+  });
+  private unsubscribeLedger: (() => void) | null = null;
   private disposePromise: Promise<void> | null = null;
   private readonly serverReady: Promise<void>;
   // An embedded webview is our own iframe reached through no socket, so it is
@@ -518,6 +525,16 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.pendingBroadcasts = [];
     webviewView.webview.options = { enableScripts: true };
     webviewView.webview.html = getWebviewContent(webviewView.webview, this.extensionUri);
+    // Live ledger snapshots reach this webview once it has loaded; a fresh iframe
+    // asks for its view again.
+    this.unsubscribeLedger?.();
+    this.unsubscribeLedger = this.ledger.subscribe((message) => {
+      if (this.isWebviewReady) this.webview?.postMessage(message);
+    });
+    webviewView.onDidDispose(() => {
+      this.unsubscribeLedger?.();
+      this.unsubscribeLedger = null;
+    });
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       if (isCompanyCommand(message as Record<string, unknown>)) await this.companyReady;
@@ -544,6 +561,19 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
             onTerminalDetached: (sessionId, leaseId) =>
               this.companyGate.release(sessionId, leaseId),
           },
+        )
+      ) {
+        return;
+      }
+
+      // Cây git board requests; the embedded webview is privileged, like the company path.
+      if (
+        handleLedgerMessage(
+          message as Record<string, unknown>,
+          (reply) => {
+            this.webview?.postMessage(reply);
+          },
+          { ledger: this.ledger, privileged: true },
         )
       ) {
         return;
@@ -1221,6 +1251,8 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
     this.companyDisposed = true;
     this.companyServices = null;
     this.companyGate.dispose();
+    this.unsubscribeLedger?.();
+    this.ledger.dispose();
     this.disposePromise = this.disposeResources();
     return this.disposePromise;
   }

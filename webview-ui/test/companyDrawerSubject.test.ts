@@ -15,7 +15,7 @@ describe('drawerSubjectFor', () => {
     const base = stateFrom({ tasks: [work], sessions: [worker] });
     const state: CompanyViewState = {
       ...base,
-      selection: { sessionId: worker.id, taskId: work.id, tab: null },
+      selection: { sessionId: worker.id, taskId: work.id, tab: null, herdrPaneId: null },
     };
 
     expect(drawerSubjectFor(state, { kind: 'contract', contractId: 'c1' })).toEqual({
@@ -31,13 +31,19 @@ describe('drawerSubjectFor', () => {
 
     expect(
       drawerSubjectFor(
-        { ...base, selection: { sessionId: worker.id, taskId: work.id, tab: null } },
+        {
+          ...base,
+          selection: { sessionId: worker.id, taskId: work.id, tab: null, herdrPaneId: null },
+        },
         null,
       ),
     ).toEqual({ kind: 'task', taskId: work.id });
     expect(
       drawerSubjectFor(
-        { ...base, selection: { sessionId: worker.id, taskId: null, tab: null } },
+        {
+          ...base,
+          selection: { sessionId: worker.id, taskId: null, tab: null, herdrPaneId: null },
+        },
         null,
       ),
     ).toEqual({ kind: 'session', sessionId: worker.id });
@@ -50,7 +56,10 @@ describe('drawerSubjectFor', () => {
 
     expect(
       drawerSubjectFor(
-        { ...base, selection: { sessionId: worker.id, taskId: 'gone', tab: null } },
+        {
+          ...base,
+          selection: { sessionId: worker.id, taskId: 'gone', tab: null, herdrPaneId: null },
+        },
         null,
       ),
     ).toEqual({ kind: 'session', sessionId: worker.id });
@@ -61,7 +70,10 @@ describe('drawerSubjectFor', () => {
 
     expect(
       drawerSubjectFor(
-        { ...base, selection: { sessionId: 'gone', taskId: 'gone', tab: null } },
+        {
+          ...base,
+          selection: { sessionId: 'gone', taskId: 'gone', tab: null, herdrPaneId: null },
+        },
         null,
       ),
     ).toBeNull();

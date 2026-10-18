@@ -92,6 +92,8 @@ export interface CompanySelection {
   taskId: string | null;
   /** Drawer tab the session should open on; null keeps the drawer's default. */
   tab: CompanyDrawerTab | null;
+  /** The herdr agent the composer is aimed at. Never set together with a session (see selectionWith). */
+  herdrPaneId: string | null;
 }
 
 /**
@@ -104,7 +106,12 @@ export interface CompanySelection {
 export type CompanyDrawerTab =
   'terminal' | 'log' | 'commands' | 'questions' | 'usage' | 'report' | 'info';
 
-export const EMPTY_SELECTION: CompanySelection = { sessionId: null, taskId: null, tab: null };
+export const EMPTY_SELECTION: CompanySelection = {
+  sessionId: null,
+  taskId: null,
+  tab: null,
+  herdrPaneId: null,
+};
 
 export interface TextStreamView {
   sessionId: string;
@@ -868,6 +875,7 @@ function settleSelection(result: CompanyResult): CompanyResult {
         sessionId,
         taskId,
         tab: sessionId === state.selection.sessionId ? state.selection.tab : null,
+        herdrPaneId: null,
       },
     },
   };

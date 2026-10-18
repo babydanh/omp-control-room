@@ -35,4 +35,7 @@ export type IconName =
   | 'chevron-left'
   | 'chevron-right'
   | 'chevron-down'
-  | 'chevron-up';
+  | 'chevron-up'
+  | 'git-branch'
+  | 'send'
+  | 'alert-triangle';

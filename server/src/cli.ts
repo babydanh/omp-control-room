@@ -42,6 +42,7 @@ import {
 } from './constants.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { createHerdrLink } from './herdr/herdrLink.js';
+import { createLedgerService } from './ledger/ledgerRuntime.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 import { PtySessionManager } from './terminal/ptySessionManager.js';
@@ -270,6 +271,14 @@ async function main(): Promise<void> {
     },
     recents: { read: readRecentCompanyWorkspaces, remember: rememberRecentCompanyWorkspace },
   });
+  // Cây git board: scans the repos seen in recent activity plus the open company folders.
+  const ledger = createLedgerService({
+    extraRepoPaths: () =>
+      company
+        .entries()
+        .filter((entry) => entry.open)
+        .map((entry) => entry.path),
+  });
   // Terminals for agents this server launches. Construction is cheap -- the
   // native module is resolved (and probed) lazily on first use, so a user who
   // never opens a terminal never pays for it. With --no-terminal, a disabled
@@ -291,6 +300,7 @@ async function main(): Promise<void> {
         await ptyManager.disposeAll();
         await company.dispose();
       } finally {
+        ledger.dispose();
         runtime.dispose();
         herdr.stop();
         await server.stop();
@@ -405,6 +415,7 @@ async function main(): Promise<void> {
       getCompany: () => (acceptingCompany ? company.activeServices() : null),
       isCompanyExecutionAllowed: () => acceptingCompany,
       workspaces: company,
+      ledger,
       herdr,
       ptyManager,
       allowedHosts: args.allowedHosts,

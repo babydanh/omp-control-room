@@ -144,6 +144,11 @@ components:
         - $ref: '#/components/schemas/CompanyFileListMessage'
         - $ref: '#/components/schemas/CompanyFileReadMessage'
         - $ref: '#/components/schemas/CompanyAttachmentUploadedMessage'
+        # Ledger (privileged; git graph and activity timeline)
+        - $ref: '#/components/schemas/LedgerSnapshotMessage'
+        - $ref: '#/components/schemas/LedgerTimelineMessage'
+        - $ref: '#/components/schemas/LedgerFileDiffMessage'
+        - $ref: '#/components/schemas/LedgerCommandResultMessage'
         # Native terminal (per-session attachments only)
         - $ref: '#/components/schemas/TerminalAttachedMessage'
         - $ref: '#/components/schemas/TerminalSnapshotMessage'
@@ -199,6 +204,11 @@ components:
         - $ref: '#/components/schemas/CompanySessionLogRequestMessage'
         - $ref: '#/components/schemas/CompanySessionRenameMessage'
         - $ref: '#/components/schemas/CompanySessionInfoRequestMessage'
+        # Ledger (privileged; read-only views and one message command)
+        - $ref: '#/components/schemas/LedgerViewRequestMessage'
+        - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
+        - $ref: '#/components/schemas/LedgerFileDiffRequestMessage'
+        - $ref: '#/components/schemas/LedgerSendMessage'
         # Herdr (privileged; drives the user's herdr server)
         - $ref: '#/components/schemas/HerdrReadMessage'
         - $ref: '#/components/schemas/HerdrPromptMessage'
@@ -3669,6 +3679,636 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/CompanyChange'
+
+    # ── Ledger: git graph + activity timeline (privileged) ─────────
+    # Read-only views of the activity ledger (~/.omp/agent/activity.db) and of
+    # the git checkouts it names, plus two commands: a message to a live session
+    # (through who.py send) and a read-only file diff. Nothing here edits the
+    # ledger or any checkout. Timestamps are the ledger's local
+    # `YYYY-MM-DD HH:MM:SS` strings, passed through unchanged.
+
+    LedgerViewRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: ledgerViewRequest
+        requestId:
+          type: string
+          format: uuid
+
+    LedgerTimelineRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, windowMinutes]
+      properties:
+        type:
+          const: ledgerTimelineRequest
+        requestId:
+          type: string
+          format: uuid
+        windowMinutes:
+          type: integer
+          enum: [15, 60, 360, 1440]
+
+    LedgerFileDiffRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, worktree, path]
+      properties:
+        type:
+          const: ledgerFileDiffRequest
+        requestId:
+          type: string
+          format: uuid
+        worktree:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        path:
+          type: string
+          minLength: 1
+          maxLength: 1024
+
+    LedgerSendMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, sessionId, text]
+      properties:
+        type:
+          const: ledgerSendMessage
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+
+    LedgerSnapshotMessage:
+      description: >-
+        The whole ledger view. With requestId it answers a ledgerViewRequest;
+        without it, it is a broadcast sent to privileged clients when the view
+        changes.
+      type: object
+      additionalProperties: false
+      required: [type, view]
+      properties:
+        type:
+          const: ledgerSnapshot
+        requestId:
+          type: string
+          format: uuid
+        view:
+          $ref: '#/components/schemas/LedgerView'
+
+    LedgerTimelineMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, timeline]
+      properties:
+        type:
+          const: ledgerTimeline
+        requestId:
+          type: string
+          format: uuid
+        timeline:
+          $ref: '#/components/schemas/LedgerTimeline'
+
+    LedgerFileDiffMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, ok, worktree, path, diff, truncated]
+      properties:
+        type:
+          const: ledgerFileDiff
+        requestId:
+          type: string
+          format: uuid
+        ok:
+          type: boolean
+        worktree:
+          type: string
+        path:
+          type: string
+        diff:
+          type: string
+          description: Unified diff text, cut to a fixed byte budget when `truncated` is true.
+        truncated:
+          type: boolean
+        reason:
+          type: string
+
+    LedgerCommandResultMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, ok]
+      properties:
+        type:
+          const: ledgerCommandResult
+        requestId:
+          type: string
+          format: uuid
+        ok:
+          type: boolean
+        reason:
+          type: string
+          description: Vietnamese refusal or failure reason when ok is false.
+        delivered:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+
+    LedgerView:
+      type: object
+      additionalProperties: false
+      required: [generatedAt, database, repos, unscannedFolders, sessions, pending, notices, mainWrites, overlaps, spamRule]
+      properties:
+        generatedAt:
+          type: string
+        database:
+          $ref: '#/components/schemas/LedgerDatabaseStatus'
+        repos:
+          type: array
+          maxItems: 24
+          items:
+            $ref: '#/components/schemas/LedgerRepo'
+        unscannedFolders:
+          type: array
+          description: Folders named by recent ledger events that are not git repositories.
+          maxItems: 50
+          items:
+            type: string
+        sessions:
+          type: array
+          maxItems: 400
+          items:
+            $ref: '#/components/schemas/LedgerSession'
+        pending:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/LedgerPending'
+        notices:
+          type: array
+          description: Ledger notices not yet delivered to their session (delivered = 0), newest first.
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/LedgerNotice'
+        mainWrites:
+          type: array
+          description: Edits and writes made in a main checkout during the last 24 hours, newest first.
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/LedgerMainWrite'
+        overlaps:
+          type: array
+          maxItems: 24
+          items:
+            $ref: '#/components/schemas/LedgerOverlapScan'
+        spamRule:
+          $ref: '#/components/schemas/LedgerSpamRule'
+
+    LedgerDatabaseStatus:
+      type: object
+      additionalProperties: false
+      required: [state]
+      properties:
+        state:
+          type: string
+          enum: [ok, missing, unreadable]
+        error:
+          type: string
+
+    LedgerRepo:
+      type: object
+      additionalProperties: false
+      required: [repo, name, worktrees]
+      properties:
+        repo:
+          type: string
+          description: Main repository root, forward slashes.
+        name:
+          type: string
+        worktrees:
+          type: array
+          maxItems: 40
+          items:
+            $ref: '#/components/schemas/LedgerWorktree'
+
+    LedgerWorktree:
+      type: object
+      additionalProperties: false
+      required: [path, name, branch, head, isMain, ahead, behind, dirtyCount, dirtyFiles, merged, hasUpstream, lastCommitSubject, lastCommitAt, sessionIds]
+      properties:
+        path:
+          type: string
+        name:
+          type: string
+        branch:
+          type: [string, 'null']
+        head:
+          type: string
+          description: Short commit id; empty when the checkout has no commit yet.
+        isMain:
+          type: boolean
+        ahead:
+          type: integer
+          minimum: 0
+          description: Commits on this checkout's HEAD that origin/main lacks.
+        behind:
+          type: integer
+          minimum: 0
+          description: Commits on origin/main that this checkout's HEAD lacks.
+        dirtyCount:
+          type: integer
+          minimum: 0
+        dirtyFiles:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/LedgerDirtyFile'
+        merged:
+          type: boolean
+          description: HEAD is an ancestor of origin/main (its work is already in main).
+        hasUpstream:
+          type: boolean
+        lastCommitSubject:
+          type: string
+          maxLength: 200
+        lastCommitAt:
+          type: [string, 'null']
+        sessionIds:
+          type: array
+          maxItems: 40
+          items:
+            type: string
+        gitError:
+          type: string
+
+    LedgerDirtyFile:
+      type: object
+      additionalProperties: false
+      required: [path, status]
+      properties:
+        path:
+          type: string
+        status:
+          type: string
+          description: Two-character porcelain status, e.g. " M", "A ", "??".
+
+    LedgerSession:
+      type: object
+      additionalProperties: false
+      required: [sessionId, agentKind, agentName, open, live, state, cwd, repo, checkout, branch, lastIntent, lastCallAt, calls5m, calls30m, spamming, spamReason, pid]
+      properties:
+        sessionId:
+          type: string
+        agentKind:
+          type: string
+          description: "main or sub (sub-agents spawned by a main session)."
+        agentName:
+          type: string
+        parentId:
+          type: [string, 'null']
+        open:
+          type: boolean
+          description: ended_at is NULL in the ledger.
+        live:
+          type: boolean
+          description: Open and heartbeat within the last 60 seconds.
+        state:
+          type: string
+        cwd:
+          type: string
+        repo:
+          type: [string, 'null']
+        checkout:
+          type: [string, 'null']
+          description: Checkout of the session's most recent file or shell event that names one.
+        branch:
+          type: [string, 'null']
+        lastIntent:
+          type: [string, 'null']
+        lastCallAt:
+          type: [string, 'null']
+        calls5m:
+          type: integer
+          minimum: 0
+        calls30m:
+          type: integer
+          minimum: 0
+        spamming:
+          type: boolean
+        spamReason:
+          type: [string, 'null']
+        pid:
+          type: [integer, 'null']
+
+    LedgerPending:
+      type: object
+      additionalProperties: false
+      required: [checkout, sessionId, branch, dirty, unpushed, notInMain, hasRemote, ts]
+      properties:
+        checkout:
+          type: string
+        sessionId:
+          type: [string, 'null']
+        branch:
+          type: [string, 'null']
+        dirty:
+          type: integer
+          minimum: 0
+        unpushed:
+          type: integer
+          minimum: 0
+        notInMain:
+          type: integer
+          minimum: 0
+        hasRemote:
+          type: boolean
+        ts:
+          type: string
+
+    LedgerNotice:
+      type: object
+      additionalProperties: false
+      required: [id, ts, toSession, fromSession, relKey, content]
+      properties:
+        id:
+          type: integer
+        ts:
+          type: string
+        toSession:
+          type: string
+        fromSession:
+          type: [string, 'null']
+        relKey:
+          type: [string, 'null']
+        content:
+          type: string
+          maxLength: 400
+
+    LedgerMainWrite:
+      type: object
+      additionalProperties: false
+      required: [sessionId, ts, tool, path, intent]
+      properties:
+        sessionId:
+          type: string
+        ts:
+          type: string
+        tool:
+          type: [string, 'null']
+        path:
+          type: [string, 'null']
+        intent:
+          type: [string, 'null']
+
+    LedgerOverlapScan:
+      description: Last overlap.py scan of one repository. `state` says whether the answer is complete.
+      type: object
+      additionalProperties: false
+      required: [repo, state, startedAt, finishedAt, base, lanes, pairs, main, pending, complete, error]
+      properties:
+        repo:
+          type: string
+        state:
+          type: string
+          enum: [idle, running, done, partial, error]
+        startedAt:
+          type: [string, 'null']
+        finishedAt:
+          type: [string, 'null']
+        base:
+          type: [string, 'null']
+        lanes:
+          type: integer
+          minimum: 0
+        pairs:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/LedgerOverlapPair'
+        main:
+          type: array
+          maxItems: 40
+          items:
+            $ref: '#/components/schemas/LedgerOverlapMain'
+        pending:
+          type: array
+          description: Labels of checks the budget did not reach. Unchecked is not clean.
+          maxItems: 200
+          items:
+            type: string
+        complete:
+          type: boolean
+        error:
+          type: [string, 'null']
+
+    LedgerOverlapPair:
+      type: object
+      additionalProperties: false
+      required: [a, b, aLabel, bLabel, conflicts, auto]
+      properties:
+        a:
+          type: string
+        b:
+          type: string
+        aLabel:
+          type: string
+        bLabel:
+          type: string
+        conflicts:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/LedgerOverlapConflict'
+        auto:
+          type: array
+          description: Files both lanes changed in separate hunks that git or Mergiraf merges by itself.
+          maxItems: 100
+          items:
+            type: string
+
+    LedgerOverlapMain:
+      type: object
+      additionalProperties: false
+      required: [lane, label, conflicts]
+      properties:
+        lane:
+          type: string
+        label:
+          type: string
+        conflicts:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/LedgerOverlapConflict'
+
+    LedgerOverlapConflict:
+      type: object
+      additionalProperties: false
+      required: [file, hunks]
+      properties:
+        file:
+          type: string
+        hunks:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/LedgerOverlapHunk'
+
+    LedgerOverlapHunk:
+      type: object
+      additionalProperties: false
+      required: [line, symbol, ours, theirs]
+      properties:
+        line:
+          type: integer
+          minimum: 0
+        symbol:
+          type: string
+        ours:
+          type: array
+          maxItems: 6
+          items:
+            type: string
+        theirs:
+          type: array
+          maxItems: 6
+          items:
+            type: string
+
+    LedgerSpamRule:
+      description: The documented rule that flags a session as spamming. See CLAUDE.md, Board UI.
+      type: object
+      additionalProperties: false
+      required: [windowMinutes, callsPerWindow, sameIntentPerWindow, lookbackMinutes]
+      properties:
+        windowMinutes:
+          type: integer
+          minimum: 1
+        callsPerWindow:
+          type: integer
+          minimum: 1
+        sameIntentPerWindow:
+          type: integer
+          minimum: 1
+        lookbackMinutes:
+          type: integer
+          minimum: 1
+
+    LedgerTimeline:
+      type: object
+      additionalProperties: false
+      required: [windowMinutes, bucketSeconds, startedAt, endedAt, lanes, shared, truncated]
+      properties:
+        windowMinutes:
+          type: integer
+        bucketSeconds:
+          type: integer
+          description: Window length divided by 60 buckets.
+        startedAt:
+          type: string
+        endedAt:
+          type: string
+        lanes:
+          type: array
+          maxItems: 150
+          items:
+            $ref: '#/components/schemas/LedgerTimelineLane'
+        shared:
+          type: array
+          description: Pairs of sessions that edited the same file within one bucket.
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/LedgerSharedFile'
+        truncated:
+          type: boolean
+
+    LedgerTimelineLane:
+      type: object
+      additionalProperties: false
+      required: [sessionId, agentKind, agentName, repo, spamming, spamReason, total, buckets]
+      properties:
+        sessionId:
+          type: string
+        agentKind:
+          type: string
+        agentName:
+          type: string
+        repo:
+          type: [string, 'null']
+        spamming:
+          type: boolean
+        spamReason:
+          type: [string, 'null']
+        total:
+          type: integer
+          minimum: 0
+        buckets:
+          type: array
+          description: Non-empty buckets only.
+          maxItems: 60
+          items:
+            $ref: '#/components/schemas/LedgerTimelineBucket'
+
+    LedgerTimelineBucket:
+      type: object
+      additionalProperties: false
+      required: [index, edit, bash, read, other, intents, files]
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          maximum: 59
+        edit:
+          type: integer
+          minimum: 0
+        bash:
+          type: integer
+          minimum: 0
+        read:
+          type: integer
+          minimum: 0
+        other:
+          type: integer
+          minimum: 0
+        intents:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            maxLength: 160
+        files:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            maxLength: 260
+
+    LedgerSharedFile:
+      type: object
+      additionalProperties: false
+      required: [a, b, path, bucket]
+      properties:
+        a:
+          type: string
+        b:
+          type: string
+        path:
+          type: string
+        bucket:
+          type: integer
+          minimum: 0
+          maximum: 59
 
     CompanyCommandResultMessage:
       type: object

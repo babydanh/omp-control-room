@@ -63,6 +63,8 @@ describe('hover open', () => {
       pendingAnchor: null,
       dismissed: null,
       drawer: null,
+      pinned: false,
+      panelHovered: false,
     });
     expect(opened.effects).toStrictEqual([]);
   });
@@ -102,6 +104,8 @@ describe('hover open', () => {
       pendingAnchor: null,
       dismissed: null,
       drawer: null,
+      pinned: false,
+      panelHovered: false,
     });
     expect(switched.effects).toStrictEqual([
       { type: 'cancel', timer: 'open' },
@@ -190,6 +194,8 @@ describe('escape and dismissal', () => {
       pendingAnchor: null,
       dismissed: 'herdr:pane-a',
       drawer: null,
+      pinned: false,
+      panelHovered: false,
     });
     expect(escaped.effects).toStrictEqual([
       { type: 'cancel', timer: 'open' },
@@ -447,5 +453,84 @@ describe('placePreview', () => {
       width: 0,
       height: 0,
     });
+  });
+});
+
+describe('pinning: an input in use holds the preview open', () => {
+  const PINNED_A = run(OPEN_A, { type: 'pin', pinned: true });
+  const pageScroll: PreviewEvent = { type: 'scroll', insidePreview: false, movesRow: true };
+
+  it('pinning cancels the grace timer, so a close that was due does not land', () => {
+    const left = reducePreview(OPEN_A, leaveRow(ROW_A));
+    const pinned = reducePreview(left.state, { type: 'pin', pinned: true });
+    expect(pinned.state.pinned).toBe(true);
+    expect(pinned.effects).toStrictEqual([{ type: 'cancel', timer: 'close' }]);
+    expect(run(pinned.state, fire('close')).target).toStrictEqual(ROW_A);
+  });
+
+  it('leaving the pinned row or its panel schedules no close', () => {
+    expect(reducePreview(PINNED_A, leaveRow(ROW_A)).effects).toStrictEqual([]);
+    const away = reducePreview(PINNED_A, { type: 'panelLeave', target: ROW_A });
+    expect(away.state.panelHovered).toBe(false);
+    expect(away.effects).toStrictEqual([]);
+    expect(run(away.state, fire('close')).target).toStrictEqual(ROW_A);
+  });
+
+  it('releasing the pin starts the grace when the pointer is outside the panel', () => {
+    const released = reducePreview(PINNED_A, { type: 'pin', pinned: false });
+    expect(released.state.pinned).toBe(false);
+    expect(released.effects).toStrictEqual([{ type: 'schedule', timer: 'close', delayMs: 250 }]);
+    expect(run(released.state, fire('close')).target).toBeNull();
+  });
+
+  it('releasing the pin keeps the preview open while the pointer is over its panel', () => {
+    const hovering = run(PINNED_A, { type: 'panelEnter', target: ROW_A });
+    const released = reducePreview(hovering, { type: 'pin', pinned: false });
+    expect(released.effects).toStrictEqual([]);
+    expect(released.state.target).toStrictEqual(ROW_A);
+  });
+
+  it('ignores scrolls that move its row, resizes, and hovers of other rows', () => {
+    expect(reducePreview(PINNED_A, pageScroll).state.target).toStrictEqual(ROW_A);
+    expect(reducePreview(PINNED_A, CLOSE)).toStrictEqual({ state: PINNED_A, effects: [] });
+    expect(reducePreview(PINNED_A, enterRow(ROW_B, ANCHOR_B))).toStrictEqual({
+      state: PINNED_A,
+      effects: [],
+    });
+  });
+
+  it('Escape and a press outside close it and release the pin', () => {
+    const escaped = reducePreview(PINNED_A, ESCAPE);
+    expect(escaped.state).toStrictEqual({ ...INITIAL_PREVIEW_STATE, dismissed: 'herdr:pane-a' });
+    const dismissed = reducePreview(PINNED_A, { type: 'dismiss' });
+    expect(dismissed.state).toStrictEqual(INITIAL_PREVIEW_STATE);
+    expect(dismissed.effects).toStrictEqual([
+      { type: 'cancel', timer: 'open' },
+      { type: 'cancel', timer: 'close' },
+    ]);
+  });
+
+  it('the drawer showing the pinned row still closes it', () => {
+    const shown = reducePreview(PINNED_A, drawerShows('herdr:pane-a'));
+    expect(shown.state.target).toBeNull();
+    expect(shown.state.pinned).toBe(false);
+  });
+
+  it('pin events do nothing without an open preview, or when nothing changes', () => {
+    expect(reducePreview(INITIAL_PREVIEW_STATE, { type: 'pin', pinned: true })).toStrictEqual({
+      state: INITIAL_PREVIEW_STATE,
+      effects: [],
+    });
+    expect(reducePreview(PINNED_A, { type: 'pin', pinned: true })).toStrictEqual({
+      state: PINNED_A,
+      effects: [],
+    });
+  });
+
+  it('tracks whether the pointer is over the open panel', () => {
+    const hovered = reducePreview(OPEN_A, { type: 'panelEnter', target: ROW_A }).state;
+    expect(hovered.panelHovered).toBe(true);
+    const left = reducePreview(hovered, { type: 'panelLeave', target: ROW_A }).state;
+    expect(left.panelHovered).toBe(false);
   });
 });

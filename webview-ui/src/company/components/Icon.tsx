@@ -186,6 +186,27 @@ const GLYPHS: Record<IconName, ReactNode> = {
       <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
     </>
   ),
+  'git-branch': (
+    <>
+      <line x1="6" y1="3" x2="6" y2="15" />
+      <circle cx="18" cy="6" r="3" />
+      <circle cx="6" cy="18" r="3" />
+      <path d="M18 9a9 9 0 0 1-9 9" />
+    </>
+  ),
+  send: (
+    <>
+      <line x1="22" y1="2" x2="11" y2="13" />
+      <polygon points="22 2 15 22 11 13 2 9 22 2" />
+    </>
+  ),
+  'alert-triangle': (
+    <>
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </>
+  ),
 };
 
 export function Icon({ name, className }: { name: IconName; className?: string }) {

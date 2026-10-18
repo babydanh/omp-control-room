@@ -4,7 +4,9 @@
  * The view feeds DOM events in and performs the returned timer effects; nothing
  * here touches timers, the DOM or React. A preview opens after a short hover
  * delay and stays open across a brief pointer gap. Escape dismisses it, and the
- * dismissal holds until the pointer leaves that same row.
+ * dismissal holds until the pointer leaves that same row. A preview whose input is in
+ * use is pinned: pointer gaps, scrolls and resizes leave it open until Escape, a press
+ * outside it, or the drawer showing its row.
  */
 
 import type { DrawerSubject } from './selection.js';
@@ -63,6 +65,10 @@ export interface PreviewState {
   readonly dismissed: string | null;
   /** Key of the subject the detail drawer shows; its row gets no preview while it does. */
   readonly drawer: string | null;
+  /** The preview's input is focused or holds text: the preview stays open until released. */
+  readonly pinned: boolean;
+  /** The pointer is over the open preview panel. */
+  readonly panelHovered: boolean;
 }
 
 export const INITIAL_PREVIEW_STATE: PreviewState = {
@@ -72,6 +78,8 @@ export const INITIAL_PREVIEW_STATE: PreviewState = {
   pendingAnchor: null,
   dismissed: null,
   drawer: null,
+  pinned: false,
+  panelHovered: false,
 };
 
 export type PreviewTimer = 'open' | 'close';
@@ -90,8 +98,12 @@ export type PreviewEvent =
   // preview (`insidePreview`) moves only its own text.
   | { readonly type: 'scroll'; readonly insidePreview: boolean; readonly movesRow: boolean }
   | { readonly type: 'panelEnter' | 'panelLeave'; readonly target: PreviewTarget }
-  // Resize, or the anchor went away.
+  // Resize, or the anchor went away. A pinned preview stays open.
   | { readonly type: 'close' }
+  // A press outside the preview panel. Closes the preview even while it is pinned.
+  | { readonly type: 'dismiss' }
+  // The preview's input took hold of it (`pinned`) or let go of it.
+  | { readonly type: 'pin'; readonly pinned: boolean }
   | { readonly type: 'timer'; readonly timer: PreviewTimer };
 
 export type PreviewEffect =
@@ -126,6 +138,8 @@ function onEnter(state: PreviewState, target: PreviewTarget, anchor: PreviewRect
   const key = previewKey(target);
   if (sameTarget(state.target, key)) return step(state, [cancel('close')]);
   if (isSuppressed(state, key)) return step(state);
+  // A pinned preview keeps its row: its input is in use, so another row cannot take over.
+  if (state.pinned) return step(state);
   if (state.target !== null) {
     // Another row is open: switch at once so the preview does not flicker.
     return step({ ...state, target, anchor, pending: null, pendingAnchor: null }, [
@@ -148,22 +162,50 @@ function onLeave(state: PreviewState, target: PreviewTarget): PreviewStep {
     next = { ...next, pending: null, pendingAnchor: null };
     effects.push(cancel('open'));
   }
-  if (sameTarget(state.target, key)) {
+  if (sameTarget(state.target, key) && !state.pinned) {
     effects.push({ type: 'schedule', timer: 'close', delayMs: PREVIEW_CLOSE_GRACE_MS });
   }
   return step(next, effects);
 }
 
-/** The pointer reached the open preview: it stays open. */
-function onPanelEnter(state: PreviewState, target: PreviewTarget): PreviewStep {
-  if (sameTarget(state.target, previewKey(target))) return step(state, [cancel('close')]);
-  return step(state);
+/** Clears the preview and its pending twin; the pin and the panel hover go with them. */
+function withoutPreview(state: PreviewState): PreviewState {
+  return {
+    ...state,
+    target: null,
+    anchor: null,
+    pending: null,
+    pendingAnchor: null,
+    pinned: false,
+    panelHovered: false,
+  };
 }
 
-/** The pointer left the open preview: it closes after the grace, unless the pointer comes back. */
+/** The pointer reached the open preview: it stays open. */
+function onPanelEnter(state: PreviewState, target: PreviewTarget): PreviewStep {
+  const next = { ...state, panelHovered: true };
+  if (sameTarget(state.target, previewKey(target))) return step(next, [cancel('close')]);
+  return step(next);
+}
+
+/** The pointer left the open preview: it closes after the grace, unless it is pinned. */
 function onPanelLeave(state: PreviewState, target: PreviewTarget): PreviewStep {
-  if (!sameTarget(state.target, previewKey(target))) return step(state);
-  return step(state, [{ type: 'schedule', timer: 'close', delayMs: PREVIEW_CLOSE_GRACE_MS }]);
+  const next = { ...state, panelHovered: false };
+  if (!sameTarget(state.target, previewKey(target)) || state.pinned) return step(next);
+  return step(next, [{ type: 'schedule', timer: 'close', delayMs: PREVIEW_CLOSE_GRACE_MS }]);
+}
+
+/**
+ * The input took hold of the preview (`pinned`) or let go of it. Letting go restarts the
+ * grace, unless the pointer is over the panel.
+ */
+function onPin(state: PreviewState, pinned: boolean): PreviewStep {
+  if (state.pinned === pinned || state.target === null) return step(state);
+  if (pinned) return step({ ...state, pinned }, [cancel('close')]);
+  if (state.panelHovered) return step({ ...state, pinned });
+  return step({ ...state, pinned }, [
+    { type: 'schedule', timer: 'close', delayMs: PREVIEW_CLOSE_GRACE_MS },
+  ]);
 }
 
 /**
@@ -171,41 +213,29 @@ function onPanelLeave(state: PreviewState, target: PreviewTarget): PreviewStep {
  * A wheel or drag inside the preview scrolls its own text and leaves it open.
  */
 function onScroll(state: PreviewState, insidePreview: boolean, movesRow: boolean): PreviewStep {
-  if (insidePreview || !movesRow) return step(state);
-  return step({ ...state, target: null, anchor: null, pending: null, pendingAnchor: null }, [
+  if (insidePreview || !movesRow || state.pinned) return step(state);
+  return step(withoutPreview(state), [cancel('open'), cancel('close')]);
+}
+
+/** A press on a row closes its preview and keeps it shut until the pointer leaves the row. */
+function onPress(state: PreviewState, target: PreviewTarget): PreviewStep {
+  return step({ ...withoutPreview(state), dismissed: previewKey(target) }, [
     cancel('open'),
     cancel('close'),
   ]);
 }
 
-/** A press on a row closes its preview and keeps it shut until the pointer leaves the row. */
-function onPress(state: PreviewState, target: PreviewTarget): PreviewStep {
-  return step(
-    {
-      ...state,
-      target: null,
-      anchor: null,
-      pending: null,
-      pendingAnchor: null,
-      dismissed: previewKey(target),
-    },
-    [cancel('open'), cancel('close')],
-  );
-}
-
 /**
  * The drawer now shows `key`. That row's open or pending preview closes, and the row gets
- * no preview while the drawer shows it.
+ * no preview while the drawer shows it. This holds for a pinned preview too: the user
+ * asked for the drawer.
  */
 function onDrawer(state: PreviewState, key: string | null): PreviewStep {
   if (key === state.drawer) return step(state);
   const shownRow =
     key !== null && (sameTarget(state.target, key) || sameTarget(state.pending, key));
   if (!shownRow) return step({ ...state, drawer: key });
-  return step(
-    { ...state, drawer: key, target: null, anchor: null, pending: null, pendingAnchor: null },
-    [cancel('open'), cancel('close')],
-  );
+  return step({ ...withoutPreview(state), drawer: key }, [cancel('open'), cancel('close')]);
 }
 
 function onTimer(state: PreviewState, timer: PreviewTimer): PreviewStep {
@@ -219,8 +249,9 @@ function onTimer(state: PreviewState, timer: PreviewTimer): PreviewStep {
       pendingAnchor: null,
     });
   }
-  if (state.target === null) return step(state);
-  return step({ ...state, target: null, anchor: null });
+  // The grace ends a hover; a pinned preview has no hover to end.
+  if (state.target === null || state.pinned) return step(state);
+  return step(withoutPreview(state));
 }
 
 /** Apply one DOM-level event to the preview state; returns the timer effects to perform. */
@@ -238,28 +269,25 @@ export function reducePreview(state: PreviewState, event: PreviewEvent): Preview
       return onDrawer(state, event.key);
     case 'escape':
       // Escape dismisses the row that is open or pending; otherwise the dismissal stays.
-      return step(
-        {
-          ...state,
-          target: null,
-          anchor: null,
-          pending: null,
-          pendingAnchor: null,
-          dismissed: activeKey(state) ?? state.dismissed,
-        },
-        [cancel('open'), cancel('close')],
-      );
+      return step({ ...withoutPreview(state), dismissed: activeKey(state) ?? state.dismissed }, [
+        cancel('open'),
+        cancel('close'),
+      ]);
     case 'panelEnter':
       return onPanelEnter(state, event.target);
     case 'panelLeave':
       return onPanelLeave(state, event.target);
     case 'scroll':
       return onScroll(state, event.insidePreview, event.movesRow);
+    case 'pin':
+      return onPin(state, event.pinned);
     case 'close':
-      return step({ ...state, target: null, anchor: null, pending: null, pendingAnchor: null }, [
-        cancel('open'),
-        cancel('close'),
-      ]);
+      // Resize, or the anchor went away; a pinned preview keeps its input.
+      if (state.pinned) return step(state);
+      return step(withoutPreview(state), [cancel('open'), cancel('close')]);
+    case 'dismiss':
+      // A press outside the panel: closes even a pinned preview.
+      return step(withoutPreview(state), [cancel('open'), cancel('close')]);
     case 'timer':
       return onTimer(state, event.timer);
   }

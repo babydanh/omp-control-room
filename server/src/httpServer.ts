@@ -21,6 +21,7 @@ import {
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
+import type { LedgerService } from './ledger/ledgerService.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
 import { registerTerminalRoutes } from './terminal/terminalRoutes.js';
 import type { AgentState } from './types.js';
@@ -66,6 +67,8 @@ export interface HttpServerOptions {
   herdr?: HerdrLink | null;
   /** Company folder list and switching; absent when the process holds one fixed workspace. */
   workspaces?: CompanyWorkspaceControl | null;
+  /** Ledger board service. Live snapshots reach privileged sockets only; absent or null = no ledger. */
+  ledger?: LedgerService | null;
   /** PTY terminals for standalone-launched agents. Absent = terminal feature off
    *  (VS Code embedded mode, where the editor owns terminals). */
   ptyManager?: PtySessionManager;
@@ -266,6 +269,13 @@ function registerWebSocketRoute(
     store.on('agentAdded', onAgentAdded);
     store.on('agentRemoved', onAgentRemoved);
     store.on('broadcast', onBroadcast);
+    // Ledger snapshots reach privileged sockets only: the board shows session intents and file paths.
+    const unsubscribeLedger =
+      privileged && options.ledger
+        ? options.ledger.subscribe((message) =>
+            safeSend(socket, message as unknown as Record<string, unknown>),
+          )
+        : null;
 
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
@@ -288,6 +298,7 @@ function registerWebSocketRoute(
             onReloadAssets: options.onReloadAssets,
             company: options.getCompany?.() ?? options.company ?? null,
             workspaces: options.workspaces ?? null,
+            ledger: options.ledger ?? null,
             privileged,
             companyExecutionAllowed: options.isCompanyExecutionAllowed?.() ?? !options.embedded,
             onTerminalAttached: (sessionId, leaseId) => gate.grant(sessionId, leaseId),
@@ -305,6 +316,7 @@ function registerWebSocketRoute(
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
+      unsubscribeLedger?.();
       gate.dispose();
     });
   });

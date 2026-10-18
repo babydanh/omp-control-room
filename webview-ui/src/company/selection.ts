@@ -22,12 +22,36 @@ export function selectionForTask(state: CompanyViewState, taskId: string): Compa
     sessionId,
     // A card is about the work, not about a transcript: open what it is doing.
     tab: sessionId === null ? null : 'log',
+    herdrPaneId: null,
   };
 }
 
 /** Selection for a session row: the session and whatever it is working on. */
 export function selectionForSession(state: CompanyViewState, sessionId: string): CompanySelection {
-  return { taskId: state.sessions[sessionId]?.activeTaskId ?? null, sessionId, tab: null };
+  return {
+    taskId: state.sessions[sessionId]?.activeTaskId ?? null,
+    sessionId,
+    tab: null,
+    herdrPaneId: null,
+  };
+}
+
+/**
+ * The selection after a change. A herdr pane and a session are never selected together:
+ * naming a herdr pane clears the session, and naming a session or a task clears the pane,
+ * so a herdr target never outlives the choice that made it. Other fields merge as usual.
+ */
+export function selectionWith(
+  current: CompanySelection,
+  change: Partial<CompanySelection>,
+): CompanySelection {
+  const next: CompanySelection = { ...current, ...change };
+  if (change.herdrPaneId !== undefined) {
+    if (change.herdrPaneId !== null) next.sessionId = null;
+  } else if (change.sessionId !== undefined || change.taskId !== undefined) {
+    next.herdrPaneId = null;
+  }
+  return next;
 }
 
 /** The contract waiting on the user's decision, if there is one. */

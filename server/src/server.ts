@@ -20,6 +20,7 @@ import {
 } from './constants.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
 import { createHttpServer } from './httpServer.js';
+import type { LedgerService } from './ledger/ledgerService.js';
 import type { ServerConfig, StandaloneAccess } from './serverConfig.js';
 import { isServerConfig, isServerTarget, sameStandaloneAccess } from './serverConfig.js';
 import { loadOrCreateStandaloneToken } from './serverToken.js';
@@ -79,6 +80,8 @@ export class PixelAgentsServer {
     getCompany?: () => CompanyCommandServices | null;
     isCompanyExecutionAllowed?: () => boolean;
     workspaces?: CompanyWorkspaceControl | null;
+    /** Cây git board service; absent or null when the ledger is not wired. */
+    ledger?: LedgerService | null;
     herdr?: HerdrLink | null;
     ptyManager?: PtySessionManager;
     /** Extra privileged Host names (standalone; see wsAuth.privilegedHostnames). */
@@ -162,6 +165,7 @@ export class PixelAgentsServer {
       getCompany: options?.getCompany,
       isCompanyExecutionAllowed: options?.isCompanyExecutionAllowed,
       workspaces: options?.workspaces,
+      ledger: options?.ledger,
       herdr: options?.herdr,
       ptyManager: options?.ptyManager,
       allowedHosts: standalone?.allowedHosts,

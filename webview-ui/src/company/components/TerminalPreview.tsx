@@ -8,6 +8,9 @@
  * through previewTriggers, so the sidebar and the rail need no preview logic.
  *
  * The panel takes the pointer, so its text can be read and scrolled with the wheel.
+ *
+ * The prompt line sends to the row's agent. While that line holds focus or text, the
+ * preview stays open.
  */
 
 import type { ReactNode, RefObject } from 'react';
@@ -38,6 +41,7 @@ import {
 } from '../terminalPreview.js';
 import { type TerminalPreviewActions, TerminalPreviewContext } from '../terminalPreviewActions.js';
 import { parseAnsiScreen, tailScreen } from '../terminalScreen.js';
+import { PreviewPrompt } from './PreviewPrompt.js';
 import { PinnedScreenFrame } from './ScreenFrame.js';
 import { ScreenView } from './ScreenView.js';
 import { TerminalMirror } from './TerminalMirror.js';
@@ -97,6 +101,12 @@ export function TerminalPreviewProvider({
     }
   }, []);
 
+  // Stable, so the prompt's pin effect runs only when its pinned state actually changes.
+  const onPinChange = useCallback(
+    (pinned: boolean): void => dispatch({ type: 'pin', pinned }),
+    [dispatch],
+  );
+
   const actions = useMemo<TerminalPreviewActions>(
     () => ({
       enter: (target, element) => {
@@ -136,7 +146,7 @@ export function TerminalPreviewProvider({
   useEffect(() => {
     if (openTarget === null) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || event.isComposing) return;
       // Escape closes the preview only; the drawer and menus underneath keep theirs.
       event.stopPropagation();
       dispatch({ type: 'escape' });
@@ -159,7 +169,7 @@ export function TerminalPreviewProvider({
       // A press inside the preview belongs to it: its scrollbar and text stay usable.
       const pressed = event.target;
       if (pressed instanceof Node && panelRef.current?.contains(pressed) === true) return;
-      dispatch({ type: 'close' });
+      dispatch({ type: 'dismiss' });
     };
     const checkAnchor = window.setInterval(() => {
       const anchor = anchorRef.current;
@@ -198,6 +208,7 @@ export function TerminalPreviewProvider({
               panelRef={panelRef}
               onPointerEnter={() => dispatch({ type: 'panelEnter', target: openTarget })}
               onPointerLeave={() => dispatch({ type: 'panelLeave', target: openTarget })}
+              onPinChange={onPinChange}
             />
           </div>,
           document.body,
@@ -230,6 +241,7 @@ function PreviewPanel({
   panelRef,
   onPointerEnter,
   onPointerLeave,
+  onPinChange,
 }: {
   client: CompanyClient;
   state: CompanyViewState;
@@ -239,12 +251,14 @@ function PreviewPanel({
   panelRef: RefObject<HTMLDivElement | null>;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
+  onPinChange: (pinned: boolean) => void;
 }) {
   const box = placePreview(anchor, bounds);
   return (
     <div
       ref={panelRef}
-      aria-hidden="true"
+      role="group"
+      aria-label="Xem trước terminal"
       data-testid="terminal-preview"
       className="company-fade-in fixed z-40 flex flex-col overflow-hidden rounded-(--company-radius-md) border border-hairline bg-raised"
       style={{
@@ -256,11 +270,14 @@ function PreviewPanel({
       onPointerEnter={onPointerEnter}
       onPointerLeave={onPointerLeave}
     >
-      {target.kind === 'herdr' ? (
-        <HerdrPreview client={client} state={state} paneId={target.paneId} />
-      ) : (
-        <SessionPreview client={client} state={state} sessionId={target.sessionId} />
-      )}
+      <div className="flex min-h-0 flex-1 flex-col">
+        {target.kind === 'herdr' ? (
+          <HerdrPreview client={client} state={state} paneId={target.paneId} />
+        ) : (
+          <SessionPreview client={client} state={state} sessionId={target.sessionId} />
+        )}
+      </div>
+      <PreviewPrompt client={client} state={state} target={target} onPinChange={onPinChange} />
     </div>
   );
 }

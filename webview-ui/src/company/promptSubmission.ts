@@ -66,13 +66,22 @@ export function planSubmit(
       pendingSubmit: { requestId },
       error: null,
     },
-    input: {
-      requestId,
-      text: state.text,
-      mode: route.mode,
-      delivery: route.delivery,
-      ...(route.targetSessionId === null ? {} : { targetSessionId: route.targetSessionId }),
-    },
+    input: promptSubmitInput(requestId, state.text, route),
+  };
+}
+
+/** The wire message for a prompt sent along a route, under the requestId that answers it. */
+export function promptSubmitInput(
+  requestId: string,
+  text: string,
+  route: PromptRoute,
+): SubmitPromptInput {
+  return {
+    requestId,
+    text,
+    mode: route.mode,
+    delivery: route.delivery,
+    ...(route.targetSessionId === null ? {} : { targetSessionId: route.targetSessionId }),
   };
 }
 

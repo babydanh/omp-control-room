@@ -24,6 +24,8 @@ import { collectDirectorySuggestions } from './directorySuggestions.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
 import { hostDirectory } from './hostDirectory.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
+import { handleLedgerMessage } from './ledger/handler.js';
+import type { LedgerService } from './ledger/ledgerService.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
@@ -94,6 +96,8 @@ export interface ClientMessageContext {
   /** PTY terminals for standalone-launched agents. Absent in VS Code embedded
    *  mode, where the editor owns terminal lifecycle. */
   ptyManager?: PtySessionManager;
+  /** Ledger board service for this process; null or absent when the ledger is not wired. */
+  ledger?: LedgerService | null;
 }
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
@@ -167,6 +171,17 @@ export function handleClientMessage(
         herdr: ctx.herdr ?? null,
       },
     )
+  ) {
+    return;
+  }
+
+  // Ledger requests are answered before the read-only gate below, so an unprivileged
+  // request gets a correlated `ledgerCommandResult` rather than a silent drop.
+  if (
+    handleLedgerMessage(msg, (message) => send(message as unknown as Record<string, unknown>), {
+      ledger: ctx.ledger ?? null,
+      privileged: ctx.privileged === true,
+    })
   ) {
     return;
   }

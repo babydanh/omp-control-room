@@ -118,6 +118,15 @@ describe('the line above the box says where a plain send goes', () => {
       'Gửi tới: PA-S0003 · Chat one · Phiên chat',
     );
   });
+
+  it('names the herdr agent when one is the target, even with a session selected', () => {
+    expect(sendTargetLabel(null, { kind: 'omp', paneId: 'wD:p1' })).toBe(
+      'Gửi tới: omp · wD:p1 (herdr)',
+    );
+    expect(sendTargetLabel(IDLE_WORKER, { kind: 'omp', paneId: 'wD:p1' })).toBe(
+      'Gửi tới: omp · wD:p1 (herdr)',
+    );
+  });
 });
 
 describe('the composer runs its own slash commands and passes the rest on', () => {

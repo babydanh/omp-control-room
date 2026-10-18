@@ -8,6 +8,7 @@
  *
  *  - Enter and the Send button: a chat prompt to the selected omp session. A busy
  *    session is steered; with no session selected, a new omp chat opens.
+ *    With a herdr agent selected, the plain send goes to that agent's pane instead.
  *  - Ctrl/Cmd+Enter: a follow-up into the selected session (a prompt with none).
  *  - Ctrl/Cmd+Shift+Enter and the "Giao cho công ty" button: the Company workflow.
  *    A chat session is never a Company target.
@@ -15,7 +16,7 @@
  *    that resolves runs in the selected session's terminal.
  */
 
-import type { CompanySessionSummary } from '../../../core/src/company.js';
+import type { CompanySessionSummary, HerdrAgent } from '../../../core/src/company.js';
 import type { OmpSessionEntry } from '../../../core/src/messages.js';
 import { type CommandResultView, failureNotice } from './commandResults.js';
 import type { CompanyClient } from './companyClient.js';
@@ -63,7 +64,9 @@ export function companyRoute(session: RouteSession): PromptRoute {
 /** The line above the box: where the next plain send goes. */
 export function sendTargetLabel(
   session: Pick<CompanySessionSummary, 'code' | 'name' | 'role'> | null,
+  herdr: Pick<HerdrAgent, 'kind' | 'paneId'> | null = null,
 ): string {
+  if (herdr !== null) return `Gửi tới: ${herdr.kind} · ${herdr.paneId} (herdr)`;
   if (session === null) return 'Gửi tới: phiên omp mới';
   return `Gửi tới: ${session.code} · ${session.name} · ${companyRoleLabel(session.role)}`;
 }

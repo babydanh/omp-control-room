@@ -36,7 +36,14 @@ import {
   COMPANY_TEXT_BATCH_MS,
   HERDR_SCREEN_LINES,
 } from './constants.js';
-import { planSubmit, promptBlockReason, type PromptRoute } from './promptSubmission.js';
+import {
+  EMPTY_PROMPT_DRAFT,
+  planSubmit,
+  promptBlockReason,
+  type PromptRoute,
+  promptSubmitInput,
+} from './promptSubmission.js';
+import { selectionWith } from './selection.js';
 
 export interface SendOutcome {
   ok: boolean;
@@ -318,6 +325,22 @@ export class CompanyClient {
     return outcome;
   }
 
+  /**
+   * Send one prompt to one session from the hover preview. The composer's draft is left
+   * alone: the verdict lands under the handle's requestId, where the preview reads it.
+   */
+  sendSessionPrompt(route: PromptRoute, text: string): CompanyCommandHandle {
+    const requestId = commands.newRequestId();
+    const blocker = promptBlockReason({ ...EMPTY_PROMPT_DRAFT, text });
+    if (blocker !== null) {
+      return { requestId, ok: false, errorCode: 'prompt_invalid', message: blocker };
+    }
+    return {
+      requestId,
+      ...this.send(commands.promptSubmit(promptSubmitInput(requestId, text, route))),
+    };
+  }
+
   decideContract(
     contractId: string,
     revision: number,
@@ -574,9 +597,12 @@ export class CompanyClient {
   select(selection: Partial<CompanySelection>): void {
     this.state = {
       ...this.state,
-      selection: { ...this.state.selection, ...selection },
-      // Choosing a different session abandons one that was still on its way.
-      openingSessionId: selection.sessionId === undefined ? this.state.openingSessionId : null,
+      selection: selectionWith(this.state.selection, selection),
+      // Choosing a session or a herdr agent abandons one that was still on its way.
+      openingSessionId:
+        selection.sessionId === undefined && selection.herdrPaneId === undefined
+          ? this.state.openingSessionId
+          : null,
     };
     this.emit();
   }

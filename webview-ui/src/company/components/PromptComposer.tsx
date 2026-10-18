@@ -14,6 +14,8 @@
  *  - Ctrl/Cmd+Shift+Enter, and the "Giao cho công ty" button: the Company
  *    workflow (Director, Contract, approval, workers). A selected Company session
  *    becomes the target; a plain omp chat never does.
+ *  - With a herdr agent selected, the plain send and Ctrl/Cmd+Enter type the text into
+ *    that agent's pane. The Company route does not apply to a herdr agent.
  *  - Attach. OMP's box carries an image picker that the company bridge cannot
  *    reach, so the affordance is gone rather than faked.
  *
@@ -35,7 +37,11 @@ import {
   useState,
 } from 'react';
 
-import type { CompanyModelCatalogEntry, CompanyRole } from '../../../../core/src/company.js';
+import type {
+  CompanyModelCatalogEntry,
+  CompanyRole,
+  HerdrAgent,
+} from '../../../../core/src/company.js';
 import type { OmpSessionEntry } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient } from '../companyClient.js';
@@ -56,6 +62,7 @@ import {
   promptBlockReason,
   type PromptRoute,
 } from '../promptSubmission.js';
+import { draftAfterSend, herdrAgentFor, sendPrompt } from '../promptTargets.js';
 import { thinkingForModel, withRoleModel } from '../roleProfiles.js';
 import {
   type ArgumentCompletion,
@@ -77,7 +84,13 @@ const NEW_CHAT_NOTICE = 'Phiên mới: lần gửi tới sẽ mở một phiên 
 
 /** The keys this box answers to, shown in the `?` tooltip beside the target line. */
 const COMPOSER_HINTS =
-  'Enter gửi tới phiên đang chọn · Shift+Enter xuống dòng · Ctrl+Enter để gửi tiếp · Ctrl+Shift+Enter để giao cho công ty · / để gõ lệnh';
+  'Enter gửi tới phiên hoặc agent đang chọn · Shift+Enter xuống dòng · Ctrl+Enter để gửi tiếp · Ctrl+Shift+Enter để giao cho công ty · / để gõ lệnh';
+
+/** Shown when Ctrl/Cmd+Shift+Enter is pressed while a herdr agent is the target. */
+const HERDR_COMPANY_NOTICE =
+  'Chọn một phiên omp để giao cho công ty. Agent herdr không nhận việc giao này.';
+/** The Company button's tooltip while a herdr agent is the target. */
+const HERDR_COMPANY_TOOLTIP = 'Không giao cho công ty khi đang gửi tới agent herdr.';
 
 /** A row in the completion popup. */
 type CompletionRow =
@@ -136,6 +149,8 @@ export function PromptComposer({ client }: PromptComposerProps) {
   /** The popup open over the box, if any. A model picker keeps the command that opened it. */
   const [picker, setPicker] = useState<ComposerPicker | null>(null);
   const [highlight, setHighlight] = useState(0);
+  /** The request of a send from this box to a herdr agent whose verdict is still pending. */
+  const [herdrRequest, setHerdrRequest] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** The height the user dragged the box to, or null when it has never been dragged. */
   const [savedHeight, setSavedHeight] = useState<number | null>(() =>
@@ -147,7 +162,8 @@ export function PromptComposer({ client }: PromptComposerProps) {
     state.selection.sessionId === null ? null : (state.sessions[state.selection.sessionId] ?? null);
   const role: CompanyRole = selectedSession?.role ?? 'director';
   const selectedModel = selectedSession?.requestedModel ?? state.selectedModel;
-  const busy = draft.pendingSubmit !== null;
+  const herdrTarget = herdrAgentFor(state.selection.herdrPaneId, state.herdr.agents);
+  const busy = draft.pendingSubmit !== null || herdrRequest !== null;
   const blocker = promptBlockReason(draft);
   const modelCommand = picker?.kind === 'model' ? picker.command : null;
   const resumeRequest = picker?.kind === 'resume' ? picker.requestId : null;
@@ -263,6 +279,33 @@ export function PromptComposer({ client }: PromptComposerProps) {
   };
 
   /**
+   * Type the draft into a herdr agent's pane. The draft clears only when the server confirms
+   * the send and the text is still what was sent; a refusal keeps it for another try.
+   */
+  const sendToHerdr = (agent: HerdrAgent) => {
+    if (herdrRequest !== null) return;
+    const text = draft.text;
+    const handle = sendPrompt(client, { kind: 'herdr', paneId: agent.paneId }, text);
+    if (handle === null) return;
+    if (!handle.ok) {
+      setNotice(failureNotice(handle, 'Chưa gửi được.'));
+      return;
+    }
+    setNotice(null);
+    setHerdrRequest(handle.requestId);
+    void client.waitForCommand(handle).then((verdict) => {
+      setHerdrRequest((current) => (current === handle.requestId ? null : current));
+      if (!verdict.ok) {
+        setNotice(failureNotice(verdict, 'Chưa gửi được.'));
+        return;
+      }
+      const current = client.getState().prompt.text;
+      const remaining = draftAfterSend(current, text);
+      if (remaining !== current) client.setDraftText(remaining);
+    });
+  };
+
+  /**
    * Every other OMP command runs in the selected session itself. The bridge
    * hands prompts to OMP with command handling off, so `/compact` sent as a
    * prompt would be text for the model; typed into the session's terminal it is
@@ -330,11 +373,13 @@ export function PromptComposer({ client }: PromptComposerProps) {
         return;
       case 'command':
         if (!runModelCommand(plan.resolved.command, plan.resolved.parsed.args)) {
-          runSessionCommand();
+          if (herdrTarget === null) runSessionCommand();
+          else sendToHerdr(herdrTarget);
         }
         return;
       case 'prompt':
-        send(chatRoute(selectedSession));
+        if (herdrTarget === null) send(chatRoute(selectedSession));
+        else sendToHerdr(herdrTarget);
         return;
     }
   };
@@ -375,14 +420,16 @@ export function PromptComposer({ client }: PromptComposerProps) {
     // dispatches a slash command: the text is sent as the prompt.
     if (isCompanyChord(event)) {
       event.preventDefault();
-      send(companyRoute(selectedSession));
+      if (herdrTarget === null) send(companyRoute(selectedSession));
+      else setNotice(HERDR_COMPANY_NOTICE);
       return;
     }
     // OMP sends Ctrl+Enter down the follow-up path, which never dispatches a
     // slash command (input-controller.ts:1851-1860).
     if (isFollowUpChord(event)) {
       event.preventDefault();
-      send(followUpRoute(selectedSession));
+      if (herdrTarget === null) send(followUpRoute(selectedSession));
+      else sendToHerdr(herdrTarget);
       return;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -548,7 +595,8 @@ export function PromptComposer({ client }: PromptComposerProps) {
           size="sm"
           variant="default"
           className="shrink-0 whitespace-nowrap"
-          disabled={blocker !== null || busy || picker !== null}
+          disabled={blocker !== null || busy || picker !== null || herdrTarget !== null}
+          title={herdrTarget === null ? undefined : HERDR_COMPANY_TOOLTIP}
           onClick={() => send(companyRoute(selectedSession))}
         >
           Giao cho công ty
@@ -565,7 +613,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
       </div>
       <p className="mt-1 flex min-w-0 items-center gap-2 text-2xs text-text-muted">
         <span className="min-w-0 truncate" data-testid="prompt-target">
-          {sendTargetLabel(selectedSession)}
+          {sendTargetLabel(selectedSession, herdrTarget)}
         </span>
         <span className="min-w-0 truncate" title={modelLabel}>
           {modelLabel}

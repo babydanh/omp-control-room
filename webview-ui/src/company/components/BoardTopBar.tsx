@@ -25,6 +25,10 @@ export interface BoardTopBarProps {
   onToggleSidebar: () => void;
   filesOpen: boolean;
   onToggleFiles: () => void;
+  /** Whether the ledger can be opened: the server has accepted this connection's probe. */
+  ledgerAvailable: boolean;
+  ledgerOpen: boolean;
+  onToggleLedger: () => void;
 }
 
 /**
@@ -104,6 +108,9 @@ export function BoardTopBar({
   onToggleSidebar,
   filesOpen,
   onToggleFiles,
+  ledgerAvailable,
+  ledgerOpen,
+  onToggleLedger,
 }: BoardTopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -154,6 +161,19 @@ export function BoardTopBar({
             >
               Tệp
             </button>
+            {ledgerAvailable && (
+              <button
+                type="button"
+                aria-pressed={ledgerOpen}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onToggleLedger();
+                }}
+                className="company-toggle touch-target"
+              >
+                Cây git
+              </button>
+            )}
           </div>
         )}
       </>
@@ -185,6 +205,16 @@ export function BoardTopBar({
         >
           Tệp
         </button>
+        {ledgerAvailable && (
+          <button
+            type="button"
+            onClick={onToggleLedger}
+            aria-pressed={ledgerOpen}
+            className="company-toggle touch-target"
+          >
+            Cây git
+          </button>
+        )}
       </nav>
     </header>
   );
