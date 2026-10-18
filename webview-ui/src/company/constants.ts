@@ -10,6 +10,8 @@
  * No color literals: the board is chrome, and chrome uses the CSS pixel tokens.
  */
 
+import type { IconName } from './iconNames.js';
+
 /** Board lanes, in the order they are drawn. */
 export const COMPANY_LANE_ORDER = [
   'planned',
@@ -44,15 +46,15 @@ export const COMPANY_LANE_OWNERS: Record<CompanyLaneId, string> = {
   failed: 'hết lượt thử',
 };
 
-/** The mark printed before each lane's label, so a column reads at a glance. */
-export const COMPANY_LANE_ICONS: Record<CompanyLaneId, string> = {
-  planned: '📝',
-  ready: '✅',
-  running: '🔨',
-  needs_input: '🙋',
-  review: '🔍',
-  done: '🎉',
-  failed: '⛔',
+/** The icon printed before each lane's label, so a column reads at a glance. */
+export const COMPANY_LANE_ICONS: Record<CompanyLaneId, IconName> = {
+  planned: 'pencil',
+  ready: 'flag',
+  running: 'play',
+  needs_input: 'help',
+  review: 'eye',
+  done: 'check',
+  failed: 'x-circle',
 };
 
 /** Excerpt length for the public assistant text shown in a bubble. */

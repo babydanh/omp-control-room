@@ -166,30 +166,32 @@
 
     /* Ink and amber: the board's palette, scoped here so the office UI keeps the
        tokens above. Warning is the red that marks something waiting on the user;
-       danger is the deeper red of a failed run. */
+       danger is the red of a failed run. Text clears 4.5:1 on every board surface,
+       and borders, marks and focus rings clear 3:1; companyContrast.test.ts holds
+       the palette to both. */
     --color-bg: #141417;
     --color-bg-dark: #1b1b20;
     --color-bg-thumb: #33333c;
-    --color-border: #33333c;
+    --color-border: #707080;
     --color-accent: #f2a33a;
     --color-accent-bright: #ffc266;
     --color-text: #ebe7df;
-    --color-text-muted: #8d8b93;
+    --color-text-muted: #a3a1aa;
     --color-btn-bg: #222228;
     --color-btn-hover: #2c2c35;
     --color-active-bg: #3a2b12;
-    --color-danger: #d14249;
+    --color-danger: #ff7088;
     --color-warning: #ff6159;
     --color-status-permission: #a98bff;
     --color-status-active: #6aa8ff;
     --color-status-success: #5fd38d;
     --color-orchid: #c792ea;
-    --color-idle: #6b6b75;
+    --color-idle: #9a9aa6;
     /* Board surfaces: a lane's column, a card on it, and the card's edge. */
     --color-lane: #15161b;
     --color-card: #0f1013;
-    --color-card-line: #3a3a44;
-    --color-card-hover: #5a5a66;
+    --color-card-line: #707080;
+    --color-card-hover: #9494a0;
   }
 
   /* The office canvas and its overlays draw over the artwork, so they keep the
@@ -509,6 +511,13 @@
 .company-ui :focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
+}
+
+/* Placeholder text is the muted text colour at full strength: the default fades it
+   to about 2.6:1 on the control fills. */
+.company-ui ::placeholder {
+  color: var(--color-text-muted);
+  opacity: 1;
 }
 
 /* Icon-only and text ghost controls: muted until hovered, with no layout shift. */

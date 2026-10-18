@@ -40,7 +40,7 @@ import {
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
-import type { SidebarPresentation } from '../layoutMode.js';
+import { isSheetDismissSwipe, type SidebarPresentation } from '../layoutMode.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS, withRoleModel } from '../roleProfiles.js';
 import { clampSidebarWidth } from '../sidebarPrefs.js';
 import type { PreviewTarget } from '../terminalPreview.js';
@@ -49,11 +49,23 @@ import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useNow } from '../useNow.js';
 import { ActivityChips } from './ActivityCounts.js';
+import { Icon } from './Icon.js';
 import { ModelPicker } from './ModelPicker.js';
 import { StatusDot } from './StatusDot.js';
 
 /** Pixels one arrow-key press moves the resize edge. */
 const RESIZE_STEP_PX = 16;
+
+/** The sidebar's three shapes: beside the board, over it on a tablet, or as a phone's sheet. */
+type PanelPresentation = Extract<SidebarPresentation, 'docked' | 'overlay' | 'sheet'>;
+
+/** Classes for each shape; the docked and overlay widths come from the drag width. */
+const PRESENTATION_CLASS: Record<PanelPresentation, string> = {
+  docked: 'relative h-full',
+  overlay: 'absolute inset-y-0 left-0 z-30 h-full',
+  sheet:
+    'fixed top-0 left-0 z-40 h-dvh w-[min(88vw,360px)] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]',
+};
 
 export interface AgentSidebarProps {
   client: CompanyClient;
@@ -64,7 +76,7 @@ export interface AgentSidebarProps {
   selectedPaneId: string | null;
   width: number;
   /** Where the sidebar sits: docked beside the board, floating over it, or a phone's sheet. */
-  presentation: Extract<SidebarPresentation, 'docked' | 'overlay' | 'sheet'>;
+  presentation: PanelPresentation;
   /** The keys of the projects the user folded. */
   collapsedProjects: ReadonlySet<string>;
   onWidthChange: (width: number) => void;
@@ -76,6 +88,8 @@ export interface AgentSidebarProps {
   onOpenSleeping: (paneId: string) => void;
   onToggleProject: (key: string) => void;
   onMenu: (request: AgentMenuRequest) => void;
+  /** Closes the sheet after a leftward swipe on it. */
+  onDismiss: () => void;
 }
 
 /** What every row and header needs from the sidebar, passed down once. */
@@ -114,12 +128,29 @@ export function AgentSidebar({
   onOpenSleeping,
   onToggleProject,
   onMenu,
+  onDismiss,
 }: AgentSidebarProps) {
   const [editingRole, setEditingRole] = useState<CompanyRole | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const now = useNow();
   const treeRef = useRef<HTMLDivElement>(null);
   useFlightLayout(treeRef);
+
+  // A leftward swipe on the sheet dismisses it; a swipe on a docked or tablet sidebar does nothing.
+  const sheetSwipe = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+
+  function onSheetPointerDown(event: ReactPointerEvent<HTMLElement>): void {
+    sheetSwipe.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+  }
+
+  function onSheetPointerUp(event: ReactPointerEvent<HTMLElement>): void {
+    const start = sheetSwipe.current;
+    sheetSwipe.current = null;
+    if (start === null || start.pointerId !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (presentation === 'sheet' && isSheetDismissSwipe(dx, dy)) onDismiss();
+  }
 
   const tree = buildProjectTree(state, now, collapsedProjects);
   const boards = tree.projects.filter((project) => project.kind === 'board');
@@ -165,8 +196,13 @@ export function AgentSidebar({
     <aside
       aria-label="Đàn agent"
       data-testid="agent-sidebar"
-      className={`flex h-full shrink-0 flex-col border-r border-border bg-bg-dark ${presentation === 'docked' ? 'relative' : 'absolute inset-y-0 left-0 z-30'} ${presentation === 'sheet' ? 'w-[min(88vw,360px)]' : ''}`}
+      className={`flex shrink-0 flex-col border-r border-border bg-bg-dark ${PRESENTATION_CLASS[presentation]}`}
       style={presentation === 'sheet' ? undefined : { width: `${width}px` }}
+      onPointerDown={onSheetPointerDown}
+      onPointerUp={onSheetPointerUp}
+      onPointerCancel={() => {
+        sheetSwipe.current = null;
+      }}
     >
       <header className="flex items-center justify-between gap-2 border-b border-border px-2.5 py-2">
         <h2 className="text-xs font-semibold text-text-muted">Đàn agent · {total}</h2>
@@ -177,7 +213,7 @@ export function AgentSidebar({
           title="Thu gọn thành thanh biểu tượng (Ctrl+B)"
           className="company-icon-btn touch-target px-1 text-2xs"
         >
-          ⟨
+          <Icon name="chevron-left" />
         </button>
       </header>
       <ActivityChips counts={counts} />
@@ -225,7 +261,7 @@ function ProjectSection({ project, view }: { project: ProjectNode; view: TreeVie
         className="flex w-full min-w-0 cursor-pointer items-center gap-2 px-2.5 py-2 text-left hover:bg-btn-hover"
       >
         <span aria-hidden="true" className="w-3 shrink-0 text-2xs text-text-muted">
-          {project.collapsed ? '▸' : '▾'}
+          <Icon name={project.collapsed ? 'chevron-right' : 'chevron-down'} />
         </span>
         <span
           aria-hidden="true"
@@ -354,7 +390,8 @@ function WorkspaceSessions({
             onClick={() => setShowParked((current) => !current)}
             className="cursor-pointer py-0.5 text-xs text-text-muted hover:text-text"
           >
-            Tạm trữ ({folder.parked.length}) {showParked ? '▴' : '▾'}
+            Tạm trữ ({folder.parked.length}){' '}
+            <Icon name={showParked ? 'chevron-up' : 'chevron-down'} />
           </button>
           {showParked && (
             <ul>
@@ -440,7 +477,7 @@ function RoleSection({
         </span>
         {profile !== null && (
           <span aria-hidden="true" className="shrink-0 text-2xs text-text-muted">
-            {editing ? '▴' : '▾'}
+            <Icon name={editing ? 'chevron-up' : 'chevron-down'} />
           </span>
         )}
       </button>
@@ -481,7 +518,8 @@ function RoleSection({
             onClick={() => setShowParked((current) => !current)}
             className="cursor-pointer py-0.5 text-xs text-text-muted hover:text-text"
           >
-            Tạm trữ ({group.parked.length}) {showParked ? '▴' : '▾'}
+            Tạm trữ ({group.parked.length}){' '}
+            <Icon name={showParked ? 'chevron-up' : 'chevron-down'} />
           </button>
           {showParked && (
             <ul>
@@ -655,7 +693,7 @@ function SleepingGroup({ rows, view }: { rows: readonly SleepingRow[]; view: Tre
         onClick={() => setOpen((current) => !current)}
         className="cursor-pointer py-0.5 text-xs text-text-muted hover:text-text"
       >
-        Ngủ đông ({rows.length}) {open ? '▴' : '▾'}
+        Ngủ đông ({rows.length}) <Icon name={open ? 'chevron-up' : 'chevron-down'} />
       </button>
       {open && (
         <ul>
@@ -708,13 +746,13 @@ function SleepingRowButton({
       data-flight-key={`sleeping:${row.paneId}`}
       data-lane={`sleeping:${row.repo.key}`}
       data-index={index}
-      className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left opacity-75 hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
+      className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
     >
       <span
         aria-hidden="true"
         className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-2xs leading-none text-text-muted"
       >
-        zz
+        <Icon name="moon" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium text-text">{row.name}</span>

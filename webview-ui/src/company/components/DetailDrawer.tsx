@@ -53,6 +53,7 @@ import { WrapLinesContext } from '../wrapLines.js';
 import { AttemptRow } from './AttemptRow.js';
 import { ContractPanel } from './ContractPanel.js';
 import { HerdrPanel } from './HerdrPanel.js';
+import { Icon } from './Icon.js';
 import { QuestionPanel } from './QuestionPanel.js';
 import { SessionBody } from './SessionBody.js';
 import { SleepingPanel } from './SleepingPanel.js';
@@ -203,7 +204,8 @@ export function DetailDrawer({
             aria-label="Quay lại danh sách"
             className="company-icon-btn touch-target shrink-0 px-2 text-sm"
           >
-            ‹ Quay lại
+            <Icon name="chevron-left" className="mr-1" />
+            Quay lại
           </button>
         )}
         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -225,7 +227,7 @@ export function DetailDrawer({
             title="Đóng"
             className="company-icon-btn touch-target shrink-0 px-1.5 text-sm"
           >
-            ✕
+            <Icon name="close" />
           </button>
         )}
       </header>

@@ -16,7 +16,7 @@ export interface AttentionBarProps {
 }
 
 const ITEM_CLASS =
-  'flex cursor-pointer items-center gap-2 rounded-[5px] border border-warning bg-bg-dark px-2 py-1 text-left text-2xs text-text hover:border-accent';
+  'touch-target flex cursor-pointer items-center gap-2 rounded-[5px] border border-warning bg-bg-dark px-2 py-1 text-left text-2xs text-text hover:border-accent';
 
 export function AttentionBar({
   contract,

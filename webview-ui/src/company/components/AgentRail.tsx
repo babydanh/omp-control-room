@@ -5,11 +5,11 @@
  * project. An open project lists one badge per agent, the ones that wait on the
  * user first, and one "+N" badge for its parked sessions; a folded project shows a
  * single summary. A badge's tooltip carries its name, status and summary. A repo's
- * hibernated sessions follow its agents as dimmed 💤 badges.
+ * hibernated sessions follow its agents as dimmed moon badges.
  */
 import { useRef } from 'react';
 
-import { type AgentMenuRequest, type AgentMenuTriggers, agentMenuTriggers } from '../agentMenu.js';
+import { type AgentMenuRequest, type AgentMenuSubject } from '../agentMenu.js';
 import {
   activityCounts,
   agentTooltip,
@@ -32,9 +32,11 @@ import { COMPANY_RAIL_WIDTH_PX } from '../constants.js';
 import { ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import type { PreviewTarget } from '../terminalPreview.js';
 import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
+import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useNow } from '../useNow.js';
 import { ActivityStack } from './ActivityCounts.js';
+import { Icon } from './Icon.js';
 import { type DotTone, StatusDot } from './StatusDot.js';
 
 /** Herdr panes have no role; their badges take a neutral edge. */
@@ -93,7 +95,7 @@ export function AgentRail({
         title="Mở rộng đàn agent (Ctrl+B)"
         className="touch-target flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center text-2xs text-text-muted hover:text-text"
       >
-        ⟩
+        <Icon name="chevron-right" />
       </button>
       <ActivityStack counts={counts} />
       <div
@@ -175,10 +177,7 @@ function RailEntryView({
           project={entry.project}
           index={index}
           onToggle={() => onToggleProject(entry.project.key)}
-          triggers={agentMenuTriggers<HTMLButtonElement>(
-            { kind: 'project', project: entry.project },
-            onMenu,
-          )}
+          onMenu={onMenu}
         />
       );
     case 'summary':
@@ -208,10 +207,8 @@ function RailEntryView({
           preview={{ kind: 'session', sessionId: entry.row.sessionId }}
           selected={entry.row.sessionId === selectedSessionId}
           onClick={() => onSelectSession(entry.row.sessionId)}
-          triggers={agentMenuTriggers<HTMLButtonElement>(
-            { kind: 'session', sessionId: entry.row.sessionId, drawer: null },
-            onMenu,
-          )}
+          menu={{ kind: 'session', sessionId: entry.row.sessionId, drawer: null }}
+          onMenu={onMenu}
         />
       );
     case 'remoteSession':
@@ -227,10 +224,8 @@ function RailEntryView({
           title={agentTooltip(entry.row)}
           selected={false}
           onClick={() => onSelectWorkspaceSession(entry.path, entry.row.sessionId)}
-          triggers={agentMenuTriggers<HTMLButtonElement>(
-            { kind: 'project', project: entry.project },
-            onMenu,
-          )}
+          menu={{ kind: 'project', project: entry.project }}
+          onMenu={onMenu}
         />
       );
     case 'pane':
@@ -247,10 +242,8 @@ function RailEntryView({
           preview={{ kind: 'herdr', paneId: entry.row.paneId }}
           selected={entry.row.paneId === selectedPaneId}
           onClick={() => onOpenHerdr(entry.row.paneId)}
-          triggers={agentMenuTriggers<HTMLButtonElement>(
-            { kind: 'herdr', paneId: entry.row.paneId, drawer: null },
-            onMenu,
-          )}
+          menu={{ kind: 'herdr', paneId: entry.row.paneId, drawer: null }}
+          onMenu={onMenu}
         />
       );
     case 'sleeping':
@@ -286,18 +279,19 @@ function ProjectMarker({
   project,
   index,
   onToggle,
-  triggers,
+  onMenu,
 }: {
   project: ProjectNode;
   index: number;
   onToggle: () => void;
-  triggers: AgentMenuTriggers<HTMLButtonElement>;
+  onMenu: (request: AgentMenuRequest) => void;
 }) {
+  const gestures = useAgentMenuGestures<HTMLButtonElement>({ kind: 'project', project }, onMenu);
   return (
     <button
       type="button"
       onClick={onToggle}
-      {...triggers}
+      {...gestures}
       aria-expanded={!project.collapsed}
       aria-label={project.name}
       title={`${project.name} · ${project.tooltip}`}
@@ -330,7 +324,8 @@ function RailBadge({
   title,
   selected,
   onClick,
-  triggers,
+  menu,
+  onMenu,
   preview,
 }: {
   testId: string;
@@ -345,17 +340,24 @@ function RailBadge({
   title: string;
   selected: boolean;
   onClick: () => void;
-  triggers: AgentMenuTriggers<HTMLButtonElement>;
+  /** What a long press or right click opens the menu on. */
+  menu: AgentMenuSubject;
+  onMenu: (request: AgentMenuRequest) => void;
   /** The row a hover preview opens for; absent when the row has no live terminal. */
   preview?: PreviewTarget;
 }) {
   const actions = useTerminalPreview();
+  const gestures = useAgentMenuGestures<HTMLButtonElement>(
+    menu,
+    onMenu,
+    preview === undefined ? undefined : () => actions.press(preview),
+  );
   return (
     <button
       type="button"
       onClick={onClick}
-      {...triggers}
       {...(preview === undefined ? {} : previewTriggers(actions, preview))}
+      {...gestures}
       aria-pressed={selected}
       aria-label={title}
       title={title}
@@ -392,17 +394,19 @@ function RailSleepingBadge({
   onMenu: (request: AgentMenuRequest) => void;
 }) {
   const actions = useTerminalPreview();
-  const triggers = agentMenuTriggers<HTMLButtonElement>(
+  const sleepingTarget: PreviewTarget = { kind: 'herdr', paneId: row.paneId };
+  const gestures = useAgentMenuGestures<HTMLButtonElement>(
     { kind: 'sleeping', paneId: row.paneId, drawer: null },
     onMenu,
+    () => actions.press(sleepingTarget),
   );
   const title = sleepingTooltip(row);
   return (
     <button
       type="button"
       onClick={onOpen}
-      {...triggers}
-      {...previewTriggers(actions, { kind: 'herdr', paneId: row.paneId })}
+      {...previewTriggers(actions, sleepingTarget)}
+      {...gestures}
       aria-pressed={selected}
       aria-label={title}
       title={title}
@@ -410,10 +414,10 @@ function RailSleepingBadge({
       data-flight-key={`sleeping:${row.paneId}`}
       data-lane="rail"
       data-index={index}
-      className={`relative flex h-11 w-[84px] shrink-0 cursor-pointer flex-col items-start justify-center rounded-[5px] border-l-4 border-dashed border-l-text-muted pl-2 pr-4 text-left opacity-60 hover:bg-btn-hover ${selected ? 'bg-btn-bg ring-1 ring-accent' : ''}`}
+      className={`relative flex h-11 w-[84px] shrink-0 cursor-pointer flex-col items-start justify-center rounded-[5px] border-l-4 border-dashed border-l-text-muted pl-2 pr-4 text-left hover:bg-btn-hover ${selected ? 'bg-btn-bg ring-1 ring-accent' : ''}`}
     >
       <span className="w-full truncate font-mono text-xs text-text">
-        <span aria-hidden="true">💤</span> {paneShortCode(row.paneId)}
+        <Icon name="moon" /> {paneShortCode(row.paneId)}
       </span>
       <span className="w-full truncate text-xs text-text-muted">{row.name}</span>
     </button>

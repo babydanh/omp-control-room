@@ -103,6 +103,11 @@ export function BoardShell({ client }: BoardShellProps) {
     [state.questions],
   );
   const subject: DrawerSubject | null = drawerSubjectFor(state, opened);
+  // A phone's full-screen drawer that has an input of its own (a herdr pane, a sleeping
+  // pane, a question) takes the place of the board composer, so each screen has one input.
+  const composerHidden =
+    mode === 'phone' &&
+    (subject?.kind === 'herdr' || subject?.kind === 'sleeping' || subject?.kind === 'question');
   const selectedSessionId =
     subject?.kind === 'session' || subject?.kind === 'task' ? state.selection.sessionId : null;
   const selectedPaneId =
@@ -155,6 +160,16 @@ export function BoardShell({ client }: BoardShellProps) {
     if (mode !== 'phone') return;
     setSheetOpen(false);
   }
+
+  // On a phone the open sheet closes on Escape, as a modal does.
+  useEffect(() => {
+    if (mode !== 'phone' || !sheetOpen) return;
+    function onKey(event: KeyboardEvent): void {
+      if (event.key === 'Escape') setSheetOpen(false);
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [mode, sheetOpen]);
 
   function selectSession(sessionId: string): void {
     setOpened(null);
@@ -254,9 +269,9 @@ export function BoardShell({ client }: BoardShellProps) {
           {(sidebar === 'overlay' || sidebar === 'sheet') && (
             <button
               type="button"
-              aria-label="Thu gọn đàn agent"
-              onClick={toggleSidebar}
-              className="absolute inset-0 z-20 cursor-default bg-black/40"
+              aria-label={sidebar === 'sheet' ? 'Đóng đàn agent' : 'Thu gọn đàn agent'}
+              onClick={sidebar === 'sheet' ? dismissSheet : toggleSidebar}
+              className={`${sidebar === 'sheet' ? 'fixed z-30' : 'absolute z-20'} inset-0 cursor-default bg-black/40`}
             />
           )}
           {sidebar === 'rail' && (
@@ -293,6 +308,7 @@ export function BoardShell({ client }: BoardShellProps) {
               onOpenSleeping={openSleeping}
               onToggleProject={toggleProject}
               onMenu={openMenu}
+              onDismiss={dismissSheet}
             />
           )}
           <CompanyBoard
@@ -328,7 +344,7 @@ export function BoardShell({ client }: BoardShellProps) {
           />
         </div>
       </TerminalPreviewProvider>
-      <PromptComposer client={client} />
+      {!composerHidden && <PromptComposer client={client} />}
       {menu !== null && (
         <AgentContextMenu
           key={menu.token}

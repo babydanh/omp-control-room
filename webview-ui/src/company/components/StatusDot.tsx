@@ -20,7 +20,7 @@ const DOT_CLASS: Readonly<Record<Exclude<DotTone, 'working'>, string>> = {
   error: 'bg-danger',
   done: 'bg-status-success',
   parked: 'border border-text-muted bg-transparent',
-  unknown: 'bg-idle opacity-60',
+  unknown: 'bg-idle',
 };
 
 export function Spinner() {

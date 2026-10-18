@@ -56,6 +56,7 @@ import { useElementWidth } from '../useElementWidth.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useNow } from '../useNow.js';
+import { Icon } from './Icon.js';
 import { StatusDot } from './StatusDot.js';
 
 export interface CompanyBoardProps {
@@ -349,7 +350,7 @@ function LaneStrip({
       title={`Mở cột ${lane.label}`}
       className="flex h-full w-full cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-btn-hover hover:text-text"
     >
-      <span aria-hidden="true">{COMPANY_LANE_ICONS[lane.id]}</span>
+      <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-sm" />
       <span className="text-2xs font-semibold text-text">{count}</span>
       <span className="flex-1 whitespace-nowrap text-xs [writing-mode:vertical-rl]">
         {lane.label}
@@ -482,7 +483,7 @@ export function CompanyBoard({
             <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1">
               <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
                 <span className="min-w-0">
-                  <span aria-hidden="true">{COMPANY_LANE_ICONS[lane.id]}</span> {lane.label}
+                  <Icon name={COMPANY_LANE_ICONS[lane.id]} /> {lane.label}
                 </span>
                 <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
               </h3>
@@ -566,7 +567,7 @@ export function CompanyBoard({
                 onClick={() => setPickedLane(lane.id)}
                 className="touch-target flex min-w-0 cursor-pointer flex-col items-center justify-center gap-0.5 rounded-[5px] border border-border px-1 py-1 text-2xs text-text-muted aria-pressed:border-accent aria-pressed:bg-active-bg aria-pressed:text-text"
               >
-                <span aria-hidden="true">{COMPANY_LANE_ICONS[lane.id]}</span>
+                <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-sm" />
                 <span className="font-semibold tabular-nums text-text">{count}</span>
               </button>
             ))}

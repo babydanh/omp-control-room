@@ -16,6 +16,7 @@ import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { useNow } from '../useNow.js';
 import { CompanyButton } from './CompanyButton.js';
+import { Icon } from './Icon.js';
 
 /** The server's limit on a wake prompt, in characters. */
 const WAKE_PROMPT_MAX_CHARS = 4000;
@@ -66,7 +67,7 @@ export function SleepingPanel({ client, state, paneId }: SleepingPanelProps) {
     <div className="flex min-h-0 flex-1 flex-col gap-2 p-2" data-testid="sleeping-panel">
       <div className="flex flex-col gap-1 text-2xs text-text-muted">
         <p>
-          <span aria-hidden="true">💤</span> Ngủ đông · {row.repo.label}
+          <Icon name="moon" className="mr-0.5" /> Ngủ đông · {row.repo.label}
         </p>
         <p className="truncate text-text">{row.name}</p>
         {row.sleptLabel !== null && <p>{row.sleptLabel}</p>}

@@ -86,3 +86,11 @@ export function swipeStep(dx: number, dy: number, threshold: number): -1 | 0 | 1
   if (Math.abs(dx) < threshold || Math.abs(dx) <= Math.abs(dy)) return 0;
   return dx < 0 ? 1 : -1;
 }
+
+/**
+ * A leftward drag on the phone's sheet this far, and more horizontal than vertical,
+ * dismisses it: the same threshold a lane swipe uses, read the other way.
+ */
+export function isSheetDismissSwipe(dx: number, dy: number): boolean {
+  return dx <= -LANE_SWIPE_THRESHOLD_PX && -dx > Math.abs(dy);
+}

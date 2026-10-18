@@ -22,7 +22,7 @@ export interface WorkspaceSwitcherProps {
 
 /** The class every control in the switcher shares: a small outlined button. */
 const CONTROL_CLASS =
-  'cursor-pointer rounded-[5px] border border-border px-2.5 py-1 text-2xs text-text-muted hover:border-accent hover:text-text disabled:cursor-default disabled:opacity-50';
+  'touch-target cursor-pointer rounded-[5px] border border-border px-2.5 py-1 text-2xs text-text-muted hover:border-accent hover:text-text disabled:cursor-default disabled:opacity-50';
 
 export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
   const [typing, setTyping] = useState(false);

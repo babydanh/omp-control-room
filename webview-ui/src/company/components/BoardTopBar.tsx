@@ -14,6 +14,7 @@ import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import type { LayoutMode } from '../layoutMode.js';
 import { quotaRows } from '../usageView.js';
+import { Icon } from './Icon.js';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 
 export interface BoardTopBarProps {
@@ -117,7 +118,7 @@ export function BoardTopBar({
             aria-expanded={!sidebarCollapsed}
             className="company-icon-btn touch-target shrink-0 px-2 text-sm"
           >
-            <span aria-hidden="true">☰</span>
+            <Icon name="menu" />
           </button>
           <h1 className="min-w-0 shrink truncate text-base text-text">OMP Board</h1>
           <div className="min-w-0 flex-1">
@@ -131,7 +132,7 @@ export function BoardTopBar({
             aria-controls="company-status-menu"
             className="company-icon-btn touch-target shrink-0 px-2 text-sm"
           >
-            <span aria-hidden="true">⋯</span>
+            <Icon name="more" />
           </button>
         </header>
         {menuOpen && (

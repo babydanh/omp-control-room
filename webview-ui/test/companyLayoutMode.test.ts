@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   defaultActiveLane,
   drawerPresentation,
+  isSheetDismissSwipe,
   LANE_SWIPE_THRESHOLD_PX,
   layoutModeFor,
   sidebarPresentation,
@@ -120,5 +121,17 @@ describe('swipeStep', () => {
 
   it('ignores a drag that is more vertical than horizontal, so the list still scrolls', () => {
     expect(swipeStep(-60, -90, LANE_SWIPE_THRESHOLD_PX)).toBe(0);
+  });
+});
+
+describe('sheet dismiss swipe', () => {
+  it('dismisses on a leftward drag past the threshold', () => {
+    expect(isSheetDismissSwipe(-LANE_SWIPE_THRESHOLD_PX, 0)).toBe(true);
+  });
+
+  it('keeps the sheet for a short drag, a rightward drag, or a mostly vertical one', () => {
+    expect(isSheetDismissSwipe(-LANE_SWIPE_THRESHOLD_PX + 1, 0)).toBe(false);
+    expect(isSheetDismissSwipe(LANE_SWIPE_THRESHOLD_PX, 0)).toBe(false);
+    expect(isSheetDismissSwipe(-60, -90)).toBe(false);
   });
 });
