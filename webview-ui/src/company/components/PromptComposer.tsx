@@ -30,7 +30,6 @@
 import { type ChangeEvent, type KeyboardEvent, useEffect, useMemo, useState } from 'react';
 
 import type { CompanyModelCatalogEntry, CompanyRole } from '../../../../core/src/company.js';
-import { Button } from '../../components/ui/Button.js';
 import type { CompanyClient } from '../companyClient.js';
 import { isSubmitChord, promptBlockReason } from '../promptSubmission.js';
 import { companyRoleLabel, thinkingForModel, withRoleModel } from '../roleProfiles.js';
@@ -46,6 +45,7 @@ import {
   slashArgumentPrefix,
 } from '../slashCommands.js';
 import { useCompanyState } from '../useCompanyState.js';
+import { CompanyButton } from './CompanyButton.js';
 
 /** Session states in which OMP steers rather than starting a new turn. */
 const BUSY_STATUSES: readonly string[] = ['busy', 'running', 'starting'];
@@ -254,10 +254,10 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const error = draft.error?.message ?? draft.error?.errorCode ?? null;
 
   return (
-    <section className="border-t-2 border-border bg-bg p-2" data-testid="prompt-composer">
+    <section className="border-t border-border bg-bg p-2" data-testid="prompt-composer">
       {rows.length > 0 && (
         <ul
-          className="mb-1 max-h-40 overflow-auto border-2 border-border"
+          className="mb-1 max-h-40 overflow-auto rounded-[6px] border border-border"
           data-testid="prompt-completions"
         >
           {rows.map((row, index) => (
@@ -289,7 +289,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
       {picker !== null && (
         <ul
-          className="mb-1 max-h-40 overflow-auto border-2 border-border"
+          className="mb-1 max-h-40 overflow-auto rounded-[6px] border border-border"
           data-testid="model-picker"
         >
           {state.modelCatalog.length === 0 && (
@@ -322,7 +322,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
         rows={4}
         placeholder="Hãy bảo công ty cần xây dựng gì. / để gõ lệnh, Ctrl+Enter để gửi tiếp."
         data-testid="prompt-input"
-        className="w-full border-2 border-border bg-bg-dark p-2 text-sm text-text"
+        className="w-full rounded-[6px] border border-border bg-bg-dark p-2 text-sm text-text"
       />
 
       <p className="mt-1 flex flex-wrap items-center gap-2 text-2xs text-text-muted">
@@ -343,14 +343,14 @@ export function PromptComposer({ client }: PromptComposerProps) {
 
       <div className="mt-2 flex items-center gap-2">
         <span className="flex-1" />
-        <Button
+        <CompanyButton
           size="sm"
           variant="accent"
           disabled={blocker !== null || busy || picker !== null}
           onClick={onSubmitKey}
         >
           {busy ? 'Đang gửi...' : 'Gửi'}
-        </Button>
+        </CompanyButton>
       </div>
       {blocker !== null && draft.text.trim().length > 0 && (
         <p className="mt-1 text-2xs text-text-muted">{blocker}</p>

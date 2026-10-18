@@ -23,11 +23,14 @@ const COMPANY_PRIVATE_TYPES: ReadonlySet<string> = new Set([
   'companyStateChanged',
   'companyCommandResult',
   'companyTextDelta',
+  'companySessionLog',
   'companyModelCatalog',
   'companyArtifactPage',
   'companyFileList',
   'companyFileRead',
   'companyAttachmentUploaded',
+  'herdrAgents',
+  'herdrScreen',
 ]);
 
 /** Server messages bound to exactly one attached session. */

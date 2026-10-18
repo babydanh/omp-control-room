@@ -30,6 +30,7 @@ const REPLAYABLE_MESSAGE_TYPES: ReadonlySet<string> = new Set([
   'companyModelCatalogRequest',
   'companyFileListRequest',
   'companyFileReadRequest',
+  'companySessionLogRequest',
 ]);
 
 /** Error a UI surfaces to keep a draft instead of losing it to a silent drop. */

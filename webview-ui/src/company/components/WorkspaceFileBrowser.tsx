@@ -15,11 +15,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import { Button } from '../../components/ui/Button.js';
 import { decodeArtifact, describeFileContent } from '../artifactView.js';
 import type { CompanyClient } from '../companyClient.js';
 import { COMPANY_ARTIFACT_PAGE_BYTES } from '../constants.js';
 import { useCompanyState } from '../useCompanyState.js';
+import { CompanyButton } from './CompanyButton.js';
 
 export interface WorkspaceFileBrowserProps {
   client: CompanyClient;
@@ -95,7 +95,7 @@ export function WorkspaceFileBrowser({
 
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="workspace-browser">
-      <header className="border-b-2 border-border p-2">
+      <header className="border-b border-border p-2">
         <p className="truncate text-2xs text-text-muted" title={workspacePath}>
           {workspacePath || 'không có không gian làm việc'}
         </p>
@@ -103,12 +103,12 @@ export function WorkspaceFileBrowser({
       </header>
 
       {artifact && artifactText && (
-        <section className="border-b-2 border-border p-2" aria-label="Tệp đính kèm">
+        <section className="border-b border-border p-2" aria-label="Tệp đính kèm">
           <div className="flex items-center justify-between">
-            <h3 className="text-xs uppercase tracking-wide text-text-muted">Tệp đính kèm</h3>
-            <Button size="sm" onClick={onClearArtifact}>
+            <h3 className="text-xs font-semibold text-text-muted">Tệp đính kèm</h3>
+            <CompanyButton size="sm" onClick={onClearArtifact}>
               Đóng
-            </Button>
+            </CompanyButton>
           </div>
           <p className="text-2xs text-text-muted">
             {artifact.contentType} &middot; đang giữ {artifact.pages.length} trang,{' '}
@@ -116,7 +116,7 @@ export function WorkspaceFileBrowser({
             {!artifact.eof && ' (vẫn đang tải)'}
             {artifactText.clipped && ' (đang hiển thị các trang đầu)'}
           </p>
-          <pre className="mt-1 max-h-64 overflow-auto border-2 border-border bg-bg-dark p-2 text-2xs whitespace-pre-wrap text-text">
+          <pre className="mt-1 max-h-64 overflow-auto rounded-[6px] border border-border bg-bg-dark p-2 text-2xs whitespace-pre-wrap text-text">
             {artifactText.text}
           </pre>
         </section>
@@ -153,12 +153,12 @@ export function WorkspaceFileBrowser({
       </ul>
 
       {openFile !== null && (
-        <section className="border-t-2 border-border p-2" aria-label={`Tệp ${openFile}`}>
+        <section className="border-t border-border p-2" aria-label={`Tệp ${openFile}`}>
           <div className="flex items-center justify-between">
             <h3 className="truncate text-xs text-text">{openFile}</h3>
-            <Button size="sm" onClick={() => setOpenFile(null)}>
+            <CompanyButton size="sm" onClick={() => setOpenFile(null)}>
               Đóng
-            </Button>
+            </CompanyButton>
           </div>
           {!content && <p className="text-2xs text-text-muted">Đang tải...</p>}
           {described?.kind === 'binary' && (
@@ -173,19 +173,19 @@ export function WorkspaceFileBrowser({
               <p className="text-2xs text-text-muted">
                 đang hiển thị {described.byteLength} trong tổng số {described.totalBytes} byte
               </p>
-              <pre className="mt-1 max-h-64 overflow-auto border-2 border-border bg-bg-dark p-2 text-2xs whitespace-pre-wrap text-text">
+              <pre className="mt-1 max-h-64 overflow-auto rounded-[6px] border border-border bg-bg-dark p-2 text-2xs whitespace-pre-wrap text-text">
                 {described.text}
               </pre>
             </>
           )}
           {described?.nextOffset !== null && described?.nextOffset !== undefined && (
-            <Button
+            <CompanyButton
               size="sm"
               className="mt-1"
               onClick={() => client.readFile(openFile, described.nextOffset ?? 0)}
             >
               Tải thêm
-            </Button>
+            </CompanyButton>
           )}
         </section>
       )}

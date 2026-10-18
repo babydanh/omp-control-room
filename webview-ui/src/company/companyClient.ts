@@ -19,7 +19,7 @@
 
 import type { QuestionAnswerInput, RoleProfile } from '../../../core/src/company.js';
 import { TRANSPORT_DISCONNECTED_ERROR } from '../../../core/src/messageDelivery.js';
-import type { ClientMessage, ServerMessage } from '../../../core/src/messages.js';
+import type { ClientMessage, HerdrKey, ServerMessage } from '../../../core/src/messages.js';
 import type { MessageTransport } from '../transport/types.js';
 import { decodeBase64ToBytes } from './base64.js';
 import * as commands from './companyMessages.js';
@@ -30,7 +30,11 @@ import {
   type CompanyViewState,
   emptyCompanyState,
 } from './companyState.js';
-import { COMPANY_TERMINAL_INPUT_CHUNK_BYTES, COMPANY_TEXT_BATCH_MS } from './constants.js';
+import {
+  COMPANY_TERMINAL_INPUT_CHUNK_BYTES,
+  COMPANY_TEXT_BATCH_MS,
+  HERDR_SCREEN_LINES,
+} from './constants.js';
 import { planSubmit, promptBlockReason } from './promptSubmission.js';
 
 export interface SendOutcome {
@@ -38,6 +42,12 @@ export interface SendOutcome {
   errorCode?: string;
   message?: string;
 }
+
+/**
+ * A herdr command: the request it went out under, and whether the send itself
+ * went out. The server's verdict arrives later as a companyCommandResult.
+ */
+export type CompanyCommandHandle = SendOutcome & { requestId: string };
 
 const SENT: SendOutcome = { ok: true };
 
@@ -236,6 +246,15 @@ export class CompanyClient {
     this.send(commands.fileReadRequest(commands.newRequestId(), path, offset));
   }
 
+  /**
+   * Ask for a session's log. The answer is a companySessionLog with
+   * `replay: true`; the reducer merges it by seq with anything that arrived
+   * before it.
+   */
+  requestSessionLog(sessionId: string): SendOutcome {
+    return this.send(commands.sessionLogRequest(commands.newRequestId(), sessionId));
+  }
+
   // ── Writes ───────────────────────────────────────────────────────────────
 
   submitPrompt(): SendOutcome {
@@ -291,6 +310,34 @@ export class CompanyClient {
 
   updateRoleProfiles(roleProfiles: Record<string, RoleProfile>): SendOutcome {
     return this.send(commands.settingsUpdate(commands.newRequestId(), roleProfiles));
+  }
+
+  // ── Herdr ────────────────────────────────────────────────────────────────
+
+  /**
+   * Every herdr command mints its own requestId. A read answers with a
+   * herdrScreen carrying it; the other commands answer with a
+   * companyCommandResult under it.
+   */
+  private herdrCommand(build: (requestId: string) => ClientMessage): CompanyCommandHandle {
+    const requestId = commands.newRequestId();
+    return { requestId, ...this.send(build(requestId)) };
+  }
+
+  herdrRead(paneId: string, lines = HERDR_SCREEN_LINES): CompanyCommandHandle {
+    return this.herdrCommand((requestId) => commands.herdrRead(requestId, paneId, lines));
+  }
+
+  herdrPrompt(paneId: string, text: string): CompanyCommandHandle {
+    return this.herdrCommand((requestId) => commands.herdrPrompt(requestId, paneId, text));
+  }
+
+  herdrKeys(paneId: string, keys: HerdrKey[]): CompanyCommandHandle {
+    return this.herdrCommand((requestId) => commands.herdrKeys(requestId, paneId, keys));
+  }
+
+  herdrFocus(paneId: string): CompanyCommandHandle {
+    return this.herdrCommand((requestId) => commands.herdrFocus(requestId, paneId));
   }
 
   private terminalLease(sessionId: string, runEpoch: number): string | null {

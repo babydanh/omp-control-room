@@ -17,6 +17,12 @@ import {
 import type { PtyClient } from './ptyClient.js';
 import type { PtyHostEvent, PtySpawnIdentity, PtySpawnSpec } from './ptyHost.js';
 
+/**
+ * herdr's own variables (HERDR_*) describe the user's herdr session, not the company agent,
+ * so the company child never inherits them. Environment names are case-insensitive on Windows.
+ */
+const HERDR_ENV_PATTERN = /^HERDR_/i;
+
 export type OmpRunnerState = 'new' | 'starting' | 'running' | 'exited' | 'failed' | 'disposed';
 
 export type OmpRunnerEvent =
@@ -213,7 +219,8 @@ export class OmpRunner {
     });
     const env = Object.fromEntries(
       Object.entries(this.options.environment ?? process.env).filter(
-        (entry): entry is [string, string] => typeof entry[1] === 'string',
+        (entry): entry is [string, string] =>
+          typeof entry[1] === 'string' && !HERDR_ENV_PATTERN.test(entry[0]),
       ),
     );
     Object.assign(env, this.bridge?.childEnv, { TERM: COMPANY_TERMINAL_NAME });

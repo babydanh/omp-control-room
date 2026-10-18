@@ -1,0 +1,791 @@
+import * as net from 'node:net';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+import type {
+  HerdrAgent,
+  HerdrAgentsMessage,
+  HerdrKey,
+  HerdrScreenMessage,
+} from '../../../core/src/messages.js';
+
+/** Protocol generation this board speaks; herdr reports it in `ping`. */
+export const HERDR_PROTOCOL_VERSION = 22;
+
+export const HERDR_DEFAULT_READ_LINES = 200;
+export const HERDR_MAX_READ_LINES = 2000;
+export const HERDR_MAX_KEYS = 16;
+export const HERDR_PROMPT_MAX_BYTES = 32 * 1024;
+
+const HERDR_KEY_SET: Record<HerdrKey, true> = {
+  up: true,
+  down: true,
+  left: true,
+  right: true,
+  enter: true,
+  esc: true,
+  tab: true,
+  'ctrl+c': true,
+  '1': true,
+  '2': true,
+  '3': true,
+  y: true,
+  n: true,
+};
+
+/** Pane ids look like `wA:p2`; this keeps arbitrary client strings out of herdr targets. */
+const PANE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/;
+
+const REQUEST_TIMEOUT_MS = 5_000;
+const READ_TIMEOUT_MS = 15_000;
+const PROMPT_TIMEOUT_MS = 10_000;
+/** Coalesces bursts of pane events into one `agent.list`. */
+const REFRESH_DELAY_MS = 150;
+const RECONNECT_BASE_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
+/** A screen watch stays open this long after the most recent read of its pane. */
+const SCREEN_WATCH_MS = 30_000;
+const SCREEN_THROTTLE_MS = 500;
+const MAX_SCREEN_WATCHES = 4;
+const MAX_LINE_BYTES = 16 * 1024 * 1024;
+const LINE_FEED = 0x0a;
+const WINDOWS_PIPE_PREFIX = '\\\\.\\pipe\\';
+const SUBSCRIBE_REQUEST_ID = 'subscribe';
+const HERDR_STATUSES = ['working', 'blocked', 'idle', 'done'] as const;
+
+const NOT_CONNECTED_MESSAGE = 'Chưa kết nối tới herdr.';
+const UNREACHABLE_MESSAGE = 'Không kết nối được tới herdr. Kiểm tra herdr đã chạy.';
+const CLOSED_MESSAGE = 'Kết nối tới herdr đã đóng.';
+const TIMEOUT_MESSAGE = 'herdr không phản hồi kịp thời.';
+const INVALID_REPLY_MESSAGE = 'herdr trả về dữ liệu không hợp lệ.';
+const REPLY_TOO_LARGE_MESSAGE = 'Phản hồi từ herdr quá lớn.';
+const REJECTED_MESSAGE = 'herdr từ chối yêu cầu.';
+const UNKNOWN_MESSAGE = 'Lỗi không xác định khi làm việc với herdr.';
+const AGENT_NOT_FOUND_MESSAGE = 'Không tìm thấy agent ở pane này. Có thể pane đã đóng.';
+const AGENT_BLOCKED_MESSAGE =
+  'Agent đang chờ xác nhận (blocked). Hãy xem màn hình rồi trả lời bằng phím.';
+const INVALID_PANE_MESSAGE = 'Mã pane không hợp lệ.';
+const INVALID_PROMPT_MESSAGE = 'Nội dung prompt không được để trống.';
+const PROMPT_TOO_LARGE_MESSAGE = 'Nội dung prompt quá dài (tối đa 32 KiB).';
+const INVALID_KEYS_MESSAGE = 'Danh sách phím không hợp lệ.';
+const INVALID_LINES_MESSAGE = 'Số dòng cần đọc phải từ 1 đến 2000.';
+
+export type HerdrErrorCode =
+  | 'invalid_request'
+  | 'herdr_unavailable'
+  | 'herdr_timeout'
+  | 'herdr_rejected'
+  | 'agent_not_found'
+  | 'agent_blocked';
+
+/** Carries a Vietnamese message that is safe to show to the board user. */
+export class HerdrError extends Error {
+  readonly code: HerdrErrorCode;
+
+  constructor(code: HerdrErrorCode, message: string) {
+    super(message);
+    this.name = 'HerdrError';
+    this.code = code;
+  }
+}
+
+/** Schedules a callback and returns the function that cancels it. Injected so tests drive time explicitly. */
+export interface HerdrScheduler {
+  schedule(callback: () => void, delayMs: number): () => void;
+}
+
+export const herdrTimerScheduler: HerdrScheduler = {
+  schedule(callback, delayMs) {
+    const timer = setTimeout(callback, delayMs);
+    // Herdr timers must never keep the server process alive on their own.
+    timer.unref();
+    return () => clearTimeout(timer);
+  },
+};
+
+/** Deferred; `Promise.withResolvers` needs a newer lib than this project targets. */
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (error: Error) => void;
+} {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (error: Error) => void = () => undefined;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+export interface HerdrLinkOptions {
+  /** herdr socket path. Defaults to the path resolved from the environment. */
+  readonly socketPath?: string;
+  readonly scheduler?: HerdrScheduler;
+}
+
+export interface HerdrLink {
+  /** Starts connecting in the background and keeps reconnecting until stopped. */
+  start(): void;
+  /** Cancels reconnects, subscriptions, and screen watches. */
+  stop(): void;
+  snapshot(): HerdrAgentsMessage;
+  onAgents(listener: (message: HerdrAgentsMessage) => void): () => void;
+  onScreen(listener: (message: HerdrScreenMessage) => void): () => void;
+  read(paneId: string, lines: number): Promise<HerdrScreenMessage>;
+  prompt(paneId: string, text: string): Promise<void>;
+  keys(paneId: string, keys: readonly HerdrKey[]): Promise<void>;
+  focus(paneId: string): Promise<void>;
+}
+
+export function isHerdrPaneId(value: unknown): value is string {
+  return typeof value === 'string' && PANE_ID_PATTERN.test(value);
+}
+
+export function isHerdrKey(value: unknown): value is HerdrKey {
+  return typeof value === 'string' && Object.hasOwn(HERDR_KEY_SET, value);
+}
+
+/**
+ * Resolves the herdr socket the same way herdr's own CLI does:
+ * HERDR_SOCKET_PATH, then HERDR_SESSION under the config directory, then the default socket.
+ */
+export function resolveHerdrSocketPath(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  homeDir: string = os.homedir(),
+): string {
+  const explicit = env.HERDR_SOCKET_PATH;
+  if (explicit) return explicit;
+  const pathLib = platform === 'win32' ? path.win32 : path.posix;
+  const configDir =
+    platform === 'win32'
+      ? pathLib.join(env.APPDATA ?? pathLib.join(homeDir, 'AppData', 'Roaming'), 'herdr')
+      : pathLib.join(homeDir, '.config', 'herdr');
+  const session = env.HERDR_SESSION;
+  if (session) return pathLib.join(configDir, 'sessions', session, 'herdr.sock');
+  return pathLib.join(configDir, 'herdr.sock');
+}
+
+/** Windows herdr listens on a named pipe whose name is the socket path. */
+export function herdrEndpoint(
+  socketPath: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== 'win32' || socketPath.startsWith(WINDOWS_PIPE_PREFIX)) return socketPath;
+  return WINDOWS_PIPE_PREFIX + socketPath;
+}
+
+export function createHerdrLink(options: HerdrLinkOptions = {}): HerdrLink {
+  return new HerdrLinkImpl(options);
+}
+
+/** A herdr subscription entry; only the fields this link uses are typed. */
+interface HerdrSubscription {
+  readonly type: string;
+  readonly pane_id?: string;
+  readonly source?: 'recent_unwrapped';
+  readonly lines?: number;
+  readonly match?: { readonly type: 'regex'; readonly value: string };
+}
+
+/** One herdr wire line: a reply to a request (`id`) or a pushed subscription event (`event`). */
+interface HerdrEnvelope {
+  readonly id?: unknown;
+  readonly result?: unknown;
+  readonly error?: { readonly code?: unknown };
+  readonly event?: unknown;
+  readonly data?: unknown;
+}
+
+interface PingResult {
+  readonly protocol?: unknown;
+}
+
+interface AgentListResult {
+  readonly agents?: unknown;
+}
+
+/** The `agent.list` entry fields this board reads. */
+interface AgentInfo {
+  readonly pane_id?: unknown;
+  readonly workspace_id?: unknown;
+  readonly agent?: unknown;
+  readonly agent_status?: unknown;
+  readonly name?: unknown;
+  readonly title?: unknown;
+  readonly cwd?: unknown;
+  readonly focused?: unknown;
+}
+
+/** Shared by `agent.read` replies and `pane.output_matched` event data. */
+interface PaneReadPayload {
+  readonly read?: { readonly text?: unknown };
+}
+
+interface HerdrEventStream {
+  close(): void;
+}
+
+interface HerdrEventHandlers {
+  onStarted(): void;
+  onEvent(event: string, data: unknown): void;
+  onFailure(code: string | undefined, error: HerdrError): void;
+}
+
+interface ScreenWatch {
+  readonly paneId: string;
+  readonly lines: number;
+  stream?: HerdrEventStream;
+  cancelExpiry: () => void;
+  cancelThrottle?: () => void;
+  dirty: boolean;
+  latestText: string;
+}
+
+const MEMBERSHIP_SUBSCRIPTIONS: readonly HerdrSubscription[] = [
+  { type: 'pane.created' },
+  { type: 'pane.closed' },
+  { type: 'pane.exited' },
+  { type: 'pane.agent_detected' },
+  { type: 'pane.focused' },
+];
+
+class HerdrLinkImpl implements HerdrLink {
+  private readonly endpoint: string;
+  private readonly scheduler: HerdrScheduler;
+  private readonly agentListeners = new Set<(message: HerdrAgentsMessage) => void>();
+  private readonly screenListeners = new Set<(message: HerdrScreenMessage) => void>();
+  private readonly watches = new Map<string, ScreenWatch>();
+  private message: HerdrAgentsMessage = {
+    type: 'herdrAgents',
+    available: false,
+    reason: NOT_CONNECTED_MESSAGE,
+    agents: [],
+  };
+  private running = false;
+  /** Bumped whenever pending work must be dropped (stop, failure). */
+  private generation = 0;
+  private requestCount = 0;
+  private reconnectAttempts = 0;
+  private cancelReconnect?: () => void;
+  private cancelRefresh?: () => void;
+  private events?: HerdrEventStream;
+  private eventsKey?: string;
+
+  constructor(options: HerdrLinkOptions) {
+    this.endpoint = herdrEndpoint(options.socketPath ?? resolveHerdrSocketPath(process.env));
+    this.scheduler = options.scheduler ?? herdrTimerScheduler;
+  }
+
+  start(): void {
+    if (this.running) return;
+    this.running = true;
+    void this.connect();
+  }
+
+  stop(): void {
+    this.running = false;
+    this.generation += 1;
+    this.cancelReconnect?.();
+    this.cancelReconnect = undefined;
+    this.cancelRefresh?.();
+    this.cancelRefresh = undefined;
+    this.closeEvents();
+    for (const paneId of [...this.watches.keys()]) this.closeWatch(paneId);
+  }
+
+  snapshot(): HerdrAgentsMessage {
+    return this.message;
+  }
+
+  onAgents(listener: (message: HerdrAgentsMessage) => void): () => void {
+    this.agentListeners.add(listener);
+    return () => this.agentListeners.delete(listener);
+  }
+
+  onScreen(listener: (message: HerdrScreenMessage) => void): () => void {
+    this.screenListeners.add(listener);
+    return () => this.screenListeners.delete(listener);
+  }
+
+  async read(paneId: string, lines: number): Promise<HerdrScreenMessage> {
+    assertPaneId(paneId);
+    assertLines(lines);
+    const result = await this.call(
+      'agent.read',
+      { target: paneId, source: 'recent_unwrapped', lines, format: 'text', strip_ansi: true },
+      READ_TIMEOUT_MS,
+    );
+    const text = readText(result);
+    if (text === undefined) throw new HerdrError('herdr_rejected', INVALID_REPLY_MESSAGE);
+    this.watchScreen(paneId, lines);
+    return { type: 'herdrScreen', paneId, text, at: new Date().toISOString() };
+  }
+
+  async prompt(paneId: string, text: string): Promise<void> {
+    assertPaneId(paneId);
+    assertPrompt(text);
+    await this.call('agent.prompt', { target: paneId, text }, PROMPT_TIMEOUT_MS);
+  }
+
+  async keys(paneId: string, keys: readonly HerdrKey[]): Promise<void> {
+    assertPaneId(paneId);
+    if (keys.length === 0 || keys.length > HERDR_MAX_KEYS || !keys.every(isHerdrKey)) {
+      throw new HerdrError('invalid_request', INVALID_KEYS_MESSAGE);
+    }
+    await this.call('agent.send_keys', { target: paneId, keys: [...keys] });
+  }
+
+  async focus(paneId: string): Promise<void> {
+    assertPaneId(paneId);
+    await this.call('agent.focus', { target: paneId });
+  }
+
+  private async connect(): Promise<void> {
+    const generation = this.generation;
+    try {
+      assertCompatible(await this.call('ping', {}));
+      if (!this.isCurrent(generation)) return;
+      const agents = parseAgentList(await this.call('agent.list', {}));
+      if (!this.isCurrent(generation)) return;
+      this.reconnectAttempts = 0;
+      this.setAgents(agents);
+      this.syncEvents(generation, agents);
+    } catch (error) {
+      this.fail(generation, error);
+    }
+  }
+
+  private async refresh(generation: number): Promise<void> {
+    try {
+      const agents = parseAgentList(await this.call('agent.list', {}));
+      if (!this.isCurrent(generation)) return;
+      this.setAgents(agents);
+      this.syncEvents(generation, agents);
+    } catch (error) {
+      this.fail(generation, error);
+    }
+  }
+
+  private isCurrent(generation: number): boolean {
+    return this.running && generation === this.generation;
+  }
+
+  private fail(generation: number, error: unknown): void {
+    if (!this.isCurrent(generation)) return;
+    this.generation += 1;
+    this.cancelRefresh?.();
+    this.cancelRefresh = undefined;
+    this.closeEvents();
+    this.publish({
+      type: 'herdrAgents',
+      available: false,
+      reason: error instanceof HerdrError ? error.message : UNKNOWN_MESSAGE,
+      agents: [],
+    });
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    const delay = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** this.reconnectAttempts);
+    this.reconnectAttempts += 1;
+    this.cancelReconnect = this.scheduler.schedule(() => {
+      this.cancelReconnect = undefined;
+      void this.connect();
+    }, delay);
+  }
+
+  private scheduleRefresh(): void {
+    if (this.cancelRefresh !== undefined) return;
+    const generation = this.generation;
+    this.cancelRefresh = this.scheduler.schedule(() => {
+      this.cancelRefresh = undefined;
+      void this.refresh(generation);
+    }, REFRESH_DELAY_MS);
+  }
+
+  /** Keeps the status subscription aligned with the current pane set; any event triggers a reconcile. */
+  private syncEvents(generation: number, agents: readonly HerdrAgent[]): void {
+    const paneIds = agents.map((agent) => agent.paneId);
+    const key = JSON.stringify(paneIds);
+    if (this.events !== undefined && this.eventsKey === key) return;
+    this.closeEvents();
+    this.eventsKey = key;
+    const subscriptions: HerdrSubscription[] = [
+      ...MEMBERSHIP_SUBSCRIPTIONS,
+      ...paneIds.map((paneId) => ({ type: 'pane.agent_status_changed', pane_id: paneId })),
+    ];
+    const stream = openEventStream(this.endpoint, subscriptions, {
+      onStarted: () => {
+        if (this.events === stream && this.isCurrent(generation)) this.scheduleRefresh();
+      },
+      onEvent: () => {
+        if (this.events === stream && this.isCurrent(generation)) this.scheduleRefresh();
+      },
+      onFailure: (code, error) => {
+        if (this.events !== stream || !this.isCurrent(generation)) return;
+        if (code === 'events_lost') {
+          // Cached state may be stale: drop the stream and reconcile from agent.list.
+          this.closeEvents();
+          this.scheduleRefresh();
+          return;
+        }
+        this.fail(generation, error);
+      },
+    });
+    this.events = stream;
+  }
+
+  private closeEvents(): void {
+    this.events?.close();
+    this.events = undefined;
+    this.eventsKey = undefined;
+  }
+
+  private setAgents(agents: readonly HerdrAgent[]): void {
+    this.publish({ type: 'herdrAgents', available: true, agents: [...agents] });
+  }
+
+  private publish(next: HerdrAgentsMessage): void {
+    if (JSON.stringify(next) === JSON.stringify(this.message)) return;
+    this.message = next;
+    for (const listener of [...this.agentListeners]) listener(next);
+  }
+
+  private watchScreen(paneId: string, lines: number): void {
+    const existing = this.watches.get(paneId);
+    if (existing !== undefined && existing.lines === lines) {
+      existing.cancelExpiry();
+      existing.cancelExpiry = this.scheduler.schedule(
+        () => this.closeWatch(paneId),
+        SCREEN_WATCH_MS,
+      );
+      return;
+    }
+    this.closeWatch(paneId);
+    if (this.watches.size >= MAX_SCREEN_WATCHES) {
+      for (const oldest of this.watches.keys()) {
+        this.closeWatch(oldest);
+        break;
+      }
+    }
+    const watch: ScreenWatch = {
+      paneId,
+      lines,
+      cancelExpiry: this.scheduler.schedule(() => this.closeWatch(paneId), SCREEN_WATCH_MS),
+      dirty: false,
+      latestText: '',
+    };
+    this.watches.set(paneId, watch);
+    watch.stream = openEventStream(
+      this.endpoint,
+      [
+        {
+          type: 'pane.output_matched',
+          pane_id: paneId,
+          source: 'recent_unwrapped',
+          lines,
+          match: { type: 'regex', value: '.' },
+        },
+      ],
+      {
+        onStarted: () => {
+          // Output between the read and the subscription would otherwise be missed.
+          if (this.watches.get(paneId) === watch) void this.resyncScreen(watch);
+        },
+        onEvent: (event, data) => {
+          if (event !== 'pane.output_matched' || this.watches.get(paneId) !== watch) return;
+          const text = readText(data);
+          if (text !== undefined) this.pushScreen(watch, text);
+        },
+        onFailure: () => {
+          if (this.watches.get(paneId) === watch) this.closeWatch(paneId);
+        },
+      },
+    );
+  }
+
+  private async resyncScreen(watch: ScreenWatch): Promise<void> {
+    try {
+      const text = readText(
+        await this.call(
+          'agent.read',
+          {
+            target: watch.paneId,
+            source: 'recent_unwrapped',
+            lines: watch.lines,
+            format: 'text',
+            strip_ansi: true,
+          },
+          READ_TIMEOUT_MS,
+        ),
+      );
+      if (text !== undefined && this.watches.get(watch.paneId) === watch)
+        this.pushScreen(watch, text);
+    } catch {
+      if (this.watches.get(watch.paneId) === watch) this.closeWatch(watch.paneId);
+    }
+  }
+
+  /** Leading-plus-trailing throttle: the first change emits at once, later changes coalesce into one emit per window. */
+  private pushScreen(watch: ScreenWatch, text: string): void {
+    watch.latestText = text;
+    if (watch.cancelThrottle !== undefined) {
+      watch.dirty = true;
+      return;
+    }
+    this.emitScreen(watch.paneId, text);
+    this.armThrottle(watch);
+  }
+
+  private armThrottle(watch: ScreenWatch): void {
+    watch.cancelThrottle = this.scheduler.schedule(() => {
+      watch.cancelThrottle = undefined;
+      if (!watch.dirty) return;
+      watch.dirty = false;
+      this.emitScreen(watch.paneId, watch.latestText);
+      this.armThrottle(watch);
+    }, SCREEN_THROTTLE_MS);
+  }
+
+  private emitScreen(paneId: string, text: string): void {
+    const message: HerdrScreenMessage = {
+      type: 'herdrScreen',
+      paneId,
+      text,
+      at: new Date().toISOString(),
+    };
+    for (const listener of [...this.screenListeners]) listener(message);
+  }
+
+  private closeWatch(paneId: string): void {
+    const watch = this.watches.get(paneId);
+    if (watch === undefined) return;
+    this.watches.delete(paneId);
+    watch.cancelExpiry();
+    watch.cancelThrottle?.();
+    watch.stream?.close();
+  }
+
+  /** One short-lived connection per request, matching herdr's own client. */
+  private call(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs: number = REQUEST_TIMEOUT_MS,
+  ): Promise<unknown> {
+    const { promise, resolve, reject } = deferred<unknown>();
+    const id = `omp-${++this.requestCount}`;
+    const socket = net.createConnection(this.endpoint);
+    const reader = new HerdrLineReader();
+    let settled = false;
+    let cancelTimeout: () => void = () => undefined;
+    const settle = (outcome: () => void): void => {
+      if (settled) return;
+      settled = true;
+      cancelTimeout();
+      socket.destroy();
+      outcome();
+    };
+    cancelTimeout = this.scheduler.schedule(
+      () => settle(() => reject(new HerdrError('herdr_timeout', TIMEOUT_MESSAGE))),
+      timeoutMs,
+    );
+    socket.on('connect', () => socket.write(`${JSON.stringify({ id, method, params })}\n`));
+    socket.on('error', () =>
+      settle(() => reject(new HerdrError('herdr_unavailable', UNREACHABLE_MESSAGE))),
+    );
+    socket.on('close', () =>
+      settle(() => reject(new HerdrError('herdr_unavailable', CLOSED_MESSAGE))),
+    );
+    socket.on('data', (chunk: Buffer) => {
+      try {
+        for (const line of reader.push(chunk)) {
+          if (settled) return;
+          const reply = parseLine(line);
+          if (reply.id !== id) continue;
+          if (reply.error !== undefined) {
+            const code = typeof reply.error.code === 'string' ? reply.error.code : '';
+            settle(() => reject(herdrRequestError(code)));
+            return;
+          }
+          settle(() => resolve(reply.result));
+          return;
+        }
+      } catch (error) {
+        settle(() =>
+          reject(
+            error instanceof HerdrError ? error : new HerdrError('herdr_rejected', UNKNOWN_MESSAGE),
+          ),
+        );
+      }
+    });
+    return promise;
+  }
+}
+
+/** Opens a long-lived `events.subscribe` connection. Each pushed line is `{event, data}`. */
+function openEventStream(
+  endpoint: string,
+  subscriptions: readonly HerdrSubscription[],
+  handlers: HerdrEventHandlers,
+): HerdrEventStream {
+  const socket = net.createConnection(endpoint);
+  const reader = new HerdrLineReader();
+  let open = true;
+  const fail = (code: string | undefined, error: HerdrError): void => {
+    if (!open) return;
+    open = false;
+    socket.destroy();
+    handlers.onFailure(code, error);
+  };
+  socket.on('connect', () =>
+    socket.write(
+      `${JSON.stringify({ id: SUBSCRIBE_REQUEST_ID, method: 'events.subscribe', params: { subscriptions } })}\n`,
+    ),
+  );
+  socket.on('error', () =>
+    fail(undefined, new HerdrError('herdr_unavailable', UNREACHABLE_MESSAGE)),
+  );
+  socket.on('close', () => fail(undefined, new HerdrError('herdr_unavailable', CLOSED_MESSAGE)));
+  socket.on('data', (chunk: Buffer) => {
+    try {
+      for (const line of reader.push(chunk)) {
+        if (!open) return;
+        const message = parseLine(line);
+        if (message.error !== undefined) {
+          const code = typeof message.error.code === 'string' ? message.error.code : '';
+          fail(code, herdrRequestError(code));
+          return;
+        }
+        if (typeof message.event === 'string') {
+          handlers.onEvent(message.event, message.data);
+          continue;
+        }
+        const result = message.result as { readonly type?: unknown } | undefined;
+        if (result?.type === 'subscription_started') handlers.onStarted();
+      }
+    } catch (error) {
+      fail(
+        undefined,
+        error instanceof HerdrError ? error : new HerdrError('herdr_rejected', UNKNOWN_MESSAGE),
+      );
+    }
+  });
+  return {
+    close() {
+      if (!open) return;
+      open = false;
+      socket.destroy();
+    },
+  };
+}
+
+class HerdrLineReader {
+  private pending: Buffer = Buffer.alloc(0);
+
+  push(chunk: Buffer): string[] {
+    this.pending = this.pending.length === 0 ? chunk : Buffer.concat([this.pending, chunk]);
+    const lines: string[] = [];
+    for (
+      let newline = this.pending.indexOf(LINE_FEED);
+      newline !== -1;
+      newline = this.pending.indexOf(LINE_FEED)
+    ) {
+      const line = this.pending.toString('utf8', 0, newline);
+      this.pending = this.pending.subarray(newline + 1);
+      if (line.length > 0) lines.push(line);
+    }
+    if (this.pending.length > MAX_LINE_BYTES)
+      throw new HerdrError('herdr_rejected', REPLY_TOO_LARGE_MESSAGE);
+    return lines;
+  }
+}
+
+function parseLine(line: string): HerdrEnvelope {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    throw new HerdrError('herdr_rejected', INVALID_REPLY_MESSAGE);
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new HerdrError('herdr_rejected', INVALID_REPLY_MESSAGE);
+  }
+  // Boundary cast: herdr's protocol guarantees this envelope; each field is re-checked where it is read.
+  return parsed as HerdrEnvelope;
+}
+
+function herdrRequestError(code: string): HerdrError {
+  switch (code) {
+    case 'agent_blocked':
+      return new HerdrError('agent_blocked', AGENT_BLOCKED_MESSAGE);
+    case 'agent_not_found':
+    case 'pane_not_found':
+      return new HerdrError('agent_not_found', AGENT_NOT_FOUND_MESSAGE);
+    default:
+      return new HerdrError(
+        'herdr_rejected',
+        code ? `herdr từ chối yêu cầu (${code}).` : REJECTED_MESSAGE,
+      );
+  }
+}
+
+function assertCompatible(pong: unknown): void {
+  const reported = (pong as PingResult | undefined)?.protocol;
+  if (reported === HERDR_PROTOCOL_VERSION) return;
+  const shown = typeof reported === 'number' ? String(reported) : 'không rõ';
+  throw new HerdrError(
+    'herdr_rejected',
+    `Giao thức herdr không khớp (herdr báo ${shown}, board cần ${HERDR_PROTOCOL_VERSION}).`,
+  );
+}
+
+function parseAgentList(result: unknown): HerdrAgent[] {
+  const list: unknown = (result as AgentListResult | undefined)?.agents;
+  if (!Array.isArray(list)) throw new HerdrError('herdr_rejected', INVALID_REPLY_MESSAGE);
+  const agents: HerdrAgent[] = [];
+  for (const info of list as AgentInfo[]) {
+    const agent = toHerdrAgent(info);
+    if (agent !== undefined) agents.push(agent);
+  }
+  return agents.sort((a, b) => (a.paneId < b.paneId ? -1 : a.paneId > b.paneId ? 1 : 0));
+}
+
+function toHerdrAgent(info: AgentInfo): HerdrAgent | undefined {
+  if (typeof info.pane_id !== 'string' || typeof info.workspace_id !== 'string') return undefined;
+  const agent: HerdrAgent = {
+    paneId: info.pane_id,
+    workspaceId: info.workspace_id,
+    kind: typeof info.agent === 'string' ? info.agent : 'unknown',
+    status: HERDR_STATUSES.find((status) => status === info.agent_status) ?? 'unknown',
+  };
+  if (typeof info.name === 'string' && info.name !== '') agent.name = info.name;
+  if (typeof info.title === 'string' && info.title !== '') agent.title = info.title;
+  if (typeof info.cwd === 'string' && info.cwd !== '') agent.cwd = info.cwd;
+  if (typeof info.focused === 'boolean') agent.focused = info.focused;
+  return agent;
+}
+
+/** Reads `read.text` from either an `agent.read` reply or a `pane.output_matched` event. */
+function readText(value: unknown): string | undefined {
+  const text = (value as PaneReadPayload | undefined)?.read?.text;
+  return typeof text === 'string' ? text : undefined;
+}
+
+function assertPaneId(paneId: string): void {
+  if (!isHerdrPaneId(paneId)) throw new HerdrError('invalid_request', INVALID_PANE_MESSAGE);
+}
+
+function assertPrompt(text: string): void {
+  if (text.trim() === '') throw new HerdrError('invalid_request', INVALID_PROMPT_MESSAGE);
+  if (Buffer.byteLength(text, 'utf8') > HERDR_PROMPT_MAX_BYTES) {
+    throw new HerdrError('invalid_request', PROMPT_TOO_LARGE_MESSAGE);
+  }
+}
+
+function assertLines(lines: number): void {
+  if (!Number.isInteger(lines) || lines < 1 || lines > HERDR_MAX_READ_LINES) {
+    throw new HerdrError('invalid_request', INVALID_LINES_MESSAGE);
+  }
+}

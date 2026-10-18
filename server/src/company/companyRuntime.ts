@@ -60,6 +60,7 @@ import type {
   CompanySessionAction,
   ContractDecision,
   ReviewerResultInput,
+  VerificationOutcome,
   VerificationRequest,
   WorkerTaskResultInput,
   WorkspaceChangeInput,
@@ -155,6 +156,7 @@ export interface CompanySupervisorPort {
 import { PtyClient, type PtyClientOptions } from './ptyClient.js';
 import { buildRolePacket, roleBriefForProfile, roleBriefText } from './roleBriefs.js';
 import { Scheduler } from './scheduler.js';
+import { SessionLog, sessionLogDirectory, type SessionLogInput } from './sessionLog.js';
 import { sessionHoldsRunner, SessionPool } from './sessionPool.js';
 import type { UsageLedger } from './usageService.js';
 import { discoverVerificationProfiles } from './verificationDiscovery.js';
@@ -179,6 +181,9 @@ const PARK_SWEEP_MS = 15_000;
 
 /** Artifact reads are paged; a page large enough for any real image. */
 const ARTIFACT_PAGE_BYTES = 256 * 1024;
+
+/** The tail of a verification command's output kept in the session log. */
+const SESSION_LOG_OUTPUT_TAIL_BYTES = 1200;
 
 /** A native image, as the bridge accepts it: canonical base64 of raw bytes. */
 type BridgeImage = { mimeType: string; data: string };
@@ -434,6 +439,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
   private readonly supervisor: CompanySupervisorPort;
   private readonly pool: SessionPool;
   private readonly scheduler: Scheduler;
+  private readonly sessionLog: SessionLog;
   private readonly gateway: RunnerTerminalGateway;
   private readonly runs = new Map<string, ActiveRun>();
   private readonly handoffs = new Map<string, string>();
@@ -454,6 +460,13 @@ class NativeCompanyRuntime implements CompanyRuntime {
     this.getCoordinator = options.getCoordinator;
     this.onMessage = options.onMessage;
     this.deps = deps;
+    this.sessionLog = new SessionLog({
+      directory: sessionLogDirectory(this.store.namespaceDir),
+      now: () => this.deps.now(),
+      onEntry: (sessionId, entry) => {
+        this.onMessage({ type: 'companySessionLog', sessionId, replay: false, entries: [entry] });
+      },
+    });
     this.launch = deps.resolveLaunch({
       ...(options.runnerCommand === undefined ? {} : { runnerCommand: options.runnerCommand }),
       ...(options.extensionPath === undefined ? {} : { extensionPath: options.extensionPath }),
@@ -549,6 +562,80 @@ class NativeCompanyRuntime implements CompanyRuntime {
    */
   private state(): CompanyState {
     return this.coordinator().readState();
+  }
+
+  /** Appends one entry to a session's durable log, attributed to its active task unless given. */
+  private logEntry(
+    sessionId: string,
+    runEpoch: number,
+    entry: Omit<SessionLogInput, 'runEpoch' | 'taskId'>,
+    taskId?: string,
+  ): void {
+    const attributed = taskId ?? this.state().sessions[sessionId]?.activeTaskId;
+    this.sessionLog.record(sessionId, {
+      ...entry,
+      runEpoch,
+      ...(attributed === undefined ? {} : { taskId: attributed }),
+    });
+  }
+
+  /** Logs a verification run for the Lệnh tab: the command line, then the tail of its output. */
+  private async logCommand(
+    run: ActiveRun,
+    request: VerificationRequest,
+    outcome: VerificationOutcome,
+  ): Promise<void> {
+    const evidence = this.state().evidence[outcome.evidenceId];
+    const commandLine =
+      evidence === undefined
+        ? `Lệnh ${outcome.commandId} bị chặn trước khi chạy.`
+        : [evidence.command.executable, ...evidence.command.argv].join(' ');
+    const tail =
+      evidence === undefined
+        ? ''
+        : (await this.outputTail(evidence.stdoutArtifactId)) ||
+          (await this.outputTail(evidence.stderrArtifactId));
+    this.logEntry(
+      run.sessionId,
+      run.runEpoch,
+      {
+        kind: 'command',
+        text: tail === '' ? commandLine : `${commandLine}\n${tail}`,
+        ok: outcome.status === 'passed',
+        ...(outcome.exitCode === undefined ? {} : { exitCode: outcome.exitCode }),
+      },
+      request.taskId,
+    );
+  }
+
+  /** The last bytes of a command's output artifact as text; '' when there is nothing to read. */
+  private async outputTail(artifactId: string | undefined): Promise<string> {
+    if (artifactId === undefined) return '';
+    try {
+      const { totalBytes } = await this.store.readArtifact(artifactId, 0, 1);
+      const offset = Math.max(0, totalBytes - SESSION_LOG_OUTPUT_TAIL_BYTES);
+      const page = await this.store.readArtifact(artifactId, offset, SESSION_LOG_OUTPUT_TAIL_BYTES);
+      return Buffer.from(page.dataBase64, 'base64')
+        .toString('utf8')
+        .replace(/^\uFFFD+/u, '')
+        .trim();
+    } catch {
+      return '';
+    }
+  }
+
+  /** Logs a QA or Judge verdict in the session that gave it, with the reviewer's notes. */
+  private logVerdict(run: ActiveRun, role: 'qa' | 'judge', input: ReviewerResultInput): void {
+    const passed = input.verdict === 'pass';
+    const headline = passed
+      ? `${ROLE_LABELS[role]} chấp thuận.`
+      : `${ROLE_LABELS[role]} yêu cầu sửa.`;
+    this.logEntry(
+      run.sessionId,
+      run.runEpoch,
+      { kind: 'verdict', text: [headline, ...input.notes].join('\n'), ok: passed },
+      input.taskId,
+    );
   }
 
   /** True while this runtime still holds the run a terminal viewer or a bridge
@@ -1120,7 +1207,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
       },
     });
 
-    if (persist) await this.recordRunIdentity(run);
+    if (persist) {
+      await this.recordRunIdentity(run);
+      this.logEntry(run.sessionId, run.runEpoch, { kind: 'state', text: 'Phiên đã khởi động.' });
+    }
     return run;
   }
 
@@ -1220,6 +1310,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
   private async stopRun(run: ActiveRun, reason: string): Promise<void> {
     if (run.stopping) return;
     run.stopping = true;
+    this.sessionLog.flush(run.sessionId);
     this.releaseChildLeases(run);
     this.gateway.forgetRun(run.sessionId, run.runEpoch);
     let stopped = false;
@@ -1294,6 +1385,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
     this.runs.delete(run.sessionId);
     run.unsubscribe();
     this.gateway.forgetRun(run.sessionId, run.runEpoch);
+    this.sessionLog.flush(run.sessionId);
     this.supervisor.notifyExit(run.runId, {
       ...(exitCode === undefined ? {} : { exitCode }),
       expected: false,
@@ -1311,6 +1403,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
         ],
         this.state().revision,
       );
+      this.logEntry(session.id, run.runEpoch, {
+        kind: 'state',
+        text: exitCode === undefined ? 'Phiên đã sập.' : `Phiên đã sập (mã thoát ${exitCode}).`,
+      });
     }
     // A crashed run's locks are NOT released: the workspace may still be
     // half-written, and another worker must not be handed the same files.
@@ -1340,6 +1436,14 @@ class NativeCompanyRuntime implements CompanyRuntime {
         seq,
         text,
       });
+      this.sessionLog.text(
+        run.sessionId,
+        {
+          runEpoch: run.runEpoch,
+          ...(session?.activeTaskId === undefined ? {} : { taskId: session.activeTaskId }),
+        },
+        text,
+      );
       return;
     }
     if (kind === 'tool') {
@@ -1351,6 +1455,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       return;
     }
     if (kind === 'quiescent') {
+      this.sessionLog.flush(run.sessionId);
       if (event['idle'] === true) {
         // `run.busy` was set when the prompt was delivered and never cleared, so
         // the tool-quiescence path could never mark a session idle and no session
@@ -1366,6 +1471,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
     if (kind === 'error') {
       const code = readString(event, 'code') ?? 'omp_bridge_error';
       console.error(`[CompanyRuntime] OMP run ${run.sessionId} reported ${code}.`);
+      this.logEntry(run.sessionId, run.runEpoch, {
+        kind: 'error',
+        text: `Cầu nối OMP báo lỗi: ${code}.`,
+      });
     }
   }
 
@@ -1373,10 +1482,25 @@ class NativeCompanyRuntime implements CompanyRuntime {
     const toolCallId = readString(event, 'toolCallId');
     if (toolCallId === undefined) return;
     if (event['phase'] === 'start') {
-      run.liveTools.set(toolCallId, readString(event, 'toolName') ?? 'unknown');
+      const started = readString(event, 'toolName') ?? 'unknown';
+      run.liveTools.set(toolCallId, started);
+      this.logEntry(run.sessionId, run.runEpoch, {
+        kind: 'tool',
+        toolName: started,
+        text: started,
+      });
       return;
     }
+    const toolName = readString(event, 'toolName') ?? run.liveTools.get(toolCallId) ?? 'unknown';
     run.liveTools.delete(toolCallId);
+    if (event['isError'] === true) {
+      this.logEntry(run.sessionId, run.runEpoch, {
+        kind: 'tool',
+        toolName,
+        text: toolName,
+        ok: false,
+      });
+    }
     if (run.liveTools.size === 0 && !run.busy) {
       void this.markRunIdle(run).catch((error: unknown) => {
         console.error('[Company] could not record an idle session.', error);
@@ -1542,6 +1666,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
       this.state().revision,
     );
     this.pool.upsert(idle);
+    this.logEntry(session.id, run.runEpoch, {
+      kind: 'state',
+      text: 'Phiên đang rảnh, chờ chỉ thị tiếp theo.',
+    });
     this.handoffs.set(session.id, text);
     // Work is finished only now that the tools are quiet, so the lock and the
     // capacity lease are handed back here and not when the result arrived. The
@@ -1618,6 +1746,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
         this.state().revision,
       );
       this.pool.upsert(parked);
+      this.logEntry(session.id, session.runEpoch, {
+        kind: 'state',
+        text: 'Phiên đã đậu để nhường chỗ cho phiên khác.',
+      });
       return true;
     }
     return false;
@@ -1847,6 +1979,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
   private async onQuestionAnswered(question: Question, input: QuestionAnswerInput): Promise<void> {
     const run = this.runs.get(question.sessionId);
     if (run === undefined || run.runEpoch !== question.runEpoch) return;
+    this.logEntry(question.sessionId, run.runEpoch, {
+      kind: 'question',
+      text: 'Người dùng đã trả lời câu hỏi.',
+    });
     if (question.actionDigest !== undefined && run.approvals.delete(question.actionDigest)) {
       // An answered approval releases exactly the call it was bound to; nothing
       // else the session asked for becomes permitted.
@@ -1886,6 +2022,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
       if (live !== undefined) {
         await this.stopRun(live, 'the session was archived to free a pool slot');
       }
+      this.logEntry(session.id, session.runEpoch, {
+        kind: 'state',
+        text: 'Phiên đã được lưu trữ.',
+      });
       return { status: 'archived' };
     }
     const run = this.runs.get(session.id);
@@ -1897,36 +2037,48 @@ class NativeCompanyRuntime implements CompanyRuntime {
 
     if (action === 'pause') {
       const record = await this.supervisor.pause(run.runId, runEpoch);
-      return { status: record.state === 'paused' ? 'paused' : 'pausing' };
+      const paused = record.state === 'paused';
+      this.logEntry(session.id, runEpoch, {
+        kind: 'state',
+        text: paused ? 'Phiên đã tạm dừng.' : 'Phiên đang tạm dừng.',
+      });
+      return { status: paused ? 'paused' : 'pausing' };
     }
     if (action === 'kill') {
       await this.stopRun(run, 'the session was stopped by the user');
+      this.logEntry(session.id, runEpoch, {
+        kind: 'state',
+        text: 'Phiên đã dừng theo yêu cầu của người dùng.',
+      });
       return { status: 'stopped' };
     }
     if (action === 'resume') {
-      return this.startResult(
-        await this.startRun(
-          session,
-          { requestId: randomUUID(), text: 'You were paused. Wait for the next instruction.' },
-          false,
-        ),
+      const resumed = await this.startRun(
+        session,
+        { requestId: randomUUID(), text: 'You were paused. Wait for the next instruction.' },
+        false,
       );
+      this.logEntry(session.id, runEpoch, { kind: 'state', text: 'Phiên đã tiếp tục.' });
+      return this.startResult(resumed);
     }
     if (action === 'restart') {
       await this.stopRun(run, 'the session was restarted by the user');
       const fresh = this.state().sessions[session.id];
       if (fresh === undefined) return { status: 'stopped' };
-      return this.startResult(
-        await this.startRun(
-          {
-            ...fresh,
-            runEpoch: runEpoch + 1,
-            ...(run.nativeSessionId === undefined ? {} : { nativeSessionId: run.nativeSessionId }),
-          },
-          { requestId: randomUUID(), text: 'You were restarted. Wait for the next instruction.' },
-          false,
-        ),
+      const restarted = await this.startRun(
+        {
+          ...fresh,
+          runEpoch: runEpoch + 1,
+          ...(run.nativeSessionId === undefined ? {} : { nativeSessionId: run.nativeSessionId }),
+        },
+        { requestId: randomUUID(), text: 'You were restarted. Wait for the next instruction.' },
+        false,
       );
+      this.logEntry(session.id, runEpoch + 1, {
+        kind: 'state',
+        text: 'Phiên đã được khởi động lại.',
+      });
+      return this.startResult(restarted);
     }
     return { status: session.status };
   }
@@ -2071,6 +2223,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
       [{ entity: 'question', op: 'put', id, value: question }],
       this.state().revision,
     );
+    this.logEntry(run.sessionId, run.runEpoch, {
+      kind: 'question',
+      text: `Hỏi người dùng: ${question.title}`,
+    });
     return { questionId: id };
   }
 
@@ -2255,10 +2411,17 @@ class NativeCompanyRuntime implements CompanyRuntime {
     void this.commit(
       [{ entity: 'question', op: 'put', id: questionId, value: question }],
       this.state().revision,
-    ).catch((error) => {
-      run.approvals.delete(digest);
-      console.error('[CompanyRuntime] Could not persist an approval question.', error);
-    });
+    )
+      .then(() => {
+        this.logEntry(run.sessionId, run.runEpoch, {
+          kind: 'question',
+          text: `Chờ người dùng duyệt ${request.toolName}: ${reason}`,
+        });
+      })
+      .catch((error) => {
+        run.approvals.delete(digest);
+        console.error('[CompanyRuntime] Could not persist an approval question.', error);
+      });
     return `Waiting for the user to answer: ${reason}`;
   }
 
@@ -2608,6 +2771,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       commandId,
     };
     const outcome = await this.coordinator().verifyTask(request);
+    await this.logCommand(run, request, outcome);
     return {
       status: outcome.status,
       evidenceId: outcome.evidenceId,
@@ -2623,6 +2787,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
   ): Promise<Record<string, unknown>> {
     const input = this.readReviewerInput(run, payload);
     const outcome = await this.coordinator().submitQaResult(input);
+    this.logVerdict(run, 'qa', input);
     await this.afterReview(run, input, outcome.verdict, outcome.taskStatus);
     return { accepted: true, revision: outcome.revision, taskStatus: outcome.taskStatus };
   }
@@ -2633,6 +2798,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
   ): Promise<Record<string, unknown>> {
     const input = this.readReviewerInput(run, payload);
     const outcome = await this.coordinator().submitJudgeResult(input);
+    this.logVerdict(run, 'judge', input);
     await this.afterReview(run, input, outcome.verdict, outcome.taskStatus);
     return { accepted: true, revision: outcome.revision, taskStatus: outcome.taskStatus };
   }
@@ -2965,6 +3131,15 @@ class NativeCompanyRuntime implements CompanyRuntime {
     // post-start pass instead.
     for (const session of Object.values(state.sessions)) this.pool.upsert(session);
     this.pendingRecovery = reconcileInterruptedWork(state, this.deps.now());
+    for (const session of Object.values(state.sessions)) {
+      if (!sessionHoldsRunner(session)) continue;
+      this.sessionLog.record(session.id, {
+        kind: 'state',
+        runEpoch: session.runEpoch,
+        ...(session.activeTaskId === undefined ? {} : { taskId: session.activeTaskId }),
+        text: 'Phiên đã sập: tiến trình không còn chạy sau khi máy chủ khởi động lại.',
+      });
+    }
   }
 
   /**
@@ -2997,6 +3172,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
         this.state().revision,
       );
       this.pool.upsert(parked);
+      this.logEntry(session.id, session.runEpoch, {
+        kind: 'state',
+        text: 'Phiên đã đậu sau thời gian rảnh.',
+      });
     }
   }
 
@@ -3038,6 +3217,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
     for (const run of [...this.runs.values()]) {
       await this.stopRun(run, 'the Company runtime shut down');
     }
+    await this.sessionLog.drain();
     const report = await this.supervisor.dispose();
     if (report.blocked.length > 0) {
       for (const entry of report.blocked) {

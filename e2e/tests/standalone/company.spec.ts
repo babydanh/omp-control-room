@@ -63,10 +63,9 @@ test('Company plans, asks, waits for approval, then verifies the approved work',
 
     await done.getByRole('button', { name: /result\.txt/ }).click();
     const drawer = company.getByTestId('session-drawer');
-    // The drawer's tabs are the session's console, activity, questions, cost
-    // and report; there is no `attempts` tab, so that click waited out the
-    // whole test budget.
-    await drawer.getByRole('button', { name: 'Hoạt động', exact: true }).click();
+    // A task opens the drawer on its session: Log, Lệnh (commands and the
+    // evidence they left), Terminal, Câu hỏi, Chi phí, Báo cáo.
+    await drawer.getByRole('button', { name: 'Lệnh', exact: true }).click();
     // The declared check ran against the real workspace and exited zero.
     await expect(drawer).toContainText('mã thoát 0');
 

@@ -34,7 +34,13 @@ import type {
   RoleProfile,
   SubmitPromptInput,
 } from '../../../core/src/company.js';
-import type { ServerMessage } from '../../../core/src/messages.js';
+import type { HerdrAgentsMessage, ServerMessage } from '../../../core/src/messages.js';
+import {
+  HERDR_DEFAULT_READ_LINES,
+  HerdrError,
+  type HerdrLink,
+  isHerdrKey,
+} from '../herdr/herdrLink.js';
 import type {
   CompanyCoordinator,
   CompanySessionAction,
@@ -50,6 +56,13 @@ import {
   COMPANY_MAX_PROMPT_BYTES,
   COMPANY_TERMINAL_INPUT_MAX_BYTES,
 } from './constants.js';
+import {
+  isSessionLogId,
+  readSessionLog,
+  SESSION_LOG_DEFAULT_LIMIT,
+  SESSION_LOG_MAX_LIMIT,
+  sessionLogDirectory,
+} from './sessionLog.js';
 import { listWorkspaceFiles, readWorkspaceFile } from './workspaceFiles.js';
 
 /** Controller lease returned by an attach; the last attach for a session wins. */
@@ -101,6 +114,8 @@ export interface CompanyCommandContext {
   privileged?: boolean;
   /** False in an untrusted VS Code workspace; authorized read-only views remain usable. */
   executionAllowed: boolean;
+  /** Server-level herdr link; absent or `null` when this process runs without one. */
+  herdr?: HerdrLink | null;
   /** Updates the per-socket egress lease as soon as attach rotates ownership. */
   onTerminalAttached?: (sessionId: string, leaseId: string) => void;
   /**
@@ -122,6 +137,22 @@ const SESSION_ACTIONS: ReadonlySet<string> = new Set([
 ]);
 const PROMPT_DELIVERIES: ReadonlySet<string> = new Set(['prompt', 'steer', 'follow_up']);
 
+const HERDR_COMMAND_TYPES: ReadonlySet<string> = new Set([
+  'herdrRead',
+  'herdrPrompt',
+  'herdrKeys',
+  'herdrFocus',
+]);
+const HERDR_NOT_LINKED_MESSAGE = 'Máy chủ này chưa kết nối herdr.';
+const HERDR_NOT_LINKED_ROSTER: HerdrAgentsMessage = {
+  type: 'herdrAgents',
+  available: false,
+  reason: HERDR_NOT_LINKED_MESSAGE,
+  agents: [],
+};
+const INVALID_HERDR_REQUEST_MESSAGE = 'Yêu cầu herdr không hợp lệ.';
+const HERDR_FAILED_MESSAGE = 'Không thực hiện được lệnh herdr.';
+
 // The wire enums live in core/asyncapi.yaml; these predicates narrow a
 // validated string back to the generated union the coordinator accepts.
 function isContractDecision(value: string): value is ContractDecision {
@@ -139,6 +170,7 @@ function isPromptDelivery(value: string): value is SubmitPromptInput['delivery']
 /** Message types this dispatcher owns. Everything else is not a company command. */
 const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySnapshotRequest',
+  ...HERDR_COMMAND_TYPES,
   'companyPromptSubmit',
   'companyContractDecision',
   'companyQuestionAnswer',
@@ -148,6 +180,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyArtifactRequest',
   'companyFileListRequest',
   'companyFileReadRequest',
+  'companySessionLogRequest',
   'companyAttachmentUpload',
   'terminalAttach',
   'terminalInput',
@@ -157,10 +190,12 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
 
 const READ_ONLY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySnapshotRequest',
+  'herdrRead',
   'companyModelCatalogRequest',
   'companyArtifactRequest',
   'companyFileListRequest',
   'companyFileReadRequest',
+  'companySessionLogRequest',
 ]);
 
 export function isCompanyCommand(msg: Record<string, unknown>): boolean {
@@ -259,6 +294,13 @@ export function handleCompanyCommand(
     );
     return true;
   }
+  if (msg.type === 'companySnapshotRequest') {
+    send(ctx.herdr?.snapshot() ?? HERDR_NOT_LINKED_ROSTER);
+  }
+  if (HERDR_COMMAND_TYPES.has(String(msg.type))) {
+    void herdrCommand(msg, requestId, ctx.herdr ?? null, send);
+    return true;
+  }
   const services = ctx.services;
   if (!services) {
     fail(send, requestId, 'company_unavailable', 'Chưa mở workspace công ty nào.');
@@ -308,6 +350,9 @@ async function run(
       case 'companyFileReadRequest':
         await fileRead(msg, requestId, services, send);
         return;
+      case 'companySessionLogRequest':
+        await sessionLogPage(msg, requestId, services, send);
+        return;
       case 'companyAttachmentUpload':
         await attachmentUpload(msg, requestId, services, send);
         return;
@@ -328,6 +373,70 @@ async function run(
     }
   } catch (err) {
     fail(send, requestId, codeOf(err), messageOf(err));
+  }
+}
+
+/** Herdr runs on the server-level link, so these commands need no company workspace. */
+async function herdrCommand(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  herdr: HerdrLink | null,
+  send: Send,
+): Promise<void> {
+  if (requestId === null) {
+    fail(send, null, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
+    return;
+  }
+  if (herdr === null) {
+    fail(send, requestId, 'herdr_unavailable', HERDR_NOT_LINKED_MESSAGE);
+    return;
+  }
+  const paneId = stringField(msg, 'paneId');
+  if (paneId === null) {
+    fail(send, requestId, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
+    return;
+  }
+  try {
+    switch (msg.type) {
+      case 'herdrRead': {
+        const lines = msg.lines === undefined ? HERDR_DEFAULT_READ_LINES : numberField(msg, 'lines');
+        if (lines === null) {
+          fail(send, requestId, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
+          return;
+        }
+        send({ ...(await herdr.read(paneId, lines)), requestId });
+        return;
+      }
+      case 'herdrPrompt': {
+        const text = stringField(msg, 'text');
+        if (text === null) {
+          fail(send, requestId, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
+          return;
+        }
+        await herdr.prompt(paneId, text);
+        ok(send, requestId);
+        return;
+      }
+      case 'herdrKeys': {
+        const keys = Array.isArray(msg.keys) && msg.keys.every(isHerdrKey) ? msg.keys : null;
+        if (keys === null) {
+          fail(send, requestId, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
+          return;
+        }
+        await herdr.keys(paneId, keys);
+        ok(send, requestId);
+        return;
+      }
+      case 'herdrFocus':
+        await herdr.focus(paneId);
+        ok(send, requestId);
+        return;
+      default:
+        fail(send, requestId, 'company_unsupported_command', `Không hỗ trợ: ${String(msg.type)}`);
+    }
+  } catch (err) {
+    if (err instanceof HerdrError) fail(send, requestId, err.code, err.message);
+    else fail(send, requestId, 'herdr_failed', HERDR_FAILED_MESSAGE);
   }
 }
 
@@ -507,6 +616,44 @@ async function fileRead(
   const limit = numberField(msg, 'limit') ?? COMPANY_FILE_DEFAULT_PAGE_BYTES;
   const content = await readWorkspaceFile(services.workspaceRoot, requested, offset, limit);
   send({ type: 'companyFileRead', requestId: requestId ?? FALLBACK_REQUEST_ID, content });
+}
+
+async function sessionLogPage(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const sessionId = stringField(msg, 'sessionId');
+  const limit = msg.limit === undefined ? SESSION_LOG_DEFAULT_LIMIT : numberField(msg, 'limit');
+  if (
+    sessionId === null ||
+    !isSessionLogId(sessionId) ||
+    limit === null ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > SESSION_LOG_MAX_LIMIT
+  ) {
+    fail(
+      send,
+      requestId,
+      'invalid_session_log_request',
+      'Cần có sessionId hợp lệ và limit từ 1 đến 500.',
+    );
+    return;
+  }
+  const entries = await readSessionLog(
+    sessionLogDirectory(services.store.namespaceDir),
+    sessionId,
+    limit,
+  );
+  send({
+    type: 'companySessionLog',
+    requestId: requestId ?? FALLBACK_REQUEST_ID,
+    sessionId,
+    replay: true,
+    entries,
+  });
 }
 
 async function attachmentUpload(

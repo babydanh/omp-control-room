@@ -1,7 +1,7 @@
 import type { Contract, VerificationEvidence } from '../../../../core/src/company.js';
-import { Button } from '../../components/ui/Button.js';
 import { buildContractPlanView, type ContractPlanView } from '../contractPlanView.js';
 import { contractStatusLabel, taskStatusLabel } from '../statusLabels.js';
+import { CompanyButton } from './CompanyButton.js';
 
 /**
  * ContractPlanPanel: the plan the user reads BEFORE approving.
@@ -64,9 +64,7 @@ export function ContractPlanPanel({
       </dl>
 
       <section aria-label="Mục tiêu">
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-text-muted">
-          Điều bạn đã yêu cầu
-        </h3>
+        <h3 className="mb-1 text-xs font-semibold text-text-muted">Điều bạn đã yêu cầu</h3>
         <ul className="flex flex-col gap-1 text-sm">
           {view.goals.map((goal) => (
             <li key={goal.id} className="flex items-start gap-2">
@@ -87,12 +85,12 @@ export function ContractPlanPanel({
 
       {view.phases.map((phase) => (
         <section key={phase.id} aria-label={`Giai đoạn ${phase.ordinal}`}>
-          <h3 className="mb-1 text-xs uppercase tracking-wide text-text-muted">
+          <h3 className="mb-1 text-xs font-semibold text-text-muted">
             {phase.ordinal}. {phase.title}
           </h3>
           <ul className="flex flex-col gap-2">
             {phase.tasks.map((task) => (
-              <li key={task.code} className="border-2 border-[var(--pixel-border)] p-2">
+              <li key={task.code} className="rounded-[6px] border border-[var(--pixel-border)] p-2">
                 <div className="flex items-baseline justify-between gap-2 text-sm">
                   <span className="text-text-primary">
                     <span className="text-text-muted">{task.code}</span> {task.title}
@@ -110,9 +108,7 @@ export function ContractPlanPanel({
                   </p>
                 )}
                 {task.dependsOnCodes.length > 0 && (
-                  <p className="text-xs text-text-muted">
-                    sau: {task.dependsOnCodes.join(', ')}
-                  </p>
+                  <p className="text-xs text-text-muted">sau: {task.dependsOnCodes.join(', ')}</p>
                 )}
               </li>
             ))}
@@ -122,7 +118,7 @@ export function ContractPlanPanel({
 
       {view.acceptance.length > 0 && (
         <section aria-label="Tiêu chí nghiệm thu">
-          <h3 className="mb-1 text-xs uppercase tracking-wide text-text-muted">
+          <h3 className="mb-1 text-xs font-semibold text-text-muted">
             Cách chúng ta biết nó đã hoàn thành
           </h3>
           <ul className="flex flex-col gap-1 text-sm">
@@ -140,9 +136,7 @@ export function ContractPlanPanel({
                   {ACCEPTANCE_LABEL[criterion.state]}
                 </span>
                 <span className="text-text-primary">{criterion.description}</span>
-                {criterion.required && (
-                  <span className="text-xs text-text-muted">bắt buộc</span>
-                )}
+                {criterion.required && <span className="text-xs text-text-muted">bắt buộc</span>}
               </li>
             ))}
           </ul>
@@ -152,11 +146,9 @@ export function ContractPlanPanel({
       {!view.canApprove && (
         <section
           aria-label="Vì sao chưa thể phê duyệt"
-          className="border-2 border-warning p-2"
+          className="rounded-[6px] border border-warning p-2"
         >
-          <h3 className="mb-1 text-xs uppercase tracking-wide text-warning">
-            Chưa sẵn sàng phê duyệt
-          </h3>
+          <h3 className="mb-1 text-xs font-semibold text-warning">Chưa sẵn sàng phê duyệt</h3>
           <ul className="list-inside list-disc text-sm text-text-primary">
             {view.approvalBlockers.map((blocker) => (
               <li key={blocker}>{blocker}</li>
@@ -166,16 +158,14 @@ export function ContractPlanPanel({
       )}
 
       <footer className="flex gap-2">
-        <Button
+        <CompanyButton
           variant="accent"
           disabled={!view.canApprove}
           onClick={() => onApprove?.(view.revision)}
         >
           Duyệt và chạy
-        </Button>
-        <Button variant="default" onClick={() => onReject?.(view.revision)}>
-          Từ chối
-        </Button>
+        </CompanyButton>
+        <CompanyButton onClick={() => onReject?.(view.revision)}>Từ chối</CompanyButton>
       </footer>
     </div>
   );

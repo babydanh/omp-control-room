@@ -15,7 +15,6 @@
 import { useState } from 'react';
 
 import type { Question, QuestionAnswerInput } from '../../../../core/src/company.js';
-import { Button } from '../../components/ui/Button.js';
 import { newRequestId } from '../companyMessages.js';
 import {
   buildQuestionAnswers,
@@ -24,7 +23,8 @@ import {
   questionHeadline,
   type QuestionSelection,
 } from '../questionAnswers.js';
-import { type QuestionProvenance,questionProvenanceNote } from '../questionProvenance.js';
+import { type QuestionProvenance, questionProvenanceNote } from '../questionProvenance.js';
+import { CompanyButton } from './CompanyButton.js';
 
 export interface QuestionPanelProps {
   question: Question;
@@ -56,7 +56,7 @@ function PromptRow({
   };
 
   return (
-    <fieldset className="mb-3 border-2 border-border p-2">
+    <fieldset className="mb-3 rounded-[6px] border border-border p-2">
       <legend className="px-2 text-sm text-text">{prompt.question}</legend>
       {prompt.options.map((option, index) => {
         const checked = picked.indices.includes(index);
@@ -88,13 +88,12 @@ function PromptRow({
             onChange({ ...selection, [prompt.id]: { ...picked, text: event.target.value } })
           }
           rows={2}
-          className="w-full border-2 border-border bg-bg-dark p-1 text-sm text-text"
+          className="w-full rounded-[4px] border border-border bg-bg-dark p-1 text-sm text-text"
         />
       </label>
     </fieldset>
   );
 }
-
 
 /**
  * One line describing how a question ended.
@@ -146,12 +145,12 @@ export function QuestionPanel({ question, onAnswer, provenance }: QuestionPanelP
     <section
       aria-label={questionHeadline(question)}
       data-testid="question-panel"
-      className="border-2 border-warning bg-bg-dark p-3"
+      className="rounded-[6px] border border-warning bg-bg-dark p-3"
     >
       <h3 className="mb-2 text-sm text-warning">{questionHeadline(question)}</h3>
       {provenance !== undefined && (
         <p
-          className="mb-2 border-2 border-warning p-1 text-2xs text-warning"
+          className="mb-2 rounded-[5px] border border-warning p-1 text-2xs text-warning"
           data-testid="question-provenance"
         >
           {questionProvenanceNote(provenance)}
@@ -163,7 +162,7 @@ export function QuestionPanel({ question, onAnswer, provenance }: QuestionPanelP
       {question.status !== 'pending' ? (
         <div className="flex flex-col gap-2">
           {question.questions.map((prompt) => (
-            <div key={prompt.id} className="border-2 border-border p-2">
+            <div key={prompt.id} className="rounded-[6px] border border-border p-2">
               <p className="text-xs text-text">{prompt.question}</p>
               {prompt.options.length > 0 && (
                 <ul className="mt-1 list-disc pl-4 text-2xs text-text-muted">
@@ -178,34 +177,39 @@ export function QuestionPanel({ question, onAnswer, provenance }: QuestionPanelP
         </div>
       ) : (
         <>
-      {question.questions.map((prompt) => (
-        <PromptRow key={prompt.id} prompt={prompt} selection={selection} onChange={setSelection} />
-      ))}
-      <div className="flex flex-wrap gap-2">
-        {question.kind === 'approval' ? (
-          <>
-            <Button
-              size="sm"
-              variant="accent"
-              disabled={!ready}
-              onClick={() => submit('approve_once')}
-            >
-              Duyệt một lần
-            </Button>
-            <Button size="sm" onClick={() => submit('reject')}>
-              Từ chối
-            </Button>
-          </>
-        ) : (
-          <Button size="sm" variant="accent" disabled={!ready} onClick={() => submit()}>
-            Gửi câu trả lời
-          </Button>
-        )}
+          {question.questions.map((prompt) => (
+            <PromptRow
+              key={prompt.id}
+              prompt={prompt}
+              selection={selection}
+              onChange={setSelection}
+            />
+          ))}
+          <div className="flex flex-wrap gap-2">
+            {question.kind === 'approval' ? (
+              <>
+                <CompanyButton
+                  size="sm"
+                  variant="accent"
+                  disabled={!ready}
+                  onClick={() => submit('approve_once')}
+                >
+                  Duyệt một lần
+                </CompanyButton>
+                <CompanyButton size="sm" onClick={() => submit('reject')}>
+                  Từ chối
+                </CompanyButton>
+              </>
+            ) : (
+              <CompanyButton size="sm" variant="accent" disabled={!ready} onClick={() => submit()}>
+                Gửi câu trả lời
+              </CompanyButton>
+            )}
           </div>
           {question.actionDigest && (
             <p className="mt-2 text-2xs text-text-muted">
-              Câu trả lời này áp dụng đúng cho những gì đang hiển thị; thay đổi bất kỳ thứ gì
-              khác sẽ phải hỏi lại.
+              Câu trả lời này áp dụng đúng cho những gì đang hiển thị; thay đổi bất kỳ thứ gì khác
+              sẽ phải hỏi lại.
             </p>
           )}
         </>

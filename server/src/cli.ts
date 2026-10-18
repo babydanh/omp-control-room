@@ -33,6 +33,7 @@ import {
 } from './configPersistence.js';
 import { MAX_PORT, MIN_PORT } from './constants.js';
 import { FileStateAdapter } from './fileStateAdapter.js';
+import { createHerdrLink } from './herdr/herdrLink.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 
@@ -157,6 +158,11 @@ async function main(): Promise<void> {
   // ── Create server ──
   const server = new PixelAgentsServer();
   const runtime = new AgentRuntime(store, claudeProvider);
+  // herdr is an optional side channel: when its socket is absent the board
+  // shows herdr as unavailable and the rest of the server runs unchanged.
+  const herdr = createHerdrLink();
+  herdr.onAgents((message) => store.broadcast(message as unknown as Record<string, unknown>));
+  herdr.onScreen((message) => store.broadcast(message as unknown as Record<string, unknown>));
   let companyHost: WorkspaceCompanyHost | null = null;
   let acceptingCompany = true;
   let disposal: Promise<void> | null = null;
@@ -169,6 +175,7 @@ async function main(): Promise<void> {
       } finally {
         companyHost = null;
         runtime.dispose();
+        herdr.stop();
         await server.stop();
         store.dispose();
       }
@@ -285,8 +292,10 @@ async function main(): Promise<void> {
       onReloadAssets,
       getCompany: () => (acceptingCompany ? (companyHost?.services ?? null) : null),
       isCompanyExecutionAllowed: () => acceptingCompany,
+      herdr,
     });
     currentConfig = { port: config.port, token: config.token };
+    herdr.start();
 
     // Sync runtime refs with persisted settings BEFORE first scan tick. The
     // runtime's single hooksEnabled ref follows the Claude provider until the

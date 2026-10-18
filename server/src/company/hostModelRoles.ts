@@ -59,7 +59,11 @@
  * passes the two as separate `--model` / `--thinking` flags.
  */
 
-import type { CompanyRole } from '../../../core/src/company.js';
+import {
+  COMPANY_HOST_DEFAULT_ROLE,
+  COMPANY_HOST_ROLE_BY_ROLE,
+  type CompanyRole,
+} from '../../../core/src/company.js';
 import {
   COMPANY_DEFAULT_MODELS,
   COMPANY_FALLBACK_ROLE_THINKING,
@@ -74,23 +78,6 @@ import { defaultQuotaRunner, type QuotaRunner, type QuotaRunnerResult } from './
  * CLI that drops the flag still resolves rather than silently falling back.
  */
 export const OMP_MODEL_ROLES_ARGV: readonly string[] = ['config', 'get', 'modelRoles', '--json'];
-
-/** The host role a Company role runs on when the host has nothing more specific. */
-export const COMPANY_HOST_DEFAULT_ROLE = 'default';
-
-/**
- * The host role each Company role reads first. A role the host has not set
- * borrows {@link COMPANY_HOST_DEFAULT_ROLE}. The host's own `judge` role is a
- * one-shot classifier, not an agent that can verify work, so Company's Judge
- * deliberately runs on `default` like QA.
- */
-export const COMPANY_HOST_ROLE_BY_ROLE: Readonly<Record<CompanyRole, string>> = {
-  director: 'plan',
-  advisor: 'advisor',
-  worker: 'task',
-  qa: COMPANY_HOST_DEFAULT_ROLE,
-  judge: COMPANY_HOST_DEFAULT_ROLE,
-};
 
 /** Company roles, in the order the board is presented. */
 export const COMPANY_ROLES: readonly CompanyRole[] = [

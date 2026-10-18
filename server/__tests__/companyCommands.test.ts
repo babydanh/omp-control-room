@@ -16,6 +16,7 @@ import type {
   CompanySessionAction,
 } from '../src/company/companyCoordinator.js';
 import type { CompanyStore } from '../src/company/companyStore.js';
+import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
 
 let tempHome: string;
 vi.mock('os', async () => {
@@ -156,6 +157,7 @@ function companyCommands(): Record<string, Record<string, unknown>> {
     companyArtifactRequest: { requestId: randomUUID(), artifactId: randomUUID(), offset: 0 },
     companyFileListRequest: { requestId: randomUUID(), path: '' },
     companyFileReadRequest: { requestId: randomUUID(), path: 'README.md', offset: 0 },
+    companySessionLogRequest: { requestId: randomUUID(), sessionId: randomUUID(), limit: 10 },
     companyAttachmentUpload: {
       requestId: randomUUID(),
       fileName: 'shot.png',
@@ -244,6 +246,7 @@ describe('company client commands', () => {
       'companyArtifactRequest',
       'companyFileListRequest',
       'companyFileReadRequest',
+      'companySessionLogRequest',
     ]);
     for (const [type, msg] of Object.entries(commands)) {
       if (readOnly.has(type)) continue;
@@ -466,6 +469,75 @@ describe('company client commands', () => {
     const [read] = replies('companyFileRead');
     expect(read.content.text).toBe('# hello\n');
     expect(results()[0]).toMatchObject({ ok: false, errorCode: 'path_outside_workspace' });
+  });
+
+  it('replays the newest session log entries, also from an untrusted workspace', async () => {
+    const sessionId = randomUUID();
+    const log = new SessionLog({
+      directory: sessionLogDirectory(store.namespaceDir),
+      now: () => '2026-01-01T00:00:00.000Z',
+      onEntry: () => {},
+    });
+    for (const text of ['one', 'two', 'three']) {
+      log.record(sessionId, { kind: 'state', runEpoch: 1, text });
+    }
+    await log.drain();
+
+    const limitedId = randomUUID();
+    const unknownId = randomUUID();
+    const defaultId = randomUUID();
+    handleCompanyCommand(
+      { type: 'companySessionLogRequest', requestId: limitedId, sessionId, limit: 2 },
+      send,
+      context(),
+    );
+    handleCompanyCommand(
+      { type: 'companySessionLogRequest', requestId: unknownId, sessionId: randomUUID(), limit: 5 },
+      send,
+      context(),
+    );
+    handleCompanyCommand(
+      { type: 'companySessionLogRequest', requestId: defaultId, sessionId },
+      send,
+      context({ executionAllowed: false }),
+    );
+
+    await vi.waitFor(() => expect(replies('companySessionLog')).toHaveLength(3));
+    const byRequest = new Map(
+      replies('companySessionLog').map((reply) => [reply.requestId, reply] as const),
+    );
+    expect(byRequest.get(limitedId)).toMatchObject({
+      type: 'companySessionLog',
+      sessionId,
+      replay: true,
+    });
+    expect(byRequest.get(limitedId)?.entries.map((entry) => entry.text)).toEqual(['two', 'three']);
+    expect(byRequest.get(unknownId)?.entries).toEqual([]);
+    expect(byRequest.get(defaultId)?.entries.map((entry) => entry.seq)).toEqual([0, 1, 2]);
+  });
+
+  it('rejects a session log request with an unsafe session id or an out-of-range limit', async () => {
+    const sessionId = randomUUID();
+    const badBodies: Record<string, unknown>[] = [
+      { sessionId: '../escape', limit: 10 },
+      { sessionId: '', limit: 10 },
+      { sessionId, limit: 0 },
+      { sessionId, limit: 501 },
+      { sessionId, limit: 1.5 },
+      { sessionId, limit: '10' },
+      { limit: 10 },
+    ];
+    for (const body of badBodies) {
+      outbox = [];
+      handleCompanyCommand(
+        { type: 'companySessionLogRequest', requestId: randomUUID(), ...body },
+        send,
+        context(),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: false, errorCode: 'invalid_session_log_request' });
+    }
+    expect(replies('companySessionLog')).toHaveLength(0);
   });
 
   it('stores an uploaded attachment and returns its digest', async () => {

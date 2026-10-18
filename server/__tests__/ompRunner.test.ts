@@ -197,6 +197,31 @@ describe('managed OMP runner', () => {
     await runner.dispose();
   });
 
+  it('keeps herdr control variables out of the OMP runner environment', async () => {
+    const pty = fakePty();
+    const runner = createOmpRunner({
+      ptyClient: pty,
+      command: { file: 'C:/node.exe', args: ['C:/omp/cli.mjs'] },
+      extensionPath: 'C:/extension/omp-bridge.mjs',
+      environment: {
+        PATH: 'C:/bin',
+        HERDR_SOCKET_PATH: 'C:/Users/test/herdr.sock',
+        HERDR_PANE_ID: 'wA:p2',
+      },
+      createBridge: (options) => fakeBridge(options).handle,
+    });
+
+    const starting = runner.start(runnerInput());
+    await pty.spawnPty.mock.results[0]?.value;
+    await starting;
+
+    const env = pty.spawnPty.mock.calls[0]?.[1].env;
+    expect(env).toHaveProperty('PATH', 'C:/bin');
+    expect(env).not.toHaveProperty('HERDR_SOCKET_PATH');
+    expect(env).not.toHaveProperty('HERDR_PANE_ID');
+    await runner.dispose();
+  });
+
   it('rejects stale controls and routes active aborts and native events through the run bridge', async () => {
     const pty = fakePty();
     let bridge = fakeBridge({

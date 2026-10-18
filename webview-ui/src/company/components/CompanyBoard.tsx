@@ -13,14 +13,23 @@
  *    for an answer, paused, and queued behind a full running lane are four
  *    different problems, and the user acts on them differently.
  *
+ * Each lane names who holds its cards, and a card in review names whether QA or
+ * the Trọng tài holds it. A card sent back after a failed verification says so.
+ * When a card changes lane, it flies there (flip.ts); reduced motion skips it.
+ *
  * A card is a button, not a draggable: the only thing clicking does is select,
  * because status is the server's to change.
  */
 
+import { useLayoutEffect, useRef } from 'react';
+
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
+import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS } from '../constants.js';
+import { type FlightMemory, flyChangedCards } from '../flip.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { taskStatusLabel } from '../statusLabels.js';
+import { useMediaQuery } from '../useMediaQuery.js';
 
 export interface CompanyBoardProps {
   lanes: readonly BoardLane[];
@@ -31,6 +40,26 @@ export interface CompanyBoardProps {
   onSelectSession: (sessionId: string) => void;
 }
 
+/** How loud a card's status line is. Red marks a card that needs the user or failed. */
+type CardTone = 'live' | 'ok' | 'alert' | 'plain';
+
+const CARD_TONE_CLASS: Readonly<Record<CardTone, string>> = {
+  live: 'text-accent',
+  ok: 'text-status-success',
+  alert: 'text-warning',
+  plain: 'text-text-muted',
+};
+
+/** The chip shape the owner and sent-back tags share. */
+const PILL_CLASS = 'mt-1 inline-block rounded-full bg-btn-bg px-2 font-mono text-[10.5px]';
+
+function cardTone(card: BoardCard): CardTone {
+  if (card.sentBack || card.lane === 'needs_input' || card.lane === 'failed') return 'alert';
+  if (card.lane === 'done') return 'ok';
+  if (card.lane === 'running') return 'live';
+  return 'plain';
+}
+
 function PlanningCard({ prompt, onSelect }: { prompt: PlanningPrompt; onSelect: () => void }) {
   return (
     <button
@@ -38,14 +67,12 @@ function PlanningCard({ prompt, onSelect }: { prompt: PlanningPrompt; onSelect: 
       onClick={onSelect}
       disabled={prompt.session === null}
       data-testid="planning-card"
-      className={`w-full cursor-pointer border-2 border-l-4 border-dashed border-border bg-bg-dark p-2 text-left hover:border-accent ${ROLE_EDGE_CLASS.director}`}
+      className={`company-card block w-full cursor-pointer border-dashed border-l-4 px-2 py-[7px] text-left disabled:cursor-default ${ROLE_EDGE_CLASS.director}`}
     >
-      <span className="block text-sm text-text">{prompt.preview}</span>
-      <span className="mt-1 block text-2xs uppercase tracking-wide text-text-muted">
-        Giám đốc đang lập kế hoạch
-      </span>
+      <span className="block text-sm leading-snug text-text">{prompt.preview}</span>
+      <span className="mt-1 block text-2xs text-text-muted">Giám đốc đang lập kế hoạch</span>
       {prompt.session && (
-        <span className="mt-1 block text-2xs text-text-muted">
+        <span className="mt-1 block font-mono text-2xs text-text-muted">
           {prompt.session.code} &middot;{' '}
           {prompt.session.effectiveModel ?? prompt.session.requestedModel}
         </span>
@@ -58,7 +85,7 @@ function FlowStrip({ flow }: { flow: BoardFlow }) {
   const limit = flow.runningLimit === null ? '?' : String(flow.runningLimit);
   return (
     <div
-      className="flex flex-wrap gap-3 border-b-2 border-border px-2 py-1 text-2xs"
+      className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-border px-3 py-1.5 text-2xs"
       data-testid="board-flow"
     >
       <span className="text-text">
@@ -98,7 +125,22 @@ function EvidenceBadges({ card }: { card: BoardCard }) {
   );
 }
 
-function TaskCard({ card, onSelect }: { card: BoardCard; onSelect: () => void }) {
+/** Who a card in review waits on, as a chip; nothing for other lanes. */
+function OwnerChip({ card }: { card: BoardCard }) {
+  if (card.reviewOwner === null) return null;
+  const tone = card.reviewOwner === 'QA' ? 'text-status-active' : 'text-orchid';
+  return <span className={`${PILL_CLASS} ${tone}`}>chờ {card.reviewOwner}</span>;
+}
+
+function TaskCard({
+  card,
+  index,
+  onSelect,
+}: {
+  card: BoardCard;
+  index: number;
+  onSelect: () => void;
+}) {
   const edge = card.session ? ROLE_EDGE_CLASS[card.session.role] : 'border-l-border';
   return (
     <button
@@ -106,20 +148,19 @@ function TaskCard({ card, onSelect }: { card: BoardCard; onSelect: () => void })
       onClick={onSelect}
       aria-pressed={card.selected}
       data-testid={`task-card-${card.code}`}
-      className={
-        card.selected
-          ? `w-full cursor-pointer border-2 border-l-4 border-accent bg-bg-dark p-2 text-left ${edge}`
-          : `w-full cursor-pointer border-2 border-l-4 border-border bg-bg-dark p-2 text-left hover:border-accent ${edge}`
-      }
+      data-task-id={card.taskId}
+      data-lane={card.lane}
+      data-index={index}
+      className={`company-card w-full cursor-pointer border-l-4 px-2 py-[7px] text-left ${edge} ${card.sentBack ? 'company-sent-back' : ''}`}
     >
-      <span className="flex items-baseline justify-between gap-2">
-        <span className="text-sm text-text">
-          <span className="text-text-muted">{card.code}</span> {card.title}
-        </span>
+      <span className="block text-sm leading-snug text-text">
+        <span className="font-mono text-2xs text-text-muted">{card.code}</span> {card.title}
       </span>
-      <span className="mt-1 block text-2xs uppercase tracking-wide text-text-muted">
+      <span className={`mt-1 block font-mono text-2xs ${CARD_TONE_CLASS[cardTone(card)]}`}>
         {taskStatusLabel(card.status)}
       </span>
+      {card.sentBack && <span className={`${PILL_CLASS} text-warning`}>trả lại</span>}
+      <OwnerChip card={card} />
       {card.waitReason && (
         <span className="mt-1 block text-2xs text-warning" data-testid={`wait-${card.code}`}>
           {card.waitReason === 'blocked_by_dependencies'
@@ -148,6 +189,16 @@ function TaskCard({ card, onSelect }: { card: BoardCard; onSelect: () => void })
   );
 }
 
+/** The reduced-motion preference: when it matches, cards sit in their new place. */
+const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
+
+/** Where every task card sits now, as one string: a change here means a move. */
+function layoutSignature(lanes: readonly BoardLane[]): string {
+  return lanes
+    .flatMap((lane) => lane.cards.map((card, index) => `${card.taskId}:${lane.id}:${index}`))
+    .join('|');
+}
+
 export function CompanyBoard({
   lanes,
   flow,
@@ -155,39 +206,68 @@ export function CompanyBoard({
   onSelectTask,
   onSelectSession,
 }: CompanyBoardProps) {
+  const boardRef = useRef<HTMLDivElement>(null);
+  const flightRef = useRef<ReadonlyMap<string, FlightMemory>>(new Map());
+  const layout = layoutSignature(lanes);
+  const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
+
+  // Cards that changed lane or slot fly from where they were. The positions are
+  // read after the layout commits, so the flight starts exactly where the card
+  // was on screen.
+  useLayoutEffect(() => {
+    if (boardRef.current === null) return;
+    const cards = Array.from(boardRef.current.querySelectorAll<HTMLElement>('[data-task-id]'));
+    flightRef.current = flyChangedCards(cards, flightRef.current, reducedMotion);
+  }, [layout, reducedMotion]);
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col" data-testid="company-board">
+    <div
+      ref={boardRef}
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      data-testid="company-board"
+    >
       <FlowStrip flow={flow} />
-      <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto p-2">
+      <div className="flex min-h-0 flex-1 gap-1.5 overflow-x-auto p-1.5">
         {lanes.map((lane) => {
           const drafts = lane.id === 'planned' ? planning : [];
+          const count = lane.cards.length + drafts.length;
           return (
             <section
               key={lane.id}
               aria-label={lane.label}
               data-testid={`company-lane-${lane.id}`}
-              className="flex min-w-48 flex-1 flex-col gap-2 overflow-y-auto border-2 border-border bg-bg p-2"
+              data-lane={lane.id}
+              className="company-lane min-w-[96px] flex-1"
             >
-              <h3 className="text-xs uppercase tracking-wide text-text-muted">
-                {lane.label} ({lane.cards.length + drafts.length})
-              </h3>
-              {lane.cards.length + drafts.length === 0 && (
-                <p className="text-2xs text-text-muted">Không có gì ở đây.</p>
-              )}
-              {drafts.map((prompt) => (
-                <PlanningCard
-                  key={prompt.promptId}
-                  prompt={prompt}
-                  onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
-                />
-              ))}
-              {lane.cards.map((card) => (
-                <TaskCard
-                  key={card.taskId}
-                  card={card}
-                  onSelect={() => onSelectTask(card.taskId)}
-                />
-              ))}
+              <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1.5">
+                <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
+                  <span className="min-w-0">
+                    {COMPANY_LANE_ICONS[lane.id]} {lane.label}
+                  </span>
+                  <span className="shrink-0 text-2xs font-normal text-text-muted">{count}</span>
+                </h3>
+                <p className="truncate font-mono text-2xs text-status-active">
+                  {COMPANY_LANE_OWNERS[lane.id]}
+                </p>
+              </header>
+              <div className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-1.5">
+                {count === 0 && <p className="px-1 text-2xs text-text-muted">Không có gì ở đây.</p>}
+                {drafts.map((prompt) => (
+                  <PlanningCard
+                    key={prompt.promptId}
+                    prompt={prompt}
+                    onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
+                  />
+                ))}
+                {lane.cards.map((card, index) => (
+                  <TaskCard
+                    key={card.taskId}
+                    card={card}
+                    index={index}
+                    onSelect={() => onSelectTask(card.taskId)}
+                  />
+                ))}
+              </div>
             </section>
           );
         })}

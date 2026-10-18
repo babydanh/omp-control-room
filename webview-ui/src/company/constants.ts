@@ -26,11 +26,33 @@ export type CompanyLaneId = (typeof COMPANY_LANE_ORDER)[number];
 export const COMPANY_LANE_LABELS: Record<CompanyLaneId, string> = {
   planned: 'Kế hoạch',
   ready: 'Sẵn sàng',
-  running: 'Đang chạy',
+  running: 'Đang làm',
   needs_input: 'Chờ bạn',
-  review: 'QA / Review',
+  review: 'Kiểm',
   done: 'Xong',
   failed: 'Lỗi',
+};
+
+/** Who holds a card in each lane: the owner line printed under the lane label. */
+export const COMPANY_LANE_OWNERS: Record<CompanyLaneId, string> = {
+  planned: 'Giám đốc',
+  ready: 'đã duyệt',
+  running: 'Nhân viên',
+  needs_input: 'bạn trả lời',
+  review: 'QA → Trọng tài',
+  done: 'exit 0 · pass',
+  failed: 'hết lượt thử',
+};
+
+/** The mark printed before each lane's label, so a column reads at a glance. */
+export const COMPANY_LANE_ICONS: Record<CompanyLaneId, string> = {
+  planned: '📝',
+  ready: '✅',
+  running: '🔨',
+  needs_input: '🙋',
+  review: '🔍',
+  done: '🎉',
+  failed: '⛔',
 };
 
 /** Excerpt length for the public assistant text shown in a bubble. */
@@ -63,3 +85,23 @@ export const COMPANY_TERMINAL_DEFAULT_ROWS = 32;
  * up frame by frame, and an unbounded queue is a memory leak with a scrollbar.
  */
 export const COMPANY_TERMINAL_FRAME_QUEUE_MAX = 512;
+
+/** Session log entries kept per session; the oldest fall off first. */
+export const COMPANY_SESSION_LOG_MAX_ENTRIES = 1000;
+
+/** Sidebar width bounds and default, in CSS pixels. */
+export const COMPANY_SIDEBAR_MIN_WIDTH_PX = 240;
+export const COMPANY_SIDEBAR_MAX_WIDTH_PX = 480;
+export const COMPANY_SIDEBAR_DEFAULT_WIDTH_PX = 300;
+
+/** At or below this viewport width the sidebar floats over the board instead of pushing it. */
+export const COMPANY_SIDEBAR_OVERLAY_MAX_PX = 1023;
+
+/** Herdr screen lines requested per read. */
+export const HERDR_SCREEN_LINES = 200;
+
+/** How often an open herdr screen is re-read while its agent is working. */
+export const HERDR_SCREEN_POLL_MS = 2000;
+
+/** Slide time of the detail drawer, matching the approved mockup. */
+export const COMPANY_DRAWER_SLIDE_MS = 320;

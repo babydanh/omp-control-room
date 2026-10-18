@@ -43,6 +43,9 @@ export type ServerMessage =
   | CompanyStateChangedMessage
   | CompanyCommandResultMessage
   | CompanyTextDeltaMessage
+  | CompanySessionLogMessage
+  | HerdrAgentsMessage
+  | HerdrScreenMessage
   | CompanyModelCatalogMessage
   | CompanyArtifactPageMessage
   | CompanyFileListMessage
@@ -87,6 +90,11 @@ export type ClientMessage =
   | CompanyFileListRequestMessage
   | CompanyFileReadRequestMessage
   | CompanyAttachmentUploadMessage
+  | CompanySessionLogRequestMessage
+  | HerdrReadMessage
+  | HerdrPromptMessage
+  | HerdrKeysMessage
+  | HerdrFocusMessage
   | TerminalAttachMessage
   | TerminalInputMessage
   | TerminalResizeMessage
@@ -359,6 +367,10 @@ export interface CompanySnapshot {
   questions: Question[];
   quotas: QuotaSnapshot[];
   diagnostics?: CompanyDiagnostics;
+  attempts?: Attempt[];
+  evidence?: VerificationEvidence[];
+  reports?: CompanyReport[];
+  usage?: UsageRecord[];
 }
 
 export interface CompanySettings {
@@ -641,6 +653,101 @@ export interface CompanyDiagnostics {
   measuredAt: string;
 }
 
+export interface Attempt {
+  id: string;
+  taskId: string;
+  sessionId: string;
+  runEpoch: number;
+  startedAt: string;
+  endedAt?: string;
+  status: AnonymousSchema_383;
+  changes: WorkspaceChange[];
+  evidenceIds: string[];
+  qaVerdict?: Record<string, any>;
+  judgeVerdict?: Record<string, any>;
+  error?: string;
+}
+
+export type AnonymousSchema_383 = 'running' | 'passed' | 'failed' | 'interrupted' | 'blocked';
+
+export interface WorkspaceChange {
+  path: string;
+  kind: AnonymousSchema_386;
+  summary: string;
+  diffArtifactId?: string;
+}
+
+export type AnonymousSchema_386 = 'create' | 'modify' | 'delete';
+
+export interface VerificationEvidence {
+  id: string;
+  command: VerificationCommand;
+  startedAt: string;
+  endedAt: string;
+  exitCode?: number;
+  signal?: string;
+  stdoutArtifactId?: string;
+  stderrArtifactId?: string;
+  prerequisites?: string[];
+  criterionIds: string[];
+}
+
+export interface CompanyReport {
+  contractId: string;
+  revision: number;
+  requirements: RequirementResult[];
+  relatedChanges: WorkspaceChange[];
+  verificationEvidenceIds: string[];
+  advisorNotes: string[];
+  usage: UsageRecord[];
+  sessions: SessionLifecycleSummary[];
+}
+
+export interface RequirementResult {
+  requirementId: string;
+  taskIds: string[];
+  attemptIds: string[];
+  evidenceIds: string[];
+  result: string;
+}
+
+export interface UsageRecord {
+  sessionId: string;
+  nativeSessionId: string;
+  nativeEntryId: string;
+  role: CompanyRole;
+  model: string;
+  provider: string;
+  purpose: string;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd?: number;
+  timestamp: string;
+  source: AnonymousSchema_436;
+  availability: string;
+  provenance: UsageProvenance;
+  toolCallId?: string;
+  runEpoch: number;
+  taskId?: string;
+  contractId?: string;
+  totalTokens?: number;
+}
+
+export type AnonymousSchema_436 = 'provider' | 'native_session';
+
+export type UsageProvenance = 'own_turn' | 'native_child' | 'child_aggregate';
+
+export interface SessionLifecycleSummary {
+  sessionId: string;
+  role: CompanyRole;
+  requestedModel: string;
+  effectiveModel?: string;
+  runEpoch: number;
+  status: string;
+}
+
 export interface CompanyStateChangedMessage {
   type: 'companyStateChanged';
   revision: number;
@@ -721,14 +828,14 @@ export interface CompanySession {
   nativeSessionPath?: string;
   agentId?: number;
   runEpoch: number;
-  status: AnonymousSchema_415;
+  status: AnonymousSchema_489;
   activeTaskId?: string;
   lastUsedAt: string;
   contextSnapshot?: Record<string, any>;
   handoffArtifactId?: string;
 }
 
-export type AnonymousSchema_415 =
+export type AnonymousSchema_489 =
   | 'parked'
   | 'starting'
   | 'idle'
@@ -755,32 +862,6 @@ export interface CompanyAttemptPutChange {
   value: Attempt;
 }
 
-export interface Attempt {
-  id: string;
-  taskId: string;
-  sessionId: string;
-  runEpoch: number;
-  startedAt: string;
-  endedAt?: string;
-  status: AnonymousSchema_432;
-  changes: WorkspaceChange[];
-  evidenceIds: string[];
-  qaVerdict?: Record<string, any>;
-  judgeVerdict?: Record<string, any>;
-  error?: string;
-}
-
-export type AnonymousSchema_432 = 'running' | 'passed' | 'failed' | 'interrupted' | 'blocked';
-
-export interface WorkspaceChange {
-  path: string;
-  kind: AnonymousSchema_435;
-  summary: string;
-  diffArtifactId?: string;
-}
-
-export type AnonymousSchema_435 = 'create' | 'modify' | 'delete';
-
 export interface CompanyReportPutChange {
   entity: 'report';
   op: 'put';
@@ -788,80 +869,11 @@ export interface CompanyReportPutChange {
   value: CompanyReport;
 }
 
-export interface CompanyReport {
-  contractId: string;
-  revision: number;
-  requirements: RequirementResult[];
-  relatedChanges: WorkspaceChange[];
-  verificationEvidenceIds: string[];
-  advisorNotes: string[];
-  usage: UsageRecord[];
-  sessions: SessionLifecycleSummary[];
-}
-
-export interface RequirementResult {
-  requirementId: string;
-  taskIds: string[];
-  attemptIds: string[];
-  evidenceIds: string[];
-  result: string;
-}
-
-export interface UsageRecord {
-  sessionId: string;
-  nativeSessionId: string;
-  nativeEntryId: string;
-  role: CompanyRole;
-  model: string;
-  provider: string;
-  purpose: string;
-  input: number;
-  output: number;
-  cacheRead: number;
-  cacheWrite: number;
-  costUsd?: number;
-  timestamp: string;
-  source: AnonymousSchema_475;
-  availability: string;
-  provenance: UsageProvenance;
-  toolCallId?: string;
-  runEpoch: number;
-  taskId?: string;
-  contractId?: string;
-  totalTokens?: number;
-}
-
-export type AnonymousSchema_475 = 'provider' | 'native_session';
-
-export type UsageProvenance = 'own_turn' | 'native_child' | 'child_aggregate';
-
-export interface SessionLifecycleSummary {
-  sessionId: string;
-  role: CompanyRole;
-  requestedModel: string;
-  effectiveModel?: string;
-  runEpoch: number;
-  status: string;
-}
-
 export interface CompanyEvidencePutChange {
   entity: 'evidence';
   op: 'put';
   id: string;
   value: VerificationEvidence;
-}
-
-export interface VerificationEvidence {
-  id: string;
-  command: VerificationCommand;
-  startedAt: string;
-  endedAt: string;
-  exitCode?: number;
-  signal?: string;
-  stdoutArtifactId?: string;
-  stderrArtifactId?: string;
-  prerequisites?: string[];
-  criterionIds: string[];
 }
 
 export interface CompanySettingsPutChange {
@@ -899,12 +911,12 @@ export interface CompanyCounters {
 }
 
 export interface CompanyRemoveChange {
-  entity: AnonymousSchema_517;
+  entity: AnonymousSchema_521;
   op: 'remove';
   id: string;
 }
 
-export type AnonymousSchema_517 =
+export type AnonymousSchema_521 =
   | 'prompt'
   | 'contract'
   | 'task'
@@ -932,6 +944,57 @@ export interface CompanyTextDeltaMessage {
   runEpoch: number;
   seq: number;
   text: string;
+}
+
+export interface CompanySessionLogMessage {
+  type: 'companySessionLog';
+  requestId?: string;
+  sessionId: string;
+  replay: boolean;
+  entries: CompanySessionLogEntry[];
+}
+
+export interface CompanySessionLogEntry {
+  seq: number;
+  at: string;
+  kind: AnonymousSchema_543;
+  runEpoch: number;
+  taskId?: string;
+  text: string;
+  toolName?: string;
+  exitCode?: number;
+  ok?: boolean;
+}
+
+export type AnonymousSchema_543 =
+  'text' | 'tool' | 'command' | 'verdict' | 'question' | 'state' | 'error';
+
+export interface HerdrAgentsMessage {
+  type: 'herdrAgents';
+  available: boolean;
+  reason?: string;
+  agents: HerdrAgent[];
+}
+
+export interface HerdrAgent {
+  paneId: string;
+  name?: string;
+  kind: string;
+  status: AnonymousSchema_557;
+  cwd?: string;
+  title?: string;
+  workspaceId: string;
+  focused?: boolean;
+}
+
+export type AnonymousSchema_557 = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
+
+export interface HerdrScreenMessage {
+  type: 'herdrScreen';
+  requestId?: string;
+  paneId: string;
+  text: string;
+  at: string;
 }
 
 export interface CompanyModelCatalogMessage {
@@ -974,12 +1037,12 @@ export interface CompanyFileListMessage {
 export interface CompanyFileEntry {
   name: string;
   path: string;
-  kind: AnonymousSchema_556;
+  kind: AnonymousSchema_591;
   sizeBytes?: number;
   modifiedAt?: string;
 }
 
-export type AnonymousSchema_556 = 'file' | 'directory';
+export type AnonymousSchema_591 = 'file' | 'directory';
 
 export interface CompanyFileReadMessage {
   type: 'companyFileRead';
@@ -991,14 +1054,14 @@ export interface CompanyFileContent {
   path: string;
   totalBytes: number;
   offset: number;
-  encoding: AnonymousSchema_564;
+  encoding: AnonymousSchema_599;
   text?: string;
   dataBase64?: string;
   mediaType?: string;
   truncated: boolean;
 }
 
-export type AnonymousSchema_564 = 'utf8' | 'base64';
+export type AnonymousSchema_599 = 'utf8' | 'base64';
 
 export interface CompanyAttachmentUploadedMessage {
   type: 'companyAttachmentUploaded';
@@ -1171,22 +1234,22 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_646;
+  delivery: AnonymousSchema_681;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_646 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_681 = 'prompt' | 'steer' | 'follow_up';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_652;
+  decision: AnonymousSchema_687;
   note?: string;
 }
 
-export type AnonymousSchema_652 = 'approve' | 'reject';
+export type AnonymousSchema_687 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1199,7 +1262,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_664;
+  decision?: AnonymousSchema_699;
 }
 
 export interface QuestionAnswer {
@@ -1208,17 +1271,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_664 = 'approve_once' | 'reject';
+export type AnonymousSchema_699 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_669;
+  action: AnonymousSchema_704;
 }
 
-export type AnonymousSchema_669 = 'pause' | 'resume' | 'kill' | 'restart' | 'archive';
+export type AnonymousSchema_704 = 'pause' | 'resume' | 'kill' | 'restart' | 'archive';
 
 export interface CompanySettingsUpdateMessage {
   type: 'companySettingsUpdate';
@@ -1259,6 +1322,55 @@ export interface CompanyAttachmentUploadMessage {
   fileName: string;
   mediaType: string;
   dataBase64: string;
+}
+
+export interface CompanySessionLogRequestMessage {
+  type: 'companySessionLogRequest';
+  requestId: string;
+  sessionId: string;
+  limit?: number;
+}
+
+export interface HerdrReadMessage {
+  type: 'herdrRead';
+  requestId: string;
+  paneId: string;
+  lines?: number;
+}
+
+export interface HerdrPromptMessage {
+  type: 'herdrPrompt';
+  requestId: string;
+  paneId: string;
+  text: string;
+}
+
+export interface HerdrKeysMessage {
+  type: 'herdrKeys';
+  requestId: string;
+  paneId: string;
+  keys: HerdrKey[];
+}
+
+export type HerdrKey =
+  | 'up'
+  | 'down'
+  | 'left'
+  | 'right'
+  | 'enter'
+  | 'esc'
+  | 'tab'
+  | 'ctrl+c'
+  | '1'
+  | '2'
+  | '3'
+  | 'y'
+  | 'n';
+
+export interface HerdrFocusMessage {
+  type: 'herdrFocus';
+  requestId: string;
+  paneId: string;
 }
 
 export interface TerminalAttachMessage {

@@ -14,6 +14,7 @@ import {
   writeConfig,
 } from './configPersistence.js';
 import { HUE_SHIFT_MAX_DEG, PALETTE_COUNT } from './constants.js';
+import type { HerdrLink } from './herdr/herdrLink.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
@@ -71,6 +72,8 @@ export interface ClientMessageContext {
   company?: CompanyCommandServices | null;
   /** Separate from transport authentication: untrusted workspaces may only read. */
   companyExecutionAllowed?: boolean;
+  /** Server-level herdr link. `null` or absent means herdr is not linked into this process. */
+  herdr?: HerdrLink | null;
   /** Called as soon as attach rotates the socket's terminal egress lease. */
   onTerminalAttached?: (sessionId: string, leaseId: string) => void;
   /** Called after a successful detach; see CompanyCommandContext. */
@@ -116,6 +119,7 @@ export function handleClientMessage(
         executionAllowed: ctx.companyExecutionAllowed === true,
         onTerminalAttached: ctx.onTerminalAttached,
         onTerminalDetached: ctx.onTerminalDetached,
+        herdr: ctx.herdr ?? null,
       },
     )
   ) {

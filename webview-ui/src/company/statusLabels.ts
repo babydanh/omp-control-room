@@ -151,8 +151,9 @@ export function quotaStatusLabel(status: string): string {
  * word is Vietnamese.
  */
 export const DRAWER_TAB_LABELS: Record<CompanyDrawerTab, string> = {
-  terminal: 'Bảng điều khiển',
-  activity: 'Hoạt động',
+  log: 'Log',
+  commands: 'Lệnh',
+  terminal: 'Terminal',
   questions: 'Câu hỏi',
   usage: 'Chi phí',
   report: 'Báo cáo',

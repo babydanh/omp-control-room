@@ -1272,6 +1272,10 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
       sessions,
       questions: structuredClone(Object.values(this.state.questions)),
       quotas: structuredClone(Object.values(this.state.quotas)),
+      attempts: structuredClone(Object.values(this.state.attempts)),
+      evidence: structuredClone(Object.values(this.state.evidence)),
+      reports: structuredClone(Object.values(this.state.reports)),
+      usage: structuredClone(Object.values(this.state.usageIndex).flat()),
     };
   }
 

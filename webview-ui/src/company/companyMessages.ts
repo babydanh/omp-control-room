@@ -21,7 +21,7 @@ import type {
   RoleProfile,
   SubmitPromptInput,
 } from '../../../core/src/company.js';
-import type { ClientMessage } from '../../../core/src/messages.js';
+import type { ClientMessage, HerdrKey } from '../../../core/src/messages.js';
 import {
   COMPANY_ARTIFACT_PAGE_BYTES,
   COMPANY_FILE_PAGE_BYTES,
@@ -39,6 +39,9 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   companyFileList: true,
   companyFileRead: true,
   companyAttachmentUploaded: true,
+  companySessionLog: true,
+  herdrAgents: true,
+  herdrScreen: true,
   terminalAttached: true,
   terminalSnapshot: true,
   terminalData: true,
@@ -163,6 +166,26 @@ export function terminalDetach(
   leaseId: string,
 ): ClientMessage {
   return { type: 'terminalDetach', sessionId, runEpoch, leaseId };
+}
+
+export function sessionLogRequest(requestId: string, sessionId: string): ClientMessage {
+  return { type: 'companySessionLogRequest', requestId, sessionId };
+}
+
+export function herdrRead(requestId: string, paneId: string, lines: number): ClientMessage {
+  return { type: 'herdrRead', requestId, paneId, lines };
+}
+
+export function herdrPrompt(requestId: string, paneId: string, text: string): ClientMessage {
+  return { type: 'herdrPrompt', requestId, paneId, text };
+}
+
+export function herdrKeys(requestId: string, paneId: string, keys: HerdrKey[]): ClientMessage {
+  return { type: 'herdrKeys', requestId, paneId, keys };
+}
+
+export function herdrFocus(requestId: string, paneId: string): ClientMessage {
+  return { type: 'herdrFocus', requestId, paneId };
 }
 
 /** The catalog entry a `companyModelCatalog` reply resolves to. */

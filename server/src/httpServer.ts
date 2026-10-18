@@ -21,6 +21,7 @@ import {
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
+import type { HerdrLink } from './herdr/herdrLink.js';
 import type { AgentState } from './types.js';
 
 /** Options for creating the HTTP + WebSocket server. */
@@ -53,6 +54,8 @@ export interface HttpServerOptions {
   getCompany?: () => CompanyCommandServices | null;
   /** Execution trust decision supplied by embedded hosts, independent of the bearer token. */
   isCompanyExecutionAllowed?: () => boolean;
+  /** Server-level herdr link; absent when this process does not link herdr. */
+  herdr?: HerdrLink | null;
 }
 
 /** Result of createHttpServer(). */
@@ -236,6 +239,7 @@ function registerWebSocketRoute(app: FastifyInstance, options: HttpServerOptions
             companyExecutionAllowed: options.isCompanyExecutionAllowed?.() ?? !options.embedded,
             onTerminalAttached: (sessionId, leaseId) => gate.grant(sessionId, leaseId),
             onTerminalDetached: (sessionId, leaseId) => gate.release(sessionId, leaseId),
+            herdr: options.herdr ?? null,
           },
         );
       } catch {

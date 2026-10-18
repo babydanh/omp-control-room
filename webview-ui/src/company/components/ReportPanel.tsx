@@ -13,13 +13,9 @@ import type {
   Contract,
   VerificationEvidence,
 } from '../../../../core/src/company.js';
-import { Button } from '../../components/ui/Button.js';
 import { companyRoleLabel } from '../roleProfiles.js';
-import {
-  changeKindLabel,
-  requirementOutcomeLabel,
-  sessionStatusLabel,
-} from '../statusLabels.js';
+import { changeKindLabel, requirementOutcomeLabel, sessionStatusLabel } from '../statusLabels.js';
+import { CompanyButton } from './CompanyButton.js';
 
 export interface ReportPanelProps {
   report: CompanyReport;
@@ -35,9 +31,7 @@ export function ReportPanel({ report, contract, evidence, onOpenArtifact }: Repo
   return (
     <div className="flex flex-col gap-3 p-2 text-sm" data-testid="report-panel">
       <section aria-label="Điều bạn đã yêu cầu">
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-text-muted">
-          Điều bạn đã yêu cầu
-        </h3>
+        <h3 className="mb-1 text-xs font-semibold text-text-muted">Điều bạn đã yêu cầu</h3>
         <ul className="flex list-inside list-disc flex-col gap-1 text-text">
           {report.requirements.map((requirement) => {
             const source = contract?.requirements.find(
@@ -57,7 +51,7 @@ export function ReportPanel({ report, contract, evidence, onOpenArtifact }: Repo
       </section>
 
       <section aria-label="Thay đổi liên quan">
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-text-muted">Thay đổi liên quan</h3>
+        <h3 className="mb-1 text-xs font-semibold text-text-muted">Thay đổi liên quan</h3>
         {report.relatedChanges.length === 0 && (
           <p className="text-2xs text-text-muted">Không có tệp nào bị thay đổi.</p>
         )}
@@ -68,9 +62,12 @@ export function ReportPanel({ report, contract, evidence, onOpenArtifact }: Repo
               <span className="text-text">{change.path}</span>
               <span className="text-2xs text-text-muted">{change.summary}</span>
               {change.diffArtifactId && (
-                <Button size="sm" onClick={() => onOpenArtifact(change.diffArtifactId ?? '')}>
+                <CompanyButton
+                  size="sm"
+                  onClick={() => onOpenArtifact(change.diffArtifactId ?? '')}
+                >
                   Khác biệt
-                </Button>
+                </CompanyButton>
               )}
             </li>
           ))}
@@ -78,9 +75,7 @@ export function ReportPanel({ report, contract, evidence, onOpenArtifact }: Repo
       </section>
 
       <section aria-label="Bằng chứng kiểm chứng">
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-text-muted">
-          Bằng chứng kiểm chứng
-        </h3>
+        <h3 className="mb-1 text-xs font-semibold text-text-muted">Bằng chứng kiểm chứng</h3>
         {report.verificationEvidenceIds.length === 0 && (
           <p className="text-2xs text-text-muted">Chưa ghi nhận kiểm chứng nào.</p>
         )}
@@ -103,14 +98,20 @@ export function ReportPanel({ report, contract, evidence, onOpenArtifact }: Repo
                   {record.signal ? `tín hiệu ${record.signal}` : `mã thoát ${record.exitCode}`}
                 </span>
                 {record.stdoutArtifactId && (
-                  <Button size="sm" onClick={() => onOpenArtifact(record.stdoutArtifactId ?? '')}>
+                  <CompanyButton
+                    size="sm"
+                    onClick={() => onOpenArtifact(record.stdoutArtifactId ?? '')}
+                  >
                     đầu ra
-                  </Button>
+                  </CompanyButton>
                 )}
                 {record.stderrArtifactId && (
-                  <Button size="sm" onClick={() => onOpenArtifact(record.stderrArtifactId ?? '')}>
+                  <CompanyButton
+                    size="sm"
+                    onClick={() => onOpenArtifact(record.stderrArtifactId ?? '')}
+                  >
                     đầu lỗi
-                  </Button>
+                  </CompanyButton>
                 )}
               </li>
             );
@@ -119,7 +120,7 @@ export function ReportPanel({ report, contract, evidence, onOpenArtifact }: Repo
       </section>
 
       <section aria-label="Ghi chú của cố vấn">
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-text-muted">Ghi chú của cố vấn</h3>
+        <h3 className="mb-1 text-xs font-semibold text-text-muted">Ghi chú của cố vấn</h3>
         {report.advisorNotes.length === 0 && (
           <p className="text-2xs text-text-muted">Không có ghi chú kiến trúc nào.</p>
         )}
@@ -131,13 +132,13 @@ export function ReportPanel({ report, contract, evidence, onOpenArtifact }: Repo
       </section>
 
       <section aria-label="Các phiên và mô hình">
-        <h3 className="mb-1 text-xs uppercase tracking-wide text-text-muted">Các phiên</h3>
+        <h3 className="mb-1 text-xs font-semibold text-text-muted">Các phiên</h3>
         <ul className="flex flex-col gap-1">
           {report.sessions.map((session) => (
             <li key={session.sessionId} className="text-2xs text-text-muted">
               {session.sessionId} &middot; {companyRoleLabel(session.role)} &middot; kỳ{' '}
-              {session.runEpoch} &middot;{' '}
-              {session.effectiveModel ?? session.requestedModel} &middot;
+              {session.runEpoch} &middot; {session.effectiveModel ?? session.requestedModel}{' '}
+              &middot;
               {sessionStatusLabel(session.status)}
             </li>
           ))}

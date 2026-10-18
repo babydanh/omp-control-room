@@ -21,7 +21,7 @@ export function selectionForTask(state: CompanyViewState, taskId: string): Compa
     taskId,
     sessionId,
     // A card is about the work, not about a transcript: open what it is doing.
-    tab: sessionId === null ? null : 'activity',
+    tab: sessionId === null ? null : 'log',
   };
 }
 
@@ -48,4 +48,54 @@ export function pendingContract(state: CompanyViewState): Contract | null {
  */
 export function canSendContractApproval(contract: Contract, view: ContractPlanView): boolean {
   return contract.status === 'awaiting_approval' && view.canApprove;
+}
+
+/**
+ * What the detail drawer shows. A board subject (a task or a session) comes
+ * from the shared selection; the rest is something the user opened from the
+ * board or the sidebar.
+ */
+export type DrawerSubject =
+  | { kind: 'task'; taskId: string }
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'herdr'; paneId: string }
+  | { kind: 'contract' }
+  | { kind: 'question'; questionId: string }
+  | { kind: 'files' };
+
+/** Something the user explicitly opened. A board subject is never opened this way. */
+export type OpenedSubject = Exclude<DrawerSubject, { kind: 'task' } | { kind: 'session' }>;
+
+/**
+ * The subject the drawer shows: what the user opened wins; otherwise the
+ * shared selection's task (when the server still has it), else its session.
+ */
+export function drawerSubjectFor(
+  state: CompanyViewState,
+  opened: OpenedSubject | null,
+): DrawerSubject | null {
+  if (opened !== null) return opened;
+  const { taskId, sessionId } = state.selection;
+  if (taskId !== null && state.tasks[taskId] !== undefined) return { kind: 'task', taskId };
+  if (sessionId !== null && state.sessions[sessionId] !== undefined) {
+    return { kind: 'session', sessionId };
+  }
+  return null;
+}
+
+/** A stable identity for a drawer subject, so a retained subject can be compared. */
+export function drawerSubjectKey(subject: DrawerSubject): string {
+  switch (subject.kind) {
+    case 'task':
+      return `task:${subject.taskId}`;
+    case 'session':
+      return `session:${subject.sessionId}`;
+    case 'herdr':
+      return `herdr:${subject.paneId}`;
+    case 'question':
+      return `question:${subject.questionId}`;
+    case 'contract':
+    case 'files':
+      return subject.kind;
+  }
 }

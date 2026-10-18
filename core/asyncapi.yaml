@@ -123,6 +123,9 @@ components:
         - $ref: '#/components/schemas/CompanyStateChangedMessage'
         - $ref: '#/components/schemas/CompanyCommandResultMessage'
         - $ref: '#/components/schemas/CompanyTextDeltaMessage'
+        - $ref: '#/components/schemas/CompanySessionLogMessage'
+        - $ref: '#/components/schemas/HerdrAgentsMessage'
+        - $ref: '#/components/schemas/HerdrScreenMessage'
         - $ref: '#/components/schemas/CompanyModelCatalogMessage'
         - $ref: '#/components/schemas/CompanyArtifactPageMessage'
         - $ref: '#/components/schemas/CompanyFileListMessage'
@@ -171,6 +174,12 @@ components:
         - $ref: '#/components/schemas/CompanyFileListRequestMessage'
         - $ref: '#/components/schemas/CompanyFileReadRequestMessage'
         - $ref: '#/components/schemas/CompanyAttachmentUploadMessage'
+        - $ref: '#/components/schemas/CompanySessionLogRequestMessage'
+        # Herdr (privileged; drives the user's herdr server)
+        - $ref: '#/components/schemas/HerdrReadMessage'
+        - $ref: '#/components/schemas/HerdrPromptMessage'
+        - $ref: '#/components/schemas/HerdrKeysMessage'
+        - $ref: '#/components/schemas/HerdrFocusMessage'
         # Native terminal
         - $ref: '#/components/schemas/TerminalAttachMessage'
         - $ref: '#/components/schemas/TerminalInputMessage'
@@ -2400,6 +2409,23 @@ components:
             $ref: '#/components/schemas/QuotaSnapshot'
         diagnostics:
           $ref: '#/components/schemas/CompanyDiagnostics'
+        attempts:
+          type: array
+          description: Every attempt, so a reload keeps what each run did.
+          items:
+            $ref: '#/components/schemas/Attempt'
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/VerificationEvidence'
+        reports:
+          type: array
+          items:
+            $ref: '#/components/schemas/CompanyReport'
+        usage:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageRecord'
 
     CompanyDiagnostics:
       type: object
@@ -3002,6 +3028,99 @@ components:
           type: string
           maxLength: 8388608
 
+    CompanySessionLogRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, sessionId]
+      properties:
+        type:
+          const: companySessionLogRequest
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 500
+
+    HerdrReadMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId]
+      properties:
+        type:
+          const: herdrRead
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+        lines:
+          type: integer
+          minimum: 1
+          maximum: 2000
+
+    HerdrPromptMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId, text]
+      properties:
+        type:
+          const: herdrPrompt
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+        text:
+          type: string
+          minLength: 1
+          maxLength: 100000
+
+    HerdrKeysMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId, keys]
+      properties:
+        type:
+          const: herdrKeys
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+        keys:
+          type: array
+          minItems: 1
+          maxItems: 16
+          items:
+            $ref: '#/components/schemas/HerdrKey'
+
+    HerdrKey:
+      type: string
+      description: The keys the board lets a person press in a herdr agent's UI.
+      enum: [up, down, left, right, enter, esc, tab, ctrl+c, '1', '2', '3', y, n]
+
+    HerdrFocusMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId]
+      properties:
+        type:
+          const: herdrFocus
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+
     TerminalAttachMessage:
       type: object
       additionalProperties: false
@@ -3161,6 +3280,120 @@ components:
           minimum: 0
         text:
           type: string
+
+    CompanySessionLogEntry:
+      type: object
+      additionalProperties: false
+      required: [seq, at, kind, runEpoch, text]
+      properties:
+        seq:
+          type: integer
+          minimum: 0
+          description: Per-session order; a replay and a live push share it.
+        at:
+          type: string
+          format: date-time
+        kind:
+          type: string
+          enum: [text, tool, command, verdict, question, state, error]
+        runEpoch:
+          type: integer
+          minimum: 0
+        taskId:
+          type: string
+          format: uuid
+        text:
+          type: string
+          maxLength: 4000
+        toolName:
+          type: string
+        exitCode:
+          type: integer
+        ok:
+          type: boolean
+          description: Whether a tool, command or verdict succeeded.
+
+    CompanySessionLogMessage:
+      type: object
+      additionalProperties: false
+      required: [type, sessionId, replay, entries]
+      properties:
+        type:
+          const: companySessionLog
+        requestId:
+          type: string
+          format: uuid
+          description: Present on the answer to a companySessionLogRequest.
+        sessionId:
+          type: string
+          format: uuid
+        replay:
+          type: boolean
+          description: True when this is history sent on request; false for a live entry.
+        entries:
+          type: array
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/CompanySessionLogEntry'
+
+    HerdrAgent:
+      type: object
+      additionalProperties: false
+      required: [paneId, kind, status, workspaceId]
+      properties:
+        paneId:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          description: The agent herdr detected (omp, claude, codex, ...).
+        status:
+          type: string
+          enum: [working, blocked, idle, done, unknown]
+        cwd:
+          type: string
+        title:
+          type: string
+        workspaceId:
+          type: string
+        focused:
+          type: boolean
+
+    HerdrAgentsMessage:
+      type: object
+      additionalProperties: false
+      required: [type, available, agents]
+      properties:
+        type:
+          const: herdrAgents
+        available:
+          type: boolean
+          description: False when no herdr server answers; the board hides the group.
+        reason:
+          type: string
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/HerdrAgent'
+
+    HerdrScreenMessage:
+      type: object
+      additionalProperties: false
+      required: [type, paneId, text, at]
+      properties:
+        type:
+          const: herdrScreen
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+        text:
+          type: string
+        at:
+          type: string
+          format: date-time
 
     CompanyModelCatalogMessage:
       type: object

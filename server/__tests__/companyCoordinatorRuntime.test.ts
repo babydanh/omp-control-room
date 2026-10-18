@@ -16,6 +16,10 @@ import type {
   Question,
   SubmitPromptInput,
 } from '../../core/src/company.js';
+import type {
+  CompanyStateEvidenceAdditionalProperty,
+  CompanyStateUsageIndexAdditionalPropertyItem,
+} from '../../core/src/messages.js';
 import type { CompanySessionAction } from '../src/company/companyCoordinator.js';
 import { applyCompanyEvent } from '../src/company/companyState.js';
 import type { CompanyStore as CompanyStoreType } from '../src/company/companyStore.js';
@@ -521,6 +525,67 @@ describe('WorkspaceCompanyCoordinator', () => {
       }),
     ).rejects.toMatchObject({ code: 'model_unavailable' });
     expect(coordinator.snapshot().revision).toBe(0);
+    await coordinator.dispose();
+  });
+
+  it('projects attempts, evidence, reports and usage into the snapshot a reload reads', async () => {
+    const store = await CompanyStore.open(workspace);
+    let state = await store.load();
+    const running: Attempt = {
+      id: 'attempt-board',
+      taskId: 'task-board',
+      sessionId: 'worker-board',
+      runEpoch: 1,
+      startedAt: now,
+      status: 'running',
+      changes: [],
+      evidenceIds: [],
+    };
+    const seed = event(state, { entity: 'attempt', op: 'put', id: running.id, value: running });
+    await store.commit(seed);
+    state = applyCompanyEvent(state, seed);
+    const proof: CompanyStateEvidenceAdditionalProperty = {
+      id: 'evidence-board',
+      command: { id: 'cmd-1', executable: 'npm', argv: ['test'], cwd: 'C:/w', timeoutSeconds: 600 },
+      startedAt: now,
+      endedAt: now,
+      exitCode: 0,
+      criterionIds: [],
+    };
+    state.evidence[proof.id] = proof;
+    const spend: CompanyStateUsageIndexAdditionalPropertyItem = {
+      sessionId: 'worker-board',
+      nativeSessionId: 'native-board',
+      nativeEntryId: 'entry-board',
+      role: 'worker',
+      model: 'model-board',
+      provider: 'provider-board',
+      purpose: 'task',
+      input: 10,
+      output: 5,
+      cacheRead: 0,
+      cacheWrite: 0,
+      timestamp: now,
+      source: 'provider',
+      availability: 'reported',
+      provenance: 'own_turn',
+      runEpoch: 1,
+    };
+    state.usageIndex[spend.sessionId] = [spend];
+
+    const coordinator = new WorkspaceCompanyCoordinator({
+      store,
+      state,
+      usageLedger: new UsageLedger(),
+      isOwner: () => true,
+      now: () => now,
+      effects: effects(),
+    });
+    const snapshot = coordinator.snapshot();
+    expect(snapshot.attempts).toEqual([running]);
+    expect(snapshot.evidence).toEqual([proof]);
+    expect(snapshot.reports).toEqual([]);
+    expect(snapshot.usage).toEqual([spend]);
     await coordinator.dispose();
   });
 

@@ -18,6 +18,7 @@ import {
   SERVER_REGISTRY_PROTOCOL_VERSION,
   SERVERS_DIR,
 } from './constants.js';
+import type { HerdrLink } from './herdr/herdrLink.js';
 import { createHttpServer } from './httpServer.js';
 import type { ServerConfig } from './serverConfig.js';
 import { isServerConfig, isServerTarget } from './serverConfig.js';
@@ -74,6 +75,7 @@ export class PixelAgentsServer {
     company?: CompanyCommandServices | null;
     getCompany?: () => CompanyCommandServices | null;
     isCompanyExecutionAllowed?: () => boolean;
+    herdr?: HerdrLink | null;
   }): Promise<ServerConfig> {
     this.stopPromise = null;
     const embedded = options?.embedded ?? true;
@@ -120,6 +122,7 @@ export class PixelAgentsServer {
       company: options?.company,
       getCompany: options?.getCompany,
       isCompanyExecutionAllowed: options?.isCompanyExecutionAllowed,
+      herdr: options?.herdr,
     });
 
     this.app = app;

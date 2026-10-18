@@ -57,14 +57,11 @@
   --btn-disabled-opacity: 0.35;
 }
 
-@theme inline {
-  /* 1px base so Tailwind spacing maps directly to pixels (pixel-art project) */
+@theme {
+  /* 1px base so Tailwind spacing maps directly to pixels (pixel-art project).
+     Spacing and text sizes are not inlined, so a scope such as .company-ui can
+     rescale them; the office keeps these values on :root. */
   --spacing: 1px;
-
-  /* UI chrome reads in Inter; the office canvas and its overlays keep the pixel
-     face, which is part of the artwork rather than a reading surface. */
-  --font-ui: var(--app-font-ui);
-  --font-pixel: 'FS Pixel Sans', var(--font-ui);
 
   /* Text sizes (pixel-art scale, base = 22px) */
   --text-*: initial;
@@ -78,6 +75,13 @@
   --text-3xl: 44px;
   --text-4xl: 52px;
   --text-5xl: 64px;
+}
+
+@theme inline {
+  /* UI chrome reads in Inter; the office canvas and its overlays keep the pixel
+     face, which is part of the artwork rather than a reading surface. */
+  --font-ui: var(--app-font-ui);
+  --font-pixel: 'FS Pixel Sans', var(--font-ui);
 
   /* Colors — reference :root vars so VS Code shows swatches */
   --color-bg: var(--color-bg);
@@ -98,6 +102,8 @@
   --color-status-active: var(--color-status-active);
   --color-status-success: var(--color-status-success);
   --color-status-error: var(--color-status-error);
+  --color-orchid: var(--color-orchid);
+  --color-idle: var(--color-idle);
 
   /* Shadow */
   --shadow-pixel: var(--shadow-pixel);
@@ -132,6 +138,39 @@
     --text-3xl: 28px;
     --text-4xl: 34px;
     --text-5xl: 42px;
+
+    /* Tailwind spacing for the board: 4px base, so p-2 is 8px (the office keeps 1px). */
+    --spacing: 4px;
+
+    /* Body text on the board; anything without its own size reads at this. */
+    font-size: var(--text-base);
+
+    /* Ink and amber: the board's palette, scoped here so the office UI keeps the
+       tokens above. Warning is the red that marks something waiting on the user;
+       danger is the deeper red of a failed run. */
+    --color-bg: #141417;
+    --color-bg-dark: #1b1b20;
+    --color-bg-thumb: #33333c;
+    --color-border: #33333c;
+    --color-accent: #f2a33a;
+    --color-accent-bright: #ffc266;
+    --color-text: #ebe7df;
+    --color-text-muted: #8d8b93;
+    --color-btn-bg: #222228;
+    --color-btn-hover: #2c2c35;
+    --color-active-bg: #3a2b12;
+    --color-danger: #d14249;
+    --color-warning: #ff6159;
+    --color-status-permission: #a98bff;
+    --color-status-active: #6aa8ff;
+    --color-status-success: #5fd38d;
+    --color-orchid: #c792ea;
+    --color-idle: #6b6b75;
+    /* Board surfaces: a lane's column, a card on it, and the card's edge. */
+    --color-lane: #15161b;
+    --color-card: #0f1013;
+    --color-card-line: #3a3a44;
+    --color-card-hover: #5a5a66;
   }
 
   /* The office canvas and its overlays draw over the artwork, so they keep the
@@ -224,6 +263,131 @@
     scrollbar-width: thin;
     scrollbar-color: var(--color-border) var(--color-bg-dark);
   }
+
+  /* Company motion. The drawer's open state animates in on mount, and its closed
+     state's translate transitions out; durations are set inline from one constant.
+     Every animation here is switched off by the reduced-motion block at the end. */
+  .company-spinner {
+    display: inline-block;
+    width: 1em;
+    height: 1em;
+    overflow: hidden;
+    line-height: 1em;
+    vertical-align: middle;
+  }
+  .company-spinner-track {
+    display: flex;
+    flex-direction: column;
+    animation: company-spin-steps 900ms steps(10) infinite;
+  }
+  .company-breathe {
+    animation: company-breathe 1.4s ease-in-out infinite;
+  }
+  .company-fade-in {
+    animation: company-fade-in 240ms ease-out both;
+  }
+  .company-sent-back {
+    box-shadow:
+      0 0 0 2px var(--color-warning),
+      0 0 12px color-mix(in srgb, var(--color-warning) 40%, transparent);
+  }
+  .company-drawer {
+    transition-property: translate;
+    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .company-drawer-in {
+    animation: company-drawer-in 320ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Lanes: each column takes its accent from data-lane, which sets the top rule
+     and tints the header. */
+  .company-lane {
+    --lane-color: var(--color-idle);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-top: 3px solid var(--lane-color);
+    border-radius: 7px;
+    background: var(--color-lane);
+  }
+  .company-lane[data-lane='planned'] {
+    --lane-color: #a98bff;
+  }
+  .company-lane[data-lane='ready'] {
+    --lane-color: #6aa8ff;
+  }
+  .company-lane[data-lane='running'] {
+    --lane-color: #f2a33a;
+  }
+  .company-lane[data-lane='needs_input'] {
+    --lane-color: #ff6159;
+  }
+  .company-lane[data-lane='review'] {
+    --lane-color: #c792ea;
+  }
+  .company-lane[data-lane='done'] {
+    --lane-color: #5fd38d;
+  }
+  .company-lane[data-lane='failed'] {
+    --lane-color: #d14249;
+  }
+  .company-lane-head {
+    border-radius: 4px 4px 0 0;
+    background: color-mix(in srgb, var(--lane-color) 14%, var(--color-lane));
+  }
+
+  /* Cards sit on the card surface; hover lightens the edge, and the selected
+     card takes the accent. */
+  .company-card {
+    border: 1px solid var(--color-card-line);
+    border-radius: 6px;
+    background: var(--color-card);
+    transition: border-color 120ms ease;
+  }
+  .company-card:hover {
+    border-color: var(--color-card-hover);
+  }
+  .company-card[aria-pressed='true'] {
+    border-color: var(--color-accent);
+  }
+
+  /* The board's own buttons. The shared Button keeps the office's 2px square frame. */
+  .company-btn {
+    cursor: pointer;
+    border: 1px solid var(--color-border);
+    border-radius: 5px;
+    background: var(--color-btn-bg);
+    padding: 4px 10px;
+    font-size: var(--text-sm);
+    color: var(--color-text);
+    transition:
+      border-color 120ms ease,
+      transform 80ms ease;
+  }
+  .company-btn:hover:not(:disabled) {
+    border-color: var(--color-accent);
+  }
+  .company-btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .company-btn:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+  .company-btn-md {
+    padding: 6px 14px;
+    font-size: var(--text-base);
+  }
+  .company-btn-accent {
+    border-color: var(--color-accent);
+    background: var(--color-accent);
+    color: var(--color-bg);
+  }
+  .company-btn-accent:hover:not(:disabled) {
+    border-color: var(--color-accent-bright);
+    background: var(--color-accent-bright);
+  }
 }
 
 @keyframes pixel-pulse {
@@ -233,5 +397,56 @@
   }
   50% {
     opacity: 0.3;
+  }
+}
+
+@keyframes company-spin-steps {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(-10em);
+  }
+}
+
+@keyframes company-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@keyframes company-fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes company-drawer-in {
+  from {
+    translate: 100% 0;
+  }
+  to {
+    translate: 0 0;
+  }
+}
+
+/* Reduced motion switches off every company animation and transition, so the
+   board stays readable and still. The FLIP flight checks the same preference
+   in script (flip.ts). */
+@media (prefers-reduced-motion: reduce) {
+  .company-ui *,
+  .company-ui *::before,
+  .company-ui *::after {
+    animation: none !important;
+    transition: none !important;
   }
 }

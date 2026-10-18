@@ -44,6 +44,38 @@ export function laneForTaskStatus(status: Task['status']): CompanyLaneId {
   return LANE_BY_STATUS[status];
 }
 
+/** Who a card in the review lane is waiting on. */
+export type ReviewOwner = 'QA' | 'Trọng tài';
+
+/** The attempt that most recently ran a task, if the server still holds it. */
+export function latestAttemptForTask(state: CompanyViewState, task: Task): Attempt | undefined {
+  let latest: Attempt | undefined;
+  for (const attemptId of task.attemptIds) {
+    const attempt = state.attempts[attemptId];
+    if (attempt !== undefined && (latest === undefined || attempt.startedAt >= latest.startedAt)) {
+      latest = attempt;
+    }
+  }
+  return latest;
+}
+
+/**
+ * Who holds a card in the review lane. QA owns the work until it passes; once
+ * QA has passed, the Judge owns the decision. A failed Judge verdict stays the
+ * Judge's: that failure is what sent the card back.
+ */
+export function reviewOwnerFor(attempt: Attempt | undefined): ReviewOwner {
+  return attempt?.qaVerdict?.['verdict'] === 'pass' ? 'Trọng tài' : 'QA';
+}
+
+/**
+ * A task that went back to running after its latest attempt failed
+ * verification. The repair is the work now, and the card says so.
+ */
+export function sentBackFor(status: Task['status'], attempt: Attempt | undefined): boolean {
+  return status === 'running' && attempt?.status === 'failed';
+}
+
 export interface BoardEvidenceSummary {
   total: number;
   passed: number;
@@ -84,6 +116,10 @@ export interface BoardCard {
    */
   waitReason: WaitReason;
   selected: boolean;
+  /** Who the card waits on while it sits in the review lane; null everywhere else. */
+  reviewOwner: ReviewOwner | null;
+  /** A repair after a failed verification: the card carries the "trả lại" state. */
+  sentBack: boolean;
 }
 
 export interface BoardLane {
@@ -139,6 +175,8 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
 
   const cards = tasks.map((task): BoardCard => {
     const contract = state.contracts[task.contractId];
+    const lane = laneForTaskStatus(task.status);
+    const attempt = latestAttemptForTask(state, task);
     const phase = contract?.phases.find((entry) => entry.id === task.phaseId);
     const dependsOnCodes = task.dependsOn.map(codeOf);
     const blockedByCodes = task.dependsOn
@@ -152,7 +190,9 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
       code: task.code,
       title: task.title,
       status: task.status,
-      lane: laneForTaskStatus(task.status),
+      lane,
+      reviewOwner: lane === 'review' ? reviewOwnerFor(attempt) : null,
+      sentBack: sentBackFor(task.status, attempt),
       contractId: task.contractId,
       contractCode: contract?.code ?? task.contractId,
       phaseTitle: phase?.title ?? 'Chưa xếp lịch',

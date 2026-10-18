@@ -12,10 +12,12 @@
  *    ignored until that snapshot arrives.
  *  - A snapshot replaces the collections it enumerates (prompts, contracts,
  *    tasks, sessions, questions, quotas) and RESETS the revision baseline. The
- *    incremental collections (attempts, evidence, reports, usage) are kept
- *    across it: the server sends those only when they change, so dropping them
- *    would turn a resync into data loss. Their removals arrive as explicit
- *    `remove` changes.
+ *    incremental collections (attempts, evidence, reports, usage) are replaced
+ *    only when the snapshot carries them: a list it sends is complete, so it
+ *    also drops any removal the client missed during a gap. An absent field
+ *    keeps what the client holds, because the server has nothing newer to say
+ *    about it; dropping the data would turn a resync into data loss. Their
+ *    removals arrive as explicit `remove` changes.
  *  - Nothing here is optimistic. A command does not move a card; the card moves
  *    when the state change for it arrives.
  *
@@ -30,10 +32,12 @@ import type {
   CompanyModelCatalogEntry,
   CompanyPromptSummary,
   CompanyReport,
+  CompanySessionLogEntry,
   CompanySessionSummary,
   CompanySettings,
   CompanySnapshot,
   Contract,
+  HerdrAgent,
   Question,
   QuotaSnapshot,
   Task,
@@ -49,6 +53,7 @@ import type {
 } from '../../../core/src/messages.js';
 import { type CommandResultView, viewCommandResult } from './commandResults.js';
 import {
+  COMPANY_SESSION_LOG_MAX_ENTRIES,
   COMPANY_TERMINAL_FRAME_QUEUE_MAX,
   COMPANY_TEXT_EXCERPT_GRAPHEMES,
   COMPANY_TEXT_STREAM_MAX_CHARS,
@@ -91,7 +96,7 @@ export interface CompanySelection {
  * a click that means "show me the question it is blocked on" has to survive
  * the drawer being re-rendered by an unrelated company message.
  */
-export type CompanyDrawerTab = 'terminal' | 'activity' | 'questions' | 'usage' | 'report';
+export type CompanyDrawerTab = 'terminal' | 'log' | 'commands' | 'questions' | 'usage' | 'report';
 
 export const EMPTY_SELECTION: CompanySelection = { sessionId: null, taskId: null, tab: null };
 
@@ -161,6 +166,40 @@ export interface FileContentView {
   error: string | null;
 }
 
+/**
+ * One session's log as the drawer shows it. Entries are keyed by seq, so the
+ * replay that answers a drawer opening and the live pushes that follow it can
+ * overlap without doubling a line.
+ */
+export interface SessionLogView {
+  sessionId: string;
+  /** Ascending by seq, unique by seq, and at most COMPANY_SESSION_LOG_MAX_ENTRIES long. */
+  entries: CompanySessionLogEntry[];
+  /** True once a replay has answered; until then the drawer shows a loading line. */
+  replayed: boolean;
+}
+
+export interface HerdrScreenView {
+  paneId: string;
+  text: string;
+  at: string;
+}
+
+/** What the board knows about the user's herdr server. */
+export interface HerdrView {
+  /** False until the first herdrAgents answer, so no herdr group is drawn before then. */
+  loaded: boolean;
+  available: boolean;
+  reason: string | null;
+  agents: HerdrAgent[];
+  /** Latest screen per pane; a late reply older than the one held is dropped. */
+  screens: Record<string, HerdrScreenView>;
+}
+
+export function emptyHerdrView(): HerdrView {
+  return { loaded: false, available: false, reason: null, agents: [], screens: {} };
+}
+
 export interface CompanyViewState {
   /** Last revision the client can account for; null before the first snapshot. */
   revision: number | null;
@@ -192,6 +231,9 @@ export interface CompanyViewState {
   selection: CompanySelection;
   /** The composer's draft, retained until the server accepts it. */
   prompt: PromptDraftState;
+  /** Session logs keyed by session id; a log survives the drawer closing. */
+  sessionLogs: Record<string, SessionLogView>;
+  herdr: HerdrView;
 }
 
 export function emptyCompanyState(): CompanyViewState {
@@ -221,6 +263,8 @@ export function emptyCompanyState(): CompanyViewState {
     selectedModel: null,
     selection: EMPTY_SELECTION,
     prompt: EMPTY_PROMPT_DRAFT,
+    sessionLogs: {},
+    herdr: emptyHerdrView(),
   };
 }
 
@@ -243,6 +287,73 @@ export function usageKey(record: UsageRecord): string {
   return `${record.nativeSessionId}:${record.nativeEntryId}`;
 }
 
+/**
+ * Merge a batch of session-log entries into what the client already holds.
+ *
+ * A replay and the live stream can describe the same seq, so entries are keyed
+ * by seq and the newer delivery wins. The view stays ascending by seq and
+ * bounded: when it overflows, the oldest entries go, because the drawer is
+ * about what happened lately.
+ */
+export function mergeSessionLog(
+  existing: SessionLogView | undefined,
+  sessionId: string,
+  incoming: readonly CompanySessionLogEntry[],
+  replay: boolean,
+): SessionLogView {
+  const bySeq = new Map<number, CompanySessionLogEntry>();
+  for (const entry of existing?.entries ?? []) bySeq.set(entry.seq, entry);
+  for (const entry of incoming) bySeq.set(entry.seq, entry);
+  const sorted = [...bySeq.values()].sort((left, right) => left.seq - right.seq);
+  const overflow = sorted.length - COMPANY_SESSION_LOG_MAX_ENTRIES;
+  return {
+    sessionId,
+    entries: overflow > 0 ? sorted.slice(overflow) : sorted,
+    replayed: (existing?.replayed ?? false) || replay,
+  };
+}
+
+/** A removed session keeps no log: drop logs for sessions the snapshot no longer lists. */
+function pruneSessionLogs(
+  logs: Record<string, SessionLogView>,
+  sessions: Record<string, SessionView>,
+): Record<string, SessionLogView> {
+  const kept: Record<string, SessionLogView> = {};
+  for (const [sessionId, log] of Object.entries(logs)) {
+    if (sessions[sessionId] !== undefined) kept[sessionId] = log;
+  }
+  return kept;
+}
+
+function indexReports(reports: readonly CompanyReport[]): Record<string, CompanyReport> {
+  // Keyed the way the server keys a report put: by contract.
+  return Object.fromEntries(
+    reports.map((report): [string, CompanyReport] => [report.contractId, report]),
+  );
+}
+
+function indexUsage(records: readonly UsageRecord[]): Record<string, UsageRecord> {
+  return Object.fromEntries(
+    records.map((record): [string, UsageRecord] => [usageKey(record), record]),
+  );
+}
+
+/** A screen reply older than the one already held is a late answer; keep the newer. */
+function applyHerdrScreen(
+  herdr: HerdrView,
+  message: { paneId: string; text: string; at: string },
+): HerdrView {
+  const held = herdr.screens[message.paneId];
+  if (held !== undefined && held.at > message.at) return herdr;
+  return {
+    ...herdr,
+    screens: {
+      ...herdr.screens,
+      [message.paneId]: { paneId: message.paneId, text: message.text, at: message.at },
+    },
+  };
+}
+
 function applySnapshot(state: CompanyViewState, snapshot: CompanySnapshot): CompanyViewState {
   // A Contract embeds its tasks; the snapshot's own task list is the
   // authoritative one, and the embedded copies fill any task it omits.
@@ -254,6 +365,8 @@ function applySnapshot(state: CompanyViewState, snapshot: CompanySnapshot): Comp
     }
   }
 
+  const sessions = indexById(snapshot.sessions);
+
   return {
     ...state,
     revision: snapshot.revision,
@@ -262,10 +375,15 @@ function applySnapshot(state: CompanyViewState, snapshot: CompanySnapshot): Comp
     prompts: [...snapshot.prompts],
     contracts: indexById(snapshot.contracts),
     tasks,
-    sessions: indexById(snapshot.sessions),
+    sessions,
     questions: indexById(snapshot.questions),
     quotas: Object.fromEntries(snapshot.quotas.map((quota) => [quota.provider, quota])),
     diagnostics: snapshot.diagnostics ?? state.diagnostics,
+    attempts: snapshot.attempts === undefined ? state.attempts : indexById(snapshot.attempts),
+    evidence: snapshot.evidence === undefined ? state.evidence : indexById(snapshot.evidence),
+    reports: snapshot.reports === undefined ? state.reports : indexReports(snapshot.reports),
+    usage: snapshot.usage === undefined ? state.usage : indexUsage(snapshot.usage),
+    sessionLogs: pruneSessionLogs(state.sessionLogs, sessions),
   };
 }
 
@@ -287,7 +405,9 @@ function applyChange(state: CompanyViewState, change: CompanyPutChange | Company
       case 'session': {
         const sessions = { ...state.sessions };
         delete sessions[change.id];
-        return { ...state, sessions };
+        const sessionLogs = { ...state.sessionLogs };
+        delete sessionLogs[change.id];
+        return { ...state, sessions, sessionLogs };
       }
       case 'question': {
         const questions = { ...state.questions };
@@ -614,6 +734,32 @@ export function applyCompanyMessage(
         },
       });
     }
+    case 'companySessionLog':
+      return unchanged({
+        ...state,
+        sessionLogs: {
+          ...state.sessionLogs,
+          [message.sessionId]: mergeSessionLog(
+            state.sessionLogs[message.sessionId],
+            message.sessionId,
+            message.entries,
+            message.replay,
+          ),
+        },
+      });
+    case 'herdrAgents':
+      return unchanged({
+        ...state,
+        herdr: {
+          ...state.herdr,
+          loaded: true,
+          available: message.available,
+          reason: message.reason ?? null,
+          agents: [...message.agents],
+        },
+      });
+    case 'herdrScreen':
+      return unchanged({ ...state, herdr: applyHerdrScreen(state.herdr, message) });
     case 'terminalAttached': {
       const previous =
         state.terminals[message.sessionId] ?? newTerminalView(message.sessionId, message.runEpoch);
