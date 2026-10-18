@@ -40,6 +40,8 @@ import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS, withRoleModel } from '../roleProfiles.js';
 import { clampSidebarWidth } from '../sidebarPrefs.js';
+import type { PreviewTarget } from '../terminalPreview.js';
+import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useNow } from '../useNow.js';
 import { ActivityChips } from './ActivityCounts.js';
@@ -445,6 +447,7 @@ function RoleSection({
               row={row}
               testId={`agent-row-${row.code}`}
               menu={{ kind: 'session', sessionId: row.sessionId, drawer: null }}
+              previewTarget={{ kind: 'session', sessionId: row.sessionId }}
               lane={group.role}
               index={index}
               selected={row.sessionId === view.selectedSessionId}
@@ -473,6 +476,7 @@ function RoleSection({
                     row={row}
                     testId={`agent-row-${row.code}`}
                     menu={{ kind: 'session', sessionId: row.sessionId, drawer: null }}
+                    previewTarget={{ kind: 'session', sessionId: row.sessionId }}
                     lane={`${group.role}:parked`}
                     index={index}
                     selected={row.sessionId === view.selectedSessionId}
@@ -509,6 +513,7 @@ function AgentRowButton({
   index,
   selected,
   menu,
+  previewTarget,
   onSelect,
   onMenu,
 }: {
@@ -519,15 +524,18 @@ function AgentRowButton({
   selected: boolean;
   /** What the row's right-click menu acts on: the session itself, or the folder it belongs to. */
   menu: AgentMenuSubject;
+  previewTarget?: PreviewTarget;
   onSelect: () => void;
   onMenu: (request: AgentMenuRequest) => void;
 }) {
   const triggers = agentMenuTriggers<HTMLButtonElement>(menu, onMenu);
+  const actions = useTerminalPreview();
   return (
     <button
       type="button"
       onClick={onSelect}
       {...triggers}
+      {...(previewTarget === undefined ? {} : previewTriggers(actions, previewTarget))}
       aria-pressed={selected}
       title={agentTooltip(row)}
       data-testid={testId}
@@ -572,11 +580,13 @@ function HerdrRowButton({
     { kind: 'herdr', paneId: row.paneId, drawer: null },
     onMenu,
   );
+  const actions = useTerminalPreview();
   return (
     <button
       type="button"
       onClick={onOpen}
       {...triggers}
+      {...previewTriggers(actions, { kind: 'herdr', paneId: row.paneId })}
       aria-pressed={selected}
       title={herdrTooltip(row)}
       data-testid={`herdr-row-${row.paneId}`}

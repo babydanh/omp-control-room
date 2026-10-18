@@ -29,6 +29,7 @@ import { WAIT_REASON_LABELS } from '../boardView.js';
 import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS } from '../constants.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { taskStatusLabel } from '../statusLabels.js';
+import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 
 export interface CompanyBoardProps {
@@ -174,11 +175,15 @@ function TaskCard({
     { kind: 'task', taskId: card.taskId, sessionId: card.session?.id ?? null, drawer: null },
     onMenu,
   );
+  const actions = useTerminalPreview();
   return (
     <button
       type="button"
       onClick={onSelect}
       {...triggers}
+      {...(card.session
+        ? previewTriggers(actions, { kind: 'session', sessionId: card.session.id })
+        : {})}
       aria-pressed={card.selected}
       data-testid={`task-card-${card.code}`}
       data-task-id={card.taskId}

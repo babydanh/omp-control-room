@@ -4,11 +4,12 @@
  * The Log tab reads the session's entries in order, with the attempts it ran at
  * the top. The log follows the newest line only while the reader is already at
  * the bottom, so reading an older line is never yanked away. The Lệnh tab lists
- * the commands the session ran, each one expandable to its output.
+ * the commands the session ran. A live command jumps to its place in the terminal;
+ * any other expands in place to its output.
  */
 
 import type { UIEvent } from 'react';
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 import type { Attempt, CompanySessionLogEntry } from '../../../../core/src/company.js';
 import type { CompanyViewState } from '../companyState.js';
@@ -152,9 +153,12 @@ export interface CommandsTabProps {
   state: CompanyViewState;
   sessionId: string;
   taskId: string | null;
+  /** A live session's commands jump to the terminal; the rest expand in place. */
+  live: boolean;
+  onJump: (command: string, output: string | null) => void;
 }
 
-export function CommandsTab({ state, sessionId, taskId }: CommandsTabProps) {
+export function CommandsTab({ state, sessionId, taskId, live, onJump }: CommandsTabProps) {
   const commands = logEntriesFor(state, sessionId, taskId).filter(
     (entry) => entry.kind === 'command',
   );
@@ -164,32 +168,51 @@ export function CommandsTab({ state, sessionId, taskId }: CommandsTabProps) {
   return (
     <ol className="flex flex-col gap-2 p-2">
       {commands.map((entry) => (
-        <CommandRow key={entry.seq} entry={entry} />
+        <CommandRow key={entry.seq} entry={entry} live={live} onJump={onJump} />
       ))}
     </ol>
   );
 }
 
-function CommandRow({ entry }: { entry: CompanySessionLogEntry }) {
+function CommandRow({
+  entry,
+  live,
+  onJump,
+}: {
+  entry: CompanySessionLogEntry;
+  live: boolean;
+  onJump: (command: string, output: string | null) => void;
+}) {
   const { command, output } = splitCommandText(entry.text);
+  const [expanded, setExpanded] = useState(false);
   return (
     <li className="company-fade-in rounded-[6px] border border-border p-2">
-      <details>
-        <summary className="flex cursor-pointer items-baseline justify-between gap-2 text-2xs">
-          <span className="min-w-0 truncate font-mono text-text">{command}</span>
-          <span className={`shrink-0 ${COMMAND_TONE_CLASS[commandTone(entry)]}`}>
-            {commandExitLabel(entry)}
-          </span>
-        </summary>
-        <p className="mt-1 text-2xs text-text-muted">
-          <time dateTime={entry.at}>{formatLogTime(entry.at)}</time>
-        </p>
-        {output !== null && (
-          <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-[5px] bg-bg p-1 text-2xs text-text">
-            {output}
-          </pre>
-        )}
-      </details>
+      <button
+        type="button"
+        aria-expanded={live ? undefined : expanded}
+        title={live ? 'Mở lệnh này trong terminal' : undefined}
+        onClick={() => (live ? onJump(command, output) : setExpanded((value) => !value))}
+        className="flex w-full cursor-pointer items-baseline justify-between gap-2 text-left text-2xs"
+      >
+        <span className="min-w-0 truncate font-mono text-text">{command}</span>
+        <span className={`shrink-0 ${COMMAND_TONE_CLASS[commandTone(entry)]}`}>
+          {commandExitLabel(entry)}
+        </span>
+      </button>
+      {!live && expanded && (
+        <div>
+          <p className="mt-1 text-2xs text-text-muted">
+            <time dateTime={entry.at}>{formatLogTime(entry.at)}</time>
+          </p>
+          {output !== null ? (
+            <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-[5px] bg-bg p-1 text-2xs text-text">
+              {output}
+            </pre>
+          ) : (
+            <p className="mt-1 text-2xs text-text-muted">Nhật ký không có kết quả của lệnh này.</p>
+          )}
+        </div>
+      )}
     </li>
   );
 }

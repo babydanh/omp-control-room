@@ -9,7 +9,7 @@
  */
 
 import type { FormEvent } from 'react';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 import type { HerdrKey } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
@@ -25,8 +25,10 @@ import {
   herdrToneFor,
 } from '../herdrView.js';
 import { formatLogTime } from '../sessionLogView.js';
+import { parseAnsiScreen } from '../terminalScreen.js';
 import { HerdrInfoTab } from './AgentInfoTab.js';
 import { CompanyButton } from './CompanyButton.js';
+import { ScreenView } from './ScreenView.js';
 
 const HERDR_TABS = ['screen', 'info'] as const satisfies readonly HerdrDrawerTab[];
 
@@ -48,6 +50,7 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
   const [lastRequest, setLastRequest] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const polling = tab === 'screen' && status !== undefined && herdrNeedsScreenPolling(status);
+  const screenLines = useMemo(() => parseAnsiScreen(screen?.text ?? ''), [screen?.text]);
 
   // Read the screen while the screen tab is open, and whenever the agent's status moves.
   useEffect(() => {
@@ -153,12 +156,17 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
             {screen && (
               <p className="text-2xs text-text-muted">màn hình lúc {formatLogTime(screen.at)}</p>
             )}
-            <pre
-              data-testid="herdr-screen"
-              className="min-h-0 flex-1 overflow-auto whitespace-pre rounded-[6px] border border-border bg-bg p-2 text-2xs text-text"
-            >
-              {screen ? screen.text : 'Chưa đọc màn hình.'}
-            </pre>
+            {screen ? (
+              <ScreenView
+                testId="herdr-screen"
+                lines={screenLines}
+                className="min-h-0 flex-1 overflow-auto rounded-[6px] border border-border p-2"
+              />
+            ) : (
+              <p className="rounded-[6px] border border-border bg-bg p-2 text-2xs text-text-muted">
+                Chưa đọc màn hình.
+              </p>
+            )}
           </div>
 
           {notice && (

@@ -43,6 +43,8 @@ function terminal(sessionId: string): TerminalView {
     runEpoch: 1,
     attached: true,
     leaseId: 'lease-1',
+    cols: null,
+    rows: null,
     lastSeq: 0,
     frames: [],
     overflow: false,

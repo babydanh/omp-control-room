@@ -27,6 +27,8 @@ import {
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_RAIL_WIDTH_PX } from '../constants.js';
 import { ROLE_EDGE_CLASS } from '../roleProfiles.js';
+import type { PreviewTarget } from '../terminalPreview.js';
+import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useNow } from '../useNow.js';
 import { ActivityStack } from './ActivityCounts.js';
@@ -193,6 +195,7 @@ function RailEntryView({
           tone={entry.row.tone}
           edgeClass={ROLE_EDGE_CLASS[entry.row.role]}
           title={agentTooltip(entry.row)}
+          preview={{ kind: 'session', sessionId: entry.row.sessionId }}
           selected={entry.row.sessionId === selectedSessionId}
           onClick={() => onSelectSession(entry.row.sessionId)}
           triggers={agentMenuTriggers<HTMLButtonElement>(
@@ -231,6 +234,7 @@ function RailEntryView({
           tone={entry.row.tone}
           edgeClass={PANE_EDGE_CLASS}
           title={herdrTooltip(entry.row)}
+          preview={{ kind: 'herdr', paneId: entry.row.paneId }}
           selected={entry.row.paneId === selectedPaneId}
           onClick={() => onOpenHerdr(entry.row.paneId)}
           triggers={agentMenuTriggers<HTMLButtonElement>(
@@ -307,6 +311,7 @@ function RailBadge({
   selected,
   onClick,
   triggers,
+  preview,
 }: {
   testId: string;
   /** The key the board's motion follows this badge by. */
@@ -321,12 +326,16 @@ function RailBadge({
   selected: boolean;
   onClick: () => void;
   triggers: AgentMenuTriggers<HTMLButtonElement>;
+  /** The row a hover preview opens for; absent when the row has no live terminal. */
+  preview?: PreviewTarget;
 }) {
+  const actions = useTerminalPreview();
   return (
     <button
       type="button"
       onClick={onClick}
       {...triggers}
+      {...(preview === undefined ? {} : previewTriggers(actions, preview))}
       aria-pressed={selected}
       aria-label={title}
       title={title}

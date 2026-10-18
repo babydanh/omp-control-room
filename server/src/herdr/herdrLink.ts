@@ -267,7 +267,7 @@ interface AgentInfo {
   readonly focused?: unknown;
 }
 
-/** Shared by `agent.read` replies and `pane.output_matched` event data. */
+/** Shared by `agent.read` replies. */
 interface PaneReadPayload {
   readonly read?: { readonly text?: unknown };
 }
@@ -288,8 +288,12 @@ interface ScreenWatch {
   stream?: HerdrEventStream;
   cancelExpiry: () => void;
   cancelThrottle?: () => void;
+  /** An output event arrived while the throttle window was open. */
   dirty: boolean;
-  latestText: string;
+  /** Reads sent for this watch, numbered in send order. */
+  reads: number;
+  /** Number of the last read whose text was emitted; older replies are dropped. */
+  shown: number;
 }
 
 /** The roster as last read from herdr, before workspace labels and checkout facts are added. */
@@ -391,9 +395,10 @@ class HerdrLinkImpl implements HerdrLink {
   async read(paneId: string, lines: number): Promise<HerdrScreenMessage> {
     assertPaneId(paneId);
     assertLines(lines);
+    // herdr ignores strip_ansi; format 'ansi' is the one that keeps SGR colour.
     const result = await this.call(
       'agent.read',
-      { target: paneId, source: 'recent_unwrapped', lines, format: 'text', strip_ansi: true },
+      { target: paneId, source: 'recent_unwrapped', lines, format: 'ansi' },
       READ_TIMEOUT_MS,
     );
     const text = readText(result);
@@ -661,7 +666,8 @@ class HerdrLinkImpl implements HerdrLink {
       lines,
       cancelExpiry: this.scheduler.schedule(() => this.closeWatch(paneId), SCREEN_WATCH_MS),
       dirty: false,
-      latestText: '',
+      reads: 0,
+      shown: 0,
     };
     this.watches.set(paneId, watch);
     watch.stream = openEventStream(
@@ -678,12 +684,12 @@ class HerdrLinkImpl implements HerdrLink {
       {
         onStarted: () => {
           // Output between the read and the subscription would otherwise be missed.
-          if (this.watches.get(paneId) === watch) void this.resyncScreen(watch);
+          if (this.watches.get(paneId) === watch) void this.readScreen(watch);
         },
-        onEvent: (event, data) => {
+        onEvent: (event) => {
+          // The event only says the pane changed; its text is plain, so the screen is read again.
           if (event !== 'pane.output_matched' || this.watches.get(paneId) !== watch) return;
-          const text = readText(data);
-          if (text !== undefined) this.pushScreen(watch, text);
+          this.signalScreen(watch);
         },
         onFailure: () => {
           if (this.watches.get(paneId) === watch) this.closeWatch(paneId);
@@ -692,36 +698,44 @@ class HerdrLinkImpl implements HerdrLink {
     );
   }
 
-  private async resyncScreen(watch: ScreenWatch): Promise<void> {
+  /**
+   * Reads the pane now and emits the reply only if its watch is still open and the reply is
+   * newer than the last one emitted, so a late reply cannot move the screen back in time.
+   */
+  private async readScreen(watch: ScreenWatch): Promise<void> {
+    const sequence = ++watch.reads;
     try {
+      // herdr ignores strip_ansi; format 'ansi' is the one that keeps SGR colour.
       const text = readText(
         await this.call(
           'agent.read',
-          {
-            target: watch.paneId,
-            source: 'recent_unwrapped',
-            lines: watch.lines,
-            format: 'text',
-            strip_ansi: true,
-          },
+          { target: watch.paneId, source: 'recent_unwrapped', lines: watch.lines, format: 'ansi' },
           READ_TIMEOUT_MS,
         ),
       );
-      if (text !== undefined && this.watches.get(watch.paneId) === watch)
-        this.pushScreen(watch, text);
+      if (
+        text !== undefined &&
+        this.watches.get(watch.paneId) === watch &&
+        sequence > watch.shown
+      ) {
+        watch.shown = sequence;
+        this.emitScreen(watch.paneId, text);
+      }
     } catch {
       if (this.watches.get(watch.paneId) === watch) this.closeWatch(watch.paneId);
     }
   }
 
-  /** Leading-plus-trailing throttle: the first change emits at once, later changes coalesce into one emit per window. */
-  private pushScreen(watch: ScreenWatch, text: string): void {
-    watch.latestText = text;
+  /**
+   * Leading-plus-trailing throttle over reads: the first output reads at once, and output that
+   * arrives inside the window coalesces into one read when the window ends.
+   */
+  private signalScreen(watch: ScreenWatch): void {
     if (watch.cancelThrottle !== undefined) {
       watch.dirty = true;
       return;
     }
-    this.emitScreen(watch.paneId, text);
+    void this.readScreen(watch);
     this.armThrottle(watch);
   }
 
@@ -730,7 +744,7 @@ class HerdrLinkImpl implements HerdrLink {
       watch.cancelThrottle = undefined;
       if (!watch.dirty) return;
       watch.dirty = false;
-      this.emitScreen(watch.paneId, watch.latestText);
+      void this.readScreen(watch);
       this.armThrottle(watch);
     }, SCREEN_THROTTLE_MS);
   }
@@ -1047,7 +1061,7 @@ function nonEmptyString(value: unknown): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
-/** Reads `read.text` from either an `agent.read` reply or a `pane.output_matched` event. */
+/** Reads `read.text` from an `agent.read` reply. */
 function readText(value: unknown): string | undefined {
   const text = (value as PaneReadPayload | undefined)?.read?.text;
   return typeof text === 'string' ? text : undefined;

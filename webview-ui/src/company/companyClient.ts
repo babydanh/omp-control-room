@@ -55,6 +55,9 @@ const SENT: SendOutcome = { ok: true };
 const LOST_VERDICT_MESSAGE =
   'Mất kết nối trước khi có kết quả; chưa rõ lệnh đã được xử lý hay chưa.';
 
+/** Who keeps a session's terminal lease: the drawer's console or a hover preview. */
+export type TerminalHolder = 'drawer' | 'preview';
+
 export class CompanyClient {
   private readonly transport: MessageTransport;
   private state: CompanyViewState = emptyCompanyState();
@@ -68,6 +71,8 @@ export class CompanyClient {
   private readonly artifactOffsets = new Map<string, number>();
   /** Verdict waiters, keyed by the requestId of the command they wait for. */
   private readonly commandWaiters = new Map<string, (result: CommandResultView) => void>();
+  /** Holders per session; the lease is released when the last one lets go. */
+  private readonly terminalHolds = new Map<string, Set<TerminalHolder>>();
 
   constructor(transport: MessageTransport) {
     this.transport = transport;
@@ -123,8 +128,11 @@ export class CompanyClient {
     this.state = next;
     this.emit();
     for (const effect of result.effects) this.runEffect(effect);
-    if (shouldReattach && this.state.selection.sessionId !== null) {
-      this.attachTerminal(this.state.selection.sessionId);
+    if (shouldReattach) {
+      // Held sessions and the selected one all need a fresh lease after a resync.
+      const sessionIds = new Set(this.terminalHolds.keys());
+      if (this.state.selection.sessionId !== null) sessionIds.add(this.state.selection.sessionId);
+      for (const sessionId of sessionIds) this.attachTerminal(sessionId);
     }
     this.continueArtifacts();
     if (message.type === 'companyCommandResult') this.settleCommandWaiter(message.requestId);
@@ -486,6 +494,26 @@ export class CompanyClient {
     return terminal.leaseId;
   }
 
+  /**
+   * Keep a session's terminal attached while anyone holds it. The first holder
+   * attaches; the last one to release detaches. Holders share one lease.
+   */
+  holdTerminal(sessionId: string, holder: TerminalHolder): () => void {
+    const holders = this.terminalHolds.get(sessionId) ?? new Set<TerminalHolder>();
+    const wasFree = holders.size === 0;
+    holders.add(holder);
+    this.terminalHolds.set(sessionId, holders);
+    if (wasFree) this.attachTerminal(sessionId);
+    return () => this.releaseTerminal(sessionId, holder);
+  }
+
+  private releaseTerminal(sessionId: string, holder: TerminalHolder): void {
+    const holders = this.terminalHolds.get(sessionId);
+    if (!holders || !holders.delete(holder) || holders.size > 0) return;
+    this.terminalHolds.delete(sessionId);
+    this.detachTerminal(sessionId);
+  }
+
   // ── Terminal ─────────────────────────────────────────────────────────────
 
   attachTerminal(sessionId: string): SendOutcome {
@@ -518,8 +546,21 @@ export class CompanyClient {
   resizeTerminal(sessionId: string, runEpoch: number, cols: number, rows: number): SendOutcome {
     const leaseId = this.terminalLease(sessionId, runEpoch);
     if (!leaseId) return { ok: false, errorCode: 'terminal_not_attached' };
-    return this.send(commands.terminalResize(sessionId, runEpoch, cols, rows, leaseId));
+    const outcome = this.send(commands.terminalResize(sessionId, runEpoch, cols, rows, leaseId));
+    if (outcome.ok) this.setTerminalSize(sessionId, cols, rows);
+    return outcome;
   }
+
+  private setTerminalSize(sessionId: string, cols: number, rows: number): void {
+    const terminal = this.state.terminals[sessionId];
+    if (!terminal) return;
+    this.state = {
+      ...this.state,
+      terminals: { ...this.state.terminals, [sessionId]: { ...terminal, cols, rows } },
+    };
+    this.emit();
+  }
+
   // ── Local view state ─────────────────────────────────────────────────────
 
   select(selection: Partial<CompanySelection>): void {

@@ -9,7 +9,9 @@ import {
   TERMINAL_SCROLLBACK_LINES,
   TERMINAL_THEME,
 } from '../../constants.js';
+import { findCommandLine } from '../commandLine.js';
 import type { TerminalFrame } from '../companyState.js';
+import { frameWrites } from '../terminalFrames.js';
 
 /**
  * TerminalConsole: the faithful view of one managed PTY.
@@ -32,6 +34,15 @@ import type { TerminalFrame } from '../companyState.js';
  *    to, when the socket is down) and never queues them for a later reconnect.
  */
 
+/** A command the Lệnh tab asked this terminal to find. */
+export interface TerminalJump {
+  /** Bumped per request, so a second click on the same row still jumps. */
+  seq: number;
+  command: string;
+  /** The command's own output from the log, shown when it is gone from the buffer. */
+  output: string | null;
+}
+
 export interface TerminalConsoleProps {
   sessionId: string;
   runEpoch: number;
@@ -45,16 +56,10 @@ export interface TerminalConsoleProps {
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
   onOverflow: () => void;
-}
-
-/** Decode base64 transport payloads into the bytes xterm expects. */
-function decodeBase64(value: string): Uint8Array {
-  const binary = atob(value);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
+  /** A command the Lệnh tab asked to find; answered once per seq. */
+  jump: TerminalJump | null;
+  /** Called with the seq of a jump whose command is not in the buffer. */
+  onJumpMissed: (seq: number) => void;
 }
 
 export function TerminalConsole({
@@ -67,16 +72,24 @@ export function TerminalConsole({
   onInput,
   onResize,
   onOverflow,
+  jump,
+  onJumpMissed,
 }: TerminalConsoleProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const lastSeqRef = useRef(0);
   /** Writes after unmount would leak; this guards the async paths. */
   const aliveRef = useRef(true);
+  /** True once a snapshot has been painted into the current xterm. */
+  const writtenSnapshotRef = useRef(false);
+  /** The jump request this xterm has already answered. */
+  const handledJumpRef = useRef<number | null>(null);
 
   useEffect(() => {
     aliveRef.current = true;
     lastSeqRef.current = 0;
+    writtenSnapshotRef.current = false;
+    handledJumpRef.current = null;
     const container = containerRef.current;
     if (!container) return undefined;
 
@@ -124,13 +137,40 @@ export function TerminalConsole({
   useEffect(() => {
     const terminal = terminalRef.current;
     if (!terminal || !aliveRef.current) return;
-    for (const frame of frames) {
-      if (frame.seq <= lastSeqRef.current) continue;
-      lastSeqRef.current = frame.seq;
-      if (frame.kind === 'snapshot') terminal.reset();
-      terminal.write(decodeBase64(frame.data));
+    const batch = frameWrites(frames, lastSeqRef.current);
+    lastSeqRef.current = batch.lastSeq;
+    if (batch.sawSnapshot) writtenSnapshotRef.current = true;
+    for (const write of batch.writes) {
+      if (write.reset) terminal.reset();
+      terminal.write(write.bytes);
     }
   }, [frames]);
+
+  // A command the Lệnh tab jumped to: once the snapshot is painted, find its line
+  // in the buffer, select it and scroll there. A miss is reported, never guessed.
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal || !aliveRef.current || jump === null) return;
+    if (!writtenSnapshotRef.current || handledJumpRef.current === jump.seq) return;
+    handledJumpRef.current = jump.seq;
+    const { seq, command } = jump;
+    // xterm parses queued writes in order, so this callback runs after them.
+    terminal.write('', () => {
+      if (!aliveRef.current) return;
+      const buffer = terminal.buffer.active;
+      const lines: string[] = [];
+      for (let row = 0; row < buffer.length; row += 1) {
+        lines.push(buffer.getLine(row)?.translateToString(true) ?? '');
+      }
+      const row = findCommandLine(lines, command);
+      if (row === null) {
+        onJumpMissed(seq);
+        return;
+      }
+      terminal.select(0, row, Math.max(1, (lines[row] ?? '').length));
+      terminal.scrollToLine(row);
+    });
+  }, [frames, jump, onJumpMissed]);
 
   useEffect(() => {
     if (overflow && aliveRef.current) onOverflow();

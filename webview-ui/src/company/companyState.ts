@@ -130,6 +130,9 @@ export interface TerminalView {
   runEpoch: number;
   attached: boolean;
   leaseId: string | null;
+  /** Shared PTY size the lease last reported or was resized to; null before attach. */
+  cols: number | null;
+  rows: number | null;
   lastSeq: number;
   frames: TerminalFrame[];
   /** Set when a consumer fell behind; the client asks for a fresh screen. */
@@ -649,6 +652,8 @@ function newTerminalView(sessionId: string, runEpoch: number): TerminalView {
     runEpoch,
     attached: false,
     leaseId: null,
+    cols: null,
+    rows: null,
     lastSeq: 0,
     frames: [],
     overflow: false,
@@ -1009,6 +1014,8 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
             runEpoch: message.runEpoch,
             attached: true,
             leaseId: message.leaseId,
+            cols: message.cols,
+            rows: message.rows,
             frames: [],
             overflow: false,
             closedReason: null,

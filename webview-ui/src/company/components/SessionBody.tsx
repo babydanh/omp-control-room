@@ -13,7 +13,7 @@
  * selected tab is mounted, so ten parked sessions do not mean ten terminals.
  */
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { Attempt } from '../../../../core/src/company.js';
 import type { CompanyClient } from '../companyClient.js';
@@ -21,12 +21,14 @@ import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { defaultDrawerTab } from '../drawerView.js';
 import { questionProvenance } from '../questionProvenance.js';
 import { companyRoleLabel } from '../roleProfiles.js';
+import { terminalPolicy } from '../sessionActions.js';
 import { DRAWER_TAB_LABELS, sessionStatusLabel } from '../statusLabels.js';
 import { contextOccupancy } from '../usageView.js';
 import { SessionInfoTab } from './AgentInfoTab.js';
 import { QuestionPanel } from './QuestionPanel.js';
 import { CommandsTab, SessionLogTab } from './SessionLog.js';
 import { TaskReport } from './TaskReport.js';
+import type { TerminalJump } from './TerminalConsole.js';
 import { TerminalTab } from './TerminalTab.js';
 import { UsageTab } from './UsageTab.js';
 
@@ -88,12 +90,26 @@ export function SessionBody({
     client.requestSessionLog(sessionId);
   }, [client, sessionId]);
 
+  // The command a Lệnh tab row asked the terminal to find. It is keyed to the session,
+  // so a jump made for one session never lands in another.
+  const [jumpState, setJumpState] = useState<{ sessionId: string; jump: TerminalJump } | null>(
+    null,
+  );
+  const jumpCounter = useRef(0);
+
   const session = state.sessions[sessionId];
   if (session === undefined) {
     return <p className="p-2 text-2xs text-text-muted">Phiên đó không còn thuộc công ty nữa.</p>;
   }
 
   const tab = choice.tab ?? defaultDrawerTab(session.status);
+  const live = terminalPolicy(session.status).attach;
+  const jump = jumpState?.sessionId === sessionId ? jumpState.jump : null;
+  const onJump = (command: string, output: string | null) => {
+    jumpCounter.current += 1;
+    setJumpState({ sessionId, jump: { seq: jumpCounter.current, command, output } });
+    setStored({ ...choice, tab: 'terminal' });
+  };
 
   const attempts: Attempt[] = Object.values(state.attempts).filter((attempt) =>
     taskId === null ? attempt.sessionId === sessionId : attempt.taskId === taskId,
@@ -155,8 +171,18 @@ export function SessionBody({
             onOpenArtifact={onOpenArtifact}
           />
         )}
-        {tab === 'commands' && <CommandsTab state={state} sessionId={sessionId} taskId={taskId} />}
-        {tab === 'terminal' && <TerminalTab client={client} state={state} sessionId={sessionId} />}
+        {tab === 'commands' && (
+          <CommandsTab
+            state={state}
+            sessionId={sessionId}
+            taskId={taskId}
+            live={live}
+            onJump={onJump}
+          />
+        )}
+        {tab === 'terminal' && (
+          <TerminalTab client={client} state={state} sessionId={sessionId} jump={jump} />
+        )}
         {tab === 'questions' && (
           <SessionQuestions
             client={client}

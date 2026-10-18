@@ -49,6 +49,21 @@ async function stopChild(child: ReturnType<typeof spawn>): Promise<void> {
   if (child.exitCode === null) child.kill('SIGKILL');
 }
 
+/**
+ * Best-effort removal of a test's temp dir. On a loaded Windows machine a file
+ * the killed CLI just wrote can stay locked by an outside scanner for 5-15 s
+ * after the CLI has exited (observed: no process left referencing the dir, rm
+ * succeeding 10 s later). That outlasts the test's own timeout, and a leaked
+ * dir under the OS temp folder is not what these tests assert, so it is left.
+ */
+function removeTempDir(dir: string): void {
+  try {
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  } catch {
+    // Left for the OS temp cleanup; see above.
+  }
+}
+
 /** Run the real bundled CLI as a subprocess, returns exit code + output. */
 function runCli(args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
@@ -190,7 +205,14 @@ describe('dist/cli.js entry-point guard', () => {
       [CLI_BUNDLE, '--port', port.toString(), '--host', host, '--workspace', workspaceDir],
       {
         cwd: workspaceDir,
-        env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
+        // A missing OMP entry makes the startup model-role read fall back at
+        // once instead of spawning the machine's real OMP (seconds, load-dependent).
+        env: {
+          ...process.env,
+          HOME: tmpHome,
+          USERPROFILE: tmpHome,
+          OMP_CLI_ENTRY: path.join(tmpHome, 'no-omp'),
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
@@ -211,8 +233,8 @@ describe('dist/cli.js entry-point guard', () => {
       await body({ output: () => output, port });
     } finally {
       await stopChild(child);
-      fs.rmSync(tmpHome, { recursive: true, force: true });
-      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      removeTempDir(tmpHome);
+      removeTempDir(workspaceDir);
     }
   }
 
@@ -405,7 +427,12 @@ describe('dist/cli.js entry-point guard', () => {
       [CLI_BUNDLE, '--port', port.toString(), '--host', '127.0.0.1'],
       {
         cwd: workspaceDir,
-        env: { ...process.env, HOME: tmpHome, USERPROFILE: tmpHome },
+        env: {
+          ...process.env,
+          HOME: tmpHome,
+          USERPROFILE: tmpHome,
+          OMP_CLI_ENTRY: path.join(tmpHome, 'no-omp'),
+        },
         stdio: ['ignore', 'pipe', 'pipe'],
       },
     );
@@ -445,8 +472,8 @@ describe('dist/cli.js entry-point guard', () => {
       expect(commands.map((entry) => entry.command)).toContain(`node "${installedHook}"`);
     } finally {
       await stopChild(child);
-      fs.rmSync(tmpHome, { recursive: true, force: true });
-      fs.rmSync(workspaceDir, { recursive: true, force: true });
+      removeTempDir(tmpHome);
+      removeTempDir(workspaceDir);
     }
   });
 });

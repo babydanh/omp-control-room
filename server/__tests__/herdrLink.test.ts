@@ -77,6 +77,10 @@ class FakeHerdr {
     return this.subscribers.size;
   }
 
+  get openCount(): number {
+    return this.open.size;
+  }
+
   listen(): Promise<void> {
     const { promise, resolve } = deferred<void>();
     this.server.listen(this.endpoint, () => resolve());
@@ -165,11 +169,18 @@ class FakeHerdr {
       );
       return;
     }
-    try {
-      socket.end(encode({ id: request.id, result: handler(request.params) }));
-    } catch (error) {
+    const fail = (error: unknown): void => {
       const code = error instanceof ReplyError ? error.code : 'invalid_request';
       socket.end(encode({ id: request.id, error: { code, message: code } }));
+    };
+    try {
+      // A handler may return a promise; its reply is sent once the promise settles.
+      void Promise.resolve(handler(request.params)).then(
+        (result: unknown) => socket.end(encode({ id: request.id, result })),
+        fail,
+      );
+    } catch (error) {
+      fail(error);
     }
   }
 
@@ -286,7 +297,7 @@ function agentInfo(overrides: Record<string, unknown> = {}): Record<string, unkn
   };
 }
 
-function paneRead(text: string): Record<string, unknown> {
+function paneRead(text: string, format = 'text'): Record<string, unknown> {
   return {
     type: 'pane_read',
     read: {
@@ -294,7 +305,7 @@ function paneRead(text: string): Record<string, unknown> {
       workspace_id: 'wA',
       tab_id: 'wA:t1',
       source: 'recent_unwrapped',
-      format: 'text',
+      format,
       text,
       revision: 1,
       truncated: false,
@@ -608,8 +619,7 @@ describe('HerdrLink against a herdr socket', () => {
       target: 'wA:p3',
       source: 'recent_unwrapped',
       lines: 50,
-      format: 'text',
-      strip_ansi: true,
+      format: 'ansi',
     });
     expect(screen).toEqual({
       type: 'herdrScreen',
@@ -617,6 +627,21 @@ describe('HerdrLink against a herdr socket', () => {
       text: 'dòng một\ndòng hai',
       at: expect.any(String),
     });
+  });
+
+  it('keeps SGR colour escapes in the text it reads', async () => {
+    const coloured = '\u001b[31mđỏ\u001b[0m\r\nxanh';
+    fake.reply('agent.read', () => paneRead(coloured, 'ansi'));
+
+    const screen = await link.read('wA:p3', 50);
+
+    expect(fake.requestsTo('agent.read')[0]?.params).toEqual({
+      target: 'wA:p3',
+      source: 'recent_unwrapped',
+      lines: 50,
+      format: 'ansi',
+    });
+    expect(screen.text).toBe(coloured);
   });
 
   it('rejects an out-of-range line count or malformed pane id without contacting herdr', async () => {
@@ -690,7 +715,7 @@ describe('HerdrLink against a herdr socket', () => {
     expect((await herdrFailure(link.focus('wA:p9'))).code).toBe('agent_not_found');
   });
 
-  it('coalesces a burst of pane output into one trailing update per throttle window', async () => {
+  it('coalesces a burst of output into one trailing read per throttle window', async () => {
     const updates: string[] = [];
     link.onScreen((message) => updates.push(message.text));
     fake.reply('agent.read', () => paneRead('T0'));
@@ -700,18 +725,76 @@ describe('HerdrLink against a herdr socket', () => {
     // The first update is the resync the watch makes once its stream starts.
     expect((await firstUpdate).text).toBe('T0');
 
-    // Inside the open throttle window these only mark the screen dirty.
-    fake.reply('agent.read', () => paneRead('T3'));
-    for (const text of ['T1', 'T2', 'T3']) fake.push('pane.output_matched', paneOutput(text));
-    // A second stream start makes the link re-read the pane. Its read reaches herdr
-    // only after the burst above was handled, so the burst is settled by then.
-    const reread = fake.until(() => fake.requestsTo('agent.read').length === 3);
-    fake.startSubscription('pane.output_matched');
-    await reread;
+    // The first output event reads at once and opens the throttle window.
+    fake.reply('agent.read', () => paneRead('T1'));
+    const leading = nextScreen(link, (message) => message.text === 'T1');
+    fake.push('pane.output_matched', paneOutput('output 1'));
+    await leading;
 
+    // Inside the open window these only mark the screen dirty and trigger no read.
+    fake.reply('agent.read', () => paneRead('T2'));
+    fake.push('pane.output_matched', paneOutput('output 2'));
+    fake.push('pane.output_matched', paneOutput('output 3'));
+    // A second stream start re-reads the pane at once, unthrottled. Its read reaches herdr
+    // only after the burst above was handled, so its emission shows the burst is settled.
+    const restarted = nextScreen(link, (message) => message.text === 'T2');
+    fake.startSubscription('pane.output_matched');
+    await restarted;
+    expect(fake.requestsTo('agent.read')).toHaveLength(4);
+
+    // The window ends with the screen changed since its last read: one trailing read.
+    fake.reply('agent.read', () => paneRead('T3'));
+    const trailing = nextScreen(link, (message) => message.text === 'T3');
     scheduler.fire(500);
 
-    expect(updates).toEqual(['T0', 'T3']);
+    expect((await trailing).text).toBe('T3');
+    expect(fake.requestsTo('agent.read')).toHaveLength(5);
+    expect(updates).toEqual(['T0', 'T1', 'T2', 'T3']);
+  });
+
+  it('emits only what agent.read returns, never the text of an output event', async () => {
+    const updates: string[] = [];
+    link.onScreen((message) => updates.push(message.text));
+    fake.reply('agent.read', () => paneRead('T0'));
+    const firstUpdate = nextScreen(link);
+    await link.read('wA:p3', 20);
+    await firstUpdate;
+
+    fake.reply('agent.read', () => paneRead('screen'));
+    const read = nextScreen(link, (message) => message.text === 'screen');
+    fake.push('pane.output_matched', paneOutput('plain event text'));
+    await read;
+
+    expect(fake.requestsTo('agent.read')).toHaveLength(3);
+    expect(updates).toEqual(['T0', 'screen']);
+  });
+
+  it('drops a read reply that arrives after a newer read was emitted', async () => {
+    const updates: string[] = [];
+    link.onScreen((message) => updates.push(message.text));
+    fake.reply('agent.read', () => paneRead('T0'));
+    const firstUpdate = nextScreen(link);
+    await link.read('wA:p3', 20);
+    await firstUpdate;
+
+    // The next read is the older one: its reply is held until the newer read has been emitted.
+    const held = deferred<Record<string, unknown>>();
+    fake.reply('agent.read', () => held.promise);
+    fake.push('pane.output_matched', paneOutput('output'));
+    await fake.until(() => fake.requestsTo('agent.read').length === 3);
+
+    fake.reply('agent.read', () => paneRead('T2'));
+    const newer = nextScreen(link, (message) => message.text === 'T2');
+    fake.startSubscription('pane.output_matched');
+    await newer;
+
+    // Only the event stream and the held read stay open. Once the older reply's socket closes,
+    // the link has read that reply and dropped it.
+    await fake.until(() => fake.openCount === 2);
+    held.resolve(paneRead('T1'));
+    await fake.until(() => fake.openCount === 1);
+
+    expect(updates).toEqual(['T0', 'T2']);
   });
 
   it('closes a screen watch 30 seconds after its last read', async () => {

@@ -44,6 +44,7 @@ import { BoardTopBar } from './BoardTopBar.js';
 import { CompanyBoard } from './CompanyBoard.js';
 import { DetailDrawer } from './DetailDrawer.js';
 import { PromptComposer } from './PromptComposer.js';
+import { TerminalPreviewProvider } from './TerminalPreview.js';
 
 /**
  * The webview's localStorage, or null when the host refuses access to it. A
@@ -207,76 +208,78 @@ export function BoardShell({ client }: BoardShellProps) {
         onOpenContract={() => openContract(null)}
         onOpenQuestion={(questionId) => setOpened({ kind: 'question', questionId })}
       />
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        {!prefs.collapsed && overlay && (
-          <button
-            type="button"
-            aria-label="Thu gọn đàn agent"
-            onClick={toggleSidebar}
-            className="absolute inset-0 z-20 cursor-default bg-black/40"
-          />
-        )}
-        {prefs.collapsed ? (
-          <AgentRail
-            state={state}
-            selectedSessionId={selectedSessionId}
-            selectedPaneId={selectedPaneId}
-            collapsedProjects={collapsedProjects}
-            onExpand={toggleSidebar}
+      <TerminalPreviewProvider client={client} state={state} drawerSubject={subject}>
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+          {!prefs.collapsed && overlay && (
+            <button
+              type="button"
+              aria-label="Thu gọn đàn agent"
+              onClick={toggleSidebar}
+              className="absolute inset-0 z-20 cursor-default bg-black/40"
+            />
+          )}
+          {prefs.collapsed ? (
+            <AgentRail
+              state={state}
+              selectedSessionId={selectedSessionId}
+              selectedPaneId={selectedPaneId}
+              collapsedProjects={collapsedProjects}
+              onExpand={toggleSidebar}
+              onSelectSession={selectSession}
+              onSelectWorkspaceSession={selectWorkspaceSession}
+              onOpenHerdr={openHerdr}
+              onToggleProject={toggleProject}
+              onMenu={openMenu}
+            />
+          ) : (
+            <AgentSidebar
+              client={client}
+              state={state}
+              selectedSessionId={selectedSessionId}
+              selectedPaneId={selectedPaneId}
+              width={prefs.width}
+              overlay={overlay}
+              collapsedProjects={collapsedProjects}
+              onWidthChange={(width) =>
+                setPrefs((current) => ({ ...current, width: clampSidebarWidth(width) }))
+              }
+              onCollapse={toggleSidebar}
+              onSelectSession={selectSession}
+              onSelectWorkspaceSession={selectWorkspaceSession}
+              onOpenHerdr={openHerdr}
+              onToggleProject={toggleProject}
+              onMenu={openMenu}
+            />
+          )}
+          <CompanyBoard
+            lanes={lanes}
+            flow={boardFlow(lanes, state.settings?.maxWorkers ?? null)}
+            planning={planningPrompts(state)}
             onSelectSession={selectSession}
-            onSelectWorkspaceSession={selectWorkspaceSession}
-            onOpenHerdr={openHerdr}
-            onToggleProject={toggleProject}
+            onSelectTask={selectTask}
             onMenu={openMenu}
           />
-        ) : (
-          <AgentSidebar
+          <DetailDrawer
             client={client}
             state={state}
-            selectedSessionId={selectedSessionId}
-            selectedPaneId={selectedPaneId}
-            width={prefs.width}
-            overlay={overlay}
-            collapsedProjects={collapsedProjects}
-            onWidthChange={(width) =>
-              setPrefs((current) => ({ ...current, width: clampSidebarWidth(width) }))
-            }
-            onCollapse={toggleSidebar}
-            onSelectSession={selectSession}
-            onSelectWorkspaceSession={selectWorkspaceSession}
-            onOpenHerdr={openHerdr}
-            onToggleProject={toggleProject}
+            subject={subject}
+            lanes={lanes}
+            artifactId={artifactId}
+            onOpen={setOpened}
+            onOpenArtifact={(id) => {
+              setArtifactId(id);
+              setOpened({ kind: 'files' });
+            }}
+            onClearArtifact={() => setArtifactId(null)}
+            onClose={closeDrawer}
+            herdrTab={herdrTab}
+            onHerdrTab={setHerdrTab}
+            prefs={drawerPrefs}
+            onPrefsChange={setDrawerPrefs}
             onMenu={openMenu}
           />
-        )}
-        <CompanyBoard
-          lanes={lanes}
-          flow={boardFlow(lanes, state.settings?.maxWorkers ?? null)}
-          planning={planningPrompts(state)}
-          onSelectSession={selectSession}
-          onSelectTask={selectTask}
-          onMenu={openMenu}
-        />
-        <DetailDrawer
-          client={client}
-          state={state}
-          subject={subject}
-          lanes={lanes}
-          artifactId={artifactId}
-          onOpen={setOpened}
-          onOpenArtifact={(id) => {
-            setArtifactId(id);
-            setOpened({ kind: 'files' });
-          }}
-          onClearArtifact={() => setArtifactId(null)}
-          onClose={closeDrawer}
-          herdrTab={herdrTab}
-          onHerdrTab={setHerdrTab}
-          prefs={drawerPrefs}
-          onPrefsChange={setDrawerPrefs}
-          onMenu={openMenu}
-        />
-      </div>
+        </div>
+      </TerminalPreviewProvider>
       <PromptComposer client={client} />
       {menu !== null && (
         <AgentContextMenu

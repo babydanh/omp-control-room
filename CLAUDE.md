@@ -353,6 +353,10 @@ The webview is one full-screen board (`webview-ui/src/company/components/BoardSh
 
 **Folders.** `CompanyWorkspaceRegistry` (`workspaceRegistry.ts`) keeps one Company per folder open in the server with one active folder; only the active folder's messages reach the board, background folders keep running. The top bar switches folders and shows each folder's working/waiting counts; recent folders persist in the pixel-agents config.
 
+**Terminal previews.** Hovering (or focusing) a sidebar row, rail badge or task card with a session opens one floating preview of its terminal tail after ~350 ms (`terminalPreview.ts` decides open/close: Escape, leave, scroll and a click on the row close it, and the drawer's own subject never gets one); clicking opens the drawer on that terminal. herdr screens are read with ANSI kept and rendered by one SGR→spans renderer (`terminalScreen.ts`, `ScreenView.tsx`) in both places; company sessions with a live run mirror their xterm terminal, others show their log tail. Clicking a row in the Lệnh tab jumps to that command in the terminal (`commandLine.ts`).
+
+**Remote access.** The server only binds `127.0.0.1`. `scripts/board-tailscale.ps1 -Port <port> -Token <token>` installs Tailscale if needed and runs `tailscale serve --bg <port>`, which terminates HTTPS inside the user's tailnet and forwards the original Host, so the same-origin WebSocket check passes unchanged; the token in the URL is still what grants company commands. `-Off` stops sharing. Never expose the tokened URL publicly (Funnel/public tunnels) without an auth layer in front.
+
 ## Asset System
 
 **Loading**: `esbuild.js` copies `webview-ui/public/assets/` → `dist/assets/`. Loader checks bundled path first, falls back to workspace root. PNG → pngjs → SpriteData (2D hex array, alpha≥2 = visible, `#RRGGBBAA` for semi-transparent). `loadDefaultLayout()` reads `assets/default-layout.json` as fallback for new workspaces.
