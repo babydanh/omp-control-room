@@ -97,6 +97,9 @@ export const COMPANY_SIDEBAR_DEFAULT_WIDTH_PX = 300;
 /** At or below this viewport width the sidebar floats over the board instead of pushing it. */
 export const COMPANY_SIDEBAR_OVERLAY_MAX_PX = 1023;
 
+/** The collapsed agent rail's width: one 36px badge per agent, with a margin either side. */
+export const COMPANY_RAIL_WIDTH_PX = 56;
+
 /** Herdr screen lines requested per read. */
 export const HERDR_SCREEN_LINES = 200;
 

@@ -85,7 +85,7 @@ export function BoardTopBar({
           type="button"
           onClick={onToggleSidebar}
           aria-pressed={!sidebarCollapsed}
-          title="Ẩn hoặc hiện đàn agent (Ctrl+B)"
+          title="Mở rộng hoặc thu gọn đàn agent (Ctrl+B)"
           className={toggleClass(!sidebarCollapsed)}
         >
           Đàn agent

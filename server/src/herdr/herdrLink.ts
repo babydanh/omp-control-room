@@ -1,3 +1,4 @@
+import * as childProcess from 'node:child_process';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -39,6 +40,9 @@ const PANE_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}:[A-Za-z0-9_-]{1,64}$/;
 const REQUEST_TIMEOUT_MS = 5_000;
 const READ_TIMEOUT_MS = 15_000;
 const PROMPT_TIMEOUT_MS = 10_000;
+const GIT_TIMEOUT_MS = 5_000;
+/** A checkout lookup, even a negative one, is reused this long before git runs again. */
+const GIT_CACHE_TTL_MS = 30_000;
 /** Coalesces bursts of pane events into one `agent.list`. */
 const REFRESH_DELAY_MS = 150;
 const RECONNECT_BASE_MS = 1_000;
@@ -118,10 +122,15 @@ function deferred<T>(): {
   return { promise, resolve, reject };
 }
 
+/** Runs `git -C <cwd> <args>` and resolves with stdout; rejects when git fails or is missing. */
+export type HerdrGitRunner = (cwd: string, args: readonly string[]) => Promise<string>;
+
 export interface HerdrLinkOptions {
   /** herdr socket path. Defaults to the path resolved from the environment. */
   readonly socketPath?: string;
   readonly scheduler?: HerdrScheduler;
+  /** Runs git for checkout lookups. Defaults to the `git` on PATH; tests inject a stub. */
+  readonly runGit?: HerdrGitRunner;
 }
 
 export interface HerdrLink {
@@ -206,6 +215,17 @@ interface AgentListResult {
   readonly agents?: unknown;
 }
 
+/** The `workspace.list` reply this board reads. */
+interface WorkspaceListResult {
+  readonly workspaces?: unknown;
+}
+
+/** The `workspace.list` entry fields this board reads. */
+interface WorkspaceInfo {
+  readonly workspace_id?: unknown;
+  readonly label?: unknown;
+}
+
 /** The `agent.list` entry fields this board reads. */
 interface AgentInfo {
   readonly pane_id?: unknown;
@@ -213,7 +233,8 @@ interface AgentInfo {
   readonly agent?: unknown;
   readonly agent_status?: unknown;
   readonly name?: unknown;
-  readonly title?: unknown;
+  readonly terminal_title?: unknown;
+  readonly terminal_title_stripped?: unknown;
   readonly cwd?: unknown;
   readonly focused?: unknown;
 }
@@ -241,6 +262,19 @@ interface ScreenWatch {
   cancelThrottle?: () => void;
   dirty: boolean;
   latestText: string;
+}
+
+/** The roster as last read from herdr, before workspace labels and checkout facts are added. */
+interface RosterSnapshot {
+  readonly agents: readonly HerdrAgent[];
+  readonly labels: ReadonlyMap<string, string>;
+}
+
+/** Git facts for the checkout a cwd sits in. `branch` is absent on a detached HEAD. */
+interface GitCheckout {
+  repo?: string;
+  branch?: string;
+  worktreeRoot: string;
 }
 
 const MEMBERSHIP_SUBSCRIPTIONS: readonly HerdrSubscription[] = [
@@ -272,10 +306,16 @@ class HerdrLinkImpl implements HerdrLink {
   private cancelRefresh?: () => void;
   private events?: HerdrEventStream;
   private eventsKey?: string;
+  private readonly runGit: HerdrGitRunner;
+  private roster: RosterSnapshot = { agents: [], labels: new Map<string, string>() };
+  /** Checkout lookups by cwd; `undefined` marks a cwd outside any git checkout. */
+  private readonly checkouts = new Map<string, GitCheckout | undefined>();
+  private readonly pendingCheckouts = new Set<string>();
 
   constructor(options: HerdrLinkOptions) {
     this.endpoint = herdrEndpoint(options.socketPath ?? resolveHerdrSocketPath(process.env));
     this.scheduler = options.scheduler ?? herdrTimerScheduler;
+    this.runGit = options.runGit ?? runGitCommand;
   }
 
   start(): void {
@@ -347,11 +387,11 @@ class HerdrLinkImpl implements HerdrLink {
     try {
       assertCompatible(await this.call('ping', {}));
       if (!this.isCurrent(generation)) return;
-      const agents = parseAgentList(await this.call('agent.list', {}));
+      const roster = await this.readRoster();
       if (!this.isCurrent(generation)) return;
       this.reconnectAttempts = 0;
-      this.setAgents(agents);
-      this.syncEvents(generation, agents);
+      this.setRoster(roster);
+      this.syncEvents(generation, roster.agents);
     } catch (error) {
       this.fail(generation, error);
     }
@@ -359,10 +399,10 @@ class HerdrLinkImpl implements HerdrLink {
 
   private async refresh(generation: number): Promise<void> {
     try {
-      const agents = parseAgentList(await this.call('agent.list', {}));
+      const roster = await this.readRoster();
       if (!this.isCurrent(generation)) return;
-      this.setAgents(agents);
-      this.syncEvents(generation, agents);
+      this.setRoster(roster);
+      this.syncEvents(generation, roster.agents);
     } catch (error) {
       this.fail(generation, error);
     }
@@ -443,8 +483,54 @@ class HerdrLinkImpl implements HerdrLink {
     this.eventsKey = undefined;
   }
 
-  private setAgents(agents: readonly HerdrAgent[]): void {
-    this.publish({ type: 'herdrAgents', available: true, agents: [...agents] });
+  private setRoster(roster: RosterSnapshot): void {
+    this.roster = roster;
+    this.publishRoster();
+    for (const agent of roster.agents) {
+      if (agent.cwd !== undefined) this.lookupCheckout(agent.cwd);
+    }
+  }
+
+  /** Publishes the last roster with the workspace labels and checkout facts known so far. */
+  private publishRoster(): void {
+    const { agents, labels } = this.roster;
+    this.publish({
+      type: 'herdrAgents',
+      available: true,
+      agents: agents.map((agent) => withRosterFields(agent, labels, this.checkouts)),
+    });
+  }
+
+  /** Reads agents and workspace labels together; a failed label read only drops the labels. */
+  private async readRoster(): Promise<RosterSnapshot> {
+    const [agentsReply, labels] = await Promise.all([
+      this.call('agent.list', {}),
+      this.readWorkspaceLabels(),
+    ]);
+    return { agents: parseAgentList(agentsReply), labels };
+  }
+
+  private async readWorkspaceLabels(): Promise<ReadonlyMap<string, string>> {
+    try {
+      return parseWorkspaceLabels(await this.call('workspace.list', {}));
+    } catch {
+      // Labels are decoration: a failed workspace.list must not drop the roster.
+      return new Map<string, string>();
+    }
+  }
+
+  /** Starts a git lookup for `cwd` unless one is cached or running; the roster never waits. */
+  private lookupCheckout(cwd: string): void {
+    if (this.checkouts.has(cwd) || this.pendingCheckouts.has(cwd)) return;
+    this.pendingCheckouts.add(cwd);
+    void readGitCheckout(cwd, this.runGit).then((checkout) => {
+      this.pendingCheckouts.delete(cwd);
+      this.checkouts.set(cwd, checkout);
+      this.scheduler.schedule(() => {
+        this.checkouts.delete(cwd);
+      }, GIT_CACHE_TTL_MS);
+      if (this.running && this.message.available) this.publishRoster();
+    });
   }
 
   private publish(next: HerdrAgentsMessage): void {
@@ -761,10 +847,104 @@ function toHerdrAgent(info: AgentInfo): HerdrAgent | undefined {
     status: HERDR_STATUSES.find((status) => status === info.agent_status) ?? 'unknown',
   };
   if (typeof info.name === 'string' && info.name !== '') agent.name = info.name;
-  if (typeof info.title === 'string' && info.title !== '') agent.title = info.title;
+  // herdr's stripped title reads best; the raw terminal title is the fallback.
+  const title = nonEmptyString(info.terminal_title_stripped) ?? nonEmptyString(info.terminal_title);
+  if (title !== undefined) agent.title = title;
   if (typeof info.cwd === 'string' && info.cwd !== '') agent.cwd = info.cwd;
   if (typeof info.focused === 'boolean') agent.focused = info.focused;
   return agent;
+}
+
+/** Adds the workspace label and checkout facts known so far; a missing fact leaves its field out. */
+function withRosterFields(
+  agent: HerdrAgent,
+  labels: ReadonlyMap<string, string>,
+  checkouts: ReadonlyMap<string, GitCheckout | undefined>,
+): HerdrAgent {
+  const result: HerdrAgent = { ...agent };
+  const label = labels.get(agent.workspaceId);
+  if (label !== undefined) result.workspaceLabel = label;
+  const checkout = agent.cwd === undefined ? undefined : checkouts.get(agent.cwd);
+  if (checkout !== undefined) {
+    if (checkout.repo !== undefined) result.repo = checkout.repo;
+    if (checkout.branch !== undefined) result.branch = checkout.branch;
+    result.worktreeRoot = checkout.worktreeRoot;
+  }
+  return result;
+}
+
+/** Maps workspace id to label; entries without a usable label are skipped. */
+function parseWorkspaceLabels(result: unknown): ReadonlyMap<string, string> {
+  const labels = new Map<string, string>();
+  const list: unknown = (result as WorkspaceListResult | undefined)?.workspaces;
+  if (!Array.isArray(list)) return labels;
+  for (const info of list as WorkspaceInfo[]) {
+    const label = nonEmptyString(info.label);
+    if (typeof info.workspace_id === 'string' && label !== undefined) {
+      labels.set(info.workspace_id, label);
+    }
+  }
+  return labels;
+}
+
+/** One `git rev-parse` per cwd. Resolves to `undefined` outside a checkout or when git fails. */
+async function readGitCheckout(
+  cwd: string,
+  runGit: HerdrGitRunner,
+): Promise<GitCheckout | undefined> {
+  let output: string;
+  try {
+    output = await runGit(cwd, [
+      'rev-parse',
+      '--show-toplevel',
+      '--abbrev-ref',
+      'HEAD',
+      '--git-common-dir',
+    ]);
+  } catch {
+    return undefined;
+  }
+  // Output lines follow the argument order: toplevel, HEAD name, common git dir.
+  const [toplevel, head, commonDir] = output.split(/\r?\n/);
+  if (!toplevel || !head || !commonDir) return undefined;
+  // git prints a relative common dir (`.git`) relative to the directory it ran in: `cwd`.
+  const worktreeRoot = path.resolve(cwd, toplevel);
+  const checkout: GitCheckout = { worktreeRoot };
+  const repo = repoName(path.resolve(cwd, commonDir), worktreeRoot);
+  if (repo !== undefined) checkout.repo = repo;
+  // A detached HEAD prints the literal `HEAD`, so the roster shows no branch for it.
+  if (head !== 'HEAD') checkout.branch = head;
+  return checkout;
+}
+
+/**
+ * Names the repository so every worktree of one repo agrees: a normal common dir is
+ * `<repo>/.git`, a bare repository is `<name>.git`. Other layouts use the checkout folder name.
+ */
+function repoName(commonGitDir: string, worktreeRoot: string): string | undefined {
+  const base = path.basename(commonGitDir);
+  if (base === '.git') return nonEmptyString(path.basename(path.dirname(commonGitDir)));
+  if (base.endsWith('.git')) return base.slice(0, -'.git'.length);
+  return nonEmptyString(path.basename(worktreeRoot));
+}
+
+/** Runs `git` without a shell, so the cwd travels as one argument and is never parsed. */
+function runGitCommand(cwd: string, args: readonly string[]): Promise<string> {
+  const { promise, resolve, reject } = deferred<string>();
+  childProcess.execFile(
+    'git',
+    ['-C', cwd, ...args],
+    { encoding: 'utf8', timeout: GIT_TIMEOUT_MS, windowsHide: true },
+    (error, stdout) => {
+      if (error) reject(error);
+      else resolve(stdout);
+    },
+  );
+  return promise;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 /** Reads `read.text` from either an `agent.read` reply or a `pane.output_matched` event. */

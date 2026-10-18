@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type { HerdrAgent } from '../../core/src/company.js';
 import {
   buildAgentGroups,
+  type HerdrGroup,
   herdrGroup,
+  type HerdrRepoGroup,
   pendingQuestionSessionIds,
 } from '../src/company/agentSidebarView.js';
 import {
@@ -14,8 +16,11 @@ import {
 import { COMPANY_ROLES } from '../src/company/roleProfiles.js';
 import { question, session, stateFrom, task } from './companyFixtures.js';
 
+/** A fixed clock for the relative times: the view never reads the real one. */
+const NOW = Date.parse('2026-05-01T10:30:00.000Z');
+
 function workerGroup(state: CompanyViewState) {
-  return buildAgentGroups(state).find((group) => group.role === 'worker');
+  return buildAgentGroups(state, NOW).find((group) => group.role === 'worker');
 }
 
 function herdrAgent(overrides: Partial<HerdrAgent>): HerdrAgent {
@@ -32,9 +37,20 @@ function herdrView(overrides: Partial<HerdrView>): HerdrView {
   return { ...emptyHerdrView(), loaded: true, available: true, ...overrides };
 }
 
+/** The repo groups of a ready herdr group; any other kind fails the test. */
+function readyRepos(group: HerdrGroup): HerdrRepoGroup[] {
+  if (group.kind !== 'ready') throw new Error(`expected a ready herdr group, got ${group.kind}`);
+  return group.repos;
+}
+
+/** Every herdr pane of a ready group, repo by repo, in display order. */
+function herdrPaneIds(group: HerdrGroup): string[] {
+  return readyRepos(group).flatMap((repo) => repo.rows.map((row) => row.paneId));
+}
+
 describe('buildAgentGroups', () => {
   it('lists every role in the company order, including roles with no agents', () => {
-    const groups = buildAgentGroups(stateFrom());
+    const groups = buildAgentGroups(stateFrom(), NOW);
     expect(groups.map((group) => group.role)).toEqual([...COMPANY_ROLES]);
     expect(groups.every((group) => group.active.length === 0 && group.parked.length === 0)).toBe(
       true,
@@ -75,7 +91,7 @@ describe('buildAgentGroups', () => {
   it('labels each row with its status word and the task it holds', () => {
     const work = task({ code: 'PA-T0001', title: 'Wire the sidebar' });
     const idle = session({ code: 'PA-S0001', status: 'idle', activeTaskId: work.id });
-    const crashed = session({ code: 'PA-S0002', status: 'crashed' });
+    const crashed = session({ code: 'PA-S0002', status: 'crashed', activeTaskId: work.id });
 
     const rows = workerGroup(stateFrom({ tasks: [work], sessions: [idle, crashed] }))?.active ?? [];
     const rowOf = (code: string) => rows.find((row) => row.code === code);
@@ -84,7 +100,16 @@ describe('buildAgentGroups', () => {
       label: 'rảnh',
       taskLine: 'PA-T0001 · Wire the sidebar',
     });
-    expect(rowOf('PA-S0002')).toMatchObject({ tone: 'error', label: 'lỗi', taskLine: null });
+    expect(rowOf('PA-S0002')).toMatchObject({ tone: 'error', label: 'lỗi' });
+  });
+
+  it('folds a crash that holds no task, which every board restart leaves behind', () => {
+    const leftover = session({ code: 'PA-S0003', status: 'crashed' });
+
+    const group = workerGroup(stateFrom({ sessions: [leftover] }));
+
+    expect(group?.active).toEqual([]);
+    expect(group?.parked.map((row) => row.code)).toEqual(['PA-S0003']);
   });
 });
 
@@ -134,9 +159,7 @@ describe('herdrGroup', () => {
       }),
     );
 
-    expect(group.kind).toBe('ready');
-    if (group.kind !== 'ready') return;
-    expect(group.rows.map((row) => row.paneId)).toEqual(['b', 'c', 'd', 'a', 'e', 'f']);
+    expect(herdrPaneIds(group)).toEqual(['b', 'c', 'd', 'a', 'e', 'f']);
   });
 
   it('labels a blocked agent as waiting on the user and falls back to the working directory', () => {
@@ -146,13 +169,120 @@ describe('herdrGroup', () => {
       }),
     );
 
-    expect(group.kind).toBe('ready');
-    if (group.kind !== 'ready') return;
-    expect(group.rows[0]).toMatchObject({
+    expect(readyRepos(group)[0]?.rows[0]).toMatchObject({
       paneId: 'p',
       tone: 'needs',
       label: 'chờ bạn',
-      detail: 'C:/repo',
+      summary: { glyph: '', text: 'C:/repo', age: null },
     });
+  });
+});
+
+describe('herdrGroup repo placement', () => {
+  it('groups agents by repository across workspaces, each group where its most urgent agent sorts', () => {
+    const repos = readyRepos(
+      herdrGroup(
+        herdrView({
+          agents: [
+            herdrAgent({
+              paneId: 'a',
+              name: 'a',
+              status: 'idle',
+              repo: 'pixel-agents',
+              workspaceLabel: 'ws-1',
+            }),
+            herdrAgent({
+              paneId: 'b',
+              name: 'b',
+              status: 'idle',
+              repo: 'omp',
+              workspaceLabel: 'ws-2',
+            }),
+            herdrAgent({
+              paneId: 'c',
+              name: 'c',
+              status: 'blocked',
+              repo: 'pixel-agents',
+              workspaceLabel: 'ws-2',
+            }),
+          ],
+        }),
+      ),
+    );
+
+    expect(repos.map((repo) => [repo.label, repo.source, repo.tag])).toEqual([
+      ['pixel-agents', 'repo', 'PA'],
+      ['omp', 'repo', 'OM'],
+    ]);
+    expect(repos[0]?.rows.map((row) => row.paneId)).toEqual(['c', 'a']);
+  });
+
+  it('keeps a repository and a workspace of the same name in separate groups', () => {
+    const repos = readyRepos(
+      herdrGroup(
+        herdrView({
+          agents: [
+            herdrAgent({ paneId: 'r', repo: 'shared' }),
+            herdrAgent({ paneId: 'w', workspaceLabel: 'shared' }),
+          ],
+        }),
+      ),
+    );
+
+    expect(repos.map((repo) => repo.key)).toEqual(['repo:shared', 'workspace:shared']);
+  });
+
+  it('places an agent with no repository under its workspace, then its folder, then khác', () => {
+    const repos = readyRepos(
+      herdrGroup(
+        herdrView({
+          agents: [
+            herdrAgent({ paneId: 'w', workspaceLabel: 'Scratch', cwd: 'C:/tmp/x' }),
+            herdrAgent({ paneId: 'f', cwd: 'C:\\Users\\me\\notes\\' }),
+            herdrAgent({ paneId: 'o' }),
+          ],
+        }),
+      ),
+    );
+
+    expect(repos.map((repo) => [repo.source, repo.label, repo.tag])).toEqual([
+      ['workspace', 'Scratch', 'SC'],
+      ['folder', 'notes', 'NO'],
+      ['other', 'khác', 'KH'],
+    ]);
+  });
+
+  it('carries the branch and worktree root of an agent that works in a git worktree', () => {
+    const repos = readyRepos(
+      herdrGroup(
+        herdrView({
+          agents: [
+            herdrAgent({
+              paneId: 'p',
+              status: 'working',
+              repo: 'pixel-agents',
+              branch: 'feat/rail',
+              worktreeRoot: 'C:/wt/rail',
+            }),
+          ],
+        }),
+      ),
+    );
+
+    expect(repos[0]?.rows[0]).toMatchObject({
+      branch: 'feat/rail',
+      worktreeRoot: 'C:/wt/rail',
+      repo: { key: 'repo:pixel-agents', label: 'pixel-agents', source: 'repo' },
+    });
+  });
+
+  it('reads a blank branch or worktree root as none', () => {
+    const repos = readyRepos(
+      herdrGroup(
+        herdrView({ agents: [herdrAgent({ paneId: 'p', branch: '   ', worktreeRoot: '' })] }),
+      ),
+    );
+
+    expect(repos[0]?.rows[0]).toMatchObject({ branch: null, worktreeRoot: null });
   });
 });

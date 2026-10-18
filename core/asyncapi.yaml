@@ -3355,8 +3355,20 @@ components:
           type: string
         title:
           type: string
+          description: The pane's terminal title without spinner glyphs; agents put what they are doing there.
         workspaceId:
           type: string
+        workspaceLabel:
+          type: string
+          description: The herdr workspace's label.
+        repo:
+          type: string
+          description: Name of the git repository the agent's cwd belongs to; worktrees of one repository share it.
+        branch:
+          type: string
+        worktreeRoot:
+          type: string
+          description: Top-level directory of the git worktree the agent works in.
         focused:
           type: boolean
 

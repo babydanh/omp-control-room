@@ -5,8 +5,9 @@
  *  1. Where the board points and how the company is doing (BoardTopBar).
  *  2. What is waiting on the user: a Contract to approve, questions to answer
  *     (AttentionBar). These are the only things that unblock the company.
- *  3. Beside the lanes: the agent sidebar (every agent, by role, plus herdr) and
- *     the detail drawer for whatever is open.
+ *  3. Beside the lanes: the agent sidebar (every agent by role, herdr by repo),
+ *     which collapses to a rail that still shows every agent, and the detail
+ *     drawer for whatever is open.
  *  4. The composer, always mounted.
  *
  * Everything shown came from a server message. When a revision gap is open the
@@ -37,6 +38,8 @@ import {
 } from '../sidebarPrefs.js';
 import { useCompanyState } from '../useCompanyState.js';
 import { useMediaQuery } from '../useMediaQuery.js';
+import { useSessionLogBackfill } from '../useSessionLogBackfill.js';
+import { AgentRail } from './AgentRail.js';
 import { AgentSidebar } from './AgentSidebar.js';
 import { AttentionBar } from './AttentionBar.js';
 import { BoardTopBar } from './BoardTopBar.js';
@@ -62,6 +65,7 @@ export interface BoardShellProps {
 
 export function BoardShell({ client }: BoardShellProps) {
   const state = useCompanyState(client);
+  useSessionLogBackfill(client, state);
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<SidebarPrefs>(() => readSidebarPrefs(browserSidebarStorage()));
@@ -115,6 +119,10 @@ export function BoardShell({ client }: BoardShellProps) {
     client.select(selectionForTask(state, taskId));
   }
 
+  function openHerdr(paneId: string): void {
+    setOpened({ kind: 'herdr', paneId });
+  }
+
   function closeDrawer(): void {
     setOpened(null);
     client.select({ sessionId: null, taskId: null, tab: null });
@@ -151,12 +159,21 @@ export function BoardShell({ client }: BoardShellProps) {
         {!prefs.collapsed && overlay && (
           <button
             type="button"
-            aria-label="Ẩn đàn agent"
+            aria-label="Thu gọn đàn agent"
             onClick={toggleSidebar}
             className="absolute inset-0 z-20 cursor-default bg-black/40"
           />
         )}
-        {!prefs.collapsed && (
+        {prefs.collapsed ? (
+          <AgentRail
+            state={state}
+            selectedSessionId={selectedSessionId}
+            selectedPaneId={selectedPaneId}
+            onExpand={toggleSidebar}
+            onSelectSession={selectSession}
+            onOpenHerdr={openHerdr}
+          />
+        ) : (
           <AgentSidebar
             client={client}
             state={state}
@@ -169,7 +186,7 @@ export function BoardShell({ client }: BoardShellProps) {
             }
             onCollapse={toggleSidebar}
             onSelectSession={selectSession}
-            onOpenHerdr={(paneId) => setOpened({ kind: 'herdr', paneId })}
+            onOpenHerdr={openHerdr}
           />
         )}
         <CompanyBoard

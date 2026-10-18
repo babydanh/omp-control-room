@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { HerdrAgentsMessage, HerdrKey, HerdrScreenMessage } from '../../core/src/messages.js';
-import type { HerdrLink, HerdrScheduler } from '../src/herdr/herdrLink.js';
+import type { HerdrGitRunner, HerdrLink, HerdrScheduler } from '../src/herdr/herdrLink.js';
 import {
   createHerdrLink,
   HERDR_MAX_KEYS,
@@ -66,6 +66,7 @@ class FakeHerdr {
   constructor() {
     this.reply('ping', () => ({ type: 'pong', version: '0.9.5', protocol: 22, capabilities: [] }));
     this.reply('agent.list', () => ({ agents: [] }));
+    this.reply('workspace.list', () => ({ type: 'workspace_list', workspaces: [] }));
     this.reply('agent.prompt', () => ({ type: 'ok' }));
     this.reply('agent.send_keys', () => ({ type: 'ok' }));
     this.reply('agent.focus', () => ({ type: 'ok' }));
@@ -182,6 +183,32 @@ class FakeHerdr {
   }
 }
 
+/** Stand-in for `git -C <cwd> rev-parse ...`: answers per cwd and records every call. */
+class FakeGit {
+  readonly calls: { readonly cwd: string; readonly args: readonly string[] }[] = [];
+  private readonly answers = new Map<string, () => Promise<string>>();
+
+  readonly run: HerdrGitRunner = (cwd, args) => {
+    this.calls.push({ cwd, args });
+    const answer = this.answers.get(cwd);
+    return answer === undefined ? Promise.reject(new Error('not a git repository')) : answer();
+  };
+
+  /** Answers `git` run in `cwd` with this stdout. */
+  checkout(cwd: string, stdout: string): void {
+    this.respond(cwd, () => Promise.resolve(stdout));
+  }
+
+  /** Answers `git` run in `cwd` however a test needs: a failure, or a reply held open. */
+  respond(cwd: string, reply: () => Promise<string>): void {
+    this.answers.set(cwd, reply);
+  }
+
+  callsIn(cwd: string): number {
+    return this.calls.filter((call) => call.cwd === cwd).length;
+  }
+}
+
 /** Deferred; `Promise.withResolvers` needs a newer lib than this project targets. */
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve: (value: T) => void = () => undefined;
@@ -250,7 +277,8 @@ function agentInfo(overrides: Record<string, unknown> = {}): Record<string, unkn
     agent: 'omp',
     agent_status: 'working',
     name: 'omp',
-    title: '',
+    terminal_title: 'omp',
+    terminal_title_stripped: 'omp',
     cwd: 'C:/repo',
     focused: true,
     ...overrides,
@@ -275,6 +303,20 @@ function paneRead(text: string): Record<string, unknown> {
 
 function paneOutput(text: string): Record<string, unknown> {
   return { matched_line: text, pane_id: 'wA:p3', read: { text } };
+}
+
+/** A `workspace.list` entry with the fields herdr sends for a workspace. */
+function workspaceInfo(workspaceId: string, label: string): Record<string, unknown> {
+  return {
+    workspace_id: workspaceId,
+    label,
+    number: 1,
+    focused: false,
+    pane_count: 1,
+    tab_count: 1,
+    active_tab_id: `${workspaceId}:t1`,
+    agent_status: 'idle',
+  };
 }
 
 /** Resolves with the next roster the link publishes that satisfies `accept`. */
@@ -371,12 +413,14 @@ describe('HerdrLink against a herdr socket', () => {
   let fake: FakeHerdr;
   let scheduler: ManualScheduler;
   let link: HerdrLink;
+  let git: FakeGit;
 
   beforeEach(async () => {
     fake = new FakeHerdr();
     await fake.listen();
     scheduler = new ManualScheduler();
-    link = createHerdrLink({ socketPath: fake.endpoint, scheduler });
+    git = new FakeGit();
+    link = createHerdrLink({ socketPath: fake.endpoint, scheduler, runGit: git.run });
   });
 
   afterEach(async () => {
@@ -386,7 +430,13 @@ describe('HerdrLink against a herdr socket', () => {
 
   it('publishes the roster after the ping and agent.list handshake', async () => {
     fake.reply('agent.list', () => ({
-      agents: [agentInfo({ title: 'Đang sửa lỗi', agent_status: 'working' })],
+      agents: [
+        agentInfo({
+          terminal_title: 'π Đang sửa lỗi',
+          terminal_title_stripped: 'Đang sửa lỗi',
+          agent_status: 'working',
+        }),
+      ],
     }));
     const roster = nextAgents(link, (message) => message.available);
 
@@ -649,5 +699,227 @@ describe('HerdrLink against a herdr socket', () => {
     link.stop();
 
     await fake.until(() => fake.subscriberCount === 0);
+  });
+
+  it('takes the pane title from terminal_title_stripped and falls back to terminal_title', async () => {
+    fake.reply('agent.list', () => ({
+      agents: [
+        agentInfo({
+          pane_id: 'wA:p2',
+          terminal_title: 'raw',
+          terminal_title_stripped: 'Đang sửa lỗi',
+        }),
+        agentInfo({
+          pane_id: 'wA:p3',
+          terminal_title: 'Chờ xác nhận',
+          terminal_title_stripped: null,
+        }),
+      ],
+    }));
+    const roster = nextAgents(link, (message) => message.agents.length === 2);
+
+    link.start();
+
+    expect((await roster).agents.map((agent) => agent.title)).toEqual([
+      'Đang sửa lỗi',
+      'Chờ xác nhận',
+    ]);
+  });
+
+  it('labels each agent with the label of its workspace', async () => {
+    fake.reply('agent.list', () => ({
+      agents: [
+        agentInfo({ pane_id: 'wA:p2' }),
+        agentInfo({ pane_id: 'wD:p1', workspace_id: 'wD' }),
+      ],
+    }));
+    fake.reply('workspace.list', () => ({
+      type: 'workspace_list',
+      workspaces: [workspaceInfo('wA', 'D:\\'), workspaceInfo('wD', 'webgiaidau')],
+    }));
+    const roster = nextAgents(link, (message) => message.agents.length === 2);
+
+    link.start();
+
+    expect((await roster).agents.map((agent) => agent.workspaceLabel)).toEqual([
+      'D:\\',
+      'webgiaidau',
+    ]);
+  });
+
+  it('keeps the roster when workspace.list fails', async () => {
+    fake.reply('agent.list', () => ({ agents: [agentInfo()] }));
+    fake.reply('workspace.list', () => {
+      throw new ReplyError('invalid_request');
+    });
+    const roster = nextAgents(link, (message) => message.available);
+
+    link.start();
+
+    const message = await roster;
+    expect(message.agents.map((agent) => agent.paneId)).toEqual(['wA:p2']);
+    expect(message.agents[0]?.workspaceLabel).toBeUndefined();
+  });
+
+  it('names the repo and branch of each checkout, shared by a worktree and its main checkout', async () => {
+    const repoRoot = path.resolve('repos', 'pixel-agents');
+    const worktree = path.join(repoRoot, '.worktrees', 'multi-role-company');
+    git.checkout(
+      worktree,
+      `${worktree}\nfeat/multi-role-company\n${path.join(repoRoot, '.git')}\n`,
+    );
+    git.checkout(repoRoot, `${repoRoot}\nmain\n.git\n`);
+    fake.reply('agent.list', () => ({
+      agents: [
+        agentInfo({ pane_id: 'wA:p2', cwd: worktree }),
+        agentInfo({ pane_id: 'wA:p3', cwd: repoRoot }),
+      ],
+    }));
+    const roster = nextAgents(link, (message) =>
+      message.agents.every((agent) => agent.repo !== undefined),
+    );
+
+    link.start();
+
+    const [linked, main] = (await roster).agents;
+    expect(linked).toMatchObject({
+      repo: 'pixel-agents',
+      branch: 'feat/multi-role-company',
+      worktreeRoot: worktree,
+    });
+    expect(main).toMatchObject({ repo: 'pixel-agents', branch: 'main', worktreeRoot: repoRoot });
+    expect(git.calls[0]?.args).toEqual([
+      'rev-parse',
+      '--show-toplevel',
+      '--abbrev-ref',
+      'HEAD',
+      '--git-common-dir',
+    ]);
+  });
+
+  it('shows no branch for a detached HEAD', async () => {
+    const detached = path.resolve('repos', 'detached');
+    git.checkout(detached, `${detached}\nHEAD\n${path.join(detached, '.git')}\n`);
+    fake.reply('agent.list', () => ({ agents: [agentInfo({ cwd: detached })] }));
+    const roster = nextAgents(link, (message) => message.agents[0]?.repo !== undefined);
+
+    link.start();
+
+    const agent = (await roster).agents[0];
+    expect(agent?.repo).toBe('detached');
+    expect(agent).not.toHaveProperty('branch');
+  });
+
+  it('names a bare repository without its .git suffix', async () => {
+    const worktree = path.resolve('repos', 'feat-tool');
+    git.checkout(worktree, `${worktree}\nfeat\n${path.resolve('repos', 'tool.git')}\n`);
+    fake.reply('agent.list', () => ({ agents: [agentInfo({ cwd: worktree })] }));
+    const roster = nextAgents(link, (message) => message.agents[0]?.repo !== undefined);
+
+    link.start();
+
+    expect((await roster).agents[0]).toMatchObject({
+      repo: 'tool',
+      branch: 'feat',
+      worktreeRoot: worktree,
+    });
+  });
+
+  it('publishes the roster before git answers, then republishes with the checkout', async () => {
+    const worktree = path.resolve('repos', 'slow');
+    const answer = deferred<string>();
+    git.respond(worktree, () => answer.promise);
+    fake.reply('agent.list', () => ({ agents: [agentInfo({ cwd: worktree })] }));
+    const beforeGit = nextAgents(link, (message) => message.available);
+
+    link.start();
+
+    expect((await beforeGit).agents[0]?.repo).toBeUndefined();
+    const withGit = nextAgents(link, (message) => message.agents[0]?.repo !== undefined);
+    answer.resolve(`${worktree}\nmain\n${path.join(worktree, '.git')}\n`);
+    expect((await withGit).agents[0]).toMatchObject({
+      repo: 'slow',
+      branch: 'main',
+      worktreeRoot: worktree,
+    });
+  });
+
+  it('keeps the roster when git fails for a checkout', async () => {
+    const worktree = path.resolve('repos', 'broken');
+    git.respond(worktree, () => Promise.reject(new Error('spawn git ENOENT')));
+    fake.reply('workspace.list', () => ({
+      type: 'workspace_list',
+      workspaces: [workspaceInfo('wA', 'D:\\')],
+    }));
+    fake.reply('agent.list', () => ({
+      agents: [agentInfo({ cwd: worktree, terminal_title_stripped: 'Đang sửa lỗi' })],
+    }));
+    const roster = nextAgents(link, (message) => message.available);
+
+    link.start();
+
+    const message = await roster;
+    expect(message.agents).toEqual([
+      expect.objectContaining({
+        paneId: 'wA:p2',
+        title: 'Đang sửa lỗi',
+        workspaceLabel: 'D:\\',
+        cwd: worktree,
+      }),
+    ]);
+    expect(message.agents[0]?.repo).toBeUndefined();
+  });
+
+  it('reuses a checkout lookup for 30 seconds, including one that found no repository', async () => {
+    const repoRoot = path.resolve('repos', 'pixel-agents');
+    const outside = path.resolve('scratch');
+    git.checkout(repoRoot, `${repoRoot}\nmain\n.git\n`);
+    fake.reply('agent.list', () => ({
+      agents: [
+        agentInfo({ pane_id: 'wA:p2', cwd: repoRoot }),
+        agentInfo({ pane_id: 'wA:p3', cwd: outside }),
+      ],
+    }));
+    const roster = nextAgents(link, (message) => message.agents[0]?.repo !== undefined);
+    // subscription_started schedules the first reconcile; it stays pending until fired below.
+    const firstReconcile = scheduler.whenScheduled(150);
+
+    link.start();
+    await roster;
+    await firstReconcile;
+    expect(git.callsIn(repoRoot)).toBe(1);
+    expect(git.callsIn(outside)).toBe(1);
+
+    // Inside the window a reconcile reuses both lookups, the negative one included.
+    fake.reply('agent.list', () => ({
+      agents: [
+        agentInfo({ pane_id: 'wA:p2', cwd: repoRoot, agent_status: 'blocked' }),
+        agentInfo({ pane_id: 'wA:p3', cwd: outside, agent_status: 'blocked' }),
+      ],
+    }));
+    const blocked = nextAgents(link, (message) => message.agents[0]?.status === 'blocked');
+    scheduler.fire(150);
+    const blockedRoster = await blocked;
+    expect(blockedRoster.agents[0]?.repo).toBe('pixel-agents');
+    expect(blockedRoster.agents[1]).not.toHaveProperty('repo');
+    expect(git.callsIn(repoRoot)).toBe(1);
+    expect(git.callsIn(outside)).toBe(1);
+
+    // Once 30 seconds pass, the next reconcile looks both checkouts up again.
+    scheduler.fire(30_000);
+    const secondReconcile = scheduler.whenScheduled(150);
+    fake.push('pane.agent_status_changed', { pane_id: 'wA:p2', agent_status: 'done' });
+    await secondReconcile;
+    fake.reply('agent.list', () => ({
+      agents: [
+        agentInfo({ pane_id: 'wA:p2', cwd: repoRoot, agent_status: 'done' }),
+        agentInfo({ pane_id: 'wA:p3', cwd: outside, agent_status: 'done' }),
+      ],
+    }));
+    const done = nextAgents(link, (message) => message.agents[0]?.status === 'done');
+    scheduler.fire(150);
+    await done;
+    expect(git.callsIn(repoRoot)).toBe(2);
+    expect(git.callsIn(outside)).toBe(2);
   });
 });

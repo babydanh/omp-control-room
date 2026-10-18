@@ -1,6 +1,8 @@
 /**
  * AgentSidebar: every agent the company runs, grouped by role, plus the herdr
- * agents the board can see and drive.
+ * agents grouped by the repository they work in. Each agent takes two lines:
+ * what it is and its state, then what it is doing. Collapsing the sidebar leaves
+ * the AgentRail, which still shows every agent.
  *
  * A row that waits on the user is red and sorts first. A role's parked sessions
  * sit collapsed under "Tạm trữ" so live work stays in view. The role header
@@ -14,23 +16,40 @@ import { useState } from 'react';
 
 import type { CompanyRole, RoleProfile } from '../../../../core/src/company.js';
 import {
+  activityCounts,
   type AgentRoleGroup,
   type AgentRow,
+  agentTooltip,
   buildAgentGroups,
   type HerdrGroup,
   herdrGroup,
+  type HerdrRepoGroup,
   type HerdrRow,
+  herdrRowCount,
+  herdrTooltip,
+  type RepoPlacement,
+  type SummaryLine,
 } from '../agentSidebarView.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS, withRoleModel } from '../roleProfiles.js';
 import { clampSidebarWidth } from '../sidebarPrefs.js';
+import { useNow } from '../useNow.js';
+import { ActivityChips } from './ActivityCounts.js';
 import { ModelPicker } from './ModelPicker.js';
 import { StatusDot } from './StatusDot.js';
 
 /** Pixels one arrow-key press moves the resize edge. */
 const RESIZE_STEP_PX = 16;
+
+/** What a repo group header's tooltip says about how the group was found. */
+const REPO_SOURCE_TITLE: Readonly<Record<RepoPlacement['source'], string>> = {
+  repo: 'Nhóm theo repository git',
+  workspace: 'Nhóm theo workspace của herdr (chưa có repository)',
+  folder: 'Nhóm theo tên thư mục (chưa có repository hay workspace)',
+  other: 'Chưa rõ repository, workspace hay thư mục',
+};
 
 export interface AgentSidebarProps {
   client: CompanyClient;
@@ -62,10 +81,14 @@ export function AgentSidebar({
 }: AgentSidebarProps) {
   const [editingRole, setEditingRole] = useState<CompanyRole | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const now = useNow();
 
-  const groups = buildAgentGroups(state);
+  const groups = buildAgentGroups(state, now);
   const herdr = herdrGroup(state.herdr);
-  const total = groups.reduce((sum, group) => sum + group.active.length + group.parked.length, 0);
+  const counts = activityCounts(groups, herdr);
+  const total =
+    groups.reduce((sum, group) => sum + group.active.length + group.parked.length, 0) +
+    herdrRowCount(herdr);
   const profiles = state.settings?.roleProfiles ?? {};
 
   function changeRole(role: CompanyRole, modelId: string, thinking: string | undefined): void {
@@ -90,13 +113,14 @@ export function AgentSidebar({
         <button
           type="button"
           onClick={onCollapse}
-          aria-label="Ẩn đàn agent"
-          title="Ẩn đàn agent (Ctrl+B)"
+          aria-label="Thu gọn đàn agent"
+          title="Thu gọn thành thanh biểu tượng (Ctrl+B)"
           className="cursor-pointer px-1 text-2xs text-text-muted hover:text-text"
         >
           ⟨
         </button>
       </header>
+      <ActivityChips counts={counts} />
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {groups.map((group) => (
@@ -231,6 +255,19 @@ function RoleSection({
   );
 }
 
+/** A row's second line: what the agent is doing, its glyph, and how long ago. */
+function SummaryText({ summary }: { summary: SummaryLine }) {
+  return (
+    <span className="mt-0.5 flex min-w-0 items-baseline gap-2 font-mono text-2xs text-text-muted">
+      <span className="min-w-0 flex-1 truncate">
+        {summary.glyph !== '' && <span aria-hidden="true">{summary.glyph} </span>}
+        {summary.text}
+      </span>
+      {summary.age !== null && <span className="shrink-0">{summary.age}</span>}
+    </span>
+  );
+}
+
 function AgentRowButton({
   row,
   selected,
@@ -245,10 +282,11 @@ function AgentRowButton({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
+      title={agentTooltip(row)}
       data-testid={`agent-row-${row.code}`}
-      className={`flex w-full cursor-pointer items-center gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
+      className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
     >
-      <span className="flex w-3 shrink-0 justify-center">
+      <span className="flex h-4 w-3 shrink-0 items-center justify-center">
         <StatusDot tone={row.tone} />
       </span>
       <span className="min-w-0 flex-1">
@@ -261,9 +299,7 @@ function AgentRowButton({
             {row.label}
           </span>
         </span>
-        {row.taskLine && (
-          <span className="block truncate text-2xs text-text-muted">{row.taskLine}</span>
-        )}
+        {row.summary !== null && <SummaryText summary={row.summary} />}
       </span>
     </button>
   );
@@ -284,28 +320,60 @@ function HerdrSection({
       <h3 className="flex items-baseline gap-2 px-2.5 pb-1 pt-2">
         <span className="text-sm font-semibold text-text">Herdr</span>
         {group.kind === 'ready' && (
-          <span className="font-mono text-2xs text-status-active">{group.rows.length} agent</span>
+          <span className="font-mono text-2xs text-status-active">
+            {herdrRowCount(group)} agent
+          </span>
         )}
       </h3>
       {group.kind === 'unavailable' ? (
         <p className="px-2 pb-2 text-2xs text-text-muted">{group.message}</p>
+      ) : group.repos.length === 0 ? (
+        <p className="px-2.5 pb-2 text-2xs text-text-muted">Không có agent nào trong herdr.</p>
       ) : (
-        <ul>
-          {group.rows.length === 0 && (
-            <li className="px-2 pb-2 text-2xs text-text-muted">Không có agent nào trong herdr.</li>
-          )}
-          {group.rows.map((row) => (
-            <li key={row.paneId}>
-              <HerdrRowButton
-                row={row}
-                selected={row.paneId === selectedPaneId}
-                onOpen={() => onOpen(row.paneId)}
-              />
-            </li>
-          ))}
-        </ul>
+        group.repos.map((repo) => (
+          <HerdrRepoSection
+            key={repo.key}
+            repo={repo}
+            selectedPaneId={selectedPaneId}
+            onOpen={onOpen}
+          />
+        ))
       )}
     </section>
+  );
+}
+
+/** The herdr agents of one repository, under a header that says where they work. */
+function HerdrRepoSection({
+  repo,
+  selectedPaneId,
+  onOpen,
+}: {
+  repo: HerdrRepoGroup;
+  selectedPaneId: string | null;
+  onOpen: (paneId: string) => void;
+}) {
+  return (
+    <div className="pb-1">
+      <h4
+        title={REPO_SOURCE_TITLE[repo.source]}
+        className="flex items-baseline gap-2 px-2.5 pt-1 text-2xs text-text-muted"
+      >
+        <span className="min-w-0 flex-1 truncate font-semibold text-text">{repo.label}</span>
+        <span className="shrink-0 font-mono">{repo.rows.length}</span>
+      </h4>
+      <ul>
+        {repo.rows.map((row) => (
+          <li key={row.paneId}>
+            <HerdrRowButton
+              row={row}
+              selected={row.paneId === selectedPaneId}
+              onOpen={() => onOpen(row.paneId)}
+            />
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -323,10 +391,11 @@ function HerdrRowButton({
       type="button"
       onClick={onOpen}
       aria-pressed={selected}
+      title={herdrTooltip(row)}
       data-testid={`herdr-row-${row.paneId}`}
-      className={`flex w-full cursor-pointer items-center gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
+      className={`flex w-full cursor-pointer items-start gap-2 rounded-[5px] border px-2 py-1.5 text-left hover:bg-btn-hover ${selected ? 'border-accent bg-btn-bg' : 'border-transparent'}`}
     >
-      <span className="flex w-3 shrink-0 justify-center">
+      <span className="flex h-4 w-3 shrink-0 items-center justify-center">
         <StatusDot tone={row.tone} />
       </span>
       <span className="min-w-0 flex-1">
@@ -334,11 +403,17 @@ function HerdrRowButton({
           <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
             {row.kind} · {row.paneId}
           </span>
+          {row.branch !== null && (
+            <span
+              title={row.worktreeRoot ?? row.branch}
+              className="min-w-0 max-w-[40%] shrink truncate rounded-[3px] border border-border px-1 font-mono text-2xs text-status-active"
+            >
+              {row.branch}
+            </span>
+          )}
           <span className="shrink-0 text-2xs text-text-muted">{row.label}</span>
         </span>
-        {row.detail && (
-          <span className="block truncate text-2xs text-text-muted">{row.detail}</span>
-        )}
+        {row.summary !== null && <SummaryText summary={row.summary} />}
       </span>
     </button>
   );
