@@ -317,10 +317,15 @@
       0 0 0 2px var(--color-warning),
       0 0 12px color-mix(in srgb, var(--color-warning) 40%, transparent);
   }
-  /* The detail drawer: the whole board on a phone. From md up it is a column as
-     wide as the reader dragged it (--company-drawer-width, set inline), and when
-     maximized it fills the board again. */
+  /* The detail drawer: the whole board on a phone. From md up, unless maximized,
+     it is a column beside the lanes, as wide as the reader dragged it
+     (--company-drawer-width, set inline), so the lanes give it their room.
+     Below md, or maximized, it floats over the board. */
   .company-drawer {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
     width: 100%;
     transition-property: translate;
     transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
@@ -328,6 +333,10 @@
   @media (min-width: 768px) {
     .company-drawer {
       width: var(--company-drawer-width, 560px);
+    }
+    .company-drawer[data-maximized='false'] {
+      position: relative;
+      flex-shrink: 0;
     }
   }
   .company-drawer[data-maximized='true'] {
@@ -399,6 +408,23 @@
   .company-lane-head {
     border-radius: 4px 4px 0 0;
     background: color-mix(in srgb, var(--lane-color) 14%, var(--color-lane));
+  }
+
+  /* The lanes row: when the lanes do not fit beside the drawer the row scrolls
+     sideways, and its bar is light enough to see on the ink. */
+  .company-lanes {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-card-hover) var(--color-lane);
+  }
+  .company-lanes::-webkit-scrollbar {
+    height: 8px;
+  }
+  .company-lanes::-webkit-scrollbar-track {
+    background: var(--color-lane);
+  }
+  .company-lanes::-webkit-scrollbar-thumb {
+    background: var(--color-card-hover);
+    border-radius: 4px;
   }
 
   /* Cards sit on the card surface; hover lightens the edge, and the selected

@@ -109,10 +109,20 @@ export const HERDR_SCREEN_POLL_MS = 2000;
 /** Slide time of the detail drawer, matching the approved mockup. */
 export const COMPANY_DRAWER_SLIDE_MS = 320;
 
-/** Detail drawer width bounds, in CSS pixels. The maximum is a share of the viewport, never below the minimum. */
-export const COMPANY_DRAWER_MIN_WIDTH_PX = 320;
+/** Detail drawer width bounds, in CSS pixels. The drawer never leaves the lanes fewer than their visible minimum. */
+export const COMPANY_DRAWER_MIN_WIDTH_PX = 280;
 export const COMPANY_DRAWER_DEFAULT_WIDTH_PX = 560;
-export const COMPANY_DRAWER_MAX_VIEWPORT_SHARE = 0.9;
+/** An unresized drawer takes this share of the board, at most the default width. */
+export const COMPANY_DRAWER_DEFAULT_SHARE = 0.4;
+
+/** The narrowest a lane with work gets; the lanes row scrolls sideways instead of squeezing it. */
+export const COMPANY_LANE_MIN_WIDTH_PX = 220;
+
+/** An empty lane's fixed width, so the lanes with work get the room. */
+export const COMPANY_LANE_EMPTY_WIDTH_PX = 160;
+
+/** How many lanes stay visible beside a docked drawer. */
+export const COMPANY_LANES_VISIBLE_MIN = 2;
 
 /** How far one arrow key moves the drawer's resize handle; with Shift, the large step. */
 export const COMPANY_DRAWER_RESIZE_STEP_PX = 16;

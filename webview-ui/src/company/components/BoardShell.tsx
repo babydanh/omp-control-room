@@ -13,7 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type AgentMenuRequest, type SessionMenuTab } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
-import { COMPANY_SIDEBAR_OVERLAY_MAX_PX } from '../constants.js';
+import { COMPANY_RAIL_WIDTH_PX, COMPANY_SIDEBAR_OVERLAY_MAX_PX } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import type { HerdrDrawerTab } from '../herdrView.js';
 import {
@@ -79,6 +79,13 @@ export function BoardShell({ client }: BoardShellProps) {
   }, []);
   const closeMenu = useCallback(() => setMenu(null), []);
   const overlay = useMediaQuery(`(max-width: ${COMPANY_SIDEBAR_OVERLAY_MAX_PX}px)`);
+  // The width the sidebar (or its rail) takes in the row beside the board; an open sidebar that floats takes none.
+  let sidebarFootprint = prefs.width;
+  if (prefs.collapsed) {
+    sidebarFootprint = COMPANY_RAIL_WIDTH_PX;
+  } else if (overlay) {
+    sidebarFootprint = 0;
+  }
   const collapsedProjects = useMemo(
     () => new Set(prefs.collapsedProjects),
     [prefs.collapsedProjects],
@@ -264,6 +271,9 @@ export function BoardShell({ client }: BoardShellProps) {
             planning={planningPrompts(state)}
             onSelectSession={selectSession}
             onSelectTask={selectTask}
+            onOpenHerdr={openHerdr}
+            selectedPaneId={selectedPaneId}
+            selectedSessionId={selectedSessionId}
             onMenu={openMenu}
           />
           <DetailDrawer
@@ -283,6 +293,7 @@ export function BoardShell({ client }: BoardShellProps) {
             onHerdrTab={setHerdrTab}
             prefs={drawerPrefs}
             onPrefsChange={setDrawerPrefs}
+            sidebarWidth={sidebarFootprint}
             onMenu={openMenu}
           />
         </div>

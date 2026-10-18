@@ -1,0 +1,207 @@
+import { describe, expect, it } from 'vitest';
+
+import type { HerdrAgent } from '../../core/src/company.js';
+import type { CompanyPromptSummary, ServerMessage } from '../../core/src/messages.js';
+import { type AgentBoardCard, buildAgentCards } from '../src/company/agentBoard.js';
+import { buildBoardLanes } from '../src/company/boardView.js';
+import { applyCompanyMessage, type CompanyViewState } from '../src/company/companyState.js';
+import { HERDR_TONE_LABELS } from '../src/company/herdrView.js';
+import { companyRoleLabel } from '../src/company/roleProfiles.js';
+import { sessionStatusLabel } from '../src/company/statusLabels.js';
+import { question, session, stateFrom, task } from './companyFixtures.js';
+
+function herdrAgent(overrides: Partial<HerdrAgent> = {}): HerdrAgent {
+  return {
+    paneId: 'pane-1',
+    kind: 'claude',
+    status: 'working',
+    workspaceId: 'ws-1',
+    name: 'claude-1',
+    ...overrides,
+  };
+}
+
+/** The view state after herdr answers with these agents. */
+function withHerdr(
+  state: CompanyViewState,
+  agents: HerdrAgent[],
+  available = true,
+): CompanyViewState {
+  return applyCompanyMessage(state, {
+    type: 'herdrAgents',
+    available,
+    agents,
+  } satisfies ServerMessage).state;
+}
+
+/** Each card's lane, keyed by the card's key: independent of sort order. */
+function laneByKey(cards: AgentBoardCard[]): Record<string, string> {
+  return Object.fromEntries(cards.map((card): [string, string] => [card.key, card.lane]));
+}
+
+describe('herdr panes as agent cards', () => {
+  it('shows working, blocked and done panes in their lanes and leaves idle and unknown ones out', () => {
+    const state = withHerdr(stateFrom(), [
+      herdrAgent({ paneId: 'p-work', status: 'working' }),
+      herdrAgent({ paneId: 'p-block', status: 'blocked' }),
+      herdrAgent({ paneId: 'p-done', status: 'done' }),
+      herdrAgent({ paneId: 'p-idle', status: 'idle' }),
+      herdrAgent({ paneId: 'p-unknown', status: 'unknown' }),
+    ]);
+
+    expect(laneByKey(buildAgentCards(state, new Set()))).toEqual({
+      'herdr:p-work': 'running',
+      'herdr:p-block': 'needs_input',
+      'herdr:p-done': 'done',
+    });
+  });
+
+  it('prints the herdr tag, the status word and the pane title', () => {
+    const state = withHerdr(stateFrom(), [herdrAgent({ paneId: 'p-1', title: 'LEDGER refactor' })]);
+
+    expect(buildAgentCards(state, new Set())[0]).toMatchObject({
+      key: 'herdr:p-1',
+      subject: { kind: 'herdr', paneId: 'p-1' },
+      tag: 'herdr',
+      title: 'LEDGER refactor',
+      statusLabel: HERDR_TONE_LABELS.working,
+    });
+  });
+
+  it('falls back to the agent kind and pane when herdr gave no title or folder', () => {
+    const state = withHerdr(stateFrom(), [herdrAgent({ paneId: 'p-9', title: undefined })]);
+
+    expect(buildAgentCards(state, new Set())[0]?.title).toBe('claude · p-9');
+  });
+
+  it('draws no herdr cards while herdr is unavailable', () => {
+    const state = withHerdr(stateFrom(), [herdrAgent()], false);
+
+    expect(buildAgentCards(state, new Set())).toEqual([]);
+  });
+});
+
+describe('company sessions as agent cards', () => {
+  it('shows live sessions by status and leaves idle, parked and crashed ones out', () => {
+    const state = stateFrom({
+      sessions: [
+        session({ id: 's-busy', status: 'busy' }),
+        session({ id: 's-start', status: 'starting' }),
+        session({ id: 's-wait', status: 'waiting_input' }),
+        session({ id: 's-idle', status: 'idle' }),
+        session({ id: 's-parked', status: 'parked' }),
+        session({ id: 's-crashed', status: 'crashed' }),
+      ],
+    });
+
+    expect(laneByKey(buildAgentCards(state, new Set()))).toEqual({
+      'session:s-busy': 'running',
+      'session:s-start': 'running',
+      'session:s-wait': 'needs_input',
+    });
+  });
+
+  it('moves a busy session to Chờ bạn while it has a pending question', () => {
+    const state = stateFrom({
+      sessions: [session({ id: 's-busy', status: 'busy' })],
+      questions: [question({ sessionId: 's-busy' })],
+    });
+
+    expect(buildAgentCards(state, new Set())[0]).toMatchObject({
+      key: 'session:s-busy',
+      lane: 'needs_input',
+      statusLabel: HERDR_TONE_LABELS.needs,
+    });
+  });
+
+  it('prints the role label, code, name and status of a session', () => {
+    const state = stateFrom({
+      sessions: [
+        session({
+          id: 's-1',
+          code: 'PA-S0007',
+          name: 'Builder',
+          role: 'worker',
+          status: 'busy',
+        }),
+      ],
+    });
+
+    expect(buildAgentCards(state, new Set())[0]).toMatchObject({
+      key: 'session:s-1',
+      subject: { kind: 'session', sessionId: 's-1' },
+      tag: companyRoleLabel('worker'),
+      project: 'PA-S0007',
+      title: 'Builder',
+      statusLabel: sessionStatusLabel('busy'),
+    });
+  });
+
+  it('leaves out sessions the caller already shows as cards', () => {
+    const state = stateFrom({
+      sessions: [
+        session({ id: 's-carded', status: 'busy' }),
+        session({ id: 's-free', status: 'busy' }),
+      ],
+    });
+
+    expect(laneByKey(buildAgentCards(state, new Set(['s-carded'])))).toEqual({
+      'session:s-free': 'running',
+    });
+  });
+});
+
+describe('agent card order and board dedupe', () => {
+  it('lists herdr panes before company sessions, and panes in identity order', () => {
+    const state = withHerdr(stateFrom({ sessions: [session({ id: 's-busy', status: 'busy' })] }), [
+      herdrAgent({ paneId: 'p10' }),
+      herdrAgent({ paneId: 'p2' }),
+    ]);
+
+    expect(buildAgentCards(state, new Set()).map((card) => card.key)).toEqual([
+      'herdr:p2',
+      'herdr:p10',
+      'session:s-busy',
+    ]);
+  });
+
+  it('shows a session that holds a task only as that task card', () => {
+    const state = stateFrom({
+      sessions: [session({ id: 's-task', status: 'busy' })],
+      tasks: [task({ sessionId: 's-task' })],
+    });
+
+    expect(buildBoardLanes(state).flatMap((lane) => lane.agents)).toEqual([]);
+  });
+
+  it('shows a Director planning a prompt only as its planning card', () => {
+    const prompt: CompanyPromptSummary = {
+      id: 'prompt-1',
+      preview: 'Plan the release',
+      createdAt: '2026-10-02T10:00:00.000Z',
+      attachments: [],
+      targetSessionId: 's-director',
+    };
+    const state = stateFrom({
+      sessions: [session({ id: 's-director', role: 'director', status: 'busy' })],
+      prompts: [prompt],
+    });
+
+    expect(buildBoardLanes(state).flatMap((lane) => lane.agents)).toEqual([]);
+  });
+
+  it('puts each agent card in the lane of its lane id', () => {
+    const state = withHerdr(
+      stateFrom({ sessions: [session({ id: 's-wait', status: 'waiting_input' })] }),
+      [herdrAgent({ paneId: 'p-work', status: 'working' })],
+    );
+    const lanes = buildBoardLanes(state);
+
+    expect(lanes.find((lane) => lane.id === 'running')?.agents.map((card) => card.key)).toEqual([
+      'herdr:p-work',
+    ]);
+    expect(lanes.find((lane) => lane.id === 'needs_input')?.agents.map((card) => card.key)).toEqual(
+      ['session:s-wait'],
+    );
+  });
+});

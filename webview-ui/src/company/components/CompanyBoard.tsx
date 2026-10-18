@@ -19,18 +19,30 @@
  *
  * A card is a button, not a draggable: the only thing clicking does is select,
  * because status is the server's to change.
+ *
+ * An agent with work of its own and no task card (a herdr pane, or a company
+ * session) shows as a dashed card after the task cards. Clicking it opens that
+ * agent; hovering previews its terminal, and right-click opens its menu.
  */
 
 import { useRef } from 'react';
 
+import type { AgentBoardCard, AgentCardSubject } from '../agentBoard.js';
 import { type AgentMenuRequest, agentMenuTriggers } from '../agentMenu.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
-import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS } from '../constants.js';
+import {
+  COMPANY_LANE_EMPTY_WIDTH_PX,
+  COMPANY_LANE_ICONS,
+  COMPANY_LANE_MIN_WIDTH_PX,
+  COMPANY_LANE_OWNERS,
+} from '../constants.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { taskStatusLabel } from '../statusLabels.js';
+import type { PreviewTarget } from '../terminalPreview.js';
 import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
 import { useFlightLayout } from '../useFlightLayout.js';
+import { StatusDot } from './StatusDot.js';
 
 export interface CompanyBoardProps {
   lanes: readonly BoardLane[];
@@ -39,6 +51,11 @@ export interface CompanyBoardProps {
   planning: readonly PlanningPrompt[];
   onSelectTask: (taskId: string) => void;
   onSelectSession: (sessionId: string) => void;
+  /** Opens the drawer on a herdr pane's agent card. */
+  onOpenHerdr: (paneId: string) => void;
+  /** The herdr pane and session the drawer shows, so their agent cards read as pressed. */
+  selectedPaneId: string | null;
+  selectedSessionId: string | null;
   onMenu: (request: AgentMenuRequest) => void;
 }
 
@@ -54,6 +71,17 @@ const CARD_TONE_CLASS: Readonly<Record<CardTone, string>> = {
 
 /** The chip shape the owner and sent-back tags share. */
 const PILL_CLASS = 'mt-1 inline-block rounded-full bg-btn-bg px-2 text-2xs';
+
+/** The status line an agent card prints, in the colour of the lane it sits in. */
+const AGENT_STATUS_CLASS: Readonly<Record<AgentBoardCard['lane'], string>> = {
+  planned: 'text-text-muted',
+  ready: 'text-text-muted',
+  running: 'text-accent',
+  needs_input: 'text-warning',
+  review: 'text-text-muted',
+  done: 'text-status-success',
+  failed: 'text-warning',
+};
 
 function cardTone(card: BoardCard): CardTone {
   if (card.sentBack || card.lane === 'needs_input' || card.lane === 'failed') return 'alert';
@@ -88,13 +116,14 @@ function PlanningCard({
       onClick={onSelect}
       aria-disabled={prompt.session === null}
       {...triggers}
+      title={prompt.preview}
       data-testid="planning-card"
       data-flight-key={`prompt:${prompt.promptId}`}
       data-lane="planned"
       data-index={index}
       className={`company-card w-full border-dashed border-l-4 px-2.5 py-2 text-left ${prompt.session === null ? 'cursor-default' : 'cursor-pointer'} ${ROLE_EDGE_CLASS.director}`}
     >
-      <span className="block break-words text-base font-medium leading-[1.35] text-text">
+      <span className="line-clamp-3 break-normal text-base font-medium leading-[1.35] text-text">
         {prompt.preview}
       </span>
       <span className="mt-1 block text-xs text-text-muted">Giám đốc đang lập kế hoạch</span>
@@ -185,6 +214,7 @@ function TaskCard({
         ? previewTriggers(actions, { kind: 'session', sessionId: card.session.id })
         : {})}
       aria-pressed={card.selected}
+      title={`${card.code} ${card.title}`}
       data-testid={`task-card-${card.code}`}
       data-task-id={card.taskId}
       data-flight-key={`task:${card.taskId}`}
@@ -192,7 +222,7 @@ function TaskCard({
       data-index={index}
       className={`company-card w-full cursor-pointer border-l-4 px-2.5 py-2 text-left ${edge} ${card.sentBack ? 'company-sent-back' : ''}`}
     >
-      <span className="block break-words text-base font-medium leading-[1.35] text-text">
+      <span className="line-clamp-3 break-normal text-base font-medium leading-[1.35] text-text">
         <span className="font-mono text-xs text-text-muted">{card.code}</span> {card.title}
       </span>
       <span className={`mt-1 block text-xs ${CARD_TONE_CLASS[cardTone(card)]}`}>
@@ -229,16 +259,85 @@ function TaskCard({
   );
 }
 
+/**
+ * An agent with work of its own and no task card: a herdr pane or a company
+ * session. Its card is dashed, so it never reads as the company's own work.
+ */
+function AgentCard({
+  card,
+  index,
+  selected,
+  onOpen,
+  onMenu,
+}: {
+  card: AgentBoardCard;
+  index: number;
+  selected: boolean;
+  onOpen: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
+}) {
+  const { subject } = card;
+  const triggers = agentMenuTriggers<HTMLButtonElement>(
+    subject.kind === 'herdr'
+      ? { kind: 'herdr', paneId: subject.paneId, drawer: null }
+      : { kind: 'session', sessionId: subject.sessionId, drawer: null },
+    onMenu,
+  );
+  const target: PreviewTarget =
+    subject.kind === 'herdr'
+      ? { kind: 'herdr', paneId: subject.paneId }
+      : { kind: 'session', sessionId: subject.sessionId };
+  const actions = useTerminalPreview();
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      {...triggers}
+      {...previewTriggers(actions, target)}
+      aria-pressed={selected}
+      title={card.title}
+      data-testid="agent-card"
+      data-agent-kind={subject.kind}
+      data-flight-key={card.key}
+      data-lane={card.lane}
+      data-index={index}
+      className="company-card w-full cursor-pointer border-dashed px-2.5 py-2 text-left"
+    >
+      <span className="flex min-w-0 items-center gap-1.5 text-2xs">
+        <StatusDot tone={card.tone} />
+        <span className="shrink-0 rounded-[3px] border border-border px-1 font-mono text-text-muted">
+          {card.tag}
+        </span>
+        <span className="min-w-0 flex-1 truncate text-text-muted">{card.project}</span>
+      </span>
+      <span className="mt-1 line-clamp-3 break-normal text-sm font-medium leading-[1.35] text-text">
+        {card.title}
+      </span>
+      <span className={`mt-1 block text-xs ${AGENT_STATUS_CLASS[card.lane]}`}>
+        {card.statusLabel}
+      </span>
+    </button>
+  );
+}
+
 export function CompanyBoard({
   lanes,
   flow,
   planning,
   onSelectTask,
   onSelectSession,
+  onOpenHerdr,
+  selectedPaneId,
+  selectedSessionId,
   onMenu,
 }: CompanyBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   useFlightLayout(boardRef);
+
+  function openAgent(subject: AgentCardSubject): void {
+    if (subject.kind === 'herdr') onOpenHerdr(subject.paneId);
+    else onSelectSession(subject.sessionId);
+  }
 
   return (
     <div
@@ -247,17 +346,22 @@ export function CompanyBoard({
       data-testid="company-board"
     >
       <FlowStrip flow={flow} />
-      <div className="flex min-h-0 flex-1 gap-1.5 overflow-x-auto p-1.5">
+      <div className="company-lanes flex min-h-0 flex-1 gap-1.5 overflow-x-auto p-1.5">
         {lanes.map((lane) => {
           const drafts = lane.id === 'planned' ? planning : [];
-          const count = lane.cards.length + drafts.length;
+          const count = lane.cards.length + drafts.length + lane.agents.length;
           return (
             <section
               key={lane.id}
               aria-label={lane.label}
               data-testid={`company-lane-${lane.id}`}
               data-lane={lane.id}
-              className="company-lane min-w-[96px] flex-1"
+              className={`company-lane ${count === 0 ? 'flex-none' : 'flex-1'}`}
+              style={
+                count === 0
+                  ? { width: COMPANY_LANE_EMPTY_WIDTH_PX }
+                  : { minWidth: COMPANY_LANE_MIN_WIDTH_PX }
+              }
             >
               <header className="company-lane-head flex flex-col gap-0.5 px-2 py-1.5">
                 <h3 className="flex items-baseline justify-between gap-2 text-base font-semibold text-text">
@@ -287,6 +391,20 @@ export function CompanyBoard({
                     card={card}
                     index={index}
                     onSelect={() => onSelectTask(card.taskId)}
+                    onMenu={onMenu}
+                  />
+                ))}
+                {lane.agents.map((agent, index) => (
+                  <AgentCard
+                    key={agent.key}
+                    card={agent}
+                    index={lane.cards.length + drafts.length + index}
+                    selected={
+                      agent.subject.kind === 'herdr'
+                        ? agent.subject.paneId === selectedPaneId
+                        : agent.subject.sessionId === selectedSessionId
+                    }
+                    onOpen={() => openAgent(agent.subject)}
                     onMenu={onMenu}
                   />
                 ))}

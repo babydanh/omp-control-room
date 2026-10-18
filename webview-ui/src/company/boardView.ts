@@ -18,6 +18,7 @@ import type {
   Task,
   VerificationEvidence,
 } from '../../../core/src/company.js';
+import { type AgentBoardCard, buildAgentCards } from './agentBoard.js';
 import type { CompanyViewState } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
 import { COMPANY_LANE_LABELS, COMPANY_LANE_ORDER } from './constants.js';
@@ -125,7 +126,10 @@ export interface BoardCard {
 export interface BoardLane {
   id: CompanyLaneId;
   label: string;
+  /** Task cards, in the server's order. */
   cards: BoardCard[];
+  /** Agents with no task card of their own, drawn after the task cards. */
+  agents: AgentBoardCard[];
 }
 
 function cardSession(session: CompanySessionSummary | undefined): BoardCardSession | null {
@@ -211,10 +215,17 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
 
   // Creation order is the server's order; Object.values keeps it, and sorting
   // by it would invent a sequence the company never declared.
+  // A session that already holds a task, or plans a prompt, is shown by that card.
+  const carded = new Set(tasks.flatMap((task) => (task.sessionId ? [task.sessionId] : [])));
+  for (const prompt of planningPrompts(state)) {
+    if (prompt.session !== null) carded.add(prompt.session.id);
+  }
+  const agents = buildAgentCards(state, carded);
   return COMPANY_LANE_ORDER.map((id) => ({
     id,
     label: COMPANY_LANE_LABELS[id],
     cards: cards.filter((card) => card.lane === id),
+    agents: agents.filter((agent) => agent.lane === id),
   }));
 }
 

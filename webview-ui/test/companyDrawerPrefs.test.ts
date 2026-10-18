@@ -7,6 +7,7 @@ import {
   type DrawerStorage,
   drawerWidthForKey,
   drawerWidthLimit,
+  effectiveDrawerWidth,
   readDrawerPrefs,
   writeDrawerPrefs,
 } from '../src/company/drawerPrefs.js';
@@ -27,16 +28,16 @@ function memoryStorage(
 }
 
 describe('drawerWidthLimit', () => {
-  it('lets the drawer take 90% of the viewport', () => {
-    expect(drawerWidthLimit(1920)).toBe(1728);
+  it('leaves the visible lanes their room beside the drawer', () => {
+    expect(drawerWidthLimit(1920)).toBe(1480);
   });
 
   it('never goes below the minimum width', () => {
-    expect(drawerWidthLimit(300)).toBe(320);
+    expect(drawerWidthLimit(300)).toBe(280);
   });
 
   it('gives the minimum for a viewport that is not a number', () => {
-    expect(drawerWidthLimit(Number.NaN)).toBe(320);
+    expect(drawerWidthLimit(Number.NaN)).toBe(280);
   });
 });
 
@@ -46,11 +47,11 @@ describe('clampDrawerWidth', () => {
   });
 
   it('raises a width below the minimum', () => {
-    expect(clampDrawerWidth(100, 1920)).toBe(320);
+    expect(clampDrawerWidth(100, 1920)).toBe(280);
   });
 
-  it('caps a width at the viewport limit', () => {
-    expect(clampDrawerWidth(2000, 1000)).toBe(900);
+  it('caps a width at the room the board leaves', () => {
+    expect(clampDrawerWidth(2000, 1000)).toBe(560);
   });
 
   it('takes the default width for a width that is not finite', () => {
@@ -59,7 +60,26 @@ describe('clampDrawerWidth', () => {
   });
 
   it('still allows the minimum in a narrow viewport', () => {
-    expect(clampDrawerWidth(560, 300)).toBe(320);
+    expect(clampDrawerWidth(560, 300)).toBe(280);
+  });
+});
+
+describe('effectiveDrawerWidth', () => {
+  it('takes 40% of the board until the user has resized the drawer', () => {
+    expect(effectiveDrawerWidth(null, 1268)).toBe(507);
+  });
+
+  it('never takes more than the default width until the user resizes it', () => {
+    expect(effectiveDrawerWidth(null, 2000)).toBe(560);
+  });
+
+  it('caps the default at the room two lanes leave, as on a 1024 viewport beside the sidebar', () => {
+    expect(effectiveDrawerWidth(null, 724)).toBe(284);
+  });
+
+  it('keeps a width the user dragged to, within the room the board leaves', () => {
+    expect(effectiveDrawerWidth(700, 1268)).toBe(700);
+    expect(effectiveDrawerWidth(900, 1268)).toBe(828);
   });
 });
 
@@ -77,14 +97,14 @@ describe('drawerWidthForKey', () => {
     expect(drawerWidthForKey(400, 'ArrowRight', true, 1920)).toBe(336);
   });
 
-  it('stops at the minimum and at the viewport limit', () => {
-    expect(drawerWidthForKey(330, 'ArrowRight', true, 1920)).toBe(320);
-    expect(drawerWidthForKey(1700, 'ArrowLeft', true, 1920)).toBe(1728);
+  it('stops at the minimum and at the room the board leaves', () => {
+    expect(drawerWidthForKey(330, 'ArrowRight', true, 1920)).toBe(280);
+    expect(drawerWidthForKey(1700, 'ArrowLeft', true, 1920)).toBe(1480);
   });
 
   it('jumps to the minimum on Home and to the limit on End', () => {
-    expect(drawerWidthForKey(600, 'Home', false, 1920)).toBe(320);
-    expect(drawerWidthForKey(600, 'End', false, 1920)).toBe(1728);
+    expect(drawerWidthForKey(600, 'Home', false, 1920)).toBe(280);
+    expect(drawerWidthForKey(600, 'End', false, 1920)).toBe(1480);
   });
 
   it('answers no other key', () => {
@@ -111,7 +131,7 @@ describe('readDrawerPrefs', () => {
 
   it('falls back field by field when a value has the wrong type', () => {
     expect(readDrawerPrefs(memoryStorage('{"width":"wide","maximized":"yes"}'))).toEqual({
-      width: 560,
+      width: null,
       maximized: false,
     });
   });
@@ -122,7 +142,7 @@ describe('readDrawerPrefs', () => {
 
   it('raises a stored width below the minimum and keeps a stored maximize', () => {
     expect(readDrawerPrefs(memoryStorage('{"width":100,"maximized":true}'))).toEqual({
-      width: 320,
+      width: 280,
       maximized: true,
     });
   });
@@ -151,7 +171,7 @@ describe('writeDrawerPrefs', () => {
     const storage = memoryStorage();
     writeDrawerPrefs(storage, { width: 10, maximized: false });
 
-    expect(readDrawerPrefs(storage).width).toBe(320);
+    expect(readDrawerPrefs(storage).width).toBe(280);
   });
 
   it('does nothing without storage', () => {

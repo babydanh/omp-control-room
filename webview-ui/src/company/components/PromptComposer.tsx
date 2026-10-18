@@ -426,7 +426,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
         </p>
       )}
 
-      <div className="mt-2 flex items-center gap-2">
+      <div className="mt-2 flex flex-wrap items-center gap-2">
         <span className="flex-1" />
         <CompanyButton
           size="sm"

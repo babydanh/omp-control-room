@@ -35,6 +35,7 @@ import {
   type DrawerPrefs,
   drawerWidthForKey,
   drawerWidthLimit,
+  effectiveDrawerWidth,
 } from '../drawerPrefs.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
 import { questionProvenance } from '../questionProvenance.js';
@@ -71,11 +72,16 @@ export interface DetailDrawerProps {
   /** The drawer's remembered shape: its width and whether it is maximized. */
   prefs: DrawerPrefs;
   onPrefsChange: Dispatch<SetStateAction<DrawerPrefs>>;
+  /** The width the agent sidebar takes beside the board; 0 when it floats over the board. */
+  sidebarWidth: number;
   /** Opens the menu the header's subject offers. */
   onMenu: (request: AgentMenuRequest) => void;
 }
 
-type ContentProps = Omit<DetailDrawerProps, 'subject' | 'onClose' | 'prefs' | 'onPrefsChange'> & {
+type ContentProps = Omit<
+  DetailDrawerProps,
+  'subject' | 'onClose' | 'prefs' | 'onPrefsChange' | 'sidebarWidth'
+> & {
   subject: DrawerSubject;
 };
 
@@ -84,6 +90,7 @@ export function DetailDrawer({
   onClose,
   prefs,
   onPrefsChange,
+  sidebarWidth,
   ...rest
 }: DetailDrawerProps) {
   const subjectKey = subject === null ? null : drawerSubjectKey(subject);
@@ -100,12 +107,14 @@ export function DetailDrawer({
   }, [open]);
 
   const viewportWidth = useViewportWidth();
+  // The board is what the viewport leaves beside the sidebar; the drawer takes its width from that.
+  const boardWidth = Math.max(0, viewportWidth - sidebarWidth);
   const dragStart = useRef<{ pointerId: number; x: number; width: number } | null>(null);
 
   if (retained === null) return null;
   const heading = headingFor(rest.state, retained, rest.lanes);
-  const width = clampDrawerWidth(prefs.width, viewportWidth);
-  const limit = drawerWidthLimit(viewportWidth);
+  const width = effectiveDrawerWidth(prefs.width, boardWidth);
+  const limit = drawerWidthLimit(boardWidth);
   const menuSubject = drawerMenuSubject(rest.lanes, retained, prefs.maximized);
   const headerTriggers =
     menuSubject === null ? null : agentMenuTriggers<HTMLElement>(menuSubject, rest.onMenu);
@@ -126,7 +135,7 @@ export function DetailDrawer({
     const start = dragStart.current;
     if (start === null || start.pointerId !== event.pointerId) return;
     // The handle sits on the drawer's left edge, so dragging left widens the drawer.
-    const next = clampDrawerWidth(start.width + (start.x - event.clientX), viewportWidth);
+    const next = clampDrawerWidth(start.width + (start.x - event.clientX), boardWidth);
     onPrefsChange((current) => ({ ...current, width: next }));
   }
 
@@ -135,7 +144,7 @@ export function DetailDrawer({
   }
 
   function onGripKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
-    const next = drawerWidthForKey(width, event.key, event.shiftKey, viewportWidth);
+    const next = drawerWidthForKey(width, event.key, event.shiftKey, boardWidth);
     if (next === null) return;
     event.preventDefault();
     onPrefsChange((current) => ({ ...current, width: next }));
@@ -149,7 +158,7 @@ export function DetailDrawer({
       data-subject={retained.kind}
       data-maximized={prefs.maximized}
       style={style}
-      className={`company-drawer absolute inset-y-0 right-0 z-30 flex flex-col border-l border-border bg-bg shadow-lg ${open ? 'company-drawer-in' : 'pointer-events-none translate-x-full'}`}
+      className={`company-drawer z-30 flex flex-col border-l border-border bg-bg shadow-lg ${open ? 'company-drawer-in' : 'pointer-events-none translate-x-full'}`}
     >
       {!prefs.maximized && (
         <div
@@ -234,6 +243,7 @@ function DrawerContent(props: ContentProps) {
     case 'herdr':
       return (
         <HerdrPanel
+          key={subject.paneId}
           client={client}
           state={state}
           paneId={subject.paneId}

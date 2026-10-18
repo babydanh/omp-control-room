@@ -3,13 +3,14 @@
  *
  * The screen is the agent's own terminal as herdr shows it. It is read on open,
  * on every status change, and every couple of seconds while the agent works.
+ * The screen opens at its newest line and follows it until the reader scrolls up.
  * The choice keys appear only while the agent waits on a choice. The prompt box
  * sends text the agent reads as typed input, and clears only after the server
  * confirms it went through.
  */
 
 import type { FormEvent } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { HerdrKey } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
@@ -25,7 +26,8 @@ import {
   herdrToneFor,
 } from '../herdrView.js';
 import { formatLogTime } from '../sessionLogView.js';
-import { parseAnsiScreen } from '../terminalScreen.js';
+import { parseAnsiScreen, type ScreenLine } from '../terminalScreen.js';
+import { useStickToBottom } from '../useStickToBottom.js';
 import { HerdrInfoTab } from './AgentInfoTab.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ScreenView } from './ScreenView.js';
@@ -157,11 +159,7 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
               <p className="text-2xs text-text-muted">màn hình lúc {formatLogTime(screen.at)}</p>
             )}
             {screen ? (
-              <ScreenView
-                testId="herdr-screen"
-                lines={screenLines}
-                className="min-h-0 flex-1 overflow-auto rounded-[6px] border border-border p-2"
-              />
+              <HerdrScreenView lines={screenLines} />
             ) : (
               <p className="rounded-[6px] border border-border bg-bg p-2 text-2xs text-text-muted">
                 Chưa đọc màn hình.
@@ -189,6 +187,21 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
           </form>
         </>
       )}
+    </div>
+  );
+}
+
+/** The herdr screen, pinned to its newest line until the reader scrolls up. */
+function HerdrScreenView({ lines }: { lines: readonly ScreenLine[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const onScroll = useStickToBottom(scrollRef);
+  return (
+    <div
+      ref={scrollRef}
+      onScroll={onScroll}
+      className="min-h-0 flex-1 overflow-auto rounded-[6px] border border-border p-2"
+    >
+      <ScreenView testId="herdr-screen" lines={lines} />
     </div>
   );
 }

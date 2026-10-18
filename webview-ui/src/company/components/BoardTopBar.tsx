@@ -22,7 +22,8 @@ export interface BoardTopBarProps {
 }
 
 /** The class every reading in the top bar shares: a small chip, muted until it matters. */
-const CHIP_CLASS = 'rounded-full border border-border px-2 py-0.5 text-2xs text-text-muted';
+const CHIP_CLASS =
+  'max-w-full truncate rounded-full border border-border px-2 py-0.5 text-2xs text-text-muted';
 
 function CatalogStatus({ entries }: { entries: readonly CompanyModelCatalogEntry[] }) {
   if (entries.length === 0) return <span className={CHIP_CLASS}>danh mục mô hình: chưa tải</span>;
@@ -82,7 +83,7 @@ export function BoardTopBar({
         )}
         <QuotaStatus state={state} />
       </span>
-      <nav className="ml-auto flex gap-1.5" aria-label="Thanh công cụ">
+      <nav className="ml-auto flex shrink-0 gap-1.5" aria-label="Thanh công cụ">
         <button
           type="button"
           onClick={onToggleSidebar}

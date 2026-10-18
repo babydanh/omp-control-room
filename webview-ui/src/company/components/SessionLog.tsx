@@ -8,8 +8,7 @@
  * any other expands in place to its output.
  */
 
-import type { UIEvent } from 'react';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 
 import type { Attempt, CompanySessionLogEntry } from '../../../../core/src/company.js';
 import type { CompanyViewState } from '../companyState.js';
@@ -27,10 +26,8 @@ import {
   splitCommandText,
   streamingLine,
 } from '../sessionLogView.js';
+import { useStickToBottom } from '../useStickToBottom.js';
 import { AttemptRow } from './AttemptRow.js';
-
-/** Pixels from the bottom that still count as "following the log". */
-const FOLLOW_THRESHOLD_PX = 24;
 
 const LOG_TONE_CLASS: Readonly<Record<LogTone, string>> = {
   text: 'text-text',
@@ -71,18 +68,7 @@ export function SessionLogTab({
   const writing = streamingLine(state.streams[sessionId], status);
   const running = status === 'busy' ? runningToolName(logEntriesFor(state, sessionId, null)) : null;
   const scrollRef = useRef<HTMLDivElement>(null);
-  const followingRef = useRef(true);
-
-  useLayoutEffect(() => {
-    const element = scrollRef.current;
-    if (element !== null && followingRef.current) element.scrollTop = element.scrollHeight;
-  }, [entries, writing, running]);
-
-  function onScroll(event: UIEvent<HTMLDivElement>): void {
-    const element = event.currentTarget;
-    const distance = element.scrollHeight - element.scrollTop - element.clientHeight;
-    followingRef.current = distance < FOLLOW_THRESHOLD_PX;
-  }
+  const onScroll = useStickToBottom(scrollRef);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -162,15 +148,19 @@ export function CommandsTab({ state, sessionId, taskId, live, onJump }: Commands
   const commands = logEntriesFor(state, sessionId, taskId).filter(
     (entry) => entry.kind === 'command',
   );
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const onScroll = useStickToBottom(scrollRef);
   if (commands.length === 0) {
     return <p className="p-2 text-2xs text-text-muted">Chưa có lệnh nào được chạy.</p>;
   }
   return (
-    <ol className="flex flex-col gap-2 p-2">
-      {commands.map((entry) => (
-        <CommandRow key={entry.seq} entry={entry} live={live} onJump={onJump} />
-      ))}
-    </ol>
+    <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto">
+      <ol className="flex flex-col gap-2 p-2">
+        {commands.map((entry) => (
+          <CommandRow key={entry.seq} entry={entry} live={live} onJump={onJump} />
+        ))}
+      </ol>
+    </div>
   );
 }
 

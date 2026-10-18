@@ -9,21 +9,27 @@
  */
 
 import {
+  COMPANY_DRAWER_DEFAULT_SHARE,
   COMPANY_DRAWER_DEFAULT_WIDTH_PX,
-  COMPANY_DRAWER_MAX_VIEWPORT_SHARE,
   COMPANY_DRAWER_MIN_WIDTH_PX,
   COMPANY_DRAWER_RESIZE_LARGE_STEP_PX,
   COMPANY_DRAWER_RESIZE_STEP_PX,
+  COMPANY_LANE_MIN_WIDTH_PX,
+  COMPANY_LANES_VISIBLE_MIN,
 } from './constants.js';
 
 export interface DrawerPrefs {
-  /** The width the user last dragged to, in CSS pixels; clamped to the viewport when drawn. */
-  width: number;
+  /** The width the user last dragged to, in CSS pixels; null until they resize, when the drawer takes its default share of the board. */
+  width: number | null;
   /** Whether the drawer fills the board instead of sitting beside its content. */
   maximized: boolean;
 }
 
-export const DRAWER_PREFS_KEY = 'omp.company.drawer';
+/**
+ * The storage key. It is v2 because earlier builds wrote the default width (560) on
+ * every load, and that stored number would read as a width the user had chosen.
+ */
+export const DRAWER_PREFS_KEY = 'omp.company.drawer.v2';
 
 /** The part of Storage the drawer uses; a test passes a plain object. */
 export interface DrawerStorage {
@@ -32,19 +38,20 @@ export interface DrawerStorage {
 }
 
 export const DEFAULT_DRAWER_PREFS: DrawerPrefs = {
-  width: COMPANY_DRAWER_DEFAULT_WIDTH_PX,
+  width: null,
   maximized: false,
 };
 
 /**
- * The widest the drawer may be in a viewport this wide: a share of it, and never
- * narrower than the minimum. A viewport that is not a number gets the minimum.
+ * The widest the drawer may be beside a board this wide: the board's width less
+ * the room the visible lanes need, and never narrower than the minimum. A width
+ * that is not a number gets the minimum.
  */
-export function drawerWidthLimit(viewportWidth: number): number {
-  const share = Number.isFinite(viewportWidth)
-    ? Math.floor(viewportWidth * COMPANY_DRAWER_MAX_VIEWPORT_SHARE)
+export function drawerWidthLimit(boardWidth: number): number {
+  const room = Number.isFinite(boardWidth)
+    ? Math.floor(boardWidth) - COMPANY_LANES_VISIBLE_MIN * COMPANY_LANE_MIN_WIDTH_PX
     : 0;
-  return Math.max(COMPANY_DRAWER_MIN_WIDTH_PX, share);
+  return Math.max(COMPANY_DRAWER_MIN_WIDTH_PX, room);
 }
 
 /** A width as whole pixels, at least the minimum; anything not a number takes the default. */
@@ -53,32 +60,42 @@ function wholeWidth(width: number): number {
   return Math.max(COMPANY_DRAWER_MIN_WIDTH_PX, Math.round(requested));
 }
 
-/** The width clamped to the drawer's range in a viewport of this width. */
-export function clampDrawerWidth(width: number, viewportWidth: number): number {
-  return Math.min(drawerWidthLimit(viewportWidth), wholeWidth(width));
+/** The width clamped to the drawer's range beside a board of this width. */
+export function clampDrawerWidth(width: number, boardWidth: number): number {
+  return Math.min(drawerWidthLimit(boardWidth), wholeWidth(width));
+}
+
+/**
+ * The width the drawer takes beside a board this wide: the width the user last
+ * dragged to, or until then 40% of the board at most the default; clamped to the
+ * room the board leaves.
+ */
+export function effectiveDrawerWidth(width: number | null, boardWidth: number): number {
+  const share = Math.floor(boardWidth * COMPANY_DRAWER_DEFAULT_SHARE);
+  return clampDrawerWidth(width ?? Math.min(COMPANY_DRAWER_DEFAULT_WIDTH_PX, share), boardWidth);
 }
 
 /**
  * The width after a key press on the resize handle, or null when the handle does
  * not answer that key. The handle sits on the drawer's left edge, so Left widens
- * it; Home and End take the minimum and the largest width the viewport allows.
+ * it; Home and End take the minimum and the largest width the board leaves room for.
  */
 export function drawerWidthForKey(
   width: number,
   key: string,
   shiftKey: boolean,
-  viewportWidth: number,
+  boardWidth: number,
 ): number | null {
   const step = shiftKey ? COMPANY_DRAWER_RESIZE_LARGE_STEP_PX : COMPANY_DRAWER_RESIZE_STEP_PX;
   switch (key) {
     case 'ArrowLeft':
-      return clampDrawerWidth(width + step, viewportWidth);
+      return clampDrawerWidth(width + step, boardWidth);
     case 'ArrowRight':
-      return clampDrawerWidth(width - step, viewportWidth);
+      return clampDrawerWidth(width - step, boardWidth);
     case 'Home':
       return COMPANY_DRAWER_MIN_WIDTH_PX;
     case 'End':
-      return drawerWidthLimit(viewportWidth);
+      return drawerWidthLimit(boardWidth);
     default:
       return null;
   }
@@ -97,14 +114,20 @@ export function readDrawerPrefs(storage: DrawerStorage | null): DrawerPrefs {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { ...DEFAULT_DRAWER_PREFS };
   }
-  const width = 'width' in parsed && typeof parsed.width === 'number' ? parsed.width : Number.NaN;
+  const width =
+    'width' in parsed && typeof parsed.width === 'number' && Number.isFinite(parsed.width)
+      ? wholeWidth(parsed.width)
+      : null;
   const maximized = 'maximized' in parsed && parsed.maximized === true;
-  return { width: wholeWidth(width), maximized };
+  return { width, maximized };
 }
 
 export function writeDrawerPrefs(storage: DrawerStorage | null, prefs: DrawerPrefs): void {
   storage?.setItem(
     DRAWER_PREFS_KEY,
-    JSON.stringify({ width: wholeWidth(prefs.width), maximized: prefs.maximized }),
+    JSON.stringify({
+      width: prefs.width === null ? null : wholeWidth(prefs.width),
+      maximized: prefs.maximized,
+    }),
   );
 }
