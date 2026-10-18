@@ -30,8 +30,11 @@ if (-not (Test-Path $ts)) {
 }
 
 if ($Off) {
-  # Remove only the HTTPS:443 mapping `serve --bg <port>` created; `serve reset` would wipe every Serve config.
-  & $ts serve --https=443 off
+  # `off` must repeat every flag used to turn the mapping on (Tailscale CLI docs); the target may be omitted.
+  # Removes only this HTTPS:443 mapping; `serve reset` would wipe every Serve config.
+  & $ts serve --bg --https=443 off
+  if ($LASTEXITCODE -ne 0) { Fail 'Tắt chưa được (xem dòng lỗi phía trên).' }
+  & $ts serve status
   Write-Host 'Đã tắt chia sẻ board qua Tailscale.' -ForegroundColor Green
   exit 0
 }
@@ -53,8 +56,9 @@ if (-not $open) { Fail "Không có gì nghe ở cổng $Port. Mở board trướ
 
 Step 'Bước 4/4: chia sẻ board trong tailnet (HTTPS)'
 Write-Host 'Lần đầu Tailscale có thể in một link bật HTTPS/MagicDNS cho tailnet: mở link đó, bấm Enable, rồi chạy lại script.'
-& $ts serve --bg $Port
+& $ts serve --bg --https=443 "http://127.0.0.1:$Port"
 if ($LASTEXITCODE -ne 0) { Fail 'tailscale serve chưa chạy được (xem dòng lỗi phía trên).' }
+& $ts serve status
 
 $url = "https://$dns/"
 if ($Token) { $url = "${url}?token=$Token" }
