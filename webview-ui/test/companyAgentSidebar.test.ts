@@ -8,6 +8,7 @@ import {
   type HerdrRepoGroup,
   isFolded,
   pendingQuestionSessionIds,
+  sidebarSessionEntries,
   workspaceSessionRow,
 } from '../src/company/agentSidebarView.js';
 import {
@@ -54,6 +55,35 @@ function herdrPaneIds(group: HerdrGroup): string[] {
 function herdrGroupNow(herdr: HerdrView): HerdrGroup {
   return herdrGroup(herdr, NOW);
 }
+
+describe('sidebarSessionEntries', () => {
+  it('lists every role’s sessions in one flat list, chat first, parked rows apart', () => {
+    const worker = session({ code: 'PA-S0002', role: 'worker', status: 'busy' });
+    const chat = session({ code: 'PA-S0005', role: 'chat', status: 'idle' });
+    const director = session({ code: 'PA-S0001', role: 'director', status: 'idle' });
+    const parkedQa = session({ code: 'PA-S0003', role: 'qa', status: 'paused' });
+    const parkedWorker = session({ code: 'PA-S0004', role: 'worker', status: 'archived' });
+
+    const { live, parked } = sidebarSessionEntries(
+      buildAgentGroups(
+        stateFrom({ sessions: [worker, chat, director, parkedQa, parkedWorker] }),
+        NOW,
+      ),
+    );
+
+    expect(live.map((entry) => entry.row.code)).toEqual(['PA-S0005', 'PA-S0001', 'PA-S0002']);
+    expect(live.map((entry) => entry.lane)).toEqual(['chat', 'director', 'worker']);
+    expect(parked.map((entry) => entry.row.code)).toEqual(['PA-S0004', 'PA-S0003']);
+    expect(parked.every((entry) => entry.lane.endsWith(':parked'))).toBe(true);
+  });
+
+  it('lists nothing for a folder with no sessions', () => {
+    expect(sidebarSessionEntries(buildAgentGroups(stateFrom(), NOW))).toEqual({
+      live: [],
+      parked: [],
+    });
+  });
+});
 
 describe('buildAgentGroups', () => {
   it('lists every role in the company order, including roles with no agents', () => {

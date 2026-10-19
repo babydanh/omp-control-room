@@ -195,6 +195,31 @@ export function isFolded(row: AgentRow): boolean {
   return row.tone === 'parked' || (row.tone === 'error' && row.taskLine === null);
 }
 
+/** One session row as the sidebar lists it: the row, its flight lane and its index in that lane. */
+export interface SidebarSessionEntry {
+  row: AgentRow;
+  lane: string;
+  index: number;
+}
+
+/**
+ * A folder's sessions as one flat list, with no role headers: role order (chat first), and
+ * within a role the order `buildAgentGroups` gave. Every role's parked rows share one list.
+ */
+export function sidebarSessionEntries(groups: readonly AgentRoleGroup[]): {
+  live: SidebarSessionEntry[];
+  parked: SidebarSessionEntry[];
+} {
+  return {
+    live: groups.flatMap((group) =>
+      group.active.map((row, index) => ({ row, lane: group.role, index })),
+    ),
+    parked: groups.flatMap((group) =>
+      group.parked.map((row, index) => ({ row, lane: `${group.role}:parked`, index })),
+    ),
+  };
+}
+
 function sessionTone(status: string, questionPending: boolean): AgentTone {
   if (questionPending || status === 'waiting_input') return 'needs';
   return TONE_BY_SESSION_STATUS[status] ?? 'idle';

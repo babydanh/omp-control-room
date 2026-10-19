@@ -31,6 +31,7 @@ import {
   type HerdrRow,
   herdrRowCount,
   herdrTooltip,
+  sidebarSessionEntries,
   type SleepingRow,
   sleepingTooltip,
   type SummaryLine,
@@ -451,12 +452,7 @@ function HerdrBlock({
  * row edged in its role's colour. The parked sessions of every role share one toggle.
  */
 function ActiveSessions({ groups, view }: { groups: readonly AgentRoleGroup[]; view: TreeView }) {
-  const live = groups.flatMap((group) =>
-    group.active.map((row, index) => ({ row, lane: group.role, index })),
-  );
-  const parked = groups.flatMap((group) =>
-    group.parked.map((row, index) => ({ row, lane: `${group.role}:parked`, index })),
-  );
+  const { live, parked } = sidebarSessionEntries(groups);
   return (
     <div className="ml-4 pb-1 pl-1">
       <ul>
