@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { CONFIG_FILE_NAME, LAYOUT_FILE_DIR } from './constants.js';
-import { pathsMatch } from './pathKey.js';
+import { pathsMatch, toPathKey } from './pathKey.js';
 
 export interface AdapterSettings {
   soundEnabled: boolean;
@@ -60,6 +60,12 @@ export interface UserDirectory {
 /** Most recent Company workspace folders kept in config.json; the board lists them after the open ones. */
 export const RECENT_COMPANY_WORKSPACES_LIMIT = 10;
 
+/** Most display names kept for Company folders in config.json; the newest survive. */
+export const COMPANY_FOLDER_NAMES_LIMIT = 500;
+
+/** Longest display name kept for a Company folder, in characters. */
+export const COMPANY_FOLDER_NAME_MAX_LENGTH = 80;
+
 export interface PixelAgentsConfig {
   vscode: AdapterSettings;
   standalone: AdapterSettings;
@@ -76,6 +82,9 @@ export interface PixelAgentsConfig {
    *  RECENT_COMPANY_WORKSPACES_LIMIT. Machine-wide like the consent above: a
    *  folder is a fact about this machine, not a per-adapter setting. */
   recentCompanyWorkspaces: string[];
+  /** Display names for Company folders, keyed by the folder's path key. Machine-wide: a name belongs to the folder
+   *  on this machine. Capped at COMPANY_FOLDER_NAMES_LIMIT, newest kept. */
+  companyFolderNames: Record<string, string>;
   /** User-defined Directories. Machine-wide by decision: a Directory defined
    *  from the phone shows up in VS Code and vice versa. */
   directories: UserDirectory[];
@@ -133,6 +142,33 @@ function parseRecentCompanyWorkspaces(raw: unknown): string[] {
     if (out.length === RECENT_COMPANY_WORKSPACES_LIMIT) break;
   }
   return out;
+}
+
+/** Trim a display name and cap it at COMPANY_FOLDER_NAME_MAX_LENGTH characters; null when nothing is left. */
+function normaliseCompanyFolderName(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  const capped = Array.from(trimmed).slice(0, COMPANY_FOLDER_NAME_MAX_LENGTH).join('').trim();
+  return capped.length > 0 ? capped : null;
+}
+
+/**
+ * Coerce a loose object into the Company folder display-name map: string values only, absolute keys only, each key
+ * folded with toPathKey, each name normalised. The newest COMPANY_FOLDER_NAMES_LIMIT entries survive.
+ */
+function parseCompanyFolderNames(raw: unknown): Record<string, string> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+  const byKey = new Map<string, string>();
+  const entries: [string, unknown][] = Object.entries(raw);
+  for (const [workspacePath, value] of entries) {
+    if (typeof value !== 'string' || !path.isAbsolute(workspacePath)) continue;
+    const name = normaliseCompanyFolderName(value);
+    if (name === null) continue;
+    const key = toPathKey(workspacePath);
+    byKey.delete(key);
+    byKey.set(key, name);
+  }
+  return Object.fromEntries([...byKey].slice(-COMPANY_FOLDER_NAMES_LIMIT));
 }
 
 /**
@@ -232,6 +268,7 @@ function emptyConfig(): PixelAgentsConfig {
     hooksConsent: {},
     hooksEnabled: {},
     recentCompanyWorkspaces: [],
+    companyFolderNames: {},
     directories: [],
   };
 }
@@ -253,6 +290,7 @@ export function readConfig(): PixelAgentsConfig {
       hooksConsent: parseHooksConsent(parsed.hooksConsent),
       hooksEnabled: parseHooksEnabled(parsed.hooksEnabled),
       recentCompanyWorkspaces: parseRecentCompanyWorkspaces(parsed.recentCompanyWorkspaces),
+      companyFolderNames: parseCompanyFolderNames(parsed.companyFolderNames),
       directories: parseUserDirectories(parsed.directories),
     };
   } catch (err) {
@@ -387,6 +425,38 @@ export function writeConfig(config: PixelAgentsConfig): boolean {
 /** Company workspace folders most recently opened, newest first. Empty when none were. */
 export function readRecentCompanyWorkspaces(): string[] {
   return readConfig().recentCompanyWorkspaces;
+}
+
+/** Display names for Company folders, keyed by path key. Empty when none were set. */
+export function readCompanyFolderNames(): Record<string, string> {
+  return readConfig().companyFolderNames;
+}
+
+/**
+ * The display name of the folder at this path, or undefined when it has none. The path is folded to its key first,
+ * so any spelling of the same folder finds the same name.
+ */
+export function companyFolderNameFor(
+  names: Readonly<Record<string, string>>,
+  workspacePath: string,
+): string | undefined {
+  const key = toPathKey(workspacePath);
+  return Object.hasOwn(names, key) ? names[key] : undefined;
+}
+
+/**
+ * Give a Company folder a display name, or clear it with `null` or a blank name. The folder is keyed by its canonical
+ * path. Returns whether the write reached the disk, so a failed save is never reported as a success.
+ */
+export function setCompanyFolderName(canonicalPath: string, name: string | null): boolean {
+  const cfg = readConfig();
+  const key = toPathKey(canonicalPath);
+  const next = new Map(Object.entries(cfg.companyFolderNames));
+  next.delete(key);
+  const normalised = name === null ? null : normaliseCompanyFolderName(name);
+  if (normalised !== null) next.set(key, normalised);
+  cfg.companyFolderNames = Object.fromEntries([...next].slice(-COMPANY_FOLDER_NAMES_LIMIT));
+  return writeConfig(cfg);
 }
 
 /**

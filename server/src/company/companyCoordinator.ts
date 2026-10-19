@@ -226,6 +226,12 @@ export interface CompanyCoordinator {
   /** Hot/warm projection of the company, safe to send to an authorized client. */
   snapshot(): CompanySnapshot;
 
+  /**
+   * Whether this folder's state holds a session, task, contract, question or prompt with this id.
+   * Answered from in-memory state, so a command can ask it cheaply to find its folder.
+   */
+  holdsId(id: string): boolean;
+
   /** Resource measurements for the diagnostics panel. */
   diagnostics(): CompanyDiagnostics;
 

@@ -156,7 +156,10 @@ export function AgentSidebar({
   const tree = buildProjectTree(state, now, collapsedProjects);
   const boards = tree.projects.filter((project) => project.kind === 'board');
   const repos = tree.projects.filter((project) => project.kind === 'herdr');
-  const activeGroups = boards.find((project) => project.active)?.groups ?? [];
+  // Every loaded project counts: the active folder, or each open folder in all mode.
+  const activeGroups = boards
+    .filter((project) => project.active)
+    .flatMap((project) => project.groups);
   const counts = activityCounts(activeGroups, tree.herdr);
   const total =
     activeGroups.reduce((sum, group) => sum + group.active.length + group.parked.length, 0) +

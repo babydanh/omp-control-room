@@ -7,10 +7,14 @@
  */
 
 import type { Contract, Question } from '../../../../core/src/company.js';
+import type { FolderIdentity } from '../folderIdentity.js';
+import { FolderTag } from './FolderTag.js';
 
 export interface AttentionBarProps {
   contract: Contract | null;
   questions: readonly Question[];
+  /** The folder a contract or question belongs to; null outside all mode. */
+  identityOf: (id: string) => FolderIdentity | null;
   onOpenContract: () => void;
   onOpenQuestion: (questionId: string) => void;
 }
@@ -21,29 +25,36 @@ const ITEM_CLASS =
 export function AttentionBar({
   contract,
   questions,
+  identityOf,
   onOpenContract,
   onOpenQuestion,
 }: AttentionBarProps) {
   if (contract === null && questions.length === 0) return null;
+  const contractFolder = contract === null ? null : identityOf(contract.id);
   return (
     <div className="flex flex-wrap gap-2 px-3 py-2" data-testid="attention-bar">
       {contract && (
         <button type="button" className={ITEM_CLASS} onClick={onOpenContract}>
+          {contractFolder !== null && <FolderTag identity={contractFolder} />}
           <span className="text-warning">Chờ duyệt</span>
           {contract.code} · {contract.title ?? 'kế hoạch'} · bản {contract.revision}
         </button>
       )}
-      {questions.map((question) => (
-        <button
-          key={question.id}
-          type="button"
-          className={ITEM_CLASS}
-          onClick={() => onOpenQuestion(question.id)}
-        >
-          <span className="text-warning">Câu hỏi</span>
-          {question.title}
-        </button>
-      ))}
+      {questions.map((question) => {
+        const folder = identityOf(question.id);
+        return (
+          <button
+            key={question.id}
+            type="button"
+            className={ITEM_CLASS}
+            onClick={() => onOpenQuestion(question.id)}
+          >
+            {folder !== null && <FolderTag identity={folder} />}
+            <span className="text-warning">Câu hỏi</span>
+            {question.title}
+          </button>
+        );
+      })}
     </div>
   );
 }

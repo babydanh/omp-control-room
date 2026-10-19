@@ -29,6 +29,7 @@ describe('company egress gate', () => {
       'companyArtifactPage',
       'companyFileList',
       'companyFileRead',
+      'companyFolderBrowse',
       'companyAttachmentUploaded',
       'herdrAgents',
       'herdrScreen',
@@ -136,5 +137,95 @@ describe('company egress gate', () => {
     expect(gate.allowsDelivery({})).toBe(true); // legacy path owns it
     expect(gate.allowsDelivery({ type: 42 })).toBe(true);
     expect(gate.allowsDelivery({ type: 'terminalData', sessionId: 7 })).toBe(false);
+  });
+});
+
+describe('company egress gate per folder view', () => {
+  const ALPHA = 'D:/work/alpha';
+  const BETA = 'D:/work/beta';
+
+  function folderSnapshot(workspacePath: string) {
+    return companyMessage('companySnapshot', { workspacePath });
+  }
+
+  it('folder view admits only the active folder, and follows the active folder', () => {
+    let active: string | null = ALPHA;
+    const gate = new CompanyClientGate(true, new Map(), { activePath: () => active });
+
+    expect(gate.companyViewMode).toBe('folder');
+    expect(gate.allowsDelivery(folderSnapshot(ALPHA))).toBe(true);
+    expect(gate.allowsDelivery(folderSnapshot(BETA))).toBe(false);
+
+    active = BETA;
+    expect(gate.allowsDelivery(folderSnapshot(ALPHA))).toBe(false);
+    expect(gate.allowsDelivery(folderSnapshot(BETA))).toBe(true);
+  });
+
+  it('folder view admits no tagged state while no folder is active', () => {
+    const gate = new CompanyClientGate(true, new Map(), { activePath: () => null });
+
+    expect(gate.allowsDelivery(folderSnapshot(ALPHA))).toBe(false);
+  });
+
+  it('all view admits every open folder to a privileged socket', () => {
+    const gate = new CompanyClientGate(true, new Map(), { activePath: () => ALPHA });
+    gate.setCompanyView('all');
+
+    expect(gate.companyViewMode).toBe('all');
+    expect(gate.allowsDelivery(folderSnapshot(ALPHA))).toBe(true);
+    expect(gate.allowsDelivery(folderSnapshot(BETA))).toBe(true);
+  });
+
+  it('tagged state never reaches an unprivileged socket, whatever its view', () => {
+    const gate = new CompanyClientGate(false, new Map(), { activePath: () => ALPHA });
+    expect(gate.allowsDelivery(folderSnapshot(ALPHA))).toBe(false);
+
+    gate.setCompanyView('all');
+    expect(gate.allowsDelivery(folderSnapshot(BETA))).toBe(false);
+  });
+
+  it('switching back to folder view narrows the socket again', () => {
+    const gate = new CompanyClientGate(true, new Map(), { activePath: () => ALPHA });
+    gate.setCompanyView('all');
+    gate.setCompanyView('folder');
+
+    expect(gate.allowsDelivery(folderSnapshot(BETA))).toBe(false);
+  });
+
+  it('a socket that never chose a view sees the active folder only', () => {
+    const gate = new CompanyClientGate(true);
+
+    expect(gate.companyViewMode).toBe('folder');
+    expect(gate.allowsDelivery(folderSnapshot(ALPHA))).toBe(false);
+    expect(gate.allowsDelivery(companyMessage('companySnapshot'))).toBe(true);
+  });
+
+  it('untagged company state and legacy traffic keep their rules whatever the view', () => {
+    const privileged = new CompanyClientGate(true, new Map(), { activePath: () => ALPHA });
+    privileged.setCompanyView('all');
+    expect(privileged.allowsDelivery(companyMessage('companySnapshot'))).toBe(true);
+
+    const observer = new CompanyClientGate(false, new Map(), { activePath: () => ALPHA });
+    observer.setCompanyView('all');
+    expect(observer.allowsDelivery(companyMessage('companySnapshot'))).toBe(false);
+    expect(observer.allowsDelivery(LEGACY_AGENT_MESSAGE)).toBe(true);
+  });
+
+  it('keeps terminal frames gated per session in every view', () => {
+    const sessionId = randomUUID();
+    const gate = new CompanyClientGate(true, new Map(), { activePath: () => ALPHA });
+    gate.setCompanyView('all');
+    expect(gate.allowsDelivery(terminalMessage('terminalData', sessionId))).toBe(false);
+
+    gate.observeOutbound({
+      type: 'terminalAttached',
+      sessionId,
+      runEpoch: 1,
+      leaseId: randomUUID(),
+      requestId: randomUUID(),
+      cols: 80,
+      rows: 24,
+    });
+    expect(gate.allowsDelivery(terminalMessage('terminalData', sessionId))).toBe(true);
   });
 });

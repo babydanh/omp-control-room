@@ -1590,6 +1590,17 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     };
   }
 
+  /** Whether this folder's durable state holds a session, task, contract, question or prompt with this id. */
+  holdsId(id: string): boolean {
+    return (
+      Object.hasOwn(this.state.sessions, id) ||
+      Object.hasOwn(this.state.tasks, id) ||
+      Object.hasOwn(this.state.contracts, id) ||
+      Object.hasOwn(this.state.questions, id) ||
+      Object.hasOwn(this.state.prompts, id)
+    );
+  }
+
   diagnostics(): CompanyDiagnostics {
     return this.options.effects.diagnostics();
   }

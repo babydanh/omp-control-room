@@ -4,8 +4,9 @@
  *
  * One process holds several folders at once. Each is its own
  * `WorkspaceCompanyHost` with its own namespace, runtime, sessions and
- * Contracts. Exactly one is ACTIVE: its messages reach the board and company
- * commands are answered by it. The others keep running in the background, and
+ * Contracts. Exactly one is ACTIVE: the folder a `folder` view shows, and the one
+ * unnamed company commands answer. Every folder's board messages carry its path, so
+ * an `all` view shows them side by side. The others keep running in the background, and
  * because their state is durable, switching back pushes a fresh snapshot rather
  * than replaying what the board missed.
  *
@@ -22,6 +23,7 @@ import type {
   CompanyWorkspaceSession,
   ServerMessage,
 } from '../../../core/src/messages.js';
+import { companyFolderNameFor } from '../configPersistence.js';
 import { toPathKey } from '../pathKey.js';
 import type { CompanyCommandServices, CompanyWorkspaceControl } from './clientCommands.js';
 import { CompanyError } from './companyError.js';
@@ -137,6 +139,14 @@ export interface CompanyWorkspaceRegistryOptions {
     read(): string[];
     remember(workspacePath: string): void;
   };
+  /**
+   * Display names of Company folders, keyed by path key. `set` stores a name (or clears it with `null`) and reports
+   * whether the write reached the disk.
+   */
+  readonly names: {
+    read(): Record<string, string>;
+    set(workspacePath: string, name: string | null): boolean;
+  };
   /** Overrides the recount window; production uses the default. */
   readonly countDebounceMs?: number;
 }
@@ -176,19 +186,47 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
     return this.folders.get(this.activeKey)?.host.services ?? null;
   }
 
+  /** Path of the active folder, or `null` when none is active or the server is shutting down. */
+  activePath(): string | null {
+    if (this.disposed || this.activeKey === null) return null;
+    return this.folders.get(this.activeKey)?.path ?? null;
+  }
+
+  /** Services of the open folder at this path, or `null` when it is not open. */
+  servicesFor(workspacePath: string): CompanyCommandServices | null {
+    if (this.disposed) return null;
+    const key = toPathKey(workspacePath);
+    for (const folder of this.folders.values()) {
+      if (toPathKey(folder.path) === key) return folder.host.services;
+    }
+    return null;
+  }
+
+  /** Services of the first open folder, in open order, whose state holds this id; `null` when none does. */
+  servicesHolding(id: string): CompanyCommandServices | null {
+    if (this.disposed) return null;
+    for (const folder of this.folders.values()) {
+      if (folder.host.services.coordinator.holdsId(id)) return folder.host.services;
+    }
+    return null;
+  }
+
   /**
    * Folders for the board: open ones in open order, then recently used ones that are not open.
    * An open folder carries its live sessions; a recent one carries none.
    */
   entries(): CompanyWorkspaceEntry[] {
+    const names = this.options.names.read();
     const openKeys = new Set<string>();
     const openEntries: CompanyWorkspaceEntry[] = [];
     for (const folder of this.folders.values()) {
       openKeys.add(toPathKey(folder.path));
       const snapshot = snapshotOf(folder.host);
       const work = snapshot === null ? IDLE_WORK : countCompanyWork(snapshot);
+      const name = companyFolderNameFor(names, folder.path);
       openEntries.push({
         path: folder.path,
+        ...(name === undefined ? {} : { name }),
         active: folder.key === this.activeKey,
         open: true,
         working: work.working,
@@ -199,12 +237,47 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
     }
     const recentEntries: CompanyWorkspaceEntry[] = this.recentPaths
       .filter((recent) => !openKeys.has(toPathKey(recent)))
-      .map((recent) => ({ path: recent, active: false, open: false, working: 0, waiting: 0 }));
+      .map((recent) => {
+        const name = companyFolderNameFor(names, recent);
+        return {
+          path: recent,
+          ...(name === undefined ? {} : { name }),
+          active: false,
+          open: false,
+          working: 0,
+          waiting: 0,
+        };
+      });
     return [...openEntries, ...recentEntries];
+  }
+
+  /**
+   * Store or clear (`null`) one folder's display name, then republish the folder list so every board shows it. The
+   * path is already canonical. A save that did not reach the disk is refused rather than reported as done.
+   */
+  setFolderName(workspacePath: string, name: string | null): void {
+    this.assertRunning();
+    if (!this.options.names.set(workspacePath, name)) {
+      throw new CompanyError('company_command_failed', 'Không lưu được tên thư mục.');
+    }
+    this.publishWorkspaces();
   }
 
   open(workspacePath: string): Promise<void> {
     const run = this.queue.then(() => this.openAndActivate(workspacePath));
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
+
+  /**
+   * Services of the folder at this path, opening it first when it is not open. Unlike
+   * {@link open}, the folder does not become the active one: the board's view stays where it was.
+   */
+  ensure(workspacePath: string): Promise<CompanyCommandServices> {
+    const run = this.queue.then(() => this.ensureOpen(workspacePath));
     this.queue = run.then(
       () => undefined,
       () => undefined,
@@ -243,6 +316,24 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
     this.activate(folder);
   }
 
+  /** Open a folder for a command without making it active. A folder already open answers as it is. */
+  private async ensureOpen(workspacePath: string): Promise<CompanyCommandServices> {
+    this.assertRunning();
+    const target = await resolveFolder(workspacePath);
+    const existing = this.folders.get(target.key);
+    if (existing !== undefined) return existing.host.services;
+    const folder = await this.openFolder(target);
+    const snapshot = folder.host.services.coordinator.snapshot();
+    this.publishWorkspaces();
+    this.options.broadcast({
+      type: 'companySnapshot',
+      requestId: COMPANY_WORKSPACE_PUSH_REQUEST_ID,
+      snapshot,
+      workspacePath: folder.path,
+    });
+    return folder.host.services;
+  }
+
   private async openFolder(target: ResolvedFolder): Promise<OpenFolder> {
     let host: WorkspaceCompanyHost;
     try {
@@ -277,13 +368,26 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
       type: 'companySnapshot',
       requestId: COMPANY_WORKSPACE_PUSH_REQUEST_ID,
       snapshot,
+      workspacePath: folder.path,
     });
   }
 
-  /** Route one folder's message: only the active folder reaches the board, every folder may change the counts. */
+  /**
+   * Route one folder's frame. Every open folder's board frames reach the board tagged with their
+   * folder, and the egress gate decides who sees them. Terminal frames stay untagged, since their
+   * delivery is decided by the session's lease. Every folder may change the counts.
+   */
   private receive(key: string, message: ServerMessage): void {
     if (this.disposed) return;
-    if (key === this.activeKey) this.options.broadcast(message);
+    const folder = this.folders.get(key);
+    if (folder !== undefined) {
+      // Terminal frames stay untagged; every other frame carries its folder's path.
+      const frame: ServerMessage & { workspacePath?: string } =
+        COMPANY_HOST_TERMINAL_MESSAGE_TYPES[message.type] === true
+          ? message
+          : { ...message, workspacePath: folder.path };
+      this.options.broadcast(frame);
+    }
     if (changesWorkCounts(message)) this.scheduleRecount();
   }
 

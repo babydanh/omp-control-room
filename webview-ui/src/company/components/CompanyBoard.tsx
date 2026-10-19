@@ -40,6 +40,7 @@ import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS, type CompanyLaneId } from '../constants.js';
+import type { FolderIdentity } from '../folderIdentity.js';
 import { isLaneCollapsed, packLanes } from '../laneLayout.js';
 import {
   defaultActiveLane,
@@ -56,6 +57,7 @@ import { useElementWidth } from '../useElementWidth.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useNow } from '../useNow.js';
+import { FolderTag } from './FolderTag.js';
 import { Icon } from './Icon.js';
 import { StatusDot } from './StatusDot.js';
 
@@ -72,6 +74,8 @@ export interface CompanyBoardProps {
   selectedPaneId: string | null;
   selectedSessionId: string | null;
   onMenu: (request: AgentMenuRequest) => void;
+  /** The folder a card's id belongs to, shown as a tag in all mode; null outside it. */
+  identityOf: (id: string) => FolderIdentity | null;
 }
 
 /**
@@ -111,11 +115,13 @@ function PlanningCard({
   index,
   onSelect,
   onMenu,
+  folder,
 }: {
   prompt: PlanningPrompt;
   index: number;
   onSelect: () => void;
   onMenu: (request: AgentMenuRequest) => void;
+  folder: FolderIdentity | null;
 }) {
   const triggers = useAgentMenuGestures<HTMLButtonElement>(
     { kind: 'planning', promptId: prompt.promptId, sessionId: prompt.session?.id ?? null },
@@ -137,6 +143,7 @@ function PlanningCard({
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         {prompt.preview}
       </span>
+      {folder !== null && <FolderTag identity={folder} className="mt-0.5" />}
       <span className="mt-0.5 block truncate text-2xs text-text-muted">
         Giám đốc đang lập kế hoạch
         {prompt.session && (
@@ -218,11 +225,13 @@ function TaskCard({
   index,
   onSelect,
   onMenu,
+  folder,
 }: {
   card: BoardCard;
   index: number;
   onSelect: () => void;
   onMenu: (request: AgentMenuRequest) => void;
+  folder: FolderIdentity | null;
 }) {
   const edge = card.session ? ROLE_EDGE_CLASS[card.session.role] : '';
   const actions = useTerminalPreview();
@@ -252,6 +261,7 @@ function TaskCard({
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         <span className="font-mono text-2xs text-text-muted">{card.code}</span> {card.title}
       </span>
+      {folder !== null && <FolderTag identity={folder} />}
       <TaskMeta card={card} />
     </button>
   );
@@ -270,6 +280,7 @@ function AgentCard({
   onOpen,
   onMenu,
   now,
+  folder,
 }: {
   card: AgentBoardCard;
   index: number;
@@ -277,6 +288,7 @@ function AgentCard({
   onOpen: () => void;
   onMenu: (request: AgentMenuRequest) => void;
   now: number;
+  folder: FolderIdentity | null;
 }) {
   const { subject } = card;
   const target: PreviewTarget =
@@ -321,6 +333,7 @@ function AgentCard({
       <span className="line-clamp-3 break-normal text-sm font-medium leading-[1.3] text-text">
         {card.title}
       </span>
+      {folder !== null && <FolderTag identity={folder} />}
       {card.activity !== null && (
         <span className="line-clamp-2 break-words text-2xs text-text-muted">{card.activity}</span>
       )}
@@ -392,6 +405,7 @@ export function CompanyBoard({
   selectedPaneId,
   selectedSessionId,
   onMenu,
+  identityOf,
 }: CompanyBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
@@ -512,6 +526,7 @@ export function CompanyBoard({
                   index={index}
                   onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
                   onMenu={onMenu}
+                  folder={identityOf(prompt.promptId)}
                 />
               ))}
               {lane.cards.map((card, index) => (
@@ -521,6 +536,7 @@ export function CompanyBoard({
                   index={index}
                   onSelect={() => onSelectTask(card.taskId)}
                   onMenu={onMenu}
+                  folder={identityOf(card.taskId)}
                 />
               ))}
               {lane.agents.map((agent, index) => (
@@ -536,6 +552,9 @@ export function CompanyBoard({
                   }
                   onOpen={() => openAgent(agent.subject)}
                   onMenu={onMenu}
+                  folder={
+                    agent.subject.kind === 'session' ? identityOf(agent.subject.sessionId) : null
+                  }
                 />
               ))}
             </div>

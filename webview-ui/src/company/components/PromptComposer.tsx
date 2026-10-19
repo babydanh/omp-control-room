@@ -44,6 +44,8 @@ import {
   startNewChat,
   terminalLine,
 } from '../composerRouting.js';
+import { showsAllFolders } from '../folderIdentity.js';
+import { focusFolder, FOLDER_LIST_LOADING_MESSAGE, folderListLoading } from '../folderView.js';
 import { isCompanyChord, promptBlockReason, type PromptRoute } from '../promptSubmission.js';
 import { draftAfterSend, herdrAgentFor, sendPrompt } from '../promptTargets.js';
 import {
@@ -53,6 +55,7 @@ import {
   type OmpSlashCommand,
 } from '../slashCommands.js';
 import { useCompanyState } from '../useCompanyState.js';
+import { folderLabel, folderLabelFor } from '../workspaces.js';
 import { CompanyButton } from './CompanyButton.js';
 import { OmpSessionPicker } from './OmpSessionPicker.js';
 
@@ -142,6 +145,14 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const herdrTarget = herdrAgentFor(state.selection.herdrPaneId, state.herdr.agents);
   const busy = draft.pendingSubmit !== null || herdrRequest !== null;
   const blocker = promptBlockReason(draft);
+  // The folder a new session or company prompt goes to. In all mode the composer names it.
+  const focus = focusFolder(state);
+  const pickerFolders = showsAllFolders(state)
+    ? (state.workspaces ?? []).filter((entry) => entry.open)
+    : [];
+  // Until the server's folder list arrives, a message with no session has no folder to go to.
+  const folderLoading = folderListLoading(state);
+  const newSessionWaits = folderLoading && selectedSession === null;
   const resumeView =
     resumeRequest === null
       ? null
@@ -251,6 +262,10 @@ export function PromptComposer({ client }: PromptComposerProps) {
    * prompt. The draft clears with the command. A refusal is shown here.
    */
   const openNewChat = () => {
+    if (folderListLoading(state)) {
+      setNotice(FOLDER_LIST_LOADING_MESSAGE);
+      return;
+    }
     setNotice(null);
     client.setDraftText('');
     void startNewChat(client).then((verdict) => {
@@ -471,7 +486,13 @@ export function PromptComposer({ client }: PromptComposerProps) {
           size="sm"
           variant="default"
           className="shrink-0 whitespace-nowrap"
-          disabled={blocker !== null || busy || resumeRequest !== null || herdrTarget !== null}
+          disabled={
+            blocker !== null ||
+            busy ||
+            resumeRequest !== null ||
+            herdrTarget !== null ||
+            newSessionWaits
+          }
           title={herdrTarget === null ? undefined : HERDR_COMPANY_TOOLTIP}
           onClick={() => send(companyRoute(selectedSession))}
         >
@@ -481,7 +502,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           size="sm"
           variant="accent"
           className="shrink-0"
-          disabled={blocker !== null || busy || resumeRequest !== null}
+          disabled={blocker !== null || busy || resumeRequest !== null || newSessionWaits}
           onClick={onSubmitKey}
         >
           {busy ? 'Đang gửi...' : 'Gửi'}
@@ -491,6 +512,22 @@ export function PromptComposer({ client }: PromptComposerProps) {
         <span className="min-w-0 truncate" data-testid="prompt-target">
           {sendTargetLabel(selectedSession, herdrTarget)}
         </span>
+        {pickerFolders.length > 0 && focus !== null && (
+          <select
+            aria-label="Thư mục nhận việc mới"
+            title={`Thư mục nhận việc mới: ${folderLabelFor(state.workspaces, focus)}`}
+            value={focus}
+            onChange={(event) => client.setFocusFolder(event.target.value)}
+            data-testid="prompt-folder"
+            className="min-w-0 max-w-[160px] shrink cursor-pointer truncate rounded-(--company-radius-sm) bg-transparent px-1 text-2xs text-text-muted hover:bg-hover"
+          >
+            {pickerFolders.map((entry) => (
+              <option key={entry.path} value={entry.path} className="bg-raised text-text">
+                {folderLabel(entry)}
+              </option>
+            ))}
+          </select>
+        )}
         <span className="min-w-0 truncate" title={modelLabel}>
           {modelLabel}
         </span>
@@ -506,6 +543,11 @@ export function PromptComposer({ client }: PromptComposerProps) {
       {notice !== null && (
         <p className="mt-1 text-2xs text-warning" data-testid="prompt-notice">
           {notice}
+        </p>
+      )}
+      {newSessionWaits && (
+        <p className="mt-1 text-2xs text-text-muted" data-testid="prompt-folder-loading">
+          {FOLDER_LIST_LOADING_MESSAGE}
         </p>
       )}
       {error !== null && (

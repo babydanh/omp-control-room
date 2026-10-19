@@ -10,12 +10,14 @@ import type {
   CompanyCommandContext,
   CompanyCommandServices,
   CompanyTerminalGateway,
+  CompanyWorkspaceControl,
 } from '../src/company/clientCommands.js';
 import type {
   CompanyCoordinator,
   CompanySessionAction,
 } from '../src/company/companyCoordinator.js';
 import { COMPANY_SESSION_NAME_MAX_LENGTH } from '../src/company/companyCoordinator.js';
+import { CompanyError } from '../src/company/companyError.js';
 import type { CompanyStore } from '../src/company/companyStore.js';
 import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
 
@@ -101,6 +103,7 @@ function fakeCoordinator(overrides: Partial<CompanyCoordinator> = {}): {
     submitJudgeResult: async () => {
       throw new Error('Native Judge verdicts are not browser commands.');
     },
+    holdsId: () => false,
     snapshot: () => {
       calls.push({ method: 'snapshot', args: [] });
       return snapshot;
@@ -179,6 +182,7 @@ function companyCommands(): Record<string, Record<string, unknown>> {
     companySessionResume: { requestId: randomUUID(), file: '/omp/saved.jsonl' },
     companyOmpSessionsRequest: { requestId: randomUUID() },
     companyChatNew: { requestId: randomUUID() },
+    companyViewMode: { requestId: randomUUID(), mode: 'all' },
     companyAttachmentUpload: {
       requestId: randomUUID(),
       fileName: 'shot.png',
@@ -280,6 +284,7 @@ describe('company client commands', () => {
       'companySessionLogRequest',
       'companySessionInfoRequest',
       'companyOmpSessionsRequest',
+      'companyViewMode',
     ]);
     for (const [type, msg] of Object.entries(commands)) {
       if (readOnly.has(type)) continue;
@@ -335,6 +340,7 @@ describe('company client commands', () => {
     await vi.waitFor(() => expect(replies('companySnapshot')).toHaveLength(1));
     const [reply] = replies('companySnapshot');
     expect(reply.requestId).toBe(requestId);
+    expect(reply.workspacePath).toBe(workspace);
     expect(reply.snapshot.revision).toBe(7);
   });
 
@@ -894,5 +900,275 @@ describe('company client commands', () => {
     expect(
       calls.some((call) => call.method === 'cancelPrompt' || call.method === 'resumeOmpSession'),
     ).toBe(false);
+  });
+
+  describe('across open folders', () => {
+    /** A second open folder beside the active one, with its own coordinator and store. */
+    async function openSecondFolder(overrides: Partial<CompanyCoordinator> = {}) {
+      const root = path.join(tempHome, 'other');
+      await fs.promises.mkdir(root, { recursive: true });
+      const otherStore = await RealCompanyStore.open(root);
+      await otherStore.load();
+      const fake = fakeCoordinator(overrides);
+      const folderServices: CompanyCommandServices = {
+        ...services,
+        coordinator: fake.coordinator,
+        store: otherStore,
+        workspaceRoot: root,
+      };
+      return { root, services: folderServices, calls: fake.calls };
+    }
+
+    /** A folder control over the given open folders; `activeRoot` names the active one. */
+    function controlOver(
+      open: Record<string, CompanyCommandServices>,
+      activeRoot: string | null,
+    ): CompanyWorkspaceControl {
+      const find = (root: string): CompanyCommandServices | null =>
+        Object.hasOwn(open, root) ? open[root] : null;
+      return {
+        entries: () =>
+          Object.keys(open).map((root) => ({
+            path: root,
+            active: root === activeRoot,
+            open: true,
+            working: 0,
+            waiting: 0,
+          })),
+        open: async () => {
+          throw new Error('folder switching is not exercised here');
+        },
+        ensure: async (root) => {
+          const found = find(root);
+          if (found === null) {
+            throw new CompanyError('workspace_invalid', `Không tìm thấy thư mục: ${root}`);
+          }
+          return found;
+        },
+        servicesFor: find,
+        servicesHolding: (id) =>
+          Object.values(open).find((candidate) => candidate.coordinator.holdsId(id)) ?? null,
+        activeServices: () => (activeRoot === null ? null : find(activeRoot)),
+        activePath: () => activeRoot,
+        setFolderName: () => undefined,
+      };
+    }
+
+    it('runs a command in the folder its workspacePath names, not the active one', async () => {
+      const second = await openSecondFolder();
+      const workspaces = controlOver(
+        { [workspace]: services, [second.root]: second.services },
+        workspace,
+      );
+      handleCompanyCommand(
+        { type: 'companyChatNew', requestId: randomUUID(), workspacePath: second.root },
+        send,
+        context({ workspaces }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: true, sessionId: 'session-new-chat' });
+      expect(second.calls).toEqual([{ method: 'openNewChat', args: [] }]);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('routes a command bound to an id to the open folder that holds that id', async () => {
+      const heldSession = randomUUID();
+      const second = await openSecondFolder({ holdsId: (id) => id === heldSession });
+      const workspaces = controlOver(
+        { [workspace]: services, [second.root]: second.services },
+        workspace,
+      );
+      handleCompanyCommand(
+        {
+          type: 'companySessionControl',
+          requestId: randomUUID(),
+          sessionId: heldSession,
+          runEpoch: 2,
+          action: 'pause',
+        },
+        send,
+        context({ workspaces }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: true });
+      expect(second.calls.map((call) => call.method)).toEqual(['controlSession']);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('sends an id no open folder holds to the active folder', async () => {
+      const second = await openSecondFolder();
+      const workspaces = controlOver(
+        { [workspace]: services, [second.root]: second.services },
+        workspace,
+      );
+      handleCompanyCommand(
+        {
+          type: 'companySessionControl',
+          requestId: randomUUID(),
+          sessionId: randomUUID(),
+          runEpoch: 2,
+          action: 'pause',
+        },
+        send,
+        context({ workspaces }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(calls.map((call) => call.method)).toEqual(['controlSession']);
+      expect(second.calls).toHaveLength(0);
+    });
+
+    it('refuses a creation command that names no folder, even while a folder is active', async () => {
+      const workspaces = controlOver({ [workspace]: services }, workspace);
+      handleCompanyCommand(
+        { type: 'companyChatNew', requestId: randomUUID() },
+        send,
+        context({ workspaces }),
+      );
+      handleCompanyCommand(
+        { type: 'companySessionResume', requestId: randomUUID(), file: '/omp/saved.jsonl' },
+        send,
+        context({ workspaces }),
+      );
+      handleCompanyCommand(
+        {
+          type: 'companyPromptSubmit',
+          prompt: { requestId: randomUUID(), text: 'start', delivery: 'prompt' },
+        },
+        send,
+        context({ workspaces }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(3));
+      expect(results().map((result) => result.errorCode)).toEqual([
+        'workspace_required',
+        'workspace_required',
+        'workspace_required',
+      ]);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('routes a prompt aimed at a session to the folder holding that session', async () => {
+      const heldSession = randomUUID();
+      const second = await openSecondFolder({ holdsId: (id) => id === heldSession });
+      const workspaces = controlOver(
+        { [workspace]: services, [second.root]: second.services },
+        workspace,
+      );
+      handleCompanyCommand(
+        {
+          type: 'companyPromptSubmit',
+          prompt: {
+            requestId: randomUUID(),
+            text: 'continue',
+            delivery: 'prompt',
+            targetSessionId: heldSession,
+          },
+        },
+        send,
+        context({ workspaces }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: true });
+      expect(second.calls.map((call) => call.method)).toEqual(['submitPrompt']);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('refuses a command that names a folder which cannot be opened, and runs nothing', async () => {
+      const workspaces = controlOver({ [workspace]: services }, workspace);
+      handleCompanyCommand(
+        {
+          type: 'companyChatNew',
+          requestId: randomUUID(),
+          workspacePath: path.join(tempHome, 'missing'),
+        },
+        send,
+        context({ workspaces }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: false, errorCode: 'workspace_invalid' });
+      expect(calls).toHaveLength(0);
+    });
+
+    it('records the company view through the callback and refuses an unknown view', async () => {
+      const modes: string[] = [];
+      const requestId = randomUUID();
+      handleCompanyCommand(
+        { type: 'companyViewMode', requestId, mode: 'all' },
+        send,
+        context({ onCompanyViewMode: (mode) => modes.push(mode) }),
+      );
+      handleCompanyCommand(
+        { type: 'companyViewMode', requestId: randomUUID(), mode: 'everything' },
+        send,
+        context({ onCompanyViewMode: (mode) => modes.push(mode) }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(2));
+      expect(results().find((result) => result.requestId === requestId)).toMatchObject({
+        ok: true,
+      });
+      expect(results().find((result) => result.errorCode === 'invalid_request')).toBeDefined();
+      expect(modes).toEqual(['all']);
+    });
+
+    it('answers an all-folders snapshot request with one tagged snapshot per open folder', async () => {
+      const second = await openSecondFolder();
+      const workspaces = controlOver(
+        { [workspace]: services, [second.root]: second.services },
+        workspace,
+      );
+      const requestId = randomUUID();
+      handleCompanyCommand(
+        { type: 'companySnapshotRequest', requestId },
+        send,
+        context({ workspaces, companyViewMode: () => 'all' }),
+      );
+      await vi.waitFor(() => expect(replies('companySnapshot')).toHaveLength(2));
+      expect(replies('companySnapshot').map((reply) => reply.workspacePath)).toEqual([
+        workspace,
+        second.root,
+      ]);
+      expect(replies('companySnapshot').every((reply) => reply.requestId === requestId)).toBe(true);
+    });
+
+    it('answers a snapshot request with the active folder only when the view is folder', async () => {
+      const second = await openSecondFolder();
+      const workspaces = controlOver(
+        { [workspace]: services, [second.root]: second.services },
+        workspace,
+      );
+      handleCompanyCommand(
+        { type: 'companySnapshotRequest', requestId: randomUUID() },
+        send,
+        context({ workspaces, companyViewMode: () => 'folder' }),
+      );
+      await vi.waitFor(() => expect(replies('companySnapshot')).toHaveLength(1));
+      expect(replies('companySnapshot')[0].workspacePath).toBe(workspace);
+      expect(second.calls).toHaveLength(0);
+    });
+
+    it('answers a snapshot request that names a folder, and refuses one that is not open', async () => {
+      const second = await openSecondFolder();
+      const workspaces = controlOver(
+        { [workspace]: services, [second.root]: second.services },
+        workspace,
+      );
+      handleCompanyCommand(
+        { type: 'companySnapshotRequest', requestId: randomUUID(), workspacePath: second.root },
+        send,
+        context({ workspaces }),
+      );
+      await vi.waitFor(() => expect(replies('companySnapshot')).toHaveLength(1));
+      expect(replies('companySnapshot')[0].workspacePath).toBe(second.root);
+      handleCompanyCommand(
+        {
+          type: 'companySnapshotRequest',
+          requestId: randomUUID(),
+          workspacePath: path.join(tempHome, 'closed'),
+        },
+        send,
+        context({ workspaces }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: false, errorCode: 'workspace_not_open' });
+    });
   });
 });

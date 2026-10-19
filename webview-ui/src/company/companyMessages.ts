@@ -28,6 +28,7 @@ import {
   COMPANY_TERMINAL_DEFAULT_COLS,
   COMPANY_TERMINAL_DEFAULT_ROWS,
 } from './constants.js';
+import type { CompanyViewMode } from './folderView.js';
 
 const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   companySnapshot: true,
@@ -44,6 +45,7 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   herdrInfo: true,
   companyOmpSessions: true,
   companyWorkspaces: true,
+  companyFolderBrowse: true,
   herdrAgents: true,
   herdrScreen: true,
   terminalAttached: true,
@@ -70,15 +72,29 @@ export function newRequestId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/**
+ * The optional folder a folder-scoped request names. Absent means the server answers
+ * for the folder it already has active.
+ */
+function folderField(workspacePath: string | undefined): { workspacePath?: string } {
+  return workspacePath === undefined ? {} : { workspacePath };
+}
+
 export function companySnapshotRequest(
   requestId: string,
   includeDiagnostics = false,
+  workspacePath?: string,
 ): ClientMessage {
-  return { type: 'companySnapshotRequest', requestId, includeDiagnostics };
+  return {
+    type: 'companySnapshotRequest',
+    requestId,
+    includeDiagnostics,
+    ...folderField(workspacePath),
+  };
 }
 
-export function promptSubmit(input: SubmitPromptInput): ClientMessage {
-  return { type: 'companyPromptSubmit', prompt: input };
+export function promptSubmit(input: SubmitPromptInput, workspacePath?: string): ClientMessage {
+  return { type: 'companyPromptSubmit', prompt: input, ...folderField(workspacePath) };
 }
 
 export function contractDecision(
@@ -116,8 +132,8 @@ export function sessionControl(
 }
 
 /** Open a new omp chat session in the folder. No prompt is sent; the verdict carries the id. */
-export function chatNew(requestId: string): ClientMessage {
-  return { type: 'companyChatNew', requestId };
+export function chatNew(requestId: string, workspacePath?: string): ClientMessage {
+  return { type: 'companyChatNew', requestId, ...folderField(workspacePath) };
 }
 
 /** Withdraw a prompt no Contract holds yet; the server stops and deletes what planned it. */
@@ -125,28 +141,57 @@ export function promptCancel(requestId: string, promptId: string): ClientMessage
   return { type: 'companyPromptCancel', requestId, promptId };
 }
 
-/** Read-only: the omp sessions saved for the folder the board is pointed at. */
-export function ompSessionsRequest(requestId: string): ClientMessage {
-  return { type: 'companyOmpSessionsRequest', requestId };
+/** Read-only: the omp sessions saved for one folder, the active one when none is named. */
+export function ompSessionsRequest(requestId: string, workspacePath?: string): ClientMessage {
+  return { type: 'companyOmpSessionsRequest', requestId, ...folderField(workspacePath) };
 }
 
-export function sessionResume(requestId: string, file: string): ClientMessage {
-  return { type: 'companySessionResume', requestId, file };
+export function sessionResume(
+  requestId: string,
+  file: string,
+  workspacePath?: string,
+): ClientMessage {
+  return { type: 'companySessionResume', requestId, file, ...folderField(workspacePath) };
 }
 
 export function workspaceOpen(requestId: string, path: string): ClientMessage {
   return { type: 'companyWorkspaceOpen', requestId, path };
 }
 
+/** List the folders under `path`, or the start view when none is named. */
+export function folderBrowseRequest(requestId: string, path?: string): ClientMessage {
+  return {
+    type: 'companyFolderBrowseRequest',
+    requestId,
+    ...(path === undefined ? {} : { path }),
+  };
+}
+
+/** Create a folder called `name` inside `parentPath`. The verdict is a companyCommandResult. */
+export function folderCreate(requestId: string, parentPath: string, name: string): ClientMessage {
+  return { type: 'companyFolderCreate', requestId, parentPath, name };
+}
+
+/** Give the folder at `path` a display name; an empty name removes it. */
+export function folderName(requestId: string, path: string, name: string): ClientMessage {
+  return { type: 'companyFolderName', requestId, path, name };
+}
+
+/** Which folders the server streams to this board: every open one, or only the active one. */
+export function companyViewMode(requestId: string, mode: CompanyViewMode): ClientMessage {
+  return { type: 'companyViewMode', requestId, mode };
+}
+
 export function settingsUpdate(
   requestId: string,
   roleProfiles: Record<string, RoleProfile>,
+  workspacePath?: string,
 ): ClientMessage {
-  return { type: 'companySettingsUpdate', requestId, roleProfiles };
+  return { type: 'companySettingsUpdate', requestId, roleProfiles, ...folderField(workspacePath) };
 }
 
-export function modelCatalogRequest(requestId: string): ClientMessage {
-  return { type: 'companyModelCatalogRequest', requestId };
+export function modelCatalogRequest(requestId: string, workspacePath?: string): ClientMessage {
+  return { type: 'companyModelCatalogRequest', requestId, ...folderField(workspacePath) };
 }
 
 export function artifactRequest(
@@ -154,12 +199,24 @@ export function artifactRequest(
   artifactId: string,
   offset = 0,
   limit = COMPANY_ARTIFACT_PAGE_BYTES,
+  workspacePath?: string,
 ): ClientMessage {
-  return { type: 'companyArtifactRequest', requestId, artifactId, offset, limit };
+  return {
+    type: 'companyArtifactRequest',
+    requestId,
+    artifactId,
+    offset,
+    limit,
+    ...folderField(workspacePath),
+  };
 }
 
-export function fileListRequest(requestId: string, path: string): ClientMessage {
-  return { type: 'companyFileListRequest', requestId, path };
+export function fileListRequest(
+  requestId: string,
+  path: string,
+  workspacePath?: string,
+): ClientMessage {
+  return { type: 'companyFileListRequest', requestId, path, ...folderField(workspacePath) };
 }
 
 export function fileReadRequest(
@@ -167,8 +224,16 @@ export function fileReadRequest(
   path: string,
   offset = 0,
   limit = COMPANY_FILE_PAGE_BYTES,
+  workspacePath?: string,
 ): ClientMessage {
-  return { type: 'companyFileReadRequest', requestId, path, offset, limit };
+  return {
+    type: 'companyFileReadRequest',
+    requestId,
+    path,
+    offset,
+    limit,
+    ...folderField(workspacePath),
+  };
 }
 
 export function terminalAttach(

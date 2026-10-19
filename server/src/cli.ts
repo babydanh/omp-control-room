@@ -30,9 +30,11 @@ import {
   getHooksConsent,
   getHooksEnabled,
   grantHooksConsent,
+  readCompanyFolderNames,
   readConfig,
   readRecentCompanyWorkspaces,
   rememberRecentCompanyWorkspace,
+  setCompanyFolderName,
 } from './configPersistence.js';
 import {
   MAX_PORT,
@@ -270,6 +272,7 @@ async function main(): Promise<void> {
       extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
     },
     recents: { read: readRecentCompanyWorkspaces, remember: rememberRecentCompanyWorkspace },
+    names: { read: readCompanyFolderNames, set: setCompanyFolderName },
   });
   // Cây git board: scans the repos seen in recent activity plus the open company folders.
   const ledger = createLedgerService({

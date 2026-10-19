@@ -68,6 +68,7 @@ export type AgentMenuAction =
   | { kind: 'cancelPrompt' }
   | { kind: 'toggleProject' }
   | { kind: 'openBoardFolder' }
+  | { kind: 'renameFolder' }
   | { kind: 'cleanErrored' }
   | { kind: 'wake' };
 
@@ -387,6 +388,12 @@ export function projectMenuItems(project: ProjectMenuFacts): AgentMenuItem[] {
             label: 'Sao chép đường dẫn',
             icon: 'copy',
             action: { kind: 'copy', what: 'path' },
+          }),
+          item({
+            id: 'rename-folder',
+            label: 'Đổi tên thư mục',
+            icon: 'pencil',
+            action: { kind: 'renameFolder' },
           }),
         ]),
     ...withGroupStart(

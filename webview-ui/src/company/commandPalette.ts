@@ -7,8 +7,10 @@
 import type { CompanyFileEntry, HerdrAgent, Task } from '../../../core/src/company.js';
 import { sleepingName } from './agentSidebarView.js';
 import type { CompanyViewState } from './companyState.js';
+import { UNTAGGED_FOLDER } from './folderView.js';
 import { companyRoleLabel } from './roleProfiles.js';
 import { sessionStatusLabel, taskStatusLabel } from './statusLabels.js';
+import { folderLabelFor } from './workspaces.js';
 
 export type PaletteGroup = 'action' | 'session' | 'task' | 'herdr' | 'sleeping' | 'folder' | 'file';
 
@@ -147,10 +149,15 @@ function keywordsOf(...parts: readonly (string | undefined)[]): string {
     .join(' ');
 }
 
-/** The final folder name of a path, separators either way. */
-function lastSegment(path: string): string {
-  const segments = path.split(/[\\/]/).filter((segment) => segment !== '');
-  return segments.at(-1) ?? path;
+/**
+ * The folder a session's row names. Only all mode needs it: a folder-mode board shows one
+ * folder, and a session with no folder tag has none to name.
+ */
+function sessionFolderLabel(state: CompanyViewState, sessionId: string): string | null {
+  if (state.viewMode !== 'all') return null;
+  const path: string | undefined = state.folderOf[sessionId];
+  if (path === undefined || path === UNTAGGED_FOLDER) return null;
+  return folderLabelFor(state.workspaces, path);
 }
 
 /** The path under the workspace root, or the path itself when it is not under the root. */
@@ -216,12 +223,14 @@ export function buildPaletteItems(
     const status = sessionStatusLabel(session.status);
     const activeTask: Task | undefined =
       session.activeTaskId === undefined ? undefined : state.tasks[session.activeTaskId];
+    const place = sessionFolderLabel(state, session.id);
+    const detail = `${session.code} · ${role} · ${status}`;
     add({
       id: `session:${session.id}`,
       group: 'session',
       target: { kind: 'session', sessionId: session.id },
       title: nonEmpty(session.name) ?? session.code,
-      subtitle: `${session.code} · ${role} · ${status}`,
+      subtitle: place === null ? detail : `${place} · ${detail}`,
       keywords: keywordsOf(
         session.code,
         session.role,
@@ -280,7 +289,7 @@ export function buildPaletteItems(
       id: `folder:${path}`,
       group: 'folder',
       target: { kind: 'folder', path },
-      title: lastSegment(path),
+      title: folderLabelFor(state.workspaces, path),
       subtitle: path === folder.activePath ? `${path} · đang mở` : path,
       keywords: path,
     });

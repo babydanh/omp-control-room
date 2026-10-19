@@ -27,27 +27,20 @@
 
 import type {
   AgentInfo,
-  Attempt,
-  CompanyCounters,
-  CompanyDiagnostics,
   CompanyModelCatalogEntry,
   CompanyPromptSummary,
   CompanyReport,
   CompanySessionLogEntry,
   CompanySessionSummary,
-  CompanySettings,
   CompanySnapshot,
-  Contract,
   HerdrAgent,
-  Question,
-  QuotaSnapshot,
   Task,
   UsageRecord,
-  VerificationEvidence,
 } from '../../../core/src/company.js';
 import type {
   CompanyFileContent,
   CompanyFileEntry,
+  CompanyFolderBrowseMessage,
   CompanyRemoveChange,
   CompanyStateChangedMessage,
   CompanyWorkspaceEntry,
@@ -63,6 +56,17 @@ import {
   COMPANY_TEXT_STREAM_MAX_CHARS,
 } from './constants.js';
 import {
+  type CompanyViewMode,
+  DEFAULT_VIEW_MODE,
+  emptyFolderScope,
+  focusFolder,
+  folderKeyOf,
+  type FolderScope,
+  foldersInView,
+  mergeFolderScopes,
+  UNTAGGED_FOLDER,
+} from './folderView.js';
+import {
   applySubmitResult,
   EMPTY_PROMPT_DRAFT,
   type PromptDraftState,
@@ -77,7 +81,7 @@ export type CompanyPutChange = Exclude<
 
 /** What the client must do as a consequence of a reduced message. */
 export type CompanyEffect =
-  | { type: 'requestSnapshot' }
+  | { type: 'requestSnapshot'; workspacePath?: string }
   | { type: 'requestModelCatalog' }
   | { type: 'reAttachTerminal'; sessionId: string; runEpoch: number };
 
@@ -247,30 +251,24 @@ export interface PendingWorkspaceSelection {
   confirmed: boolean;
 }
 
-export interface CompanyViewState {
-  /** Last revision the client can account for; null before the first snapshot. */
-  revision: number | null;
-  /** True when a change was missed and a snapshot has been requested. */
-  needsSnapshot: boolean;
-  settings: CompanySettings | null;
-  prompts: CompanyPromptSummary[];
-  contracts: Record<string, Contract>;
-  tasks: Record<string, Task>;
-  sessions: Record<string, SessionView>;
-  questions: Record<string, Question>;
-  attempts: Record<string, Attempt>;
-  evidence: Record<string, VerificationEvidence>;
-  reports: Record<string, CompanyReport>;
-  /** Keyed by (nativeSessionId, nativeEntryId) so a re-sent entry cannot double count. */
-  usage: Record<string, UsageRecord>;
-  quotas: Record<string, QuotaSnapshot>;
-  counters: CompanyCounters | null;
-  diagnostics: CompanyDiagnostics | null;
+/**
+ * The board's view. The company fields it inherits from FolderScope are the merged view of
+ * the folders in view; `folders` keeps each folder's own data, and the view is derived from
+ * it on every change.
+ */
+export interface CompanyViewState extends FolderScope {
+  /** Each folder's own company data, keyed by the folder path the server tags it with. */
+  folders: Record<string, FolderScope>;
+  /** `all` merges every open folder; `folder` shows only the active one. */
+  viewMode: CompanyViewMode;
+  /** The folder the user last picked or created in; the target of new work in `all` mode. */
+  focusPath: string | null;
+  /** The folder each session, task, contract, question or prompt in view belongs to. */
+  folderOf: Record<string, string>;
   commandResults: Record<string, CommandResultView>;
   modelCatalog: CompanyModelCatalogEntry[];
   /** False until the server has answered the catalog request; an empty catalog before that is loading, not empty. */
   modelCatalogLoaded: boolean;
-  streams: Record<string, TextStreamView>;
   terminals: Record<string, TerminalView>;
   artifacts: Record<string, ArtifactView>;
   fileListings: Record<string, FileListingView>;
@@ -297,29 +295,27 @@ export interface CompanyViewState {
   pendingWorkspaceSelection: PendingWorkspaceSelection | null;
   /** Why the last choice of a session in another folder did not land; null when none failed. */
   workspaceSelectionNotice: string | null;
+  /** The listing the server sent for the latest folder browse; null until one arrives. */
+  folderBrowse: CompanyFolderBrowseMessage | null;
+  /** requestId of the latest folder browse; a listing under any other id is dropped. */
+  folderBrowseRequest: string | null;
 }
 
-export function emptyCompanyState(): CompanyViewState {
+export function emptyCompanyState(
+  view: { viewMode: CompanyViewMode; focusPath: string | null } = {
+    viewMode: DEFAULT_VIEW_MODE,
+    focusPath: null,
+  },
+): CompanyViewState {
   return {
-    revision: null,
-    needsSnapshot: false,
-    settings: null,
-    prompts: [],
-    contracts: {},
-    tasks: {},
-    sessions: {},
-    questions: {},
-    attempts: {},
-    evidence: {},
-    reports: {},
-    usage: {},
-    quotas: {},
-    counters: null,
-    diagnostics: null,
+    ...emptyFolderScope(),
+    folders: {},
+    folderOf: {},
+    viewMode: view.viewMode,
+    focusPath: view.focusPath,
     commandResults: {},
     modelCatalog: [],
     modelCatalogLoaded: false,
-    streams: {},
     terminals: {},
     artifacts: {},
     fileListings: {},
@@ -336,6 +332,8 @@ export function emptyCompanyState(): CompanyViewState {
     openingSessionId: null,
     pendingWorkspaceSelection: null,
     workspaceSelectionNotice: null,
+    folderBrowse: null,
+    folderBrowseRequest: null,
   };
 }
 
@@ -451,7 +449,7 @@ function isOlderInfo(incoming: AgentInfo, held: AgentInfo): boolean {
   return Number.isNaN(incomingAt) || incomingAt < heldAt;
 }
 
-function applySnapshot(state: CompanyViewState, snapshot: CompanySnapshot): CompanyViewState {
+function applySnapshot(scope: FolderScope, snapshot: CompanySnapshot): FolderScope {
   // A Contract embeds its tasks; the snapshot's own task list is the
   // authoritative one, and the embedded copies fill any task it omits.
   const tasks: Record<string, Task> = {};
@@ -465,7 +463,7 @@ function applySnapshot(state: CompanyViewState, snapshot: CompanySnapshot): Comp
   const sessions = indexById(snapshot.sessions);
 
   return {
-    ...state,
+    ...scope,
     revision: snapshot.revision,
     needsSnapshot: false,
     settings: snapshot.settings,
@@ -475,17 +473,18 @@ function applySnapshot(state: CompanyViewState, snapshot: CompanySnapshot): Comp
     sessions,
     questions: indexById(snapshot.questions),
     quotas: Object.fromEntries(snapshot.quotas.map((quota) => [quota.provider, quota])),
-    diagnostics: snapshot.diagnostics ?? state.diagnostics,
-    attempts: snapshot.attempts === undefined ? state.attempts : indexById(snapshot.attempts),
-    evidence: snapshot.evidence === undefined ? state.evidence : indexById(snapshot.evidence),
-    reports: snapshot.reports === undefined ? state.reports : indexReports(snapshot.reports),
-    usage: snapshot.usage === undefined ? state.usage : indexUsage(snapshot.usage),
-    sessionLogs: keepLive(state.sessionLogs, (sessionId) => sessions[sessionId] !== undefined),
-    sessionInfos: keepLive(state.sessionInfos, (sessionId) => sessions[sessionId] !== undefined),
+    diagnostics: snapshot.diagnostics ?? scope.diagnostics,
+    attempts: snapshot.attempts === undefined ? scope.attempts : indexById(snapshot.attempts),
+    evidence: snapshot.evidence === undefined ? scope.evidence : indexById(snapshot.evidence),
+    reports: snapshot.reports === undefined ? scope.reports : indexReports(snapshot.reports),
+    usage: snapshot.usage === undefined ? scope.usage : indexUsage(snapshot.usage),
   };
 }
 
-function applyChange(state: CompanyViewState, change: CompanyPutChange | CompanyRemoveChange) {
+function applyChange<S extends FolderScope>(
+  state: S,
+  change: CompanyPutChange | CompanyRemoveChange,
+): S {
   if (change.op === 'remove') {
     switch (change.entity) {
       case 'prompt':
@@ -503,11 +502,7 @@ function applyChange(state: CompanyViewState, change: CompanyPutChange | Company
       case 'session': {
         const sessions = { ...state.sessions };
         delete sessions[change.id];
-        const sessionLogs = { ...state.sessionLogs };
-        delete sessionLogs[change.id];
-        const sessionInfos = { ...state.sessionInfos };
-        delete sessionInfos[change.id];
-        return { ...state, sessions, sessionLogs, sessionInfos };
+        return { ...state, sessions };
       }
       case 'question': {
         const questions = { ...state.questions };
@@ -618,31 +613,35 @@ function applyChange(state: CompanyViewState, change: CompanyPutChange | Company
   }
 }
 
+/**
+ * One folder's state change, applied on its own revision baseline. A gap in that folder's
+ * revisions is repaired by asking for that folder's snapshot; the other folders are untouched.
+ */
 function applyStateChanged(
   state: CompanyViewState,
   message: CompanyStateChangedMessage,
 ): CompanyResult {
-  // A gap is open, or we never had a baseline: neither can be repaired by
-  // applying this change, so ask for the whole picture instead.
-  if (state.revision === null || state.needsSnapshot) {
-    if (state.needsSnapshot) return unchanged(state);
-    return { state: { ...state, needsSnapshot: true }, effects: [{ type: 'requestSnapshot' }] };
+  const key = folderKeyOf(message);
+  const scope = state.folders[key] ?? emptyFolderScope();
+  // A gap is open, or this folder never had a baseline: neither can be repaired by
+  // applying this change, so ask for its whole picture instead.
+  if (scope.revision === null || scope.needsSnapshot) {
+    if (scope.needsSnapshot) return unchanged(state);
+    return awaitFolderSnapshot(state, key);
   }
-  if (message.revision <= state.revision) return unchanged(state);
-  if (message.revision > state.revision + 1) {
-    return { state: { ...state, needsSnapshot: true }, effects: [{ type: 'requestSnapshot' }] };
-  }
+  if (message.revision <= scope.revision) return unchanged(state);
+  if (message.revision > scope.revision + 1) return awaitFolderSnapshot(state, key);
 
-  let next = state;
+  let next = scope;
   for (const change of message.changes) next = applyChange(next, change);
-  return { state: { ...next, revision: message.revision }, effects: [] };
+  return unchanged(withFolderScope(state, key, { ...next, revision: message.revision }));
 }
 
 function applyTextDelta(
-  state: CompanyViewState,
+  scope: FolderScope,
   message: Extract<ServerMessage, { type: 'companyTextDelta' }>,
-): CompanyViewState {
-  const existing = state.streams[message.sessionId];
+): FolderScope {
+  const existing = scope.streams[message.sessionId];
   // A restart is a new run: its text is not a continuation of the old tail.
   const base: TextStreamView =
     existing && existing.runEpoch === message.runEpoch
@@ -654,12 +653,12 @@ function applyTextDelta(
           tail: '',
           excerpt: '',
         };
-  if (message.seq <= base.seq) return state;
+  if (message.seq <= base.seq) return scope;
   const tail = (base.tail + message.text).slice(-COMPANY_TEXT_STREAM_MAX_CHARS);
   return {
-    ...state,
+    ...scope,
     streams: {
-      ...state.streams,
+      ...scope.streams,
       [message.sessionId]: {
         ...base,
         seq: message.seq,
@@ -749,8 +748,11 @@ function applyWorkspaces(
 ): CompanyViewState {
   const before = state.workspaces?.find((entry) => entry.active)?.path ?? null;
   const after = workspaces.find((entry) => entry.active)?.path ?? null;
-  const held: CompanyViewState = { ...state, workspaces: [...workspaces] };
+  const held = project({ ...state, workspaces: [...workspaces] });
   if (state.workspaces === null || before === after) return held;
+  // Folder mode shows one folder, so the selection belonged to the folder it left.
+  // All mode shows every folder, so the selection and the terminals stay.
+  if (state.viewMode !== 'folder') return held;
   return {
     ...held,
     terminals: {},
@@ -758,6 +760,74 @@ function applyWorkspaces(
     ompSessions: null,
     openingSessionId: null,
   };
+}
+
+/** Stores one folder's company data, then re-derives the view the board reads. */
+function withFolderScope(
+  state: CompanyViewState,
+  key: string,
+  scope: FolderScope,
+): CompanyViewState {
+  return project({ ...state, folders: { ...state.folders, [key]: scope } });
+}
+
+/**
+ * Derives the flat view from the folders in view: their merged company data, plus the
+ * per-session data that the merged ids keep live.
+ */
+function project(state: CompanyViewState): CompanyViewState {
+  const input = {
+    viewMode: state.viewMode,
+    focusPath: state.focusPath,
+    workspaces: state.workspaces,
+  };
+  const inView = foldersInView(input, Object.keys(state.folders));
+  const focus = focusFolder(input) ?? inView[inView.length - 1] ?? null;
+  const { folderOf, ...scope } = mergeFolderScopes(
+    inView.map((path) => ({ path, scope: state.folders[path] ?? emptyFolderScope() })),
+    focus,
+  );
+  return {
+    ...state,
+    ...scope,
+    folderOf,
+    sessionLogs: keepLive(
+      state.sessionLogs,
+      (sessionId) => scope.sessions[sessionId] !== undefined,
+    ),
+    sessionInfos: keepLive(
+      state.sessionInfos,
+      (sessionId) => scope.sessions[sessionId] !== undefined,
+    ),
+  };
+}
+
+/**
+ * Asks the server for one folder's whole picture and marks that folder as waiting for it.
+ * The other folders keep their data and their revisions.
+ */
+function awaitFolderSnapshot(state: CompanyViewState, key: string): CompanyResult {
+  const scope = state.folders[key] ?? emptyFolderScope();
+  const effect: CompanyEffect =
+    key === UNTAGGED_FOLDER
+      ? { type: 'requestSnapshot' }
+      : { type: 'requestSnapshot', workspacePath: key };
+  return {
+    state: withFolderScope(state, key, { ...scope, needsSnapshot: true }),
+    effects: [effect],
+  };
+}
+
+/** Changes the board's view mode. A selection the new view no longer holds is dropped. */
+export function applyViewMode(state: CompanyViewState, mode: CompanyViewMode): CompanyViewState {
+  if (state.viewMode === mode) return state;
+  return settleSelection({ state: project({ ...state, viewMode: mode }), effects: [] }).state;
+}
+
+/** Sets the folder new work targets. Only `all` mode reads it; `folder` mode uses the active folder. */
+export function applyFocusFolder(state: CompanyViewState, path: string): CompanyViewState {
+  if (state.focusPath === path) return state;
+  return project({ ...state, focusPath: path });
 }
 
 function applyCommandResult(
@@ -898,14 +968,21 @@ export function applyCompanyMessage(
 
 function reduceMessage(state: CompanyViewState, message: ServerMessage): CompanyResult {
   switch (message.type) {
-    case 'companySnapshot':
-      return unchanged(dropMissingWorkspaceSelection(applySnapshot(state, message.snapshot)));
+    case 'companySnapshot': {
+      const key = folderKeyOf(message);
+      const scope = applySnapshot(state.folders[key] ?? emptyFolderScope(), message.snapshot);
+      return unchanged(dropMissingWorkspaceSelection(withFolderScope(state, key, scope)));
+    }
     case 'companyStateChanged':
       return applyStateChanged(state, message);
     case 'companyCommandResult':
       return applyCommandResult(state, message);
-    case 'companyTextDelta':
-      return unchanged(applyTextDelta(state, message));
+    case 'companyTextDelta': {
+      const key = folderKeyOf(message);
+      const scope = state.folders[key] ?? emptyFolderScope();
+      const next = applyTextDelta(scope, message);
+      return unchanged(next === scope ? state : withFolderScope(state, key, next));
+    }
     case 'companyModelCatalog':
       // The catalog is what the composer's image gate reads. A model the user
       // picked that the catalog no longer lists stays selected: the server
@@ -923,6 +1000,11 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
       });
     case 'companyWorkspaces':
       return unchanged(applyWorkspaces(state, message.workspaces));
+    case 'companyFolderBrowse': {
+      // Only the listing that answers the latest browse is held; an older one is a late answer.
+      const current = message.requestId === state.folderBrowseRequest;
+      return unchanged(current ? { ...state, folderBrowse: message } : state);
+    }
     case 'companyArtifactPage': {
       const page = message.page;
       const previous: ArtifactView = state.artifacts[page.id] ?? {

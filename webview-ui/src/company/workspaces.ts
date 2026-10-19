@@ -4,6 +4,7 @@
  */
 
 import type { CompanyWorkspaceEntry } from '../../../core/src/messages.js';
+import { folderBasename } from './folderView.js';
 
 /** Refusal shown when the folder field is submitted empty. */
 const BLANK_FOLDER_MESSAGE = 'Hãy nhập đường dẫn thư mục.';
@@ -18,10 +19,25 @@ export function activeWorkspace(
   return workspaces?.find((entry) => entry.active) ?? null;
 }
 
-/** Last segment of a folder path, for compact labels; the full path belongs in a title. */
-export function workspaceName(path: string): string {
-  const segments = path.split(/[\\/]+/).filter((segment) => segment !== '');
-  return segments[segments.length - 1] ?? path;
+/**
+ * What a folder is called on the board: its display name when it has one, else the last
+ * segment of its path. A blank name is no name.
+ */
+export function folderLabel(entry: { path: string; name?: string }): string {
+  const name = entry.name?.trim() ?? '';
+  return name === '' ? folderBasename(entry.path) : name;
+}
+
+/**
+ * The label of the folder at `path` in the server's list. A path the list does not hold, or
+ * any path before the list arrives, is named by its basename.
+ */
+export function folderLabelFor(
+  workspaces: readonly CompanyWorkspaceEntry[] | null,
+  path: string,
+): string {
+  const entry = workspaces?.find((candidate) => candidate.path === path);
+  return entry === undefined ? folderBasename(path) : folderLabel(entry);
 }
 
 /** What a folder is doing, in words. An idle folder reads as idle, never as a count of zero. */

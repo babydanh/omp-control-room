@@ -52,6 +52,7 @@ import type {
   ContractDecision,
 } from './companyCoordinator.js';
 import { COMPANY_SESSION_NAME_MAX_LENGTH } from './companyCoordinator.js';
+import { CompanyError } from './companyError.js';
 import type { CompanyStore } from './companyStore.js';
 import {
   COMPANY_ARTIFACT_PAGE_BYTES,
@@ -62,6 +63,13 @@ import {
   COMPANY_MAX_PROMPT_BYTES,
   COMPANY_TERMINAL_INPUT_MAX_BYTES,
 } from './constants.js';
+import type { CompanyViewMode } from './egress.js';
+import {
+  createFolder,
+  listFolder,
+  resolveFolderPath,
+  startView,
+} from './folderBrowser.js';
 import {
   isSessionLogId,
   readSessionLog,
@@ -125,6 +133,21 @@ export interface CompanyWorkspaceControl {
   entries(): CompanyWorkspaceEntry[];
   /** Open the folder if it is not open, then make it the active one. Refusals carry a user-facing message. */
   open(workspacePath: string): Promise<void>;
+  /** Services of the folder at this path, opening it first if needed, without making it active. */
+  ensure(workspacePath: string): Promise<CompanyCommandServices>;
+  /** Services of the open folder at this path, or `null` when it is not open. */
+  servicesFor(workspacePath: string): CompanyCommandServices | null;
+  /** Services of the open folder whose state holds this id, or `null` when none does. */
+  servicesHolding(id: string): CompanyCommandServices | null;
+  /** Services of the active folder, or `null` when none is active. */
+  activeServices(): CompanyCommandServices | null;
+  /** Path of the active folder, or `null` when none is active. */
+  activePath(): string | null;
+  /**
+   * Store or clear (`null`) a folder's display name, then republish the folder list. Refusals carry a user-facing
+   * message. The path must already be canonical.
+   */
+  setFolderName(workspacePath: string, name: string | null): void;
 }
 
 export interface CompanyCommandContext {
@@ -145,6 +168,10 @@ export interface CompanyCommandContext {
    * detach reply from revoking a newer attachment for the same session.
    */
   onTerminalDetached?: (sessionId: string, leaseId: string) => void;
+  /** Records the connection's company view (`all` or `folder`); the egress gate delivers accordingly. */
+  onCompanyViewMode?: (mode: CompanyViewMode) => void;
+  /** The connection's current company view, read when a snapshot request is answered. */
+  companyViewMode?: () => CompanyViewMode;
 }
 
 type Send = (message: ServerMessage) => void;
@@ -195,6 +222,13 @@ function isPromptDelivery(value: string): value is SubmitPromptInput['delivery']
   return PROMPT_DELIVERIES.has(value);
 }
 
+/** Folder browser and folder naming commands. They answer for the folder list, so they need no open folder. */
+const FOLDER_COMMAND_TYPES: ReadonlySet<string> = new Set([
+  'companyFolderBrowseRequest',
+  'companyFolderCreate',
+  'companyFolderName',
+]);
+
 /** Message types this dispatcher owns. Everything else is not a company command. */
 const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySnapshotRequest',
@@ -217,6 +251,8 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySessionLogRequest',
   'companyAttachmentUpload',
   'companyWorkspaceOpen',
+  ...FOLDER_COMMAND_TYPES,
+  'companyViewMode',
   'terminalAttach',
   'terminalInput',
   'terminalResize',
@@ -234,7 +270,15 @@ const READ_ONLY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySessionLogRequest',
   'companySessionInfoRequest',
   'companyOmpSessionsRequest',
+  'companyViewMode',
 ]);
+
+/** Commands that create a session or a prompt. They have no id to find a folder by, so they must name one. */
+const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
+  companyChatNew: true,
+  companySessionResume: true,
+  companyPromptSubmit: true,
+};
 
 export function isCompanyCommand(msg: Record<string, unknown>): boolean {
   return typeof msg.type === 'string' && COMPANY_COMMAND_TYPES.has(msg.type);
@@ -345,6 +389,18 @@ export function handleCompanyCommand(
   }
   if (msg.type === 'companyWorkspaceOpen') {
     void openWorkspace(requestId, stringField(msg, 'path'), ctx.workspaces ?? null, send);
+    return true;
+  }
+  if (FOLDER_COMMAND_TYPES.has(String(msg.type))) {
+    void folderCommand(msg, requestId, ctx.workspaces ?? null, send);
+    return true;
+  }
+  if (msg.type === 'companyViewMode') {
+    setViewMode(msg, requestId, ctx, send);
+    return true;
+  }
+  if (ctx.workspaces) {
+    void routeAndRun(msg, requestId, ctx.workspaces, send, ctx);
     return true;
   }
   const services = ctx.services;
@@ -553,6 +609,231 @@ async function openWorkspace(
   }
 }
 
+/**
+ * Folder browser, folder creation and folder naming. They answer for the folder list rather than for one folder's
+ * services, so they run before routing: a browse or a create needs no open folder.
+ */
+async function folderCommand(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  workspaces: CompanyWorkspaceControl | null,
+  send: Send,
+): Promise<void> {
+  try {
+    if (msg.type === 'companyFolderBrowseRequest') {
+      await browseFolders(msg, requestId, send);
+    } else if (msg.type === 'companyFolderCreate') {
+      await createFolderCommand(msg, requestId, send);
+    } else {
+      await nameFolderCommand(msg, requestId, workspaces, send);
+    }
+  } catch (err) {
+    fail(send, requestId, codeOf(err), messageOf(err));
+  }
+}
+
+/** The start view when no `path` is sent; otherwise the folders inside the named folder. */
+async function browseFolders(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  send: Send,
+): Promise<void> {
+  const requested = msg.path;
+  if (requested !== undefined && typeof requested !== 'string') {
+    fail(send, requestId, 'invalid_request', 'Đường dẫn thư mục phải là chuỗi.');
+    return;
+  }
+  const listing =
+    typeof requested === 'string'
+      ? await listFolder(await resolveFolderPath(requested))
+      : await startView();
+  send({ type: 'companyFolderBrowse', requestId: requestId ?? FALLBACK_REQUEST_ID, ...listing });
+}
+
+/** Create one folder inside the named parent and answer with the new folder's canonical path. */
+async function createFolderCommand(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  send: Send,
+): Promise<void> {
+  const parentPath = stringField(msg, 'parentPath');
+  const name = stringField(msg, 'name');
+  if (parentPath === null || name === null) {
+    fail(send, requestId, 'invalid_request', 'Cần thư mục cha và tên thư mục mới.');
+    return;
+  }
+  const created = await createFolder(parentPath, name);
+  send({
+    type: 'companyCommandResult',
+    requestId: requestId ?? FALLBACK_REQUEST_ID,
+    ok: true,
+    workspacePath: created,
+  });
+}
+
+/** Store or clear a folder's display name, then answer with the folder's canonical path. */
+async function nameFolderCommand(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  workspaces: CompanyWorkspaceControl | null,
+  send: Send,
+): Promise<void> {
+  const folderPath = stringField(msg, 'path');
+  const name = stringField(msg, 'name');
+  if (folderPath === null || name === null) {
+    fail(send, requestId, 'invalid_request', 'Cần đường dẫn và tên thư mục.');
+    return;
+  }
+  if (workspaces === null) {
+    fail(send, requestId, 'company_unavailable', 'Máy chủ này không quản lý nhiều thư mục.');
+    return;
+  }
+  const canonical = await resolveFolderPath(folderPath);
+  workspaces.setFolderName(canonical, name.trim().length === 0 ? null : name);
+  send({
+    type: 'companyCommandResult',
+    requestId: requestId ?? FALLBACK_REQUEST_ID,
+    ok: true,
+    workspacePath: canonical,
+  });
+}
+
+/**
+ * Run a command against the folder it routes to. Snapshot requests answer for one, several or
+ * the active folder, so they are answered on their own.
+ */
+async function routeAndRun(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  workspaces: CompanyWorkspaceControl,
+  send: Send,
+  ctx: CompanyCommandContext,
+): Promise<void> {
+  try {
+    if (msg.type === 'companySnapshotRequest') {
+      await answerSnapshotRequest(msg, requestId, workspaces, send, ctx);
+      return;
+    }
+    const services = await resolveServices(msg, workspaces);
+    if (!services) {
+      fail(send, requestId, 'company_unavailable', 'Chưa mở workspace công ty nào.');
+      return;
+    }
+    await run(msg, requestId, services, send, ctx);
+  } catch (err) {
+    fail(send, requestId, codeOf(err), messageOf(err));
+  }
+}
+
+/**
+ * The folder a command runs against: the folder it names; otherwise the folder holding the id it
+ * acts on, falling back to the active folder so the handler gives its own not-found answer;
+ * otherwise the active folder. A creation command has no id to find a folder by, so without a
+ * named folder it is refused.
+ */
+async function resolveServices(
+  msg: Record<string, unknown>,
+  workspaces: CompanyWorkspaceControl,
+): Promise<CompanyCommandServices | null> {
+  const workspacePath = stringField(msg, 'workspacePath');
+  if (workspacePath !== null) return workspaces.ensure(workspacePath);
+  const routedId = routedIdOf(msg);
+  if (routedId) return workspaces.servicesHolding(routedId) ?? workspaces.activeServices();
+  if (CREATION_COMMAND_TYPES[String(msg.type)] === true) {
+    throw new CompanyError('workspace_required', 'Chọn thư mục để thực hiện thao tác này.');
+  }
+  return workspaces.activeServices();
+}
+
+/**
+ * The id a command acts on, when it is bound to one. A prompt names a session only when it
+ * targets one; a prompt with no target creates a session instead.
+ */
+function routedIdOf(msg: Record<string, unknown>): string | null {
+  switch (msg.type) {
+    case 'companyContractDecision':
+      return stringField(msg, 'contractId');
+    case 'companyPromptCancel':
+      return stringField(msg, 'promptId');
+    case 'companyQuestionAnswer':
+      return stringField(objectField(msg, 'answer') ?? {}, 'questionId');
+    case 'companyPromptSubmit':
+      return stringField(objectField(msg, 'prompt') ?? {}, 'targetSessionId');
+    case 'companySessionControl':
+    case 'companySessionRename':
+    case 'companySessionInfoRequest':
+    case 'companySessionLogRequest':
+    case 'terminalAttach':
+    case 'terminalInput':
+    case 'terminalResize':
+    case 'terminalDetach':
+      return stringField(msg, 'sessionId');
+    default:
+      return null;
+  }
+}
+
+/**
+ * Answer a snapshot request for the folder it names. Without one, an `all` view gets one snapshot
+ * per open folder and any other view gets the active folder's.
+ */
+async function answerSnapshotRequest(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  workspaces: CompanyWorkspaceControl,
+  send: Send,
+  ctx: CompanyCommandContext,
+): Promise<void> {
+  const workspacePath = stringField(msg, 'workspacePath');
+  if (workspacePath !== null) {
+    const services = workspaces.servicesFor(workspacePath);
+    if (!services) {
+      fail(send, requestId, 'workspace_not_open', 'Thư mục này chưa được mở.');
+      return;
+    }
+    await snapshot(msg, requestId, services, send);
+    return;
+  }
+  if (ctx.companyViewMode?.() === 'all') {
+    let answered = 0;
+    for (const entry of workspaces.entries()) {
+      const services = entry.open ? workspaces.servicesFor(entry.path) : null;
+      if (!services) continue;
+      await snapshot(msg, requestId, services, send);
+      answered += 1;
+    }
+    if (answered === 0) {
+      fail(send, requestId, 'company_unavailable', 'Chưa mở workspace công ty nào.');
+    }
+    return;
+  }
+  const services = workspaces.activeServices();
+  if (!services) {
+    fail(send, requestId, 'company_unavailable', 'Chưa mở workspace công ty nào.');
+    return;
+  }
+  await snapshot(msg, requestId, services, send);
+}
+
+/**
+ * Record the connection's company view. Only the view changes: the client asks for the snapshot
+ * it needs next, so no snapshot is sent here.
+ */
+function setViewMode(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  ctx: CompanyCommandContext,
+  send: Send,
+): void {
+  const mode = stringField(msg, 'mode');
+  if (mode !== 'all' && mode !== 'folder') {
+    fail(send, requestId, 'invalid_request', 'Chế độ xem phải là all hoặc folder.');
+    return;
+  }
+  ctx.onCompanyViewMode?.(mode);
+  ok(send, requestId);
+}
+
 async function snapshot(
   msg: Record<string, unknown>,
   requestId: string | null,
@@ -566,6 +847,7 @@ async function snapshot(
     type: 'companySnapshot',
     requestId: requestId ?? FALLBACK_REQUEST_ID,
     snapshot: diagnostics ? { ...projection, diagnostics } : projection,
+    workspacePath: services.workspaceRoot,
   });
 }
 

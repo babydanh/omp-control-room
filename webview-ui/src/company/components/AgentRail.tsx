@@ -78,8 +78,10 @@ export function AgentRail({
   useFlightLayout(listRef);
   const tree = buildProjectTree(state, now, collapsedProjects);
   const entries = buildRailTree(tree.projects);
-  const active = tree.projects.find((project) => project.active);
-  const counts = activityCounts(active?.groups ?? [], tree.herdr);
+  const loadedGroups = tree.projects
+    .filter((project) => project.active)
+    .flatMap((project) => project.groups);
+  const counts = activityCounts(loadedGroups, tree.herdr);
 
   return (
     <aside

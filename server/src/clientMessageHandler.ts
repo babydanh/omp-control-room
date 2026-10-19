@@ -7,6 +7,7 @@ import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
 import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import { handleCompanyCommand } from './company/clientCommands.js';
+import type { CompanyViewMode } from './company/egress.js';
 import {
   getHooksConsent,
   getHooksEnabled,
@@ -93,6 +94,10 @@ export interface ClientMessageContext {
   onTerminalAttached?: (sessionId: string, leaseId: string) => void;
   /** Called after a successful detach; see CompanyCommandContext. */
   onTerminalDetached?: (sessionId: string, leaseId: string) => void;
+  /** Records the connection's company view (`all` or `folder`); see CompanyCommandContext. */
+  onCompanyViewMode?: (mode: CompanyViewMode) => void;
+  /** The connection's current company view, read when a snapshot request is answered. */
+  companyViewMode?: () => CompanyViewMode;
   /** PTY terminals for standalone-launched agents. Absent in VS Code embedded
    *  mode, where the editor owns terminal lifecycle. */
   ptyManager?: PtySessionManager;
@@ -169,6 +174,8 @@ export function handleClientMessage(
         onTerminalAttached: ctx.onTerminalAttached,
         onTerminalDetached: ctx.onTerminalDetached,
         herdr: ctx.herdr ?? null,
+        onCompanyViewMode: ctx.onCompanyViewMode,
+        companyViewMode: ctx.companyViewMode,
       },
     )
   ) {

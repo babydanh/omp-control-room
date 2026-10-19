@@ -13,9 +13,9 @@ import {
 } from '../src/company/companyState.js';
 import {
   activeWorkspace,
+  folderLabel,
   planWorkspaceOpen,
   workspaceActivity,
-  workspaceName,
 } from '../src/company/workspaces.js';
 import type { MessageTransport } from '../src/transport/types.js';
 import { session, snapshot, stateFrom } from './companyFixtures.js';
@@ -54,10 +54,10 @@ function terminal(sessionId: string): TerminalView {
 
 describe('folder names and activity', () => {
   it('names a folder by its last segment, whatever the separator', () => {
-    expect(workspaceName('D:\\du-an')).toBe('du-an');
-    expect(workspaceName('D:\\du-an\\')).toBe('du-an');
-    expect(workspaceName('/home/me/app/')).toBe('app');
-    expect(workspaceName('D:\\')).toBe('D:');
+    expect(folderLabel({ path: 'D:\\du-an' })).toBe('du-an');
+    expect(folderLabel({ path: 'D:\\du-an\\' })).toBe('du-an');
+    expect(folderLabel({ path: '/home/me/app/' })).toBe('app');
+    expect(folderLabel({ path: 'D:\\' })).toBe('D:');
   });
 
   it('reads an idle folder as idle and counts only what is happening', () => {
@@ -100,8 +100,9 @@ describe('planning a folder switch', () => {
 /** A board that has a session selected, holding the terminal and resume list of its folder. */
 function stateWithFolders(workspaces: CompanyWorkspaceEntry[] | null): CompanyViewState {
   return {
-    ...stateFrom({ sessions: [session({ id: 's1' })] }),
+    ...stateFrom({ sessions: [session({ id: 's1' })] }, DU_AN),
     workspaces,
+    viewMode: 'folder',
     selection: { sessionId: 's1', taskId: null, tab: 'activity', herdrPaneId: null },
     terminals: { s1: terminal('s1') },
     ompSessions: { requestId: 'r1', folder: DU_AN, sessions: [] },
@@ -180,6 +181,7 @@ function clientWithSession() {
   client.accept({
     type: 'companySnapshot',
     requestId: randomUUID(),
+    workspacePath: DU_AN,
     snapshot: snapshot({ sessions: [session({ id: 's1' })] }),
   });
   client.accept({
@@ -237,6 +239,18 @@ describe('opening a folder through the client', () => {
     expect(handle.errorCode).toBe(TRANSPORT_DISCONNECTED_ERROR);
     expect(client.getState().pendingWorkspaceOpen).toBeNull();
   });
+
+  it('tells the server the folder view before it switches folders', () => {
+    const { client, sent } = clientWithSession();
+    client.openWorkspace(KHAC);
+    const types = sent.map((message) => message.type);
+    expect(sent.find((message) => message.type === 'companyViewMode')).toEqual({
+      type: 'companyViewMode',
+      requestId: expect.any(String),
+      mode: 'folder',
+    });
+    expect(types.indexOf('companyViewMode')).toBeLessThan(types.indexOf('companyWorkspaceOpen'));
+  });
 });
 
 describe('choosing a session in another folder through the client', () => {
@@ -256,8 +270,13 @@ describe('choosing a session in another folder through the client', () => {
     expect(client.getState().selection.sessionId).toBeNull();
 
     client.accept({
+      type: 'companyWorkspaces',
+      workspaces: [folder(DU_AN, false), folder(KHAC, true)],
+    });
+    client.accept({
       type: 'companySnapshot',
       requestId: randomUUID(),
+      workspacePath: KHAC,
       snapshot: snapshot({ sessions: [session({ id: 's2' })] }),
     });
     expect(client.getState().pendingWorkspaceSelection).toBeNull();
@@ -285,8 +304,13 @@ describe('choosing a session in another folder through the client', () => {
     const handle = client.openWorkspaceSession(KHAC, 's2');
     client.accept({ type: 'companyCommandResult', requestId: handle.requestId, ok: true });
     client.accept({
+      type: 'companyWorkspaces',
+      workspaces: [folder(DU_AN, false), folder(KHAC, true)],
+    });
+    client.accept({
       type: 'companySnapshot',
       requestId: randomUUID(),
+      workspacePath: KHAC,
       snapshot: snapshot({ sessions: [session({ id: 's9' })] }),
     });
     const state = client.getState();

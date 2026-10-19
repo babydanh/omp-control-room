@@ -11,9 +11,13 @@ import {
   TRANSPORT_STATE_DISCONNECTED,
   TRANSPORT_STATE_RECONNECTING,
 } from '../../../core/src/constants.js';
+import type { CompanyDiagnostics } from '../../../core/src/messages.js';
 import type { TransportState } from '../../../core/src/transport.js';
 import type { CompanyViewState } from './companyState.js';
+import { showsAllFolders } from './folderIdentity.js';
+import { foldersInView } from './folderView.js';
 import { quotaRows } from './usageView.js';
+import { folderLabelFor } from './workspaces.js';
 
 export interface StatusRow {
   label: string;
@@ -51,10 +55,35 @@ function catalogText(state: CompanyViewState): string {
   return `${usable}/${entries.length} dùng được`;
 }
 
+/**
+ * The omp diagnostics the pill reads: the focused folder's in folder mode, and every folder in
+ * view's in all mode, so the runner counts are totals across the board.
+ */
+function diagnosticsInView(state: CompanyViewState): CompanyDiagnostics[] {
+  if (!showsAllFolders(state)) return state.diagnostics ? [state.diagnostics] : [];
+  return foldersInView(state, Object.keys(state.folders)).flatMap(
+    (path) => state.folders[path]?.diagnostics ?? [],
+  );
+}
+
 function runnerText(state: CompanyViewState): string | null {
-  const diagnostics = state.diagnostics;
-  if (!diagnostics) return null;
-  return `đang chạy ${diagnostics.liveRunners}/${diagnostics.modelLeases} · xếp hàng ${diagnostics.queuedTasks} · giữ lại ${diagnostics.retainedSessions}`;
+  const measured = diagnosticsInView(state);
+  if (measured.length === 0) return null;
+  const total = (pick: (diagnostics: CompanyDiagnostics) => number): number =>
+    measured.reduce((sum, diagnostics) => sum + pick(diagnostics), 0);
+  return `đang chạy ${total((d) => d.liveRunners)}/${total((d) => d.modelLeases)} · xếp hàng ${total((d) => d.queuedTasks)} · giữ lại ${total((d) => d.retainedSessions)}`;
+}
+
+/**
+ * The revision the server last reported: the focused folder's in folder mode, and each folder in
+ * view's in all mode, since revisions of different folders do not add up to anything.
+ */
+function revisionText(state: CompanyViewState): string {
+  if (!showsAllFolders(state)) return String(state.revision ?? '-');
+  const revisions = foldersInView(state, Object.keys(state.folders)).map(
+    (path) => `${folderLabelFor(state.workspaces, path)} ${state.folders[path]?.revision ?? '-'}`,
+  );
+  return revisions.length === 0 ? '-' : revisions.join(' · ');
 }
 
 export function statusPillView(
@@ -72,7 +101,7 @@ export function statusPillView(
   );
   const rows: StatusRow[] = [
     { label: 'Kết nối', value: connectionLabel(connection), attention: !connected },
-    { label: 'Bản sửa', value: String(state.revision ?? '-'), attention: false },
+    { label: 'Bản sửa', value: revisionText(state), attention: false },
     { label: 'Mô hình', value: catalogText(state), attention: false },
     { label: 'omp', value: runner ?? 'chưa có số liệu', attention: false },
     ...windows.map((entry) => ({

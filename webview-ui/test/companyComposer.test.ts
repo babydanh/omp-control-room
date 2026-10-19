@@ -13,6 +13,9 @@ import { session, settings, snapshot, task } from './companyFixtures.js';
 /** A chat prompt with no target: what the client sends when no session is named. */
 const NEW_CHAT: PromptRoute = { mode: 'chat', delivery: 'prompt', targetSessionId: null };
 
+/** The folder the test board is on: the one the server marks active. */
+const FOLDER = 'D:\\cong-ty';
+
 interface FakeTransport {
   transport: MessageTransport;
   sent: ClientMessage[];
@@ -41,13 +44,14 @@ function fakeTransport(): FakeTransport {
   };
 }
 
-/** A client that has already applied a snapshot, as the app's does on connect. */
+/** A client that has applied a snapshot and the folder list, as the app's does on connect. */
 function connectedClient() {
   const fake = fakeTransport();
   const client = new CompanyClient(fake.transport);
   client.accept({
     type: 'companySnapshot',
     requestId: randomUUID(),
+    workspacePath: FOLDER,
     snapshot: snapshot({
       revision: 1,
       settings: settings({
@@ -62,6 +66,10 @@ function connectedClient() {
         },
       }),
     }),
+  });
+  client.accept({
+    type: 'companyWorkspaces',
+    workspaces: [{ path: FOLDER, active: true, open: true, working: 0, waiting: 0 }],
   });
   return { client, ...fake };
 }
@@ -203,7 +211,9 @@ describe('/new opens a chat with no prompt', () => {
 
     void startNewChat(client);
 
-    expect(sent).toEqual([{ type: 'companyChatNew', requestId: expect.any(String) }]);
+    expect(sent).toEqual([
+      { type: 'companyChatNew', requestId: expect.any(String), workspacePath: FOLDER },
+    ]);
     expect(client.getState().prompt.text).toBe('draft kept');
   });
 
@@ -241,7 +251,9 @@ describe('/resume asks for the saved omp sessions and lists the answer to its ow
     const handle = client.requestOmpSessions();
 
     expect(handle.ok).toBe(true);
-    expect(sent).toEqual([{ type: 'companyOmpSessionsRequest', requestId: handle.requestId }]);
+    expect(sent).toEqual([
+      { type: 'companyOmpSessionsRequest', requestId: handle.requestId, workspacePath: FOLDER },
+    ]);
   });
 
   it('a request the socket refuses is reported on its handle, so no list is awaited', () => {
@@ -315,8 +327,10 @@ describe('a snapshot request goes out from the connect handshake', () => {
 
     client.connect();
 
-    expect(fake.sent).toHaveLength(1);
-    expect(fake.sent[0]).toMatchObject({ type: 'companySnapshotRequest' });
+    expect(fake.sent.map((message) => message.type)).toEqual([
+      'companyViewMode',
+      'companySnapshotRequest',
+    ]);
   });
 
   it('drops a selection whose task the server removed', () => {
@@ -349,6 +363,7 @@ describe('terminal controller leases', () => {
     client.accept({
       type: 'companySnapshot',
       requestId: randomUUID(),
+      workspacePath: FOLDER,
       snapshot: snapshot({ revision: 2, sessions: [session({ id: sessionId, runEpoch: 3 })] }),
     });
     client.attachTerminal(sessionId);
@@ -387,6 +402,7 @@ describe('terminal controller leases', () => {
     client.accept({
       type: 'companySnapshot',
       requestId: randomUUID(),
+      workspacePath: FOLDER,
       snapshot: snapshot({ revision: 2, sessions: [session({ id: sessionId, runEpoch: 3 })] }),
     });
     client.select({ sessionId });
@@ -404,6 +420,7 @@ describe('terminal controller leases', () => {
     client.connect();
 
     expect(sent.slice(previousCount).map((message) => message.type)).toEqual([
+      'companyViewMode',
       'companySnapshotRequest',
     ]);
     expect(client.getState().terminals[sessionId]).toMatchObject({
@@ -418,6 +435,7 @@ describe('terminal controller leases', () => {
     client.accept({
       type: 'companySnapshot',
       requestId: randomUUID(),
+      workspacePath: FOLDER,
       snapshot: snapshot({ revision: 3, sessions: [session({ id: sessionId, runEpoch: 4 })] }),
     });
 

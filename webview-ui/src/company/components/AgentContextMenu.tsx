@@ -47,6 +47,7 @@ import { deleteSessionsInOrder, removalNotice } from '../sessionRemoval.js';
 import { sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
+import { FolderNameDialog } from './FolderNameDialog.js';
 import { Icon } from './Icon.js';
 
 export interface AgentContextMenuProps {
@@ -66,7 +67,7 @@ export interface AgentContextMenuProps {
 /** The actions that ask first. Each names the item that opened the question. */
 type ConfirmKind = 'kill' | 'delete' | 'cancel-prompt' | 'clean';
 
-type MenuMode = 'menu' | 'rename' | ConfirmKind;
+type MenuMode = 'menu' | 'rename' | 'folder-rename' | ConfirmKind;
 
 interface Notice {
   text: string;
@@ -297,6 +298,8 @@ export function AgentContextMenu({
 
   // Escape, a pointer press outside, scrolling anywhere else, or a resize closes the menu.
   useEffect(() => {
+    // The folder-name dialog takes the keys and the pointer; the menu stays out of its way.
+    if (mode === 'folder-rename') return;
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -355,6 +358,12 @@ export function AgentContextMenu({
   function control(action: SessionControlAction): void {
     if (sessionId === null) return;
     track(client.controlSession(sessionId, action));
+  }
+
+  // Closing the rename dialog closes the menu it came from, and returns focus to the item's opener.
+  function closeFolderRename(): void {
+    returnFocus?.focus({ preventScroll: true });
+    onClose();
   }
 
   function copyValue(what: CopyWhat): string | null {
@@ -482,6 +491,10 @@ export function AgentContextMenu({
         if (subject.kind === 'project') onToggleProject(subject.project.key);
         onClose();
         return;
+      case 'renameFolder':
+        setNotice(null);
+        setMode('folder-rename');
+        return;
       case 'openBoardFolder':
         if (subject.kind === 'project' && subject.project.switchTo !== null) {
           track(client.openWorkspace(subject.project.switchTo));
@@ -526,7 +539,21 @@ export function AgentContextMenu({
     menuItems.at(next)?.focus({ preventScroll: true });
   }
 
-  const confirm = mode === 'menu' || mode === 'rename' ? null : confirmSpec(mode);
+  // The folder-name dialog replaces the menu while it is open; the menu stays mounted under it.
+  const renamingFolder =
+    mode === 'folder-rename' && subject.kind === 'project' ? subject.project.path : null;
+  if (renamingFolder !== null) {
+    return (
+      <FolderNameDialog
+        client={client}
+        path={renamingFolder}
+        currentName={state.workspaces?.find((entry) => entry.path === renamingFolder)?.name ?? null}
+        onClose={closeFolderRename}
+      />
+    );
+  }
+  const confirm =
+    mode === 'menu' || mode === 'rename' || mode === 'folder-rename' ? null : confirmSpec(mode);
 
   return (
     <div

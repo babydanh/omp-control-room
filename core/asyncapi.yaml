@@ -131,6 +131,7 @@ components:
         - $ref: '#/components/schemas/CompanySnapshotMessage'
         - $ref: '#/components/schemas/CompanyStateChangedMessage'
         - $ref: '#/components/schemas/CompanyCommandResultMessage'
+        - $ref: '#/components/schemas/CompanyFolderBrowseMessage'
         - $ref: '#/components/schemas/CompanyTextDeltaMessage'
         - $ref: '#/components/schemas/CompanySessionLogMessage'
         - $ref: '#/components/schemas/HerdrAgentsMessage'
@@ -205,6 +206,10 @@ components:
         - $ref: '#/components/schemas/CompanySessionRenameMessage'
         - $ref: '#/components/schemas/CompanySessionInfoRequestMessage'
         - $ref: '#/components/schemas/CompanyChatNewMessage'
+        - $ref: '#/components/schemas/CompanyViewModeMessage'
+        - $ref: '#/components/schemas/CompanyFolderBrowseRequestMessage'
+        - $ref: '#/components/schemas/CompanyFolderCreateMessage'
+        - $ref: '#/components/schemas/CompanyFolderNameMessage'
         # Ledger (privileged; read-only views and one message command)
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
@@ -3263,6 +3268,11 @@ components:
           format: uuid
         includeDiagnostics:
           type: boolean
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Snapshot this folder only. Omitted, the answer covers the board's view.
 
     CompanyPromptSubmitMessage:
       type: object
@@ -3273,6 +3283,11 @@ components:
           const: companyPromptSubmit
         prompt:
           $ref: '#/components/schemas/SubmitPromptInput'
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder to create the prompt in when no target session is named. Required then when the server runs several folders.
 
     CompanyContractDecisionMessage:
       type: object
@@ -3340,6 +3355,91 @@ components:
         requestId:
           type: string
           format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder to create the chat in. Required when the server runs several folders.
+
+    CompanyFolderBrowseRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      description: >-
+        List one folder's sub-folders for the folder browser. Without a path the answer is the
+        start view: the drives (or the root) and the home folder. A refusal is a
+        companyCommandResult under the same requestId.
+      properties:
+        type:
+          const: companyFolderBrowseRequest
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: An absolute folder path. A path with a parent segment is refused.
+
+    CompanyFolderCreateMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, parentPath, name]
+      description: >-
+        Create one new folder inside an existing folder. The name is one path segment and must not
+        already exist. The verdict names the new folder through workspacePath.
+      properties:
+        type:
+          const: companyFolderCreate
+        requestId:
+          type: string
+          format: uuid
+        parentPath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+
+    CompanyFolderNameMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path, name]
+      description: >-
+        Give a folder a display name, kept in the pixel-agents config and keyed by the folder's
+        canonical path. An empty name removes it, so the folder shows its own name again.
+      properties:
+        type:
+          const: companyFolderName
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        name:
+          type: string
+          maxLength: 80
+
+    CompanyViewModeMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, mode]
+      description: >-
+        Choose what the board shows. all sends every open folder's snapshot and updates, each tagged with its
+        workspacePath; folder sends only the active folder, as before several folders existed.
+      properties:
+        type:
+          const: companyViewMode
+        requestId:
+          type: string
+          format: uuid
+        mode:
+          type: string
+          enum: [all, folder]
 
     CompanyPromptCancelMessage:
       type: object
@@ -3367,6 +3467,11 @@ components:
         requestId:
           type: string
           format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder whose saved sessions are listed. Required when the server runs several folders.
 
     CompanySessionResumeMessage:
       type: object
@@ -3382,6 +3487,11 @@ components:
         file:
           type: string
           maxLength: 4096
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder the saved session belongs to. Required when the server runs several folders.
 
     CompanyWorkspaceOpenMessage:
       type: object
@@ -3409,6 +3519,11 @@ components:
         requestId:
           type: string
           format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder whose role profiles change. Required when the server runs several folders.
         roleProfiles:
           type: object
           additionalProperties:
@@ -3424,6 +3539,11 @@ components:
         requestId:
           type: string
           format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder whose model catalog answers. Omitted on a single-folder surface.
 
     CompanyArtifactRequestMessage:
       type: object
@@ -3435,6 +3555,11 @@ components:
         requestId:
           type: string
           format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder holding the artifact. Required when the server runs several folders.
         artifactId:
           type: string
           format: uuid
@@ -3456,6 +3581,11 @@ components:
         requestId:
           type: string
           format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder to list. Required when the server runs several folders.
         path:
           type: string
           maxLength: 1024
@@ -3471,6 +3601,11 @@ components:
         requestId:
           type: string
           format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder the file belongs to. Required when the server runs several folders.
         path:
           type: string
           maxLength: 1024
@@ -3493,6 +3628,11 @@ components:
         requestId:
           type: string
           format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder the attachment is stored in. Required when the server runs several folders.
         fileName:
           type: string
           maxLength: 512
@@ -3782,6 +3922,11 @@ components:
           format: uuid
         snapshot:
           $ref: '#/components/schemas/CompanySnapshot'
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder this snapshot belongs to. Set by a server running several folders.
 
     CompanyStateChangedMessage:
       type: object
@@ -3793,6 +3938,11 @@ components:
         revision:
           type: integer
           minimum: 1
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder whose state these changes apply to. Set by a server running several folders.
         changes:
           type: array
           items:
@@ -4451,6 +4601,62 @@ components:
           type: string
           format: uuid
           description: The session a prompt was delivered to or opened, so the board can make it the current session.
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: The folder a folder command created or named.
+
+    CompanyFolderBrowseMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path, parent, roots, entries, truncated]
+      description: >-
+        The answer to a companyFolderBrowseRequest, sent to the asking socket only. path is the
+        canonical folder listed, or null for the start view, where roots holds the drives (or the
+        root) and the home folder.
+      properties:
+        type:
+          const: companyFolderBrowse
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: [string, 'null']
+        parent:
+          type: [string, 'null']
+          description: The folder above path; null at a drive root and in the start view.
+        roots:
+          type: array
+          maxItems: 64
+          items:
+            type: object
+            additionalProperties: false
+            required: [kind, name, path]
+            properties:
+              kind:
+                type: string
+                enum: [drive, root, home]
+              name:
+                type: string
+              path:
+                type: string
+        entries:
+          type: array
+          maxItems: 1000
+          description: Sub-folders of path, sorted by name. Files are never listed.
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, path]
+            properties:
+              name:
+                type: string
+              path:
+                type: string
+        truncated:
+          type: boolean
+          description: True when the folder holds more sub-folders than entries carries.
 
     CompanyTextDeltaMessage:
       type: object
@@ -4473,6 +4679,11 @@ components:
           minimum: 0
         text:
           type: string
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: Folder this text belongs to. Set by a server running several folders.
 
     CompanySessionLogEntry:
       type: object
@@ -4797,6 +5008,11 @@ components:
       properties:
         path:
           type: string
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: The display name the user gave this folder. Absent means the folder's own name.
         active:
           type: boolean
           description: The folder this board is showing.

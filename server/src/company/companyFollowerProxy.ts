@@ -694,6 +694,21 @@ export class CompanyFollowerProxy {
         return proxy.snapshotValue;
       },
 
+      holdsId(id: string): boolean {
+        // A follower keeps no state of its own: it answers from the owner's last polled projection.
+        const snapshot = proxy.snapshotValue;
+        if (snapshot === null) return false;
+        const held = (items: ReadonlyArray<{ readonly id: string }>): boolean =>
+          items.some((item) => item.id === id);
+        return (
+          held(snapshot.sessions) ||
+          held(snapshot.tasks) ||
+          held(snapshot.contracts) ||
+          held(snapshot.questions) ||
+          held(snapshot.prompts)
+        );
+      },
+
       diagnostics(): CompanyDiagnostics {
         // Demand-driven: the panel asks when it opens, and the next poll carries
         // the measurement instead of this process spawning one per session.

@@ -84,6 +84,7 @@ describe('buildProjectTree', () => {
   it('lists the active folder first, then each other folder as a project to switch to', () => {
     const state: CompanyViewState = {
       ...stateFrom(),
+      viewMode: 'folder',
       workspaces: [workspace('/work/alpha', true, 0, 0), workspace('/work/beta', false, 2, 1)],
     };
 
@@ -126,6 +127,7 @@ describe('buildProjectTree', () => {
   it('folds exactly the projects whose keys it is given', () => {
     const state: CompanyViewState = {
       ...stateFrom(),
+      viewMode: 'folder',
       workspaces: [workspace('/work/alpha', true, 0, 0), workspace('/work/beta', false, 0, 0)],
     };
 
@@ -191,6 +193,7 @@ describe('buildProjectTree', () => {
   it("lists an open background folder's sessions as its rows, in the folder list's order", () => {
     const state: CompanyViewState = {
       ...stateFrom(),
+      viewMode: 'folder',
       workspaces: [
         workspace('/work/alpha', true, 0, 0),
         openFolder('/work/beta', [
@@ -216,6 +219,7 @@ describe('buildProjectTree', () => {
   it("folds an open background folder's parked sessions into their own list", () => {
     const state: CompanyViewState = {
       ...stateFrom(),
+      viewMode: 'folder',
       workspaces: [
         workspace('/work/alpha', true, 0, 0),
         openFolder('/work/beta', [
@@ -234,6 +238,7 @@ describe('buildProjectTree', () => {
   it('lists no rows for a folder that is not open, and marks it as not open', () => {
     const state: CompanyViewState = {
       ...stateFrom(),
+      viewMode: 'folder',
       workspaces: [workspace('/work/alpha', true, 0, 0), workspace('/work/beta', false, 0, 0)],
     };
     const beta = buildProjectTree(state, NOW, new Set()).projects[1];
@@ -244,6 +249,7 @@ describe('buildProjectTree', () => {
   it('keeps only the counts for an open folder whose sessions the host did not send', () => {
     const state: CompanyViewState = {
       ...stateFrom(),
+      viewMode: 'folder',
       workspaces: [
         workspace('/work/alpha', true, 0, 0),
         { path: '/work/beta', active: false, open: true, working: 2, waiting: 1 },
@@ -339,6 +345,7 @@ describe('buildRailTree', () => {
   it("lists a background folder's live sessions after its marker, and its parked ones as one badge", () => {
     const state: CompanyViewState = {
       ...stateFrom(),
+      viewMode: 'folder',
       workspaces: [
         workspace('/work/alpha', true, 0, 0),
         openFolder('/work/beta', [
@@ -362,6 +369,7 @@ describe('buildRailTree', () => {
   it('gives a background folder session badge the folder it switches the board to', () => {
     const state: CompanyViewState = {
       ...stateFrom(),
+      viewMode: 'folder',
       workspaces: [
         workspace('/work/alpha', true, 0, 0),
         openFolder('/work/beta', [folderSession('PA-S0002', 'busy')]),

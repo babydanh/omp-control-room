@@ -26,6 +26,8 @@ import { type CommandResultView, failureNotice } from './commandResults.js';
 import * as commands from './companyMessages.js';
 import {
   applyCompanyMessage,
+  applyFocusFolder,
+  applyViewMode,
   type CompanyEffect,
   type CompanySelection,
   type CompanyViewState,
@@ -36,6 +38,13 @@ import {
   COMPANY_TEXT_BATCH_MS,
   HERDR_SCREEN_LINES,
 } from './constants.js';
+import { type FolderPrefsStorage, loadFolderPrefs, saveFolderPrefs } from './folderPrefs.js';
+import {
+  type CompanyViewMode,
+  focusFolder,
+  FOLDER_LIST_LOADING_MESSAGE,
+  folderListLoading,
+} from './folderView.js';
 import {
   EMPTY_PROMPT_DRAFT,
   planSubmit,
@@ -62,27 +71,37 @@ const SENT: SendOutcome = { ok: true };
 const LOST_VERDICT_MESSAGE =
   'Mất kết nối trước khi có kết quả; chưa rõ lệnh đã được xử lý hay chưa.';
 
+/** The refusal code for a folder-scoped command sent before the server's folder list arrived. */
+const WORKSPACES_LOADING_CODE = 'workspaces_loading';
+
 /** Who keeps a session's terminal lease: the drawer's console or a hover preview. */
 export type TerminalHolder = 'drawer' | 'preview';
 
 export class CompanyClient {
   private readonly transport: MessageTransport;
-  private state: CompanyViewState = emptyCompanyState();
+  private readonly storage: FolderPrefsStorage | null;
+  private state: CompanyViewState;
   private readonly listeners = new Set<() => void>();
   private reattachTerminalAfterSnapshot = false;
   /** Text deltas waiting for the next flush. */
   private bufferedDeltas: ServerMessage[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private lastFlushAt = 0;
-  /** Offset requested per artifact, so paging never runs ahead of itself. */
-  private readonly artifactOffsets = new Map<string, number>();
+  /** Offset and folder requested per artifact, so paging never runs ahead of itself. */
+  private readonly artifactOffsets = new Map<
+    string,
+    { offset: number; workspacePath: string | undefined }
+  >();
   /** Verdict waiters, keyed by the requestId of the command they wait for. */
   private readonly commandWaiters = new Map<string, (result: CommandResultView) => void>();
   /** Holders per session; the lease is released when the last one lets go. */
   private readonly terminalHolds = new Map<string, Set<TerminalHolder>>();
 
-  constructor(transport: MessageTransport) {
+  constructor(transport: MessageTransport, storage: FolderPrefsStorage | null = null) {
     this.transport = transport;
+    this.storage = storage;
+    const prefs = loadFolderPrefs(storage);
+    this.state = emptyCompanyState({ viewMode: prefs.viewMode, focusPath: prefs.lastFolder });
   }
 
   /** Stable identity for `useSyncExternalStore`. */
@@ -148,7 +167,7 @@ export class CompanyClient {
   private runEffect(effect: CompanyEffect): void {
     switch (effect.type) {
       case 'requestSnapshot':
-        this.requestSnapshot();
+        this.requestSnapshot(false, effect.workspacePath);
         return;
       case 'requestModelCatalog':
         this.requestModelCatalog();
@@ -224,12 +243,44 @@ export class CompanyClient {
       this.emit();
     }
     this.reattachTerminalAfterSnapshot = true;
+    // The server starts each connection in folder mode, so this board's view is sent first.
+    this.send(commands.companyViewMode(commands.newRequestId(), this.state.viewMode));
     const outcome = this.send(commands.companySnapshotRequest(commands.newRequestId()));
     if (!outcome.ok) this.reattachTerminalAfterSnapshot = false;
   }
 
-  requestSnapshot(withDiagnostics = false): void {
-    this.send(commands.companySnapshotRequest(commands.newRequestId(), withDiagnostics));
+  // ── Folder view ──────────────────────────────────────────────────────────
+
+  /**
+   * Switch between every open folder and one. The server is told the mode first, so the
+   * snapshot it answers with covers the new view. The choice is remembered for this webview.
+   */
+  setViewMode(mode: CompanyViewMode): void {
+    if (this.state.viewMode === mode) return;
+    this.state = applyViewMode(this.state, mode);
+    saveFolderPrefs(this.storage, { viewMode: mode, lastFolder: this.state.focusPath });
+    this.emit();
+    this.send(commands.companyViewMode(commands.newRequestId(), mode));
+    this.requestSnapshot();
+  }
+
+  /** Remember the folder new work goes to; in `all` mode the composer and the file browser read it. */
+  setFocusFolder(path: string): void {
+    if (this.state.focusPath === path) return;
+    this.state = applyFocusFolder(this.state, path);
+    saveFolderPrefs(this.storage, { viewMode: this.state.viewMode, lastFolder: path });
+    this.emit();
+  }
+
+  /** The folder new work and folder-scoped reads go to; undefined when the server has sent no folder list. */
+  private targetFolder(): string | undefined {
+    return focusFolder(this.state) ?? undefined;
+  }
+
+  requestSnapshot(withDiagnostics = false, workspacePath?: string): void {
+    this.send(
+      commands.companySnapshotRequest(commands.newRequestId(), withDiagnostics, workspacePath),
+    );
   }
 
   /** The board only asks for diagnostics while it is actually on screen. */
@@ -238,22 +289,34 @@ export class CompanyClient {
   }
 
   requestModelCatalog(): void {
-    this.send(commands.modelCatalogRequest(commands.newRequestId()));
+    this.send(commands.modelCatalogRequest(commands.newRequestId(), this.targetFolder()));
   }
 
   requestArtifact(artifactId: string): void {
     this.artifactOffsets.delete(artifactId);
-    this.fetchArtifactPage(artifactId, 0);
+    this.fetchArtifactPage(artifactId, 0, this.targetFolder());
   }
 
-  private fetchArtifactPage(artifactId: string, offset: number): void {
-    this.artifactOffsets.set(artifactId, offset);
-    this.send(commands.artifactRequest(commands.newRequestId(), artifactId, offset));
+  private fetchArtifactPage(
+    artifactId: string,
+    offset: number,
+    workspacePath: string | undefined,
+  ): void {
+    this.artifactOffsets.set(artifactId, { offset, workspacePath });
+    this.send(
+      commands.artifactRequest(
+        commands.newRequestId(),
+        artifactId,
+        offset,
+        undefined,
+        workspacePath,
+      ),
+    );
   }
 
   /** Pull the next page of an artifact whose last page reported `eof: false`. */
   private continueArtifacts(): void {
-    for (const [artifactId, requestedOffset] of this.artifactOffsets) {
+    for (const [artifactId, { offset: requestedOffset, workspacePath }] of this.artifactOffsets) {
       const view = this.state.artifacts[artifactId];
       if (!view) continue;
       if (view.eof) {
@@ -264,16 +327,24 @@ export class CompanyClient {
       if (!last) continue;
       const nextOffset = last.offset + decodeBase64ToBytes(last.dataBase64).length;
       if (nextOffset <= requestedOffset) continue;
-      this.fetchArtifactPage(artifactId, nextOffset);
+      this.fetchArtifactPage(artifactId, nextOffset, workspacePath);
     }
   }
 
   listFiles(path: string): void {
-    this.send(commands.fileListRequest(commands.newRequestId(), path));
+    this.send(commands.fileListRequest(commands.newRequestId(), path, this.targetFolder()));
   }
 
   readFile(path: string, offset = 0): void {
-    this.send(commands.fileReadRequest(commands.newRequestId(), path, offset));
+    this.send(
+      commands.fileReadRequest(
+        commands.newRequestId(),
+        path,
+        offset,
+        undefined,
+        this.targetFolder(),
+      ),
+    );
   }
 
   /**
@@ -304,7 +375,14 @@ export class CompanyClient {
     if (blocker !== null) return { ok: false, errorCode: 'prompt_invalid', message: blocker };
     const requestId = commands.newRequestId();
     const plan = planSubmit(this.state.prompt, requestId, route);
-    const outcome = this.send(commands.promptSubmit(plan.input));
+    // A prompt with no target session opens or picks one, so it names the folder it goes to.
+    const opensSession = route.targetSessionId === null;
+    const folder = opensSession ? this.targetFolder() : undefined;
+    // Until the folder list arrives there is no folder to name, so the prompt is refused unsent.
+    const outcome: SendOutcome =
+      opensSession && folderListLoading(this.state)
+        ? { ok: false, errorCode: WORKSPACES_LOADING_CODE, message: FOLDER_LIST_LOADING_MESSAGE }
+        : this.send(commands.promptSubmit(plan.input, folder));
     // The draft keeps its text either way: the server clears it on an `ok` result,
     // and a refusal leaves the user looking at what they wrote.
     this.state = {
@@ -379,9 +457,11 @@ export class CompanyClient {
   /**
    * Open a new omp chat session in the folder, with no prompt. The verdict is a
    * companyCommandResult under the handle's requestId; its `sessionId` names the new session.
+   * Refused while the folder list is still loading, since the session would name no folder.
    */
   newChatSession(): CompanyCommandHandle {
-    return this.command((requestId) => commands.chatNew(requestId));
+    if (folderListLoading(this.state)) return this.folderListLoadingHandle();
+    return this.command((requestId) => commands.chatNew(requestId, this.targetFolder()));
   }
 
   /**
@@ -393,7 +473,9 @@ export class CompanyClient {
   }
 
   updateRoleProfiles(roleProfiles: Record<string, RoleProfile>): SendOutcome {
-    return this.send(commands.settingsUpdate(commands.newRequestId(), roleProfiles));
+    return this.send(
+      commands.settingsUpdate(commands.newRequestId(), roleProfiles, this.targetFolder()),
+    );
   }
 
   /**
@@ -409,12 +491,44 @@ export class CompanyClient {
    * companyOmpSessions; a refused send is reported on the handle itself.
    */
   requestOmpSessions(): CompanyCommandHandle {
-    return this.command((requestId) => commands.ompSessionsRequest(requestId));
+    return this.command((requestId) => commands.ompSessionsRequest(requestId, this.targetFolder()));
   }
 
   /** Resume a saved omp session on the board. The verdict names the session it opened. */
   resumeSession(file: string): CompanyCommandHandle {
-    return this.command((requestId) => commands.sessionResume(requestId, file));
+    if (folderListLoading(this.state)) return this.folderListLoadingHandle();
+    const folder = this.state.ompSessions?.folder ?? this.targetFolder();
+    return this.command((requestId) => commands.sessionResume(requestId, file, folder));
+  }
+
+  /**
+   * List the folders under `path`, or the start view when none is named. The listing arrives
+   * as a companyFolderBrowse held for the board's latest browse; a refusal is a
+   * companyCommandResult under the handle's requestId. Refused while the folder list loads.
+   */
+  browseFolders(path?: string): CompanyCommandHandle {
+    if (folderListLoading(this.state)) return this.folderListLoadingHandle();
+    const requestId = commands.newRequestId();
+    this.state = { ...this.state, folderBrowseRequest: requestId };
+    this.emit();
+    return { requestId, ...this.send(commands.folderBrowseRequest(requestId, path)) };
+  }
+
+  /**
+   * Create a folder inside `parentPath`. The verdict is a companyCommandResult under the
+   * handle's requestId. Refused while the folder list is loading.
+   */
+  createFolder(parentPath: string, name: string): CompanyCommandHandle {
+    if (folderListLoading(this.state)) return this.folderListLoadingHandle();
+    return this.command((requestId) => commands.folderCreate(requestId, parentPath, name));
+  }
+
+  /**
+   * Give the folder at `path` a display name; an empty name removes it. The verdict is a
+   * companyCommandResult under the handle's requestId.
+   */
+  renameFolder(path: string, name: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.folderName(requestId, path, name));
   }
 
   /**
@@ -436,6 +550,9 @@ export class CompanyClient {
 
   /** Send one folder switch; a session chosen with it waits for the switch's verdict. */
   private sendWorkspaceOpen(path: string, sessionId: string | null): CompanyCommandHandle {
+    // Pointing the board at one folder is what folder mode is for; that folder is remembered.
+    this.setFocusFolder(path);
+    this.setViewMode('folder');
     const requestId = commands.newRequestId();
     const pending = sessionId === null ? null : { requestId, path, sessionId, confirmed: false };
     this.state = {
@@ -489,6 +606,19 @@ export class CompanyClient {
   private command(build: (requestId: string) => ClientMessage): CompanyCommandHandle {
     const requestId = commands.newRequestId();
     return { requestId, ...this.send(build(requestId)) };
+  }
+
+  /**
+   * The refusal for a folder-scoped command sent before the server's folder list arrived. It
+   * names no folder, so nothing is sent.
+   */
+  private folderListLoadingHandle(): CompanyCommandHandle {
+    return {
+      requestId: commands.newRequestId(),
+      ok: false,
+      errorCode: WORKSPACES_LOADING_CODE,
+      message: FOLDER_LIST_LOADING_MESSAGE,
+    };
   }
 
   herdrRead(paneId: string, lines = HERDR_SCREEN_LINES): CompanyCommandHandle {

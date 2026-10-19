@@ -259,7 +259,10 @@ function registerWebSocketRoute(
     // Per-socket egress gate. Ingress is checked in the dispatcher; this is the
     // other half, so an observer socket cannot read company state out of the
     // store broadcast path.
-    const gate = new CompanyClientGate(privileged, currentTerminalLeases);
+    // Folder-tagged state follows the registry's active folder unless this socket chose `all`.
+    const gate = new CompanyClientGate(privileged, currentTerminalLeases, {
+      activePath: () => options.workspaces?.activePath() ?? null,
+    });
 
     const onBroadcast = (message: Record<string, unknown>) => {
       if (!gate.allowsDelivery(message)) return;
@@ -303,6 +306,8 @@ function registerWebSocketRoute(
             companyExecutionAllowed: options.isCompanyExecutionAllowed?.() ?? !options.embedded,
             onTerminalAttached: (sessionId, leaseId) => gate.grant(sessionId, leaseId),
             onTerminalDetached: (sessionId, leaseId) => gate.release(sessionId, leaseId),
+            onCompanyViewMode: (mode) => gate.setCompanyView(mode),
+            companyViewMode: () => gate.companyViewMode,
             herdr: options.herdr ?? null,
             ptyManager: options.ptyManager,
           },

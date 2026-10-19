@@ -2,10 +2,11 @@
  * agentTree: the agent sidebar's project tree, and the collapsed rail built from
  * it, as pure data.
  *
- * A project is either a folder the board can work in or a herdr repo group. The
- * board's active folder is the only one whose company sessions the server loads,
- * so it alone lists its roles and rows; every other board folder shows the counts
- * the server reports for it. Herdr agents keep the repo grouping the sidebar
+ * A project is either a folder the board can work in or a herdr repo group. In folder
+ * mode the board's active folder is the only one whose company sessions the server
+ * loads, so it alone lists its roles and rows; every other board folder shows the counts
+ * the server reports for it. In all mode every open folder's sessions are loaded, so each
+ * open folder lists its own roles and rows. Herdr agents keep the repo grouping the sidebar
  * already builds. The rail is the same tree reduced to one marker per project
  * followed by its badges, so collapsing the sidebar never leaves an agent unnamed.
  */
@@ -25,8 +26,10 @@ import {
   workspaceSessionRow,
 } from './agentSidebarView.js';
 import type { CompanyViewState } from './companyState.js';
+import { FOLDER_TONE_COUNT, showsAllFolders } from './folderIdentity.js';
+import { folderToneIndex } from './folderView.js';
 import { removableErroredSessionIds } from './sessionRemoval.js';
-import { workspaceName } from './workspaces.js';
+import { folderLabel, folderLabelFor } from './workspaces.js';
 
 /** How many colour slots a project's left tick cycles through. */
 export const PROJECT_TONE_COUNT = 5;
@@ -62,7 +65,10 @@ export interface ProjectNode {
   path: string | null;
   /** What the header's tooltip says: the full path, and for a herdr group how it was found. */
   tooltip: string;
-  /** True for the board's active folder, the only one whose sessions are loaded. */
+  /**
+   * True when the folder's sessions are loaded: the active folder in folder mode, every open
+   * folder in all mode.
+   */
   active: boolean;
   /** A board folder that is not active: the folder the board switches to. Null otherwise. */
   switchTo: string | null;
@@ -119,17 +125,10 @@ export function buildProjectTree(
   now: number,
   collapsed: ReadonlySet<string>,
 ): AgentTree {
-  const groups = buildAgentGroups(state, now);
   const herdr = herdrGroup(state.herdr, now);
-  const listed = state.workspaces ?? [];
-  const activePath =
-    listed.find((entry) => entry.active)?.path ?? state.settings?.workspacePath ?? null;
-
-  const projects: ProjectNode[] = [activeBoardProject(state, groups, activePath, collapsed)];
-  for (const entry of listed) {
-    if (entry.active || entry.path === activePath) continue;
-    projects.push(inactiveBoardProject(entry, collapsed));
-  }
+  const projects: ProjectNode[] = showsAllFolders(state)
+    ? allFolderProjects(state, now, collapsed)
+    : folderProjects(state, now, collapsed);
   if (herdr.kind === 'ready') {
     for (const repo of herdr.repos) {
       const key = `herdr:${repo.key}`;
@@ -163,6 +162,82 @@ export function buildProjectTree(
   return { projects, herdr };
 }
 
+/**
+ * Folder mode: the active folder with the sessions the board holds, then every other folder as
+ * the server summarises it.
+ */
+function folderProjects(
+  state: CompanyViewState,
+  now: number,
+  collapsed: ReadonlySet<string>,
+): ProjectNode[] {
+  const groups = buildAgentGroups(state, now);
+  const listed = state.workspaces ?? [];
+  const activePath =
+    listed.find((entry) => entry.active)?.path ?? state.settings?.workspacePath ?? null;
+  const projects: ProjectNode[] = [activeBoardProject(state, groups, activePath, collapsed)];
+  for (const entry of listed) {
+    if (entry.active || entry.path === activePath) continue;
+    projects.push(inactiveBoardProject(entry, collapsed));
+  }
+  return projects;
+}
+
+/**
+ * All mode: one project per open folder, each listing its own sessions. Every open folder's
+ * sessions are loaded, so each of these projects is active.
+ */
+function allFolderProjects(
+  state: CompanyViewState,
+  now: number,
+  collapsed: ReadonlySet<string>,
+): ProjectNode[] {
+  return (state.workspaces ?? [])
+    .filter((entry) => entry.open)
+    .map((entry) => {
+      const scoped = sessionsOfFolder(state, entry.path);
+      return loadedBoardProject(scoped, buildAgentGroups(scoped, now), entry, collapsed);
+    });
+}
+
+/** The board narrowed to one folder's sessions, so its groups count only that folder's agents. */
+function sessionsOfFolder(state: CompanyViewState, path: string): CompanyViewState {
+  const sessions = Object.fromEntries(
+    Object.entries(state.sessions).filter(([id]) => state.folderOf[id] === path),
+  );
+  return { ...state, sessions };
+}
+
+/** An open folder in all mode: its sessions are loaded, so it lists its roles and rows. */
+function loadedBoardProject(
+  state: CompanyViewState,
+  groups: AgentRoleGroup[],
+  entry: CompanyWorkspaceEntry,
+  collapsed: ReadonlySet<string>,
+): ProjectNode {
+  const key = boardProjectKey(entry.path);
+  return {
+    key,
+    kind: 'board',
+    name: folderLabel(entry),
+    path: entry.path,
+    tooltip: entry.path,
+    active: true,
+    switchTo: null,
+    notOpen: false,
+    branch: null,
+    tone: folderToneIndex(entry.path, FOLDER_TONE_COUNT),
+    counts: countTones(groups.flatMap((group) => group.active.map((row) => row.tone))),
+    collapsed: collapsed.has(key),
+    groups,
+    panes: [],
+    sleeping: [],
+    folderRows: null,
+    parkedCount: groups.reduce((sum, group) => sum + group.parked.length, 0),
+    cleanable: groups.flatMap((group) => removableErroredSessionIds(state, group)),
+  };
+}
+
 function activeBoardProject(
   state: CompanyViewState,
   groups: AgentRoleGroup[],
@@ -173,7 +248,7 @@ function activeBoardProject(
   return {
     key,
     kind: 'board',
-    name: activePath === null ? COMPANY_PROJECT_NAME : workspaceName(activePath),
+    name: activePath === null ? COMPANY_PROJECT_NAME : folderLabelFor(state.workspaces, activePath),
     path: activePath,
     tooltip: activePath ?? COMPANY_PROJECT_NAME,
     active: true,
@@ -201,7 +276,7 @@ function inactiveBoardProject(
   return {
     key,
     kind: 'board',
-    name: workspaceName(entry.path),
+    name: folderLabel(entry),
     path: entry.path,
     tooltip: entry.path,
     active: false,

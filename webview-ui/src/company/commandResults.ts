@@ -17,6 +17,8 @@ export interface CommandResultView {
   revision?: number;
   /** The session a command opened, resumed or acted on, when the server names one. */
   sessionId?: string;
+  /** The canonical folder a folder create or name command acted on, as the server reports it. */
+  workspacePath?: string;
 }
 
 export function viewCommandResult(
@@ -29,6 +31,7 @@ export function viewCommandResult(
     message: message.message,
     revision: message.revision,
     sessionId: message.sessionId,
+    workspacePath: message.workspacePath,
   };
 }
 

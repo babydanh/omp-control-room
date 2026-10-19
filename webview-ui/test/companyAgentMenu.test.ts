@@ -209,6 +209,7 @@ describe('projectMenuItems', () => {
     expect(projectMenuItems(project).map((item) => item.label)).toEqual([
       'Thu gọn',
       'Sao chép đường dẫn',
+      'Đổi tên thư mục',
     ]);
   });
 

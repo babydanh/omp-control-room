@@ -21,12 +21,19 @@ import {
   companyWorkspaceSessions,
   countCompanyWork,
 } from '../src/company/workspaceRegistry.js';
+import { toPathKey } from '../src/pathKey.js';
 
 /** A fake host: its coordinator reports `state.snapshot`, and `emit` delivers a frame the way the real host does. */
 interface FakeHost {
   readonly host: WorkspaceCompanyHost;
   readonly options: WorkspaceCompanyHostOptions;
-  readonly state: { snapshot: CompanySnapshot; disposeCalls: number; unreadable: boolean };
+  readonly state: {
+    snapshot: CompanySnapshot;
+    disposeCalls: number;
+    unreadable: boolean;
+    /** Ids the fake coordinator reports as held by this folder. */
+    ids: Set<string>;
+  };
   emit(message: ServerMessage): void;
 }
 
@@ -37,6 +44,8 @@ interface Harness {
   /** Backing store for the recents seam, so tests can inspect what was remembered. */
   readonly recents: string[];
   readonly control: { failNextOpen: boolean; openCalls: number };
+  /** Display-name store behind the names seam, keyed by path key, so tests can seed and inspect names. */
+  readonly names: Record<string, string>;
 }
 
 /** A session as the coordinator lists it; the folder list keeps five of these fields and no more. */
@@ -72,13 +81,19 @@ function snapshotWith(parts: {
 }
 
 function createFakeHost(options: WorkspaceCompanyHostOptions): FakeHost {
-  const state = { snapshot: snapshotWith({}), disposeCalls: 0, unreadable: false };
+  const state = {
+    snapshot: snapshotWith({}),
+    disposeCalls: 0,
+    unreadable: false,
+    ids: new Set<string>(),
+  };
   const services = {
     coordinator: {
       snapshot: () => {
         if (state.unreadable) throw new Error('coordinator still starting');
         return state.snapshot;
       },
+      holdsId: (id: string) => state.ids.has(id),
     },
   } as unknown as CompanyCommandServices;
   const host: WorkspaceCompanyHost = {
@@ -100,11 +115,18 @@ function createFakeHost(options: WorkspaceCompanyHostOptions): FakeHost {
 }
 
 function createHarness(
-  options: { recents?: string[]; beforeOpen?: (workspacePath: string) => Promise<void> } = {},
+  options: {
+    recents?: string[];
+    beforeOpen?: (workspacePath: string) => Promise<void>;
+    /** When false, every display-name save is refused, as a failed config write would be. */
+    namesWritable?: boolean;
+  } = {},
 ): Harness {
   const broadcasts: ServerMessage[] = [];
   const hosts: FakeHost[] = [];
   const recents = [...(options.recents ?? [])];
+  const names: Record<string, string> = {};
+  const namesWritable = options.namesWritable ?? true;
   const control = { failNextOpen: false, openCalls: 0 };
   const registry = new CompanyWorkspaceRegistry({
     broadcast: (message) => {
@@ -129,9 +151,22 @@ function createHarness(
         recents.splice(0, recents.length, ...next.slice(0, 10));
       },
     },
+    names: {
+      read: () => ({ ...names }),
+      set: (workspacePath, name) => {
+        if (!namesWritable) return false;
+        const key = toPathKey(workspacePath);
+        if (name === null) {
+          delete names[key];
+        } else {
+          names[key] = name;
+        }
+        return true;
+      },
+    },
     countDebounceMs: 250,
   });
-  return { registry, broadcasts, hosts, recents, control };
+  return { registry, broadcasts, hosts, recents, control, names };
 }
 
 function hostAt(hosts: FakeHost[], index: number): FakeHost {
@@ -256,6 +291,7 @@ describe('CompanyWorkspaceRegistry', () => {
       expect.objectContaining({
         type: 'companySnapshot',
         requestId: COMPANY_WORKSPACE_PUSH_REQUEST_ID,
+        workspacePath: alphaReal,
       }),
     );
     expect(h.recents[0]).toBe(alphaReal);
@@ -321,23 +357,99 @@ describe('CompanyWorkspaceRegistry', () => {
     ]);
   });
 
-  it('forwards only the active folder to the board and keeps the others silent', async () => {
+  it('tags board messages from each open folder with its path, and leaves terminal frames untagged', async () => {
+    const h = createHarness();
+    await h.registry.open(alpha);
+    await h.registry.open(beta);
+    const before = h.broadcasts.length;
+    const terminal = {
+      type: 'terminalData',
+      sessionId: 'session-1',
+      runEpoch: 1,
+      seq: 0,
+      data: '',
+    } as unknown as ServerMessage;
+
+    hostAt(h.hosts, 0).emit(marker('from-alpha'));
+    hostAt(h.hosts, 1).emit(marker('from-beta'));
+    hostAt(h.hosts, 0).emit(terminal);
+
+    expect(h.broadcasts.slice(before)).toEqual([
+      { ...marker('from-alpha'), workspacePath: alphaReal },
+      { ...marker('from-beta'), workspacePath: betaReal },
+      terminal,
+    ]);
+  });
+
+  it('ensure opens a folder without activating it, and pushes its tagged snapshot', async () => {
+    const h = createHarness();
+    await h.registry.open(alpha);
+
+    const services = await h.registry.ensure(beta);
+
+    expect(h.hosts).toHaveLength(2);
+    expect(services).toBe(hostAt(h.hosts, 1).host.services);
+    expect(h.registry.activeServices()).toBe(hostAt(h.hosts, 0).host.services);
+    expect(h.registry.activePath()).toBe(alphaReal);
+    expect(h.broadcasts).toContainEqual(
+      expect.objectContaining({
+        type: 'companySnapshot',
+        requestId: COMPANY_WORKSPACE_PUSH_REQUEST_ID,
+        workspacePath: betaReal,
+      }),
+    );
+    expect(workspaceLists(h.broadcasts).at(-1)).toEqual([
+      { path: alphaReal, active: true, open: true, working: 0, waiting: 0, sessions: [] },
+      { path: betaReal, active: false, open: true, working: 0, waiting: 0, sessions: [] },
+    ]);
+  });
+
+  it('ensure answers an open folder from its existing host, with no new host or push', async () => {
     const h = createHarness();
     await h.registry.open(alpha);
     await h.registry.open(beta);
     const before = h.broadcasts.length;
 
-    hostAt(h.hosts, 0).emit(marker('from-alpha'));
-    hostAt(h.hosts, 1).emit(marker('from-beta'));
+    expect(await h.registry.ensure(alpha)).toBe(hostAt(h.hosts, 0).host.services);
+    expect(h.hosts).toHaveLength(2);
+    expect(h.broadcasts).toHaveLength(before);
+  });
 
-    expect(h.broadcasts.slice(before)).toEqual([marker('from-beta')]);
+  it('ensure refuses a missing path or a file, and opens no host', async () => {
+    const h = createHarness();
 
+    await expect(h.registry.ensure(path.join(root, 'missing'))).rejects.toMatchObject({
+      code: 'workspace_invalid',
+    });
+    await expect(h.registry.ensure(notes)).rejects.toMatchObject({ code: 'workspace_invalid' });
+
+    expect(h.hosts).toHaveLength(0);
+    expect(h.broadcasts).toHaveLength(0);
+  });
+
+  it('servicesFor, servicesHolding and activePath answer from the open folders', async () => {
+    const h = createHarness();
     await h.registry.open(alpha);
-    const switched = h.broadcasts.length;
-    hostAt(h.hosts, 0).emit(marker('alpha-again'));
-    hostAt(h.hosts, 1).emit(marker('beta-silent'));
+    await h.registry.ensure(beta);
+    hostAt(h.hosts, 1).state.ids.add('session-beta');
 
-    expect(h.broadcasts.slice(switched)).toEqual([marker('alpha-again')]);
+    expect(h.registry.servicesFor(betaReal)).toBe(hostAt(h.hosts, 1).host.services);
+    expect(h.registry.servicesFor(path.join(root, 'gone'))).toBeNull();
+    expect(h.registry.servicesHolding('session-beta')).toBe(hostAt(h.hosts, 1).host.services);
+    expect(h.registry.servicesHolding('nobody')).toBeNull();
+    expect(h.registry.activePath()).toBe(alphaReal);
+
+    await h.registry.dispose();
+    expect(h.registry.activePath()).toBeNull();
+    expect(h.registry.servicesFor(alphaReal)).toBeNull();
+    expect(h.registry.servicesHolding('session-beta')).toBeNull();
+  });
+
+  it('refuses ensure once the registry is disposed', async () => {
+    const h = createHarness();
+    await h.registry.dispose();
+
+    await expect(h.registry.ensure(alpha)).rejects.toMatchObject({ code: 'company_unavailable' });
   });
 
   it('counts working and waiting work per folder from each host snapshot', async () => {
@@ -527,5 +639,54 @@ describe('CompanyWorkspaceRegistry', () => {
     const [entry] = h.registry.entries();
     expect(entry).toEqual({ path: alphaReal, active: true, open: true, working: 0, waiting: 0 });
     expect(entry).not.toHaveProperty('sessions');
+  });
+
+  it('carries a display name on an open folder and on a recent one', async () => {
+    const h = createHarness({ recents: [betaReal] });
+    h.names[toPathKey(alphaReal)] = 'Mốc A';
+    h.names[toPathKey(betaReal)] = 'Mốc B';
+    await h.registry.open(alpha);
+
+    expect(h.registry.entries()).toEqual([
+      {
+        path: alphaReal,
+        name: 'Mốc A',
+        active: true,
+        open: true,
+        working: 0,
+        waiting: 0,
+        sessions: [],
+      },
+      { path: betaReal, name: 'Mốc B', active: false, open: false, working: 0, waiting: 0 },
+    ]);
+  });
+
+  it('republishes the folder list when a display name is set or cleared', async () => {
+    const h = createHarness();
+    await h.registry.open(alpha);
+    const before = workspaceLists(h.broadcasts).length;
+
+    h.registry.setFolderName(alphaReal, 'Mốc A');
+    expect(workspaceLists(h.broadcasts)).toHaveLength(before + 1);
+    expect(workspaceLists(h.broadcasts).at(-1)?.[0]).toMatchObject({
+      path: alphaReal,
+      name: 'Mốc A',
+    });
+
+    h.registry.setFolderName(alphaReal, null);
+    expect(workspaceLists(h.broadcasts)).toHaveLength(before + 2);
+    expect(h.registry.entries()[0]).not.toHaveProperty('name');
+  });
+
+  it('refuses a display name the store could not save, and keeps the folder list as it was', async () => {
+    const h = createHarness({ namesWritable: false });
+    await h.registry.open(alpha);
+    const before = workspaceLists(h.broadcasts).length;
+
+    expect(() => h.registry.setFolderName(alphaReal, 'Mốc A')).toThrow(
+      'Không lưu được tên thư mục.',
+    );
+    expect(workspaceLists(h.broadcasts)).toHaveLength(before);
+    expect(h.registry.entries()[0]).not.toHaveProperty('name');
   });
 });

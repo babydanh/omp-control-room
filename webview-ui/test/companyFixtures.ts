@@ -260,11 +260,19 @@ export function snapshot(overrides: Partial<CompanySnapshot> = {}): CompanySnaps
   };
 }
 
-/** A view state produced the way the app produces one: by reducing a snapshot. */
-export function stateFrom(snapshotOverride: Partial<CompanySnapshot> = {}): CompanyViewState {
+/**
+ * A view state produced the way the app produces one: by reducing a snapshot. Pass the folder
+ * the snapshot belongs to when the test puts that folder in the server's list; the server tags
+ * every folder's company data with its path.
+ */
+export function stateFrom(
+  snapshotOverride: Partial<CompanySnapshot> = {},
+  workspacePath?: string,
+): CompanyViewState {
   return applyCompanyMessage(emptyCompanyState(), {
     type: 'companySnapshot',
     requestId: randomUUID(),
     snapshot: snapshot(snapshotOverride),
+    ...(workspacePath === undefined ? {} : { workspacePath }),
   }).state;
 }

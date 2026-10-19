@@ -14,11 +14,12 @@ import type { AgentMenuRequest } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import { buildPaletteItems, type PaletteActionId, type PaletteItem } from '../commandPalette.js';
 import type { CompanyClient } from '../companyClient.js';
-import type { CompanyDrawerTab } from '../companyState.js';
+import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { startNewChat } from '../composerRouting.js';
 import { COMPANY_RAIL_WIDTH_PX } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
+import { folderIdentityOf, foldersWaitingForSnapshot, showsAllFolders } from '../folderIdentity.js';
 import type { HerdrDrawerTab } from '../herdrView.js';
 import { sidebarPresentation } from '../layoutMode.js';
 import { ledgerStore } from '../ledger/ledgerClient.js';
@@ -70,6 +71,18 @@ function browserStorage(): Storage | null {
 
 /** Apple platforms show ⌘ in shortcut hints; elsewhere the key names stay. */
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+
+/**
+ * The words of the snapshot banner. In all mode it names the folders still waiting for a fresh
+ * snapshot, so the reader knows which folder's board may be behind.
+ */
+function snapshotNoticeText(state: CompanyViewState): string {
+  const waiting = showsAllFolders(state) ? foldersWaitingForSnapshot(state) : [];
+  if (waiting.length === 0) {
+    return 'Có thay đổi đã bị bỏ sót; đang chờ một bản chụp mới từ máy chủ.';
+  }
+  return `Có thay đổi đã bị bỏ sót ở ${waiting.join(', ')}; đang chờ một bản chụp mới từ máy chủ.`;
+}
 
 export interface BoardShellProps {
   client: CompanyClient;
@@ -349,7 +362,7 @@ export function BoardShell({ client }: BoardShellProps) {
       />
       {state.needsSnapshot && (
         <p className="bg-warning/12 px-3 py-1.5 text-2xs text-warning">
-          Có thay đổi đã bị bỏ sót; đang chờ một bản chụp mới từ máy chủ.
+          {snapshotNoticeText(state)}
         </p>
       )}
       {state.workspaceSelectionNotice !== null && (
@@ -364,6 +377,7 @@ export function BoardShell({ client }: BoardShellProps) {
       <AttentionBar
         contract={pendingContract(state)}
         questions={pendingQuestions}
+        identityOf={(id) => folderIdentityOf(state, id)}
         onOpenContract={() => openContract(null)}
         onOpenQuestion={(questionId) => setOpened({ kind: 'question', questionId })}
       />
@@ -436,6 +450,7 @@ export function BoardShell({ client }: BoardShellProps) {
               selectedPaneId={selectedPaneId}
               selectedSessionId={selectedSessionId}
               onMenu={openMenu}
+              identityOf={(id) => folderIdentityOf(state, id)}
             />
           )}
           <DetailDrawer
