@@ -4,6 +4,8 @@ A web control room for [omp](https://github.com/can1357/oh-my-pi) coding agents:
 
 Run: `npm install && npm run build && node dist/cli.js --port 3197`, then open the printed URL (it carries the access token).
 
+On Windows, `powershell -ExecutionPolicy Bypass -File scripts\board-start.ps1` starts the board as its own process (outside any terminal, herdr or omp session, so closing those does not stop it); `-Restart` after a rebuild, `-Stop` to stop. Log: `%LOCALAPPDATA%\omp-control-room\board.log`.
+
 Built on [Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents) by Pablo De Lucca (MIT, see `LICENSE`). The original Pixel Agents README follows.
 
 ---
