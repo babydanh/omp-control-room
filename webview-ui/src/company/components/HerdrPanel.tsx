@@ -5,11 +5,11 @@
  * pushes each change to the pane's screen, and the screen is also read on open and on every status
  * change. Holding or selecting text in the screen freezes it, with a chip that says so, and the newest
  * screen lands once the selection lets go. The screen opens at its newest line and follows it until
- * the reader scrolls up. The choice keys appear only while the agent waits on a choice. The prompt box
- * sends text the agent reads as typed input, and clears only after the server confirms it went through.
+ * the reader scrolls up. The choice keys appear only while the agent waits on a choice. Prompts to the
+ * agent go through the board's one composer at the bottom, which targets the agent open here.
  */
 
-import type { FormEvent, RefObject } from 'react';
+import type { RefObject } from 'react';
 import { useEffect, useRef, useState } from 'react';
 
 import type { HerdrKey } from '../../../../core/src/messages.js';
@@ -50,8 +50,6 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
   const agent = state.herdr.agents.find((entry) => entry.paneId === paneId);
   const status = agent?.status;
   const latest = state.herdr.screens[paneId];
-  const [draft, setDraft] = useState('');
-  const [sentPrompt, setSentPrompt] = useState<string | null>(null);
   const [lastRequest, setLastRequest] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const screenRef = useRef<HTMLPreElement>(null);
@@ -70,15 +68,6 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
   }, [client, paneId, status, live]);
   useHerdrScreenWatch(client, paneId, live);
 
-  // The draft is cleared only when the server confirms the prompt was sent, so
-  // a rejected prompt is still there to be fixed and sent again.
-  const promptOutcome = sentPrompt === null ? undefined : state.commandResults[sentPrompt];
-  useEffect(() => {
-    if (promptOutcome?.ok !== true) return;
-    setDraft('');
-    setSentPrompt(null);
-  }, [promptOutcome]);
-
   const lastOutcome = lastRequest === null ? undefined : state.commandResults[lastRequest];
   const notice = localNotice ?? failureNotice(lastOutcome, 'Máy chủ từ chối lệnh này.');
 
@@ -89,15 +78,6 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
 
   function sendKey(key: HerdrKey): void {
     track(client.herdrKeys(paneId, [key]));
-  }
-
-  function sendPrompt(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    const text = draft.trim();
-    if (text === '') return;
-    const handle = client.herdrPrompt(paneId, text);
-    track(handle);
-    setSentPrompt(handle.ok ? handle.requestId : null);
   }
 
   if (agent === undefined) {
@@ -174,19 +154,6 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
               {notice}
             </p>
           )}
-
-          <form onSubmit={sendPrompt} className="flex gap-1">
-            <input
-              aria-label="Gửi lời nhắc tới agent"
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              placeholder="Gửi lời nhắc tới agent…"
-              className="min-w-0 flex-1 rounded-(--company-radius-sm) bg-raised px-2 py-1 text-2xs text-text"
-            />
-            <CompanyButton type="submit" size="sm" disabled={draft.trim() === ''}>
-              Gửi
-            </CompanyButton>
-          </form>
         </>
       )}
     </div>
