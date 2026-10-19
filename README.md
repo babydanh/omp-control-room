@@ -1,3 +1,13 @@
+# omp-control-room
+
+A web control room for [omp](https://github.com/can1357/oh-my-pi) coding agents: live omp terminals per session, folder-scoped sessions (new / resume / delete / rename), a Company workflow (Director → Advisor → approval → Worker → QA → Judge), herdr agents and hibernated panes, and a git/activity view built from the omp activity ledger. See `CLAUDE.md` → "Board UI" for how it works.
+
+Run: `npm install && npm run build && node dist/cli.js --port 3197`, then open the printed URL (it carries the access token).
+
+Built on [Pixel Agents](https://github.com/pixel-agents-hq/pixel-agents) by Pablo De Lucca (MIT, see `LICENSE`). The original Pixel Agents README follows.
+
+---
+
 <h1 align="center">
   <a href="https://github.com/pixel-agents-hq/pixel-agents/discussions">
     <img src="webview-ui/public/banner.png" alt="Pixel Agents">
