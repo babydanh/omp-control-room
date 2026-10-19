@@ -24,7 +24,6 @@ import {
   emptyHerdrView,
   type HerdrView,
 } from '../src/company/companyState.js';
-import { isLaneCollapsed } from '../src/company/laneLayout.js';
 import { drawerSubjectKey } from '../src/company/selection.js';
 import { previewTargetOfSubject } from '../src/company/terminalPreview.js';
 import { stateFrom } from './companyFixtures.js';
@@ -249,12 +248,5 @@ describe('herdrWake', () => {
       paneId: 'p1',
       prompt: 'dọn dẹp',
     });
-  });
-});
-
-describe('the sleeping lane', () => {
-  it('folds to a strip while it holds nothing and is not open, like any empty lane', () => {
-    expect(isLaneCollapsed(0, false)).toBe(true);
-    expect(isLaneCollapsed(1, false)).toBe(false);
   });
 });

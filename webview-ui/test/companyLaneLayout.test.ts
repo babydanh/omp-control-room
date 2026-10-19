@@ -1,141 +1,49 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  COMPANY_LANE_GAP_PX,
-  COMPANY_LANE_MIN_WIDTH_PX,
-  COMPANY_LANE_STRIP_WIDTH_PX,
-  COMPANY_LANE_WIDTH_PX,
-  COMPANY_MOTION,
-} from '../src/company/constants.js';
-import { isLaneCollapsed, keepOpenEmptyLanes, packLanes } from '../src/company/laneLayout.js';
-
-describe('isLaneCollapsed', () => {
-  it('folds an empty lane its reader has not opened', () => {
-    expect(isLaneCollapsed(0, false)).toBe(true);
-  });
-
-  it('keeps an empty lane open once its reader opens it', () => {
-    expect(isLaneCollapsed(0, true)).toBe(false);
-  });
-
-  it('never folds a lane that holds cards, opened or not', () => {
-    expect(isLaneCollapsed(1, false)).toBe(false);
-    expect(isLaneCollapsed(3, true)).toBe(false);
-  });
-});
+import { COMPANY_LANE_GAP_PX, COMPANY_LANE_MIN_WIDTH_PX } from '../src/company/constants.js';
+import { packLanes } from '../src/company/laneLayout.js';
 
 describe('packLanes', () => {
-  it('keeps open lanes at full width on one row when they fit', () => {
-    const slots = [{ collapsed: false }, { collapsed: false }, { collapsed: false }];
-    expect(packLanes(slots, 1000)).toEqual({
-      rows: [[0, 1, 2]],
-      widths: [COMPANY_LANE_WIDTH_PX, COMPANY_LANE_WIDTH_PX, COMPANY_LANE_WIDTH_PX],
+  it('keeps every lane on one row, sharing the full width, when they all fit', () => {
+    const packing = packLanes(7, 1500);
+    expect(packing.rows).toEqual([[0, 1, 2, 3, 4, 5, 6]]);
+    expect(packing.width).toBe(Math.floor((1500 - 6 * COMPANY_LANE_GAP_PX) / 7));
+    expect(packing.width).toBeGreaterThanOrEqual(COMPANY_LANE_MIN_WIDTH_PX);
+  });
+
+  it('wraps onto a second row once a lane would drop below the minimum, balancing the rows', () => {
+    // 1300px holds six 200px lanes, not seven: two rows of four and three, each lane 320px.
+    expect(packLanes(7, 1300)).toEqual({
+      rows: [
+        [0, 1, 2, 3],
+        [4, 5, 6],
+      ],
+      width: Math.floor((1300 - 3 * COMPANY_LANE_GAP_PX) / 4),
     });
   });
 
-  it('shrinks open lanes evenly down to the minimum before wrapping', () => {
-    const slots = [{ collapsed: false }, { collapsed: false }, { collapsed: false }];
-    const exact = 3 * COMPANY_LANE_MIN_WIDTH_PX + 2 * COMPANY_LANE_GAP_PX;
-    expect(packLanes(slots, exact)).toEqual({
-      rows: [[0, 1, 2]],
-      widths: [COMPANY_LANE_MIN_WIDTH_PX, COMPANY_LANE_MIN_WIDTH_PX, COMPANY_LANE_MIN_WIDTH_PX],
-    });
-  });
-
-  it('starts a second row instead of pushing an open lane below the minimum', () => {
-    const slots = [0, 1, 2, 3].map(() => ({ collapsed: false }));
-    const packing = packLanes(slots, 700);
-    expect(packing.rows).toEqual([[0, 1, 2], [3]]);
-    expect(packing.widths[0]).toBe(packing.widths[1]);
-    expect(packing.widths[0]).toBeGreaterThanOrEqual(COMPANY_LANE_MIN_WIDTH_PX);
-    expect(packing.widths[3]).toBe(COMPANY_LANE_WIDTH_PX);
-  });
-
-  it('folds empty lanes to strips that keep their 40px and leave the rest to open lanes', () => {
-    const slots = [{ collapsed: true }, { collapsed: false }, { collapsed: false }];
-    expect(packLanes(slots, 500)).toEqual({
-      rows: [[0, 1, 2]],
-      widths: [COMPANY_LANE_STRIP_WIDTH_PX, 224, 224],
-    });
-  });
-
-  it('wraps strips onto a new row once the open lanes have claimed the minimum', () => {
-    const slots = [
-      { collapsed: false },
-      { collapsed: true },
-      { collapsed: true },
-      { collapsed: false },
-      { collapsed: true },
-      { collapsed: true },
-      { collapsed: true },
-    ];
-    const packing = packLanes(slots, 588);
-    expect(packing.rows).toEqual([
-      [0, 1, 2, 3, 4],
-      [5, 6],
-    ]);
-    expect(packing.widths).toEqual([222, 40, 40, 222, 40, 40, 40]);
-  });
-
-  it('lets a lane alone on its row take what a narrow board has', () => {
-    expect(packLanes([{ collapsed: false }], 150)).toEqual({ rows: [[0]], widths: [150] });
+  it('keeps one lane per row on a board narrower than one minimum lane', () => {
+    expect(packLanes(3, 150)).toEqual({ rows: [[0], [1], [2]], width: 150 });
   });
 
   it('returns no rows for no lanes', () => {
-    expect(packLanes([], 800)).toEqual({ rows: [], widths: [] });
+    expect(packLanes(0, 800)).toEqual({ rows: [], width: 0 });
   });
 
-  it('never packs a row wider than the space it was given', () => {
-    const patterns = [
-      [false, false, false, false, false, false, false],
-      [true, false, true, false, true, false, true],
-      [false, true, true, true, true, true, false],
-    ].map((pattern) => pattern.map((collapsed) => ({ collapsed })));
-    for (const slots of patterns) {
-      for (let available = 300; available <= 1400; available += 50) {
-        const packing = packLanes(slots, available);
-        for (const row of packing.rows) {
-          const used = row.reduce((sum, index) => sum + (packing.widths[index] ?? 0), 0);
-          expect(used + (row.length - 1) * COMPANY_LANE_GAP_PX).toBeLessThanOrEqual(available);
+  it('places every lane once and never packs a row wider than the space it was given', () => {
+    for (let count = 1; count <= 9; count += 1) {
+      for (let available = 200; available <= 2000; available += 37) {
+        const { rows, width } = packLanes(count, available);
+        expect(rows.flat()).toEqual(Array.from({ length: count }, (_, i) => i));
+        for (const row of rows) {
+          expect(row.length * width + (row.length - 1) * COMPANY_LANE_GAP_PX).toBeLessThanOrEqual(
+            available,
+          );
         }
+        // Balanced: no row is more than one lane shorter than the first.
+        const first = rows[0]?.length ?? 0;
+        for (const row of rows) expect(first - row.length).toBeLessThanOrEqual(1);
       }
     }
-  });
-});
-
-describe('lane motion timing', () => {
-  it('eases the lane width over 420ms and fades the lane body over 240ms', () => {
-    expect(COMPANY_MOTION.laneWidthMs).toBe(420);
-    expect(COMPANY_MOTION.laneContentMs).toBe(240);
-  });
-
-  it('keeps the body fade shorter than the width ease it follows or precedes', () => {
-    expect(COMPANY_MOTION.laneContentMs).toBeLessThan(COMPANY_MOTION.laneWidthMs);
-  });
-});
-
-describe('keepOpenEmptyLanes', () => {
-  it('keeps an opened lane while it is still empty', () => {
-    const opened = new Set(['ready']);
-    expect(keepOpenEmptyLanes(opened, new Map([['ready', 0]]))).toBe(opened);
-  });
-
-  it('drops the opened mark of a lane that has filled, so it folds once it empties', () => {
-    const kept = keepOpenEmptyLanes(new Set(['ready']), new Map([['ready', 2]]));
-    expect(kept.has('ready')).toBe(false);
-    expect(isLaneCollapsed(0, kept.has('ready'))).toBe(true);
-  });
-
-  it('returns the same set when no opened lane has filled', () => {
-    const opened = new Set(['ready', 'done']);
-    expect(
-      keepOpenEmptyLanes(
-        opened,
-        new Map([
-          ['ready', 0],
-          ['done', 0],
-        ]),
-      ),
-    ).toBe(opened);
   });
 });

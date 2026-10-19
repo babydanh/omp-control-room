@@ -117,12 +117,8 @@ export const HERDR_WATCH_RENEW_MS = 10_000;
 export const COMPANY_MOTION = {
   /** Ease-out cubic: quick off the mark, settling softly. Flights sample the same curve in flip.ts. */
   easing: 'cubic-bezier(.33,1,.68,1)',
-  /** A lane column's width, on collapse and on expand. */
+  /** A lane column's width, when the board resizes and the lanes re-pack. */
   laneWidthMs: 420,
-  /** A lane's body fades and rises this long: after the width on expand, before it on collapse. */
-  laneContentMs: 240,
-  /** How far a lane's body rises into place. */
-  laneContentRisePx: 4,
   /** A card that changes lane flies this long: inside the 650-800ms band. */
   flightMs: 760,
   /** How far a flying card lifts off its straight path, at the midpoint of its travel. */
@@ -151,17 +147,13 @@ export const COMPANY_DRAWER_DEFAULT_WIDTH_PX = 560;
 export const COMPANY_DRAWER_DEFAULT_SHARE = 0.4;
 
 /**
- * An open lane's widest column. Lanes shrink from here toward
- * COMPANY_LANE_MIN_WIDTH_PX before a row wraps onto another line; spare width stays
- * empty on the row's right.
+ * A lane's comfortable width: the drawer never narrows the board below
+ * COMPANY_LANES_VISIBLE_MIN lanes this wide. The lanes themselves fill the board's width.
  */
 export const COMPANY_LANE_WIDTH_PX = 272;
 
-/** The narrowest an open lane gets: below this a card's title and activity cannot be read. */
+/** The narrowest a lane gets: below this a card's title and activity cannot be read, so the lanes wrap onto another row. */
 export const COMPANY_LANE_MIN_WIDTH_PX = 200;
-
-/** A lane with no cards collapses to a strip this wide, so the lanes with work get the room. */
-export const COMPANY_LANE_STRIP_WIDTH_PX = 40;
 
 /** The gap between lane columns: 6px, the 1.5 step of the 4px rhythm. */
 export const COMPANY_LANE_GAP_PX = 6;

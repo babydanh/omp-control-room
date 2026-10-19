@@ -47,7 +47,7 @@ import {
   type CompanyLaneId,
 } from '../constants.js';
 import type { FolderIdentity } from '../folderIdentity.js';
-import { isLaneCollapsed, keepOpenEmptyLanes, packLanes } from '../laneLayout.js';
+import { packLanes } from '../laneLayout.js';
 import {
   defaultActiveLane,
   LANE_SWIPE_THRESHOLD_PX,
@@ -348,37 +348,6 @@ function AgentCard({
   );
 }
 
-/**
- * An empty lane folded to a strip: its mark, its count and its name, read top to
- * bottom. The lane's colour tints its mark. A click opens the
- * lane. The words stay in the DOM for screen readers and text search.
- */
-function LaneStrip({
-  lane,
-  count,
-  onOpen,
-}: {
-  lane: BoardLane;
-  count: number;
-  onOpen: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      title={`Mở cột ${lane.label}`}
-      className="company-lane-strip absolute inset-0 flex cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-hover hover:text-text"
-    >
-      <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-sm text-[var(--lane-color)]" />
-      <span className="text-2xs font-semibold text-text">{count}</span>
-      <span className="flex-1 whitespace-nowrap text-xs [writing-mode:vertical-rl]">
-        {lane.label}
-      </span>
-      <span className="sr-only">Không có gì ở đây.</span>
-    </button>
-  );
-}
-
 /** The lane a phone opens on when the reader has not picked one: where attention is needed first. */
 const LANE_ATTENTION_ORDER: readonly CompanyLaneId[] = [
   'needs_input',
@@ -393,23 +362,17 @@ const LANE_ATTENTION_ORDER: readonly CompanyLaneId[] = [
 /** The lanes row's padding on each side (p-1.5), taken out of the width the lanes pack into. */
 const LANES_PADDING_PX = 6;
 
-/**
- * The motion custom properties the board's CSS reads (the lane rules in index.css):
- * the ease, the lane width and body fade durations, and the body's rise.
- */
+/** The motion custom properties the board's CSS reads (the lane rules in index.css): the ease and the lane width. */
 const BOARD_MOTION_VARS: CSSProperties & Record<string, string> = {
   '--company-ease': COMPANY_MOTION.easing,
   '--company-lane-ms': `${COMPANY_MOTION.laneWidthMs}ms`,
-  '--company-lane-content-ms': `${COMPANY_MOTION.laneContentMs}ms`,
-  '--company-lane-rise': `${COMPANY_MOTION.laneContentRisePx}px`,
 };
 
-/** One lane as the board draws it: its drafts, its card count and whether it folds to a strip. */
+/** One lane as the board draws it: its drafts and its card count. */
 interface LaneView {
   lane: BoardLane;
   drafts: readonly PlanningPrompt[];
   count: number;
-  collapsed: boolean;
 }
 
 export function CompanyBoard({
@@ -430,8 +393,6 @@ export function CompanyBoard({
   const now = useNow();
   const mode = useLayoutMode();
   const lanesWidth = useElementWidth(lanesRef, mode);
-  // Empty lanes the reader opened from their strip. A lane with cards is open whatever this holds.
-  const [openedLanes, setOpenedLanes] = useState<ReadonlySet<CompanyLaneId>>(() => new Set());
   // The lane a phone shows, once the reader has picked one; until then the attention default.
   const [pickedLane, setPickedLane] = useState<CompanyLaneId | null>(null);
   const swipeStart = useRef<{ pointerId: number; x: number; y: number } | null>(null);
@@ -439,35 +400,15 @@ export function CompanyBoard({
   const views: LaneView[] = lanes.map((lane) => {
     const drafts = lane.id === 'planned' ? planning : [];
     const count = lane.cards.length + drafts.length + lane.agents.length;
-    // A phone shows its one lane open, so an empty lane is never folded there.
-    const collapsed = mode !== 'phone' && isLaneCollapsed(count, openedLanes.has(lane.id));
-    return { lane, drafts, count, collapsed };
+    return { lane, drafts, count };
   });
-  // An opened lane that fills is open anyway; once it empties again it folds, as an unopened lane does.
-  const keptOpen = keepOpenEmptyLanes(
-    openedLanes,
-    new Map(views.map(({ lane, count }) => [lane.id, count] as const)),
-  );
-  if (keptOpen !== openedLanes) setOpenedLanes(keptOpen);
   const shownLane =
     pickedLane ??
     defaultActiveLane(
       views.map(({ lane, count }) => ({ id: lane.id, count })),
       LANE_ATTENTION_ORDER,
     );
-  const packing = packLanes(
-    views.map((view) => ({ collapsed: view.collapsed })),
-    lanesWidth - 2 * LANES_PADDING_PX,
-  );
-
-  function toggleLane(laneId: CompanyLaneId): void {
-    setOpenedLanes((current) => {
-      const next = new Set(current);
-      if (next.has(laneId)) next.delete(laneId);
-      else next.add(laneId);
-      return next;
-    });
-  }
+  const packing = packLanes(views.length, lanesWidth - 2 * LANES_PADDING_PX);
 
   function openAgent(subject: AgentCardSubject): void {
     if (subject.kind === 'herdr') onOpenHerdr(subject.paneId);
@@ -502,18 +443,16 @@ export function CompanyBoard({
   }
 
   function renderLane(view: LaneView, fill: boolean, style?: CSSProperties) {
-    const { lane, drafts, count, collapsed } = view;
+    const { lane, drafts, count } = view;
     return (
       <section
         key={lane.id}
         aria-label={lane.label}
         data-testid={`company-lane-${lane.id}`}
         data-lane={lane.id}
-        data-collapsed={collapsed}
         className={`company-lane relative min-h-0 min-w-0 ${fill ? 'flex-1' : ''}`}
         style={style}
       >
-        <LaneStrip lane={lane} count={count} onOpen={() => toggleLane(lane.id)} />
         <div className="company-lane-body flex min-h-0 min-w-0 flex-1 flex-col">
           <header className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
             <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
@@ -527,18 +466,7 @@ export function CompanyBoard({
           </header>
           <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
             {count === 0 && (
-              <div className="flex flex-col items-start gap-1 px-1">
-                <p className="text-xs text-text-muted">Chưa có việc nào ở cột này.</p>
-                {mode !== 'phone' && (
-                  <button
-                    type="button"
-                    onClick={() => toggleLane(lane.id)}
-                    className="company-icon-btn touch-target px-1 text-2xs"
-                  >
-                    Thu gọn cột
-                  </button>
-                )}
-              </div>
+              <p className="px-1 text-xs text-text-muted">Chưa có việc nào ở cột này.</p>
             )}
             {drafts.map((prompt, index) => (
               <PlanningCard
@@ -636,9 +564,8 @@ export function CompanyBoard({
             <div key={row.join(',')} className="flex min-h-0 min-w-0 flex-1 gap-1.5">
               {row.map((index) => {
                 const view = views[index];
-                const width = packing.widths[index];
-                if (view === undefined || width === undefined) return null;
-                return renderLane(view, false, { flex: '0 0 auto', width });
+                if (view === undefined) return null;
+                return renderLane(view, false, { flex: '0 0 auto', width: packing.width });
               })}
             </div>
           ))}
