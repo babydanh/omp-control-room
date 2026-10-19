@@ -24,6 +24,7 @@ import type {
   HerdrKey,
   ServerMessage,
   SquadRowInput,
+  SquadSettings,
   WorkItemAssignee,
   WorkItemVerdict,
 } from '../../../core/src/messages.js';
@@ -500,14 +501,18 @@ export class CompanyClient {
     );
   }
 
-  /** Hand an existing work item to another agent. The verdict is a companyCommandResult. */
+  /**
+   * Hand an existing work item to another agent, with its fields. The verdict is a
+   * companyCommandResult.
+   */
   assignWorkItem(
     workspacePath: string,
     id: string,
     assignee: WorkItemAssignee,
+    fields: commands.WorkItemFields = {},
   ): CompanyCommandHandle {
     return this.command((requestId) =>
-      commands.workItemAssign(requestId, workspacePath, id, assignee),
+      commands.workItemAssign(requestId, workspacePath, id, assignee, fields),
     );
   }
 
@@ -599,6 +604,13 @@ export class CompanyClient {
   /** Retry a failed run. The verdict is a companyCommandResult. */
   retrySquad(workspacePath: string, runId: string): CompanyCommandHandle {
     return this.command((requestId) => commands.squadRetry(requestId, workspacePath, runId));
+  }
+
+  /** Save one folder's squad settings. The verdict is a companyCommandResult. */
+  setSquadSettings(workspacePath: string, settings: SquadSettings): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.squadSettingsSet(requestId, workspacePath, settings),
+    );
   }
 
   updateRoleProfiles(roleProfiles: Record<string, RoleProfile>): SendOutcome {

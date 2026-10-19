@@ -69,6 +69,15 @@ class FakeWorkItems implements SquadWorkItems {
       revision: this.sequence,
       items: structuredClone(this.items),
       roles,
+      settings: {
+        maxParallel: 4,
+        maxSquadSessions: 3,
+        minFreeRamGb: 2,
+        autoJudge: true,
+        autoApproveNext: false,
+      },
+      repos: [],
+      agents: [],
     };
   }
 

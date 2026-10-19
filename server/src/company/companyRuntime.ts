@@ -839,7 +839,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
     const transcript =
       sessionFile === undefined ? undefined : await readTranscriptFields(sessionFile);
     return {
-      cwd: this.store.workspacePath,
+      cwd: session.cwd ?? this.store.workspacePath,
       launchCwd: this.store.workspacePath,
       model: transcript?.model ?? session.effectiveModel ?? session.requestedModel,
       ...(transcript?.thinking === undefined ? {} : { thinking: transcript.thinking }),
@@ -1086,6 +1086,8 @@ class NativeCompanyRuntime implements CompanyRuntime {
   private async acquireNewSession(
     role: CompanyRole,
     workstreamId: string,
+    /** Directory the new session's process runs in; absent means the folder root. */
+    cwd?: string,
   ): Promise<CompanySession> {
     const state = this.state();
     const request: SessionRequest = {
@@ -1111,7 +1113,13 @@ class NativeCompanyRuntime implements CompanyRuntime {
       return { ...decision.session, runEpoch: decision.runEpoch, status: 'starting' };
     }
     for (const candidate of decision.archiveCandidates) await this.archiveSession(candidate);
-    return this.mintSession(role, workstreamId, decision.mint.requestedModel, decision.runEpoch);
+    return this.mintSession(
+      role,
+      workstreamId,
+      decision.mint.requestedModel,
+      decision.runEpoch,
+      cwd,
+    );
   }
 
   private async mintSession(
@@ -1119,6 +1127,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
     workstreamId: string,
     requestedModel: string,
     runEpoch: number,
+    cwd?: string,
   ): Promise<CompanySession> {
     const state = this.state();
     const counter = state.counters.session + 1;
@@ -1129,6 +1138,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       role,
       workstreamId,
       workspaceKey: this.store.workspaceKey,
+      ...(cwd === undefined ? {} : { cwd }),
       requestedModel,
       runEpoch,
       status: 'starting',
@@ -1169,10 +1179,18 @@ class NativeCompanyRuntime implements CompanyRuntime {
   /**
    * Open a plain omp chat session in this workspace. Nothing is sent: the session
    * starts with no turn and waits for the user's first prompt. `resumeFile`
-   * reopens an omp session file instead of starting a fresh one.
+   * reopens an omp session file instead of starting a fresh one. `cwd` is the
+   * directory the process runs in (absent: the folder root). A non-chat `role`
+   * opens a standalone session with no workflow, in its own squad workstream.
    */
-  private async openChatSession(input: { resumeFile?: string }): Promise<CompanySession> {
-    const session = await this.acquireNewSession('chat', `chat-${randomUUID()}`);
+  private async openChatSession(input: {
+    resumeFile?: string;
+    cwd?: string;
+    role?: CompanyRole;
+  }): Promise<CompanySession> {
+    const role = input.role ?? 'chat';
+    const workstreamId = role === 'chat' ? `chat-${randomUUID()}` : `squad-${randomUUID()}`;
+    const session = await this.acquireNewSession(role, workstreamId, input.cwd);
     await this.startRun(session, undefined, true, input.resumeFile);
     return this.state().sessions[session.id] ?? session;
   }
@@ -1326,7 +1344,9 @@ class NativeCompanyRuntime implements CompanyRuntime {
         sessionId: session.id,
         runEpoch: session.runEpoch,
         roleProfile: profile,
-        workspaceRoot: this.store.workspacePath,
+        // The process runs in the session's own directory. Approvals and tool
+        // policy still answer for the folder root (see authorizeTool).
+        workspaceRoot: session.cwd ?? this.store.workspacePath,
         ...(profile.toolsPolicy === 'omp'
           ? {}
           : { sessionDirectory: this.sessionDirectory(session.id) }),

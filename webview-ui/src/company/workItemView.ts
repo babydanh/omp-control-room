@@ -12,6 +12,9 @@
 
 import type {
   AgentRole,
+  CompanyRole,
+  OmpAgentInfo,
+  SquadSettings,
   WorkItem,
   WorkItemAssignee,
   WorkItemBlocker,
@@ -35,6 +38,12 @@ export interface FolderWorkItems {
   revision: number;
   items: WorkItem[];
   roles: AgentRole[];
+  /** The repos under the folder: git repos and worktrees, as canonical paths. */
+  repos: string[];
+  /** The omp subagents the folder can run, as the server lists them. */
+  agents: OmpAgentInfo[];
+  /** The folder's squad settings; null until the server has sent them. */
+  settings: SquadSettings | null;
 }
 
 /** Names one work item. Ids are unique within a folder, so the folder is part of the name. */
@@ -56,6 +65,18 @@ export const WORK_ITEM_HEAD_MAX_CHARS = 140;
 
 /** The name a new omp chat carries until the server opens the session it becomes. */
 export const NEW_SESSION_LABEL = 'Phiên omp mới';
+
+/** The label of the option that leaves the agent to be picked when the item runs. */
+export const AUTO_ASSIGNEE_LABEL = 'Tự chọn agent';
+
+/** The roles a work item can be filed under, as the create and assign dialogs offer them. */
+export const WORK_ITEM_ROLES: readonly CompanyRole[] = ['chat', 'worker', 'qa', 'advisor', 'judge'];
+
+/** Longest list of code areas one work item carries. */
+export const WORK_ITEM_AREAS_MAX = 8;
+
+/** How many area chips a card shows before it counts the rest as `+n`. */
+export const WORK_ITEM_AREA_CHIPS = 2;
 
 const LANE_BY_STATUS: Readonly<Record<WorkItemStatus, CompanyLaneId>> = {
   queued: 'ready',
@@ -145,6 +166,8 @@ export function assigneeLabel(
     }
     case 'new-session':
       return NEW_SESSION_LABEL;
+    case 'auto':
+      return AUTO_ASSIGNEE_LABEL;
   }
 }
 
@@ -190,23 +213,90 @@ export interface WorkItemChip {
 }
 
 /**
- * The chip for why a queued item is held: `Chờ agent rảnh`, `Chờ việc #n xong`, or `Việc #n bị
- * lỗi`. Null when nothing holds the item.
+ * The chip a card shows for what holds an item: its kind in words, and how loud it is. Null when
+ * nothing holds the item.
  */
 export function blockerChip(item: {
   readonly blocker?: WorkItemBlocker | null;
 }): WorkItemChip | null {
   const blocker = item.blocker;
   if (blocker === undefined || blocker === null) return null;
-  if (blocker.kind === 'agent') return { text: 'Chờ agent rảnh', tone: 'muted' };
-  if (blocker.kind === 'dependency') {
-    const text =
-      blocker.sequence === undefined ? 'Chờ việc khác xong' : `Chờ việc #${blocker.sequence} xong`;
-    return { text, tone: 'muted' };
+  switch (blocker.kind) {
+    case 'agent':
+      return { text: 'Agent đang bận', tone: 'muted' };
+    case 'dependency':
+      return { text: 'Chờ việc khác', tone: 'muted' };
+    case 'failed':
+      return { text: 'Việc lỗi', tone: 'danger' };
+    case 'capacity':
+      if (blocker.running === undefined || blocker.limit === undefined) {
+        return { text: 'Đầy chỗ', tone: 'muted' };
+      }
+      return { text: `Đầy chỗ ${blocker.running}/${blocker.limit}`, tone: 'muted' };
+    case 'area':
+      return { text: 'Vùng đang bị giữ', tone: 'muted' };
+    case 'no_member':
+      return { text: 'Chưa có agent', tone: 'muted' };
   }
-  const text =
-    blocker.sequence === undefined ? 'Có việc bị lỗi' : `Việc #${blocker.sequence} bị lỗi`;
-  return { text, tone: 'danger' };
+}
+
+/**
+ * The sentence a card shows under its chip: what the item waits for, in words. Null when nothing
+ * holds the item.
+ */
+export function blockerSentence(blocker: WorkItemBlocker | null | undefined): string | null {
+  if (blocker === undefined || blocker === null) return null;
+  switch (blocker.kind) {
+    case 'agent':
+      return 'Chờ agent rảnh để nhận việc.';
+    case 'dependency':
+      return blocker.sequence === undefined
+        ? 'Chờ một việc khác xong.'
+        : `Chờ việc #${blocker.sequence} xong.`;
+    case 'failed':
+      return blocker.sequence === undefined
+        ? 'Có việc đang chờ đã bị lỗi. Gỡ chờ hoặc giao lại.'
+        : `Việc #${blocker.sequence} bị lỗi. Gỡ chờ hoặc giao lại.`;
+    case 'capacity':
+      return blocker.running === undefined || blocker.limit === undefined
+        ? 'Hết chỗ chạy, chờ có chỗ trống.'
+        : `Đang chạy ${blocker.running}/${blocker.limit} việc, chờ có chỗ trống.`;
+    case 'area':
+      return blocker.area === undefined || blocker.area === ''
+        ? 'Vùng code cần có đang có việc khác giữ.'
+        : `Vùng ${blocker.area} đang có việc khác giữ.`;
+    case 'no_member':
+      return 'Thư mục chưa có agent nào để nhận việc này.';
+  }
+}
+
+/** A repo's short name: the last segment of its path, whichever slash it uses. Empty when none. */
+export function repoShortName(path: string): string {
+  const segments = path.split(/[\\/]+/).filter((segment) => segment !== '');
+  return segments.at(-1) ?? '';
+}
+
+/**
+ * The code areas an item carries: each trimmed and lowercased, blanks and repeats dropped, and at
+ * most WORK_ITEM_AREAS_MAX kept in the order they were given.
+ */
+export function normalizeAreas(values: readonly string[]): string[] {
+  const areas: string[] = [];
+  for (const value of values) {
+    const area = value.trim().toLowerCase();
+    if (area === '' || areas.includes(area)) continue;
+    areas.push(area);
+    if (areas.length === WORK_ITEM_AREAS_MAX) break;
+  }
+  return areas;
+}
+
+/** The area chips a card shows: the first few, and how many more follow them. */
+export function areaChipsOf(areas: readonly string[]): { shown: string[]; more: number } {
+  return {
+    shown: areas.slice(0, WORK_ITEM_AREA_CHIPS),
+    more: Math.max(0, areas.length - WORK_ITEM_AREA_CHIPS),
+  };
 }
 
 /**
@@ -342,7 +432,7 @@ export function workItemKey(ref: WorkItemRef): string {
 /** One folder's work items; an empty list when the server has sent none for that folder. */
 export function workItemsOf(state: CompanyViewState, workspacePath: string): FolderWorkItems {
   const held: FolderWorkItems | undefined = state.workItems[workspacePath];
-  return held ?? { revision: 0, items: [], roles: [] };
+  return held ?? { revision: 0, items: [], roles: [], repos: [], agents: [], settings: null };
 }
 
 /** The work item a reference names, or undefined when the folder no longer holds it. */

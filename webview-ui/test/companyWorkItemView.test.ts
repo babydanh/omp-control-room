@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type {
   AgentRole,
   CompanyWorkspaceEntry,
+  SquadSettings,
   WorkItem,
   WorkItemStatus,
 } from '../../core/src/messages.js';
@@ -31,6 +32,14 @@ import { session, stateFrom } from './companyFixtures.js';
 
 const ACTIVE = 'D:/work/app';
 const OTHER = 'D:/work/site';
+
+const SETTINGS: SquadSettings = {
+  maxParallel: 4,
+  maxSquadSessions: 3,
+  minFreeRamGb: 2,
+  autoJudge: true,
+  autoApproveNext: false,
+};
 
 function item(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {
   return {
@@ -65,6 +74,9 @@ function withWorkItems(
     revision,
     items,
     roles,
+    repos: [],
+    agents: [],
+    settings: SETTINGS,
   }).state;
 }
 
@@ -190,9 +202,16 @@ describe('workItemCardHead', () => {
 });
 
 describe('workItemsOf and roleDescriptionFor', () => {
-  it('reads an empty folder as no items, revision 0, no roles', () => {
+  it('reads an empty folder as empty lists and no settings', () => {
     const state = emptyCompanyState();
-    expect(workItemsOf(state, ACTIVE)).toEqual({ revision: 0, items: [], roles: [] });
+    expect(workItemsOf(state, ACTIVE)).toEqual({
+      revision: 0,
+      items: [],
+      roles: [],
+      repos: [],
+      agents: [],
+      settings: null,
+    });
     expect(roleDescriptionFor(state, ACTIVE, { kind: 'herdr', paneId: 'p1' })).toBe('');
   });
 

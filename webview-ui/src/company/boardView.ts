@@ -156,6 +156,14 @@ export interface BoardWorkItem {
   priority: number;
   /** Why a queued item is not sent yet; null when nothing holds it. */
   blocker: WorkItemBlocker | null;
+  /** The repo the item runs in, as a canonical path; null for the folder root. */
+  repo: string | null;
+  /** The role the item is filed under; null when none is set. */
+  role: CompanyRole | null;
+  /** The omp subagent that takes the item; null for the default worker. */
+  agent: string | null;
+  /** The code areas the item carries, in lowercase. */
+  areas: string[];
   updatedAt: string;
   /** The folder the item is filed under when every folder is shown; null in folder mode. */
   folder: FolderIdentity | null;
@@ -246,6 +254,10 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
     sequence: item.sequence,
     priority: item.priority,
     blocker: item.blocker ?? null,
+    repo: item.repo ?? null,
+    role: item.role ?? null,
+    agent: item.agent ?? null,
+    areas: item.areas ?? [],
     updatedAt: item.updatedAt,
     folder,
     squadRunId: item.squadRunId ?? null,

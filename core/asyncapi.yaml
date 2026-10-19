@@ -226,6 +226,7 @@ components:
         - $ref: '#/components/schemas/CompanyWorkItemCancelMessage'
         - $ref: '#/components/schemas/CompanyWorkItemDependenciesMessage'
         - $ref: '#/components/schemas/CompanyAgentRoleSetMessage'
+        - $ref: '#/components/schemas/CompanySquadSettingsSetMessage'
         # Squad leader (privileged; one leader turn proposes assignments for the team)
         - $ref: '#/components/schemas/CompanySquadRequestMessage'
         - $ref: '#/components/schemas/CompanySquadApproveMessage'
@@ -2125,6 +2126,12 @@ components:
           format: uuid
         workspaceKey:
           type: string
+        cwd:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            Folder the session's omp process runs in. Absent means the Company folder root.
         requestedModel:
           type: string
         effectiveModel:
@@ -2179,6 +2186,12 @@ components:
           type: string
         name:
           type: string
+        cwd:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            Folder the session's omp process runs in. Absent means the Company folder root.
         role:
           $ref: '#/components/schemas/CompanyRole'
         requestedModel:
@@ -3785,7 +3798,7 @@ components:
 
     WorkItemAssigneeKind:
       type: string
-      enum: [herdr, session, new-session]
+      enum: [herdr, session, new-session, auto]
 
     WorkItemAssignee:
       type: object
@@ -3793,7 +3806,9 @@ components:
       required: [kind]
       description: >-
         Who a work item goes to. herdr names a herdr pane by paneId. session names an omp session on
-        the board by sessionId. new-session opens a fresh omp chat in the folder when the item is sent.
+        the board by sessionId. new-session opens a fresh omp chat in the item's repo when the item is
+        sent. auto lets the scheduler pick an idle member in the item's repo, or open one, when the item
+        is sent, and the item then takes the concrete assignee.
       properties:
         kind:
           $ref: '#/components/schemas/WorkItemAssigneeKind'
@@ -3830,18 +3845,33 @@ components:
       description: >-
         P0 is the most urgent, P3 the least. A queued item for one agent is sent by priority first, then by creation order.
 
+    WorkItemBlockerKind:
+      type: string
+      enum: [agent, dependency, failed, capacity, area, no_member]
+
     WorkItemBlocker:
       type: object
       additionalProperties: false
       required: [kind]
       description: >-
-        Why a queued item is not sent yet, shown as a chip. agent: its agent is busy. dependency: a dependency is not
-        done yet. failed: a dependency failed or was removed. sequence is the #n of that dependency.
+        Why a queued item is not sent yet, shown as a chip. agent: its agent is busy. dependency: a dependency is
+        not done yet. failed: a dependency failed or was removed. capacity: the folder has no free slot; running and
+        limit give the count. area: a running item holds an area or checkout this one needs; sequence is that
+        item's #n and area names it. no_member: no free agent in the item's repo, and the squad cannot open one;
+        the reason sentence says why.
       properties:
         kind:
-          type: string
-          enum: [agent, dependency, failed]
+          $ref: '#/components/schemas/WorkItemBlockerKind'
         sequence:
+          type: integer
+          minimum: 0
+        area:
+          type: string
+          maxLength: 300
+        running:
+          type: integer
+          minimum: 0
+        limit:
           type: integer
           minimum: 0
     WorkItem:
@@ -3885,6 +3915,31 @@ components:
           items:
             type: string
             format: uuid
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            Canonical path of the repo or checkout the item works in. Absent means the Company folder root.
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        areas:
+          type: array
+          maxItems: 8
+          description: >-
+            Code areas this item edits, lowercase, such as web:src/app. Two running items may not share an
+            area. Read-only agents take none.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
+        agent:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Name of the omp subagent that does the item, such as task, reviewer, or a custom agent. Absent
+            means the default worker.
         blocker:
           $ref: '#/components/schemas/WorkItemBlocker'
         squadRunId:
@@ -3920,10 +3975,56 @@ components:
           type: string
           format: date-time
 
+    SquadSettings:
+      type: object
+      additionalProperties: false
+      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext]
+      description: >-
+        Per-folder limits for the squad scheduler. maxParallel caps running work items in the folder.
+        maxSquadSessions caps the omp sessions the squad opens. minFreeRamGb is the free memory needed before
+        opening one. autoJudge and autoApproveNext are read by the judge and the leader in later phases.
+      properties:
+        maxParallel:
+          type: integer
+          minimum: 1
+          maximum: 8
+        maxSquadSessions:
+          type: integer
+          minimum: 0
+          maximum: 6
+        minFreeRamGb:
+          type: number
+          minimum: 0
+          maximum: 256
+        autoJudge:
+          type: boolean
+        autoApproveNext:
+          type: boolean
+
+    OmpAgentInfo:
+      type: object
+      additionalProperties: false
+      required: [name, description, readOnly, source]
+      description: >-
+        An omp subagent a work item can name. A readOnly agent takes no area or checkout locks.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 64
+        description:
+          type: string
+          maxLength: 1000
+        readOnly:
+          type: boolean
+        source:
+          type: string
+          enum: [bundled, user, project]
+
     CompanyWorkItemsMessage:
       type: object
       additionalProperties: false
-      required: [type, workspacePath, revision, items, roles]
+      required: [type, workspacePath, revision, items, roles, settings, repos, agents]
       description: >-
         One folder's work items and agent role notes, sent in full after every change to them and in
         answer to a snapshot request. A message replaces the folder's earlier one when its revision is newer.
@@ -3945,6 +4046,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AgentRole'
+        settings:
+          $ref: '#/components/schemas/SquadSettings'
+        repos:
+          type: array
+          maxItems: 200
+          description: >-
+            Git repos and worktrees under the folder, as canonical paths, for the Repo choice.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 4096
+        agents:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/OmpAgentInfo'
 
     CompanyWorkItemCreateMessage:
       type: object
@@ -3979,6 +4096,31 @@ components:
           items:
             type: string
             format: uuid
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            Canonical path of the repo or checkout the item works in. Absent means the Company folder root.
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        areas:
+          type: array
+          maxItems: 8
+          description: >-
+            Code areas this item edits, lowercase, such as web:src/app. Two running items may not share an
+            area. Read-only agents take none.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
+        agent:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Name of the omp subagent that does the item, such as task, reviewer, or a custom agent. Absent
+            means the default worker.
 
     CompanyWorkItemAssignMessage:
       type: object
@@ -4002,6 +4144,29 @@ components:
           format: uuid
         assignee:
           $ref: '#/components/schemas/WorkItemAssignee'
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            Canonical path of the repo the item moves to. Absent clears it, so the item runs in the folder root.
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        areas:
+          type: array
+          maxItems: 8
+          description: >-
+            Code areas the item edits, lowercase. Absent clears them. Each assign sends the full set of fields.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
+        agent:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Omp subagent name. Absent clears it and the item uses the default worker.
 
     CompanyWorkItemFollowUpMessage:
       type: object
@@ -4121,6 +4286,25 @@ components:
         description:
           type: string
           maxLength: 1000
+
+    CompanySquadSettingsSetMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, settings]
+      description: >-
+        Save the folder's squad settings. The same requestId twice saves nothing new.
+      properties:
+        type:
+          const: companySquadSettingsSet
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        settings:
+          $ref: '#/components/schemas/SquadSettings'
 
     SquadRunStatus:
       type: string

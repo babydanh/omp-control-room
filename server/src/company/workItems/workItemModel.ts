@@ -8,7 +8,9 @@
 
 import type {
   AgentRole,
+  CompanyRole,
   HerdrAgent,
+  SquadSettings,
   WorkItem,
   WorkItemAssignee,
   WorkItemAssigneeKind,
@@ -19,7 +21,6 @@ import type {
 } from '../../../../core/src/messages.js';
 import {
   closesLoop,
-  composePrompt,
   isWorkItemPriority,
   WORK_ITEM_ACCEPTANCE_MAX_CHARS,
   WORK_ITEM_DEPENDS_MAX,
@@ -27,6 +28,9 @@ import {
 } from '../../../../core/src/workItemGraph.js';
 import { isHerdrPaneId } from '../../herdr/paneId.js';
 import { isRecord } from '../typeGuards.js';
+import { isValidAgentName } from './agentCatalog.js';
+import { composeDispatchPrompt } from './dispatchPrompt.js';
+import { parseSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
 
 /** Longest prompt a work item may carry: the same bytes herdr accepts for one pane prompt. */
 export const WORK_ITEM_TEXT_MAX_BYTES = 32 * 1024;
@@ -49,6 +53,14 @@ export const WORK_ITEM_FINISHED_KEEP = 200;
 export const WORK_ITEM_GRACE_MS = 10_000;
 /** Non-empty screen lines kept as an item's result. */
 export const WORK_ITEM_RESULT_LINES = 12;
+/** Most code areas one work item may lock. */
+export const WORK_ITEM_AREAS_MAX = 8;
+/** Longest code-area name, in characters. */
+export const WORK_ITEM_AREA_MAX_CHARS = 120;
+/** Longest repo path a work item may name, in characters. */
+export const WORK_ITEM_REPO_MAX_CHARS = 4096;
+/** Squad-opened session ids kept per folder; the oldest fall off the front. */
+export const SQUAD_SESSIONS_KEPT = 200;
 
 /** Vietnamese reasons the board shows. The server owns the wording. */
 export const WORK_ITEM_REASON = {
@@ -85,6 +97,14 @@ export interface WorkItemDraft {
   dependsOn?: readonly string[];
   /** Indexes into the same batch of drafts that this one waits for (squad rows). */
   dependsOnDrafts?: readonly number[];
+  /** Canonical repo path inside the folder; the folder root when absent. */
+  repo?: string;
+  /** Role the session is opened with, and a matching hint for the scheduler. */
+  role?: CompanyRole;
+  /** Code areas the item locks while it edits. Normalized; at most WORK_ITEM_AREAS_MAX. */
+  areas?: readonly string[];
+  /** Omp subagent name the item runs under. */
+  agent?: string;
 }
 
 /** Where a folder's work items and role notes sit on disk. */
@@ -94,6 +114,9 @@ export interface WorkItemsFile {
   nextSequence: number;
   items: StoredWorkItem[];
   roles: AgentRole[];
+  settings: SquadSettings;
+  /** Sessions the squad opened, oldest first; used for reuse and the open cap. */
+  squadSessionIds: string[];
 }
 
 /** What a persisted file parsed to. `corrupt` means the file existed but was not a usable file. */
@@ -110,6 +133,13 @@ export type AgentObservation = 'unknown' | 'gone' | 'free' | 'busy' | 'blocked';
 type HerdrStatus = HerdrAgent['status'];
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ITEM_ROLES: Record<Exclude<CompanyRole, 'director'>, true> = {
+  advisor: true,
+  worker: true,
+  qa: true,
+  judge: true,
+  chat: true,
+};
 
 const WORK_ITEM_STATUSES: Record<WorkItemStatus, true> = {
   queued: true,
@@ -123,6 +153,7 @@ const ASSIGNEE_KINDS: Record<WorkItemAssigneeKind, true> = {
   herdr: true,
   session: true,
   'new-session': true,
+  auto: true,
 };
 const EVENT_KINDS: Record<WorkItemEventKind, true> = {
   created: true,
@@ -143,6 +174,11 @@ export function isWorkItemStatus(value: unknown): value is WorkItemStatus {
   return typeof value === 'string' && Object.hasOwn(WORK_ITEM_STATUSES, value);
 }
 
+/** A role a work item may name: the roles a session runs as. The director leads and is not one. */
+export function isItemRole(value: unknown): value is Exclude<CompanyRole, 'director'> {
+  return typeof value === 'string' && Object.hasOwn(ITEM_ROLES, value);
+}
+
 function isIsoString(value: unknown): value is string {
   return typeof value === 'string' && !Number.isNaN(Date.parse(value));
 }
@@ -151,7 +187,7 @@ function nonNegativeInt(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-/** Whether a value is an assignee the server can act on (herdr pane, session, or new session). */
+/** Whether a value is an assignee the server can act on: herdr pane, session, new session, or auto. */
 export function isWorkItemAssignee(value: unknown): value is WorkItemAssignee {
   if (!isRecord(value)) return false;
   if (typeof value.kind !== 'string' || !Object.hasOwn(ASSIGNEE_KINDS, value.kind)) return false;
@@ -171,6 +207,7 @@ export function isWorkItemAssignee(value: unknown): value is WorkItemAssignee {
 export function normalizeAssignee(assignee: WorkItemAssignee): WorkItemAssignee {
   if (assignee.kind === 'herdr') return { kind: 'herdr', paneId: assignee.paneId ?? '' };
   if (assignee.kind === 'session') return { kind: 'session', sessionId: assignee.sessionId ?? '' };
+  if (assignee.kind === 'auto') return { kind: 'auto' };
   return { kind: 'new-session' };
 }
 
@@ -178,6 +215,7 @@ export function normalizeAssignee(assignee: WorkItemAssignee): WorkItemAssignee 
 export function assigneeKey(assignee: WorkItemAssignee): string {
   if (assignee.kind === 'herdr') return `herdr:${assignee.paneId ?? ''}`;
   if (assignee.kind === 'session') return `session:${assignee.sessionId ?? ''}`;
+  if (assignee.kind === 'auto') return 'auto';
   return 'new-session';
 }
 
@@ -243,6 +281,20 @@ export function clip(text: string, max: number): string {
   return Array.from(text).slice(0, max).join('');
 }
 
+/**
+ * Code-area names as the server keeps them: trimmed, lowercase, forward slashes, no trailing slash.
+ * Blanks and repeats are dropped; non-string entries are ignored. Callers apply the length and count limits.
+ */
+export function normalizeAreas(values: readonly unknown[]): string[] {
+  const areas: string[] = [];
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const area = value.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    if (area !== '' && !areas.includes(area)) areas.push(area);
+  }
+  return areas;
+}
+
 /** A history event, with `message` present only when there is one. */
 export function makeEvent(at: string, kind: WorkItemEventKind, message?: string): WorkItemEvent {
   return message === undefined
@@ -256,6 +308,7 @@ export function toWorkItem(stored: StoredWorkItem): WorkItem {
     ...stored,
     history: [...stored.history],
     dependsOn: [...stored.dependsOn],
+    areas: [...(stored.areas ?? [])],
   };
   delete wire.pendingPrompt;
   delete wire.waitSequences;
@@ -302,6 +355,20 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
   const history = Array.isArray(value.history)
     ? value.history.map(parseEvent).filter((event): event is WorkItemEvent => event !== null)
     : [];
+  const repo =
+    typeof value.repo === 'string' &&
+    value.repo.trim() !== '' &&
+    value.repo.length <= WORK_ITEM_REPO_MAX_CHARS
+      ? value.repo.trim()
+      : undefined;
+  const role = isItemRole(value.role) ? value.role : undefined;
+  const areas = Array.isArray(value.areas)
+    ? normalizeAreas(value.areas)
+        .filter((area) => area.length <= WORK_ITEM_AREA_MAX_CHARS)
+        .slice(0, WORK_ITEM_AREAS_MAX)
+    : [];
+  const agent =
+    typeof value.agent === 'string' && isValidAgentName(value.agent) ? value.agent : undefined;
   return {
     id: value.id,
     text: value.text,
@@ -317,12 +384,16 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     pendingPrompt:
       typeof value.pendingPrompt === 'string'
         ? value.pendingPrompt
-        : composePrompt(value.text, acceptance),
+        : composeDispatchPrompt({ text: value.text, acceptance, agent, readOnly: false }),
     ...(acceptance === '' ? {} : { acceptance }),
     ...(typeof value.dispatchedAt === 'string' ? { dispatchedAt: value.dispatchedAt } : {}),
     ...(typeof value.reason === 'string' ? { reason: value.reason } : {}),
     ...(typeof value.result === 'string' ? { result: value.result } : {}),
     ...(typeof value.squadRunId === 'string' ? { squadRunId: value.squadRunId } : {}),
+    ...(repo === undefined ? {} : { repo }),
+    ...(role === undefined ? {} : { role }),
+    areas,
+    ...(agent === undefined ? {} : { agent }),
   };
 }
 
@@ -352,7 +423,7 @@ function parseWaitSequences(value: unknown, dependsOn: readonly string[]): Recor
 /** Validates one stored role note. */
 export function parseRole(value: unknown): AgentRole | null {
   if (!isRecord(value)) return null;
-  if (!isWorkItemAssignee(value.agent)) return null;
+  if (!isWorkItemAssignee(value.agent) || value.agent.kind === 'auto') return null;
   if (typeof value.description !== 'string') return null;
   if (Array.from(value.description).length > ROLE_DESCRIPTION_MAX_CHARS) return null;
   if (!isIsoString(value.updatedAt)) return null;
@@ -363,9 +434,27 @@ export function parseRole(value: unknown): AgentRole | null {
   };
 }
 
+/** Keeps the well-formed squad-opened session ids, without repeats, the most recent last. */
+function parseSquadSessionIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const ids = new Set<string>();
+  for (const entry of value) {
+    if (typeof entry === 'string' && entry.length > 0 && entry.length <= 200) ids.add(entry);
+  }
+  return [...ids].slice(-SQUAD_SESSIONS_KEPT);
+}
+
 /** A file with nothing in it: revision zero, no items, no role notes. */
 export function emptyWorkItemsFile(): WorkItemsFile {
-  return { version: 1, revision: 0, nextSequence: 0, items: [], roles: [] };
+  return {
+    version: 1,
+    revision: 0,
+    nextSequence: 0,
+    items: [],
+    roles: [],
+    settings: { ...SQUAD_SETTINGS_DEFAULT },
+    squadSessionIds: [],
+  };
 }
 
 /**
@@ -414,7 +503,15 @@ export function parseWorkItemsFile(raw: unknown): ParsedWorkItems {
   const revision = nonNegativeInt(raw.revision) ?? 0;
   const nextSequence = Math.max(nonNegativeInt(raw.nextSequence) ?? 0, highest + 1);
   return {
-    file: { version: 1, revision, nextSequence, items, roles },
+    file: {
+      version: 1,
+      revision,
+      nextSequence,
+      items,
+      roles,
+      settings: parseSquadSettings(raw.settings),
+      squadSessionIds: parseSquadSessionIds(raw.squadSessionIds),
+    },
     dropped,
     corrupt: false,
   };

@@ -629,7 +629,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           initialText={draft.text}
           textEditable
           options={assigneeOptionsFor(state, focus)}
-          items={workItemsOf(state, focus).items}
+          folder={workItemsOf(state, focus)}
           onAccepted={() => {
             setAssignOpen(false);
             client.setDraftText('');

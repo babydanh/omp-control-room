@@ -218,9 +218,14 @@ export interface WorkspaceCompanyCoordinatorEffects {
   readonly onPromptSubmitted: (prompt: CompanyPrompt, input: SubmitPromptInput) => Promise<void>;
   /**
    * Open a plain omp chat session in this workspace, or resume an omp session
-   * file. Like onPromptSubmitted, awaited after the caller's serialized phase.
+   * file. `cwd` and `role` place a new session as `openNewChat` describes. Like
+   * onPromptSubmitted, awaited after the caller's serialized phase.
    */
-  readonly openChatSession: (input: { resumeFile?: string }) => Promise<CompanySession>;
+  readonly openChatSession: (input: {
+    resumeFile?: string;
+    cwd?: string;
+    role?: CompanyRole;
+  }) => Promise<CompanySession>;
   readonly onContractDecision: (contract: Contract, decision: ContractDecision) => Promise<void>;
   readonly onQuestionAnswered: (question: Question, input: QuestionAnswerInput) => Promise<void>;
   /**
@@ -1313,15 +1318,17 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
   /**
    * Open a plain omp chat session in this workspace with no prompt. Nothing is
    * sent: the session waits for the user's first message. Returns its board id.
+   * `cwd` and `role` place the new session (see `CompanyCoordinator.openNewChat`);
+   * with neither, it is a chat session in the folder root.
    */
-  async openNewChat(): Promise<string> {
+  async openNewChat(input: { cwd?: string; role?: CompanyRole } = {}): Promise<string> {
     // The guards run under the queue. The effect runs after it, because it
     // commits through this same queue and would wait on itself inside it.
     await this.serialize(async () => {
       this.assertOwner();
       this.assertStarted();
     });
-    const session = await this.options.effects.openChatSession({});
+    const session = await this.options.effects.openChatSession({ ...input });
     return session.id;
   }
 
@@ -1562,6 +1569,7 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
       code: session.code,
       name: session.name,
       role: session.role,
+      ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
       requestedModel: session.requestedModel,
       ...(session.effectiveModel === undefined ? {} : { effectiveModel: session.effectiveModel }),
       ...(session.agentId === undefined ? {} : { agentId: session.agentId }),

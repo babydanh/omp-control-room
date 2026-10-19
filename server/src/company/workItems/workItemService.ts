@@ -1,14 +1,16 @@
 /**
- * WorkItemService: one folder's manual work items.
+ * WorkItemService: one folder's work items.
  *
  * A work item is a piece of work the user hands to one agent: a herdr pane, an omp session on the
- * board, or a new omp chat opened for it. The service stores items per folder, sends each to its
- * agent when that agent is free, queues it behind the agent's current work otherwise, and moves its
- * status as herdr and the session report back. Every change is published as a full
- * `companyWorkItems` message and saved to disk.
+ * board, a new omp chat opened for it, or whichever free agent the squad scheduler picks (`auto`).
+ * The service stores items per folder, decides when each may start (see `workItemScheduler.ts`),
+ * sends it to its agent, queues it behind the agent's current work otherwise, and moves its status
+ * as herdr and the session report back. Every change is published as a full `companyWorkItems`
+ * message and saved to disk.
  *
  * An item may wait for other items: it is sent only once every one of them is done, and its
- * priority decides its place in its agent's queue.
+ * priority decides its place in its agent's queue. An editing item also takes its code areas and
+ * its checkout while it runs, so two editing items never work on the same place at once.
  *
  * The status rules live in `workItemModel.ts`. This module applies them and performs the side
  * effects through the injected ports, so tests run with fakes and no clock or socket.
@@ -18,8 +20,11 @@
 
 import type {
   AgentRole,
+  CompanyRole,
   CompanyWorkItemsMessage,
   HerdrAgent,
+  OmpAgentInfo,
+  SquadSettings,
   WorkItem,
   WorkItemAssignee,
   WorkItemVerdict,
@@ -29,7 +34,6 @@ import {
   blockerReason,
   checkDependsOn,
   compareQueue,
-  composePrompt,
   dependenciesDone,
   type DependencyState,
   type DependsOnRefusal,
@@ -38,6 +42,9 @@ import {
   WORK_ITEM_PRIORITY_DEFAULT,
 } from '../../../../core/src/workItemGraph.js';
 import { CompanyError } from '../companyError.js';
+import { BUNDLED_AGENTS, findAgent } from './agentCatalog.js';
+import { composeDispatchPrompt } from './dispatchPrompt.js';
+import { GIB, isSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
 import {
   type AgentObservation,
   assigneeKey,
@@ -47,9 +54,11 @@ import {
   canReassign,
   clip,
   isFinished,
+  isItemRole,
   isUuid,
   isWorkItemAssignee,
   makeEvent,
+  normalizeAreas,
   normalizeAssignee,
   observeHerdrStatus,
   observeSessionStatus,
@@ -57,8 +66,11 @@ import {
   type ParsedWorkItems,
   refuseText,
   ROLE_DESCRIPTION_MAX_CHARS,
+  SQUAD_SESSIONS_KEPT,
   type StoredWorkItem,
   toWorkItem,
+  WORK_ITEM_AREA_MAX_CHARS,
+  WORK_ITEM_AREAS_MAX,
   WORK_ITEM_FINISHED_KEEP,
   WORK_ITEM_GRACE_MS,
   WORK_ITEM_HISTORY_MAX,
@@ -69,6 +81,16 @@ import {
   type WorkItemDraft,
   type WorkItemsFile,
 } from './workItemModel.js';
+import {
+  checkoutKey,
+  checkoutName,
+  decideStart,
+  type SchedulerContext,
+  type SchedulerDecision,
+  type SchedulerHold,
+  type SchedulerItem,
+  type SchedulerMember,
+} from './workItemScheduler.js';
 
 /** How many recent request ids are remembered, so a resent command answers the same way. */
 const REQUEST_MEMORY_MAX = 256;
@@ -77,6 +99,8 @@ const REQUEST_MEMORY_MAX = 256;
 export interface WorkItemPaneView {
   readonly paneId: string;
   readonly status: HerdrAgent['status'];
+  /** The checkout the pane runs in, when herdr reports one. */
+  readonly cwd?: string;
 }
 
 /** What the roster answers about herdr panes at one moment. */
@@ -99,6 +123,8 @@ export interface WorkItemSessionView {
   readonly id: string;
   readonly status: string;
   readonly role: string;
+  /** The checkout the session runs in, when the session reports one. */
+  readonly cwd?: string;
 }
 
 /** The folder's omp sessions. */
@@ -111,8 +137,14 @@ export interface WorkItemSessions {
     mode: 'chat' | 'company',
     requestId: string,
   ): Promise<void>;
-  /** Opens a new omp chat in the folder and returns its session id. */
-  openChat(): Promise<string>;
+  /** Opens a new omp chat in `cwd` for `role` and returns its session id. */
+  openChat(input: { readonly cwd: string; readonly role: CompanyRole }): Promise<string>;
+}
+
+/** What the board can pick from: the folder's repos and its omp agents. */
+export interface WorkItemCatalog {
+  readonly repos: readonly string[];
+  readonly agents: readonly OmpAgentInfo[];
 }
 
 /** Where the folder's file lives. */
@@ -131,12 +163,30 @@ export interface WorkItemPorts {
   newId(): string;
   /** Runs `run` after `ms`. Returns a function that cancels it. */
   schedule(run: () => void, ms: number): () => void;
+  /** The folder's repos and omp agents, read fresh. Rejects when the read itself fails. */
+  catalog(): Promise<WorkItemCatalog>;
+  /** Free memory in bytes, read whenever the scheduler may open a session. */
+  freeMemoryBytes(): number;
 }
 
 /** A command the board sent. The request id makes a resent command harmless. */
 export interface WorkItemCommand {
   readonly requestId: string;
 }
+
+/** The item fields a create or an assign may name. Absent means none. */
+type ItemFieldsInput = Pick<WorkItemDraft, 'repo' | 'role' | 'areas' | 'agent'>;
+
+/** The item fields after checks: a repo from the folder's list, a role, normalized areas, a known agent. */
+interface WorkItemFields {
+  repo?: string;
+  role?: CompanyRole;
+  areas: string[];
+  agent?: string;
+}
+
+/** A decision that starts an item: the item goes to a member, or to a session opened first. */
+type StartDecision = Exclude<SchedulerDecision, { readonly kind: 'wait' }>;
 
 /** Vietnamese refusals the board shows. */
 const MESSAGE = {
@@ -148,6 +198,11 @@ const MESSAGE = {
   sessionUnknown: 'Phiên omp đó không còn trên bảng.',
   assigneeInvalid: 'Người nhận việc không hợp lệ.',
   roleInvalid: 'Mô tả vai trò quá dài.',
+  itemRoleInvalid: 'Vai không hợp lệ.',
+  repoInvalid: 'Repo đó không nằm trong thư mục này.',
+  areasInvalid: 'Vùng code tối đa 8 mục, mỗi mục tối đa 120 ký tự.',
+  agentUnknown: 'Subagent omp đó không có trong danh sách.',
+  settingsInvalid: 'Cài đặt đội không hợp lệ.',
   emptyText: 'Nội dung việc không được để trống.',
   promptTooLarge: 'Nội dung việc vượt quá giới hạn.',
   done: 'Việc đã xong.',
@@ -197,6 +252,23 @@ function isLive(item: StoredWorkItem): boolean {
   return item.status === 'queued' || occupiesAgent(item.status);
 }
 
+/** How the board names a scheduler member in a history line. */
+function memberLabel(member: SchedulerMember): string {
+  if (member.assignee.kind === 'herdr') return `pane herdr ${member.assignee.paneId ?? ''}`;
+  return member.cwd === undefined ? 'phiên omp' : `phiên omp trong ${checkoutName(member.cwd)}`;
+}
+
+/** Sets the item's repo, role, areas and agent to exactly these fields; an absent one is cleared. */
+function applyFields(item: StoredWorkItem, fields: WorkItemFields): void {
+  if (fields.repo === undefined) delete item.repo;
+  else item.repo = fields.repo;
+  if (fields.role === undefined) delete item.role;
+  else item.role = fields.role;
+  item.areas = [...fields.areas];
+  if (fields.agent === undefined) delete item.agent;
+  else item.agent = fields.agent;
+}
+
 /** Work items for one folder, with their queue, status, and role notes. */
 export class WorkItemService {
   private readonly workspacePath: string;
@@ -205,6 +277,10 @@ export class WorkItemService {
   private roles: AgentRole[] = [];
   private revision = 0;
   private nextSequence = 0;
+  private settings: SquadSettings = { ...SQUAD_SETTINGS_DEFAULT };
+  /** Sessions the squad opened, oldest first. Used for reuse and the open cap. */
+  private squadSessionIds: string[] = [];
+  private catalog: WorkItemCatalog = { repos: [], agents: BUNDLED_AGENTS };
   /** Items the agent was seen working on, so its return to free means it finished. */
   private readonly observedBusy = new Set<string>();
   /** Answers to recent commands by request id; the work item id for a create, '' otherwise. */
@@ -225,13 +301,16 @@ export class WorkItemService {
     this.ports = ports;
   }
 
-  /** Reads the folder's file. Call once, before any command. */
+  /** Reads the folder's file and catalog. Call once, before any command. */
   async load(): Promise<void> {
     const parsed = await this.ports.persistence.load();
     this.revision = parsed.file.revision;
     this.nextSequence = parsed.file.nextSequence;
     this.roles = parsed.file.roles;
+    this.settings = { ...parsed.file.settings };
+    this.squadSessionIds = [...parsed.file.squadSessionIds];
     for (const item of parsed.file.items) this.items.set(item.id, item);
+    await this.refreshCatalog();
     // A running item from before this start gets its grace check again.
     if ([...this.items.values()].some((item) => item.status === 'running'))
       this.scheduleGraceCheck();
@@ -247,6 +326,9 @@ export class WorkItemService {
       revision: this.revision,
       items,
       roles: this.roles.map((role) => ({ ...role, agent: { ...role.agent } })),
+      settings: { ...this.settings },
+      repos: [...this.catalog.repos],
+      agents: this.catalog.agents.map((agent) => ({ ...agent })),
     };
   }
 
@@ -265,14 +347,14 @@ export class WorkItemService {
   }
 
   /**
-   * Creates one item for an assignee and sends it, or queues it while the assignee is busy. The
-   * same request id twice creates nothing new and answers with the first item's id.
+   * Creates one item for an assignee. It is sent when the scheduler lets it start, and queued
+   * until then. The same request id twice creates nothing new and answers with the first item's id.
    */
   async create(command: WorkItemCommand & Omit<WorkItemDraft, 'dependsOnDrafts'>): Promise<string> {
-    const replayed = this.replay(command.requestId);
+    const replayed = await this.catalogFor(command.requestId);
     if (replayed !== undefined) return replayed;
-    this.validateDraft(command);
-    const item = this.addItem(command, this.ports.newId(), command.dependsOn ?? []);
+    const fields = this.validateDraft(command);
+    const item = this.addItem(command, this.ports.newId(), command.dependsOn ?? [], fields);
     this.remember(command.requestId, item.id);
     await this.commitOrDiscard([item.id], command.requestId);
     await this.reconcileAfterSave();
@@ -290,16 +372,19 @@ export class WorkItemService {
     if (!isUuid(options.squadRunId)) {
       throw new CompanyError('invalid_request', 'Mã lượt squad phải là UUID.');
     }
-    const existing = [...this.items.values()]
-      .filter((item) => item.squadRunId === options.squadRunId)
-      .sort((a, b) => a.sequence - b.sequence)
-      .map((item) => item.id);
-    if (existing.length > 0) return existing;
-    for (const draft of drafts) this.validateDraft(draft);
-    const plans = drafts.map((draft) => ({ draft, id: this.ports.newId() }));
+    const answered = this.idsOfRun(options.squadRunId);
+    if (answered.length > 0) return answered;
+    await this.readCatalog();
+    const again = this.idsOfRun(options.squadRunId);
+    if (again.length > 0) return again;
+    const plans = drafts.map((draft) => ({
+      draft,
+      id: this.ports.newId(),
+      fields: this.validateDraft(draft),
+    }));
     const waits = this.resolveBatchDependencies(plans);
     const created = plans.map((plan, index) =>
-      this.addItem(plan.draft, plan.id, waits[index] ?? [], options.squadRunId),
+      this.addItem(plan.draft, plan.id, waits[index] ?? [], plan.fields, options.squadRunId),
     );
     // Waits on items of this batch can only be named once all of them exist.
     for (const item of created) item.waitSequences = this.sequencesOf(item.dependsOn);
@@ -309,22 +394,27 @@ export class WorkItemService {
     return ids;
   }
 
-  /** Gives an item to another assignee, sends it, or queues it there. Refused while it is running. */
+  /**
+   * Gives an item to another assignee, and sets its repo, role, areas and agent to the fields
+   * sent (an absent field is cleared). The item is then queued again; the scheduler decides when.
+   */
   async assign(
-    command: WorkItemCommand & { id: string; assignee: WorkItemAssignee },
+    command: WorkItemCommand & { id: string; assignee: WorkItemAssignee } & ItemFieldsInput,
   ): Promise<void> {
-    if (this.replay(command.requestId) !== undefined) return;
+    if ((await this.catalogFor(command.requestId)) !== undefined) return;
     const item = this.requireItem(command.id);
     this.refuseUnlessReassignable(item);
     if (!isWorkItemAssignee(command.assignee)) {
       throw new CompanyError('assignee_invalid', MESSAGE.assigneeInvalid);
     }
     this.assertReachable(command.assignee);
+    const fields = this.prepareFields(command);
     const before = structuredClone(item);
     item.assignee = normalizeAssignee(command.assignee);
+    applyFields(item, fields);
     this.requeue(
       item,
-      composePrompt(item.text, item.acceptance),
+      this.promptFor(item.text, item.acceptance, fields.agent),
       'assigned',
       'Giao lại cho agent khác.',
     );
@@ -335,7 +425,7 @@ export class WorkItemService {
 
   /** Sends one more prompt to an item's assignee. Only for items in review or failed. */
   async followUp(command: WorkItemCommand & { id: string; text: string }): Promise<void> {
-    if (this.replay(command.requestId) !== undefined) return;
+    if ((await this.catalogFor(command.requestId)) !== undefined) return;
     const item = this.requireItem(command.id);
     this.refuseUnlessFollowable(item);
     const refusal = refuseText(command.text);
@@ -345,7 +435,7 @@ export class WorkItemService {
     const before = structuredClone(item);
     this.requeue(
       item,
-      composePrompt(text, item.acceptance),
+      this.promptFor(text, item.acceptance, item.agent),
       'followed_up',
       clip(text, WORK_ITEM_REASON_MAX_CHARS),
     );
@@ -446,7 +536,11 @@ export class WorkItemService {
     command: WorkItemCommand & { agent: WorkItemAssignee; description: string },
   ): Promise<void> {
     if (this.replay(command.requestId) !== undefined) return;
-    if (!isWorkItemAssignee(command.agent) || command.agent.kind === 'new-session') {
+    if (
+      !isWorkItemAssignee(command.agent) ||
+      command.agent.kind === 'new-session' ||
+      command.agent.kind === 'auto'
+    ) {
       throw new CompanyError('assignee_invalid', MESSAGE.assigneeInvalid);
     }
     if (Array.from(command.description).length > ROLE_DESCRIPTION_MAX_CHARS) {
@@ -462,6 +556,22 @@ export class WorkItemService {
     this.remember(command.requestId, '');
     this.commit();
     await this.flush();
+  }
+
+  /**
+   * Saves the folder's squad settings. Idempotent by request id. Raising a limit may let waiting
+   * items start, so the pass runs once the change is on disk.
+   */
+  async setSettings(command: WorkItemCommand & { settings: SquadSettings }): Promise<void> {
+    if (this.replay(command.requestId) !== undefined) return;
+    if (!isSquadSettings(command.settings)) {
+      throw new CompanyError('settings_invalid', MESSAGE.settingsInvalid);
+    }
+    this.settings = { ...command.settings };
+    this.remember(command.requestId, '');
+    this.commit();
+    await this.flush();
+    await this.reconcileAfterSave();
   }
 
   /**
@@ -592,7 +702,8 @@ export class WorkItemService {
       : new CompanyError('prompt_too_large', MESSAGE.promptTooLarge);
   }
 
-  private validateDraft(draft: WorkItemDraft): void {
+  /** Checks one draft and returns its item fields, normalized. Refuses anything the board must not store. */
+  private validateDraft(draft: WorkItemDraft): WorkItemFields {
     const refusal = refuseText(draft.text);
     if (refusal !== null) throw this.textError(refusal);
     if (!isWorkItemAssignee(draft.assignee)) {
@@ -600,6 +711,7 @@ export class WorkItemService {
     }
     this.assertReachable(draft.assignee);
     this.validateExtras(draft);
+    return this.prepareFields(draft);
   }
 
   /** Checks the priority, criteria, and wait list a draft carries. */
@@ -614,6 +726,39 @@ export class WorkItemService {
       throw new CompanyError('acceptance_too_long', MESSAGE.acceptanceTooLong);
     }
     this.refuseDependsOn(null, draft.dependsOn ?? []);
+  }
+
+  /**
+   * Checks the repo, role, areas and agent an item names, and returns them normalized. The repo
+   * must be one of the folder's repos and the agent one the catalog lists.
+   */
+  private prepareFields(input: ItemFieldsInput): WorkItemFields {
+    const repo = input.repo?.trim() ?? '';
+    const agent = input.agent?.trim() ?? '';
+    const areas = normalizeAreas(input.areas ?? []);
+    if (
+      areas.length > WORK_ITEM_AREAS_MAX ||
+      areas.some((area) => area.length > WORK_ITEM_AREA_MAX_CHARS)
+    ) {
+      throw new CompanyError('areas_invalid', MESSAGE.areasInvalid);
+    }
+    if (input.role !== undefined && !isItemRole(input.role)) {
+      throw new CompanyError('item_role_invalid', MESSAGE.itemRoleInvalid);
+    }
+    const fields: WorkItemFields = { areas };
+    if (repo !== '') {
+      const match = this.catalog.repos.find((entry) => checkoutKey(entry) === checkoutKey(repo));
+      if (match === undefined) throw new CompanyError('repo_invalid', MESSAGE.repoInvalid);
+      fields.repo = match;
+    }
+    if (input.role !== undefined) fields.role = input.role;
+    if (agent !== '') {
+      if (findAgent(this.catalog.agents, agent) === undefined) {
+        throw new CompanyError('agent_unknown', MESSAGE.agentUnknown);
+      }
+      fields.agent = agent;
+    }
+    return fields;
   }
 
   /** Refuses a wait list the core check rejects. `dependencyOf` sees the items the list may name. */
@@ -653,9 +798,12 @@ export class WorkItemService {
     return waits;
   }
 
-  /** Refuses an assignee the board cannot reach right now. New sessions are always reachable. */
+  /**
+   * Refuses an assignee the board cannot reach right now. New sessions and auto items are always
+   * reachable: a new session opens when it starts, and an auto item picks its agent then.
+   */
   private assertReachable(assignee: WorkItemAssignee): void {
-    if (assignee.kind === 'new-session') return;
+    if (assignee.kind === 'new-session' || assignee.kind === 'auto') return;
     if (assignee.kind === 'herdr') {
       const roster = this.ports.roster.panes();
       if (!roster.available) throw new CompanyError('herdr_unavailable', MESSAGE.herdrUnavailable);
@@ -696,6 +844,7 @@ export class WorkItemService {
     draft: WorkItemDraft,
     id: string,
     dependsOn: readonly string[],
+    fields: WorkItemFields,
     squadRunId?: string,
   ): StoredWorkItem {
     const at = this.iso();
@@ -714,13 +863,23 @@ export class WorkItemService {
       createdAt: at,
       updatedAt: at,
       history: [makeEvent(at, 'created'), makeEvent(at, 'queued')],
-      pendingPrompt: composePrompt(text, acceptance),
+      pendingPrompt: this.promptFor(text, acceptance, fields.agent),
       ...(acceptance === '' ? {} : { acceptance }),
       ...(squadRunId === undefined ? {} : { squadRunId }),
     };
+    applyFields(item, fields);
     this.nextSequence += 1;
     this.items.set(item.id, item);
     return item;
+  }
+
+  /** The prompt an item owes its agent: its text, the subagent line, the safe-work block, then acceptance. */
+  private promptFor(
+    text: string,
+    acceptance: string | undefined,
+    agent: string | undefined,
+  ): string {
+    return composeDispatchPrompt({ text, acceptance, agent, readOnly: this.isReadOnly(agent) });
   }
 
   /** Puts an item back in its assignee's queue, owing `prompt` to the agent. */
@@ -781,6 +940,8 @@ export class WorkItemService {
       nextSequence: this.nextSequence,
       items: [...this.items.values()],
       roles: this.roles,
+      settings: { ...this.settings },
+      squadSessionIds: [...this.squadSessionIds],
     };
   }
 
@@ -806,19 +967,13 @@ export class WorkItemService {
     }
   }
 
-  /** One status pass over every agent that has live items, and over new-session items. */
+  /**
+   * One status pass. It judges every agent that has live items (finished, gone, or still busy),
+   * then starts each ready queued item the scheduler lets go, in queue order.
+   */
   private async pass(): Promise<void> {
     const view = this.view();
-    // Read the keys before dispatching new-session items below: a chat opened there is not in
-    // this pass's session list, so it is judged on the next pass.
-    const keys = this.liveAgentKeys();
-    // A new-session item has no agent to wait for: its chat opens as soon as it is ready.
-    for (const item of this.queueOrder()) {
-      if (item.status === 'queued' && item.assignee.kind === 'new-session' && this.isReady(item)) {
-        await this.dispatch(item);
-      }
-    }
-    for (const key of keys) {
+    for (const key of this.liveAgentKeys()) {
       const items = this.liveItemsFor(key);
       const first = items[0];
       if (first === undefined) continue;
@@ -833,21 +988,68 @@ export class WorkItemService {
         continue;
       }
       const active = items.find((item) => occupiesAgent(item.status));
-      if (active !== undefined) {
-        await this.advance(active, observation);
-        continue;
-      }
-      // A queued item waiting on another item is passed over: the next ready one goes instead.
-      const next = items.find((item) => item.status === 'queued' && this.isReady(item));
-      if (observation === 'free' && next !== undefined) await this.dispatch(next);
+      if (active !== undefined) await this.advance(active, observation);
     }
+    await this.startQueued(view);
+  }
+
+  /** Starts each ready queued item the scheduler lets go, in queue order, one decision at a time. */
+  private async startQueued(view: FolderView): Promise<void> {
+    for (const candidate of this.queueOrder()) {
+      // An earlier start may have saved, failed or cancelled items, so each is checked as it comes.
+      if (this.items.get(candidate.id) !== candidate || candidate.status !== 'queued') continue;
+      if (!this.isReady(candidate)) continue;
+      const decision = decideStart(this.schedulerItem(candidate), this.schedulerContext(view));
+      if (decision.kind === 'wait') continue;
+      await this.start(candidate, decision);
+    }
+  }
+
+  /**
+   * Starts one item the scheduler let go. An auto item takes the member chosen for it; a decision
+   * to open a session opens it first, and the session is remembered as the squad's.
+   */
+  private async start(item: StoredWorkItem, decision: StartDecision): Promise<void> {
+    const auto = item.assignee.kind === 'auto';
+    if (decision.kind === 'open') {
+      let sessionId: string;
+      try {
+        sessionId = await this.ports.sessions.openChat({ cwd: decision.cwd, role: decision.role });
+      } catch (error) {
+        this.fail(item, WORK_ITEM_REASON.openFailed, describe(error));
+        return;
+      }
+      this.recordSquadSession(sessionId);
+      item.assignee = { kind: 'session', sessionId };
+      const message = auto
+        ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
+        : 'Mở phiên omp mới cho việc này.';
+      this.pushEvent(item, makeEvent(this.iso(), 'assigned', message));
+    } else if (auto) {
+      item.assignee = normalizeAssignee(decision.member.assignee);
+      this.pushEvent(
+        item,
+        makeEvent(this.iso(), 'assigned', `Tự chọn: ${memberLabel(decision.member)}.`),
+      );
+    }
+    await this.dispatch(item);
+  }
+
+  /** Remembers a session the squad opened, keeping the newest SQUAD_SESSIONS_KEPT. */
+  private recordSquadSession(sessionId: string): void {
+    this.squadSessionIds = [
+      ...this.squadSessionIds.filter((id) => id !== sessionId),
+      sessionId,
+    ].slice(-SQUAD_SESSIONS_KEPT);
   }
 
   /** Keys of the agents that have live items, in order of their oldest live item. */
   private liveAgentKeys(): string[] {
     const keys = new Map<string, number>();
     for (const item of this.sortedItems()) {
-      if (!isLive(item) || item.assignee.kind === 'new-session') continue;
+      // A new-session or auto item has no agent yet, so there is nothing to judge.
+      if (!isLive(item) || item.assignee.kind === 'new-session' || item.assignee.kind === 'auto')
+        continue;
       const key = assigneeKey(item.assignee);
       if (!keys.has(key)) keys.set(key, item.sequence);
     }
@@ -873,17 +1075,16 @@ export class WorkItemService {
     return { roster: this.ports.roster.panes(), sessions: this.ports.sessions.list() };
   }
 
-  /** One item as the board receives it: a queued item carries what it waits on and why. */
+  /** One item as the board receives it: a queued item carries what it waits on, or why it cannot start. */
   private wire(item: StoredWorkItem, view: FolderView): WorkItem {
     const wire = toWorkItem(item);
     if (item.status !== 'queued') return wire;
-    const blocker = blockerOf(
-      item.dependsOn,
-      (id) => this.dependencyState(item, id),
-      this.agentBusy(item, view),
-    );
-    if (blocker === null) return wire;
-    return { ...wire, blocker, reason: blockerReason(blocker) };
+    // Agents are judged by the scheduler below; the dependency check never reads them.
+    const blocker = blockerOf(item.dependsOn, (id) => this.dependencyState(item, id), false);
+    if (blocker !== null) return { ...wire, blocker, reason: blockerReason(blocker) };
+    const decision = decideStart(this.schedulerItem(item), this.schedulerContext(view));
+    if (decision.kind !== 'wait') return wire;
+    return { ...wire, blocker: decision.blocker, reason: decision.reason };
   }
 
   /** What the queue knows about one dependency: its status, or failed at its last #n once it is gone. */
@@ -899,25 +1100,130 @@ export class WorkItemService {
     return dependenciesDone(item.dependsOn, (id) => this.dependencyState(item, id));
   }
 
-  /** Whether the item's agent cannot take it now: another item holds the agent, or it is not free. */
-  private agentBusy(item: StoredWorkItem, view: FolderView): boolean {
-    if (item.assignee.kind === 'new-session') return false;
-    const key = assigneeKey(item.assignee);
-    for (const other of this.items.values()) {
-      if (
-        other.id !== item.id &&
-        occupiesAgent(other.status) &&
-        assigneeKey(other.assignee) === key
-      ) {
-        return true;
-      }
-    }
-    return this.observeAssignee(item.assignee, view) !== 'free';
+  /** Whether an agent may edit the work: a read-only agent takes no area or checkout lock. */
+  private isReadOnly(agent: string | undefined): boolean {
+    return agent !== undefined && findAgent(this.catalog.agents, agent)?.readOnly === true;
   }
 
-  /** How one assignee reads this pass: its herdr pane or omp session, as the views report it. */
+  /** The scheduler's view of one item. Explicit agents carry their member key; auto and new-session items do not. */
+  private schedulerItem(item: StoredWorkItem): SchedulerItem {
+    const explicit = item.assignee.kind === 'herdr' || item.assignee.kind === 'session';
+    return {
+      sequence: item.sequence,
+      kind: item.assignee.kind,
+      memberKey: explicit ? assigneeKey(item.assignee) : undefined,
+      repo: item.repo ?? this.workspacePath,
+      role: item.role,
+      areas: item.areas ?? [],
+      readOnly: this.isReadOnly(item.agent),
+    };
+  }
+
+  /** Everything a scheduling decision reads, gathered from the views, the items, the settings and memory. */
+  private schedulerContext(view: FolderView): SchedulerContext {
+    const members = this.members(view);
+    const checkouts = new Map(members.map((member) => [member.key, member.cwd]));
+    const holds: SchedulerHold[] = [];
+    for (const item of this.items.values()) {
+      if (!occupiesAgent(item.status)) continue;
+      const memberKey = assigneeKey(item.assignee);
+      holds.push({
+        memberKey,
+        sequence: item.sequence,
+        readOnly: this.isReadOnly(item.agent),
+        areas: item.areas ?? [],
+        checkout: checkouts.get(memberKey),
+      });
+    }
+    const squadSessionsOpen = this.squadSessionIds.filter((id) =>
+      view.sessions.some((session) => session.id === id && observeSessionStatus(session.status) !== 'gone'),
+    ).length;
+    return {
+      members,
+      holds,
+      maxParallel: this.settings.maxParallel,
+      maxSquadSessions: this.settings.maxSquadSessions,
+      squadSessionsOpen,
+      freeBytes: this.ports.freeMemoryBytes(),
+      minFreeBytes: this.settings.minFreeRamGb * GIB,
+    };
+  }
+
+  /** Every herdr pane and omp session as a scheduler member, with its role note and whether it reads free. */
+  private members(view: FolderView): SchedulerMember[] {
+    const notes = new Map(this.roles.map((role) => [assigneeKey(role.agent), role.description]));
+    const panes = view.roster.panes.map((pane): SchedulerMember => {
+      const assignee: WorkItemAssignee = { kind: 'herdr', paneId: pane.paneId };
+      const key = assigneeKey(assignee);
+      return {
+        key,
+        assignee,
+        cwd: pane.cwd,
+        role: undefined,
+        note: notes.get(key),
+        free: view.roster.available && observeHerdrStatus(pane.status) === 'free',
+        squadOpened: false,
+      };
+    });
+    const sessions = view.sessions.map((session): SchedulerMember => {
+      const assignee: WorkItemAssignee = { kind: 'session', sessionId: session.id };
+      const key = assigneeKey(assignee);
+      return {
+        key,
+        assignee,
+        cwd: session.cwd,
+        role: isItemRole(session.role) ? session.role : undefined,
+        note: notes.get(key),
+        free: observeSessionStatus(session.status) === 'free',
+        squadOpened: this.squadSessionIds.includes(session.id),
+      };
+    });
+    return [...panes, ...sessions];
+  }
+
+  /** Reads the folder's repos and agents, publishing them when they changed. */
+  private async readCatalog(): Promise<void> {
+    if (await this.refreshCatalog()) this.ports.publish(this.snapshot());
+  }
+
+  /** The answer already given to this request, or undefined. A new request reads the catalog first. */
+  private async catalogFor(requestId: string): Promise<string | undefined> {
+    const replayed = this.replay(requestId);
+    if (replayed !== undefined) return replayed;
+    await this.readCatalog();
+    return this.replay(requestId);
+  }
+
+  /**
+   * Reads the folder's repos and omp agents. A failed read keeps the lists it had, and the next
+   * command reads again. Returns whether the lists changed.
+   */
+  private async refreshCatalog(): Promise<boolean> {
+    let next: WorkItemCatalog;
+    try {
+      next = await this.ports.catalog();
+    } catch {
+      return false;
+    }
+    const changed = JSON.stringify(next) !== JSON.stringify(this.catalog);
+    this.catalog = {
+      repos: [...next.repos],
+      agents: next.agents.map((agent) => ({ ...agent })),
+    };
+    return changed;
+  }
+
+  /** Ids of the items one squad run already created, oldest first. */
+  private idsOfRun(squadRunId: string): string[] {
+    return [...this.items.values()]
+      .filter((item) => item.squadRunId === squadRunId)
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((item) => item.id);
+  }
+
+  /** What the queue knows about the herdr pane or session an item names. */
   private observeAssignee(assignee: WorkItemAssignee, view: FolderView): AgentObservation {
-    if (assignee.kind === 'new-session') return 'free';
+    if (assignee.kind === 'new-session' || assignee.kind === 'auto') return 'free';
     if (assignee.kind === 'herdr') {
       if (!view.roster.available) return 'unknown';
       const pane = view.roster.panes.find((entry) => entry.paneId === assignee.paneId);
@@ -1025,19 +1331,8 @@ export class WorkItemService {
     this.commit();
   }
 
-  /** Sends a queued item to its free agent. A new-session item first opens its chat. */
+  /** Sends a queued item to its agent. `start` has already chosen the agent and opened its session. */
   private async dispatch(item: StoredWorkItem): Promise<void> {
-    if (item.assignee.kind === 'new-session') {
-      let sessionId: string;
-      try {
-        sessionId = await this.ports.sessions.openChat();
-      } catch (error) {
-        this.fail(item, WORK_ITEM_REASON.openFailed, describe(error));
-        return;
-      }
-      item.assignee = { kind: 'session', sessionId };
-      this.pushEvent(item, makeEvent(this.iso(), 'assigned', 'Mở phiên omp mới cho việc này.'));
-    }
     const at = this.iso();
     const before = {
       dispatchedAt: item.dispatchedAt,
@@ -1093,7 +1388,7 @@ export class WorkItemService {
       );
       return;
     }
-    throw new Error('new-session has no agent to send to yet');
+    throw new Error('item has no agent to send to yet');
   }
 
   /** Re-checks the pass once the grace window after a dispatch has passed. */

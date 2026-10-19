@@ -52,32 +52,54 @@ describe('blockerChip', () => {
     expect(blockerChip({ blocker: null })).toBeNull();
   });
 
-  it('names a wait for a free agent in muted tone', () => {
+  it('names a busy agent in muted tone', () => {
     expect(blockerChip({ blocker: { kind: 'agent' } })).toEqual({
-      text: 'Chờ agent rảnh',
+      text: 'Agent đang bận',
       tone: 'muted',
     });
   });
 
-  it('names the item it waits for by #n, and falls back when no #n is known', () => {
+  it('names a wait on another item in muted tone, with or without its #n', () => {
     expect(blockerChip({ blocker: { kind: 'dependency', sequence: 3 } })).toEqual({
-      text: 'Chờ việc #3 xong',
+      text: 'Chờ việc khác',
       tone: 'muted',
     });
     expect(blockerChip({ blocker: { kind: 'dependency' } })).toEqual({
-      text: 'Chờ việc khác xong',
+      text: 'Chờ việc khác',
       tone: 'muted',
     });
   });
 
   it('names a failed dependency in danger tone', () => {
     expect(blockerChip({ blocker: { kind: 'failed', sequence: 2 } })).toEqual({
-      text: 'Việc #2 bị lỗi',
+      text: 'Việc lỗi',
       tone: 'danger',
     });
     expect(blockerChip({ blocker: { kind: 'failed' } })).toEqual({
-      text: 'Có việc bị lỗi',
+      text: 'Việc lỗi',
       tone: 'danger',
+    });
+  });
+
+  it('shows the running count of a full folder, or only the words when the count is missing', () => {
+    expect(blockerChip({ blocker: { kind: 'capacity', running: 4, limit: 4 } })).toEqual({
+      text: 'Đầy chỗ 4/4',
+      tone: 'muted',
+    });
+    expect(blockerChip({ blocker: { kind: 'capacity' } })).toEqual({
+      text: 'Đầy chỗ',
+      tone: 'muted',
+    });
+  });
+
+  it('names a held code area and an item with no agent to take it, in muted tone', () => {
+    expect(blockerChip({ blocker: { kind: 'area', area: 'auth' } })).toEqual({
+      text: 'Vùng đang bị giữ',
+      tone: 'muted',
+    });
+    expect(blockerChip({ blocker: { kind: 'no_member' } })).toEqual({
+      text: 'Chưa có agent',
+      tone: 'muted',
     });
   });
 });

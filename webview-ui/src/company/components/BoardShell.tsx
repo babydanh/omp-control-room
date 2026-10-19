@@ -50,6 +50,7 @@ import { useCompanyState } from '../useCompanyState.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useSessionLogBackfill } from '../useSessionLogBackfill.js';
 import { openUsagePage } from '../useUsageRoute.js';
+import { workItemsOf } from '../workItemView.js';
 import { AgentContextMenu } from './AgentContextMenu.js';
 import { AgentRail } from './AgentRail.js';
 import { AgentSidebar } from './AgentSidebar.js';
@@ -140,6 +141,11 @@ export function BoardShell({ client }: BoardShellProps) {
   );
 
   const lanes = useMemo(() => buildBoardLanes(state), [state]);
+  const squadPath = state.settings?.workspacePath ?? null;
+  const squadFolder =
+    squadPath === null
+      ? null
+      : { workspacePath: squadPath, settings: workItemsOf(state, squadPath).settings };
   const ledgerBoardSessions = useMemo(() => boardSessionIndex(state.sessions), [state.sessions]);
   const ledgerPanes = useMemo(
     () => panesOf(state.herdr.agents, state.herdr.sleeping),
@@ -491,6 +497,7 @@ export function BoardShell({ client }: BoardShellProps) {
             <CompanyBoard
               lanes={lanes}
               flow={boardFlow(lanes, state.settings?.maxWorkers ?? null)}
+              squadFolder={squadFolder}
               planning={planningPrompts(state)}
               onSelectSession={selectSession}
               onSelectTask={selectTask}

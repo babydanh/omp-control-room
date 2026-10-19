@@ -820,8 +820,11 @@ function applyWorkItems(
       ...state.workItems,
       [key]: {
         revision: message.revision,
-        items: [...message.items],
+        items: message.items.map((item) => ({ ...item, areas: item.areas ?? [] })),
         roles: [...message.roles],
+        repos: [...(message.repos ?? [])],
+        agents: [...(message.agents ?? [])],
+        settings: message.settings ?? null,
       },
     },
   };

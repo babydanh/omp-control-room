@@ -181,9 +181,8 @@ function SendMenuItem({
             <span className="shrink-0 text-2xs text-text-muted">{shortcut}</span>
           )}
         </span>
-        <span className="text-2xs text-text-muted">
-          {off ? entry.disabledReason : entry.description}
-        </span>
+        <span className="text-2xs text-text-muted">{entry.description}</span>
+        {off ? <span className="text-2xs text-text-muted">{entry.disabledReason}</span> : null}
       </span>
     </button>
   );

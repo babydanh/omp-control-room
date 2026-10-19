@@ -1203,6 +1203,8 @@ describe('company client commands', () => {
         now: () => Date.now(),
         newId: () => randomUUID(),
         schedule: () => () => undefined,
+        catalog: async () => ({ repos: [], agents: [] }),
+        freeMemoryBytes: () => 8 * 1024 ** 3,
       });
       await work.load();
       services = { ...services, workItems: work };

@@ -9,7 +9,7 @@
 import { type FormEvent, useEffect, useState } from 'react';
 
 import type { WorkItem, WorkItemEvent } from '../../../../core/src/messages.js';
-import { blockerReason, priorityLabel } from '../../../../core/src/workItemGraph.js';
+import { priorityLabel } from '../../../../core/src/workItemGraph.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import { assigneeOptionsFor } from '../assigneeOptions.js';
 import { failureNotice } from '../commandResults.js';
@@ -18,6 +18,7 @@ import type { CompanyViewState } from '../companyState.js';
 import { useNow } from '../useNow.js';
 import {
   assigneeLabel,
+  blockerSentence,
   dependencyChoices,
   dependencyRefusal,
   dependencyRefusalText,
@@ -119,15 +120,16 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
 
   const status = item.status;
   const holder = assigneeLabel(item.assignee, state, workspacePath);
-  const folderItems = workItemsOf(state, workspacePath).items;
+  const folderWork = workItemsOf(state, workspacePath);
+  const folderItems = folderWork.items;
   const position = queuePosition(item, folderItems);
   const waits = waitingOn(item, folderItems);
   // A queued item held by another item says so in the server's words; an agent wait keeps its place.
   const blocker = item.blocker;
   const waitText =
     blocker !== undefined && blocker.kind !== 'agent'
-      ? blockerReason(blocker)
-      : queueWaitText(holder, position);
+      ? blockerSentence(blocker)
+      : queueWaitText(item.assignee.kind === 'auto' ? 'agent' : holder, position);
   const folder = workItemFolderIdentity(state, workspacePath);
   const updated = relativeTimeVi(item.updatedAt, now);
   const reason = item.reason?.trim() ? item.reason : null;
@@ -318,10 +320,13 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
           textEditable={false}
           currentAssignee={item.assignee}
           options={assigneeOptionsFor(state, workspacePath)}
+          repos={folderWork.repos}
+          agents={folderWork.agents}
+          initialFields={{ repo: item.repo, role: item.role, areas: item.areas, agent: item.agent }}
           pending={busy}
           notice={notice}
-          onSubmit={(assignee) =>
-            send('assign', client.assignWorkItem(workspacePath, id, assignee))
+          onSubmit={(assignee, _text, fields) =>
+            send('assign', client.assignWorkItem(workspacePath, id, assignee, fields))
           }
           onClose={() => setReassigning(false)}
         />

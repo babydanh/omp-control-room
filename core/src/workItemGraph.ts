@@ -152,6 +152,11 @@ export function blockerOf(
 export function blockerReason(blocker: WorkItemBlocker): string {
   if (blocker.kind === 'agent') return 'Chờ agent rảnh để nhận việc.';
   if (blocker.kind === 'dependency') return `Chờ việc #${blocker.sequence ?? 0} xong.`;
+  if (blocker.kind === 'capacity') {
+    return `Đầy chỗ (${blocker.running ?? 0}/${blocker.limit ?? 0}), chờ chỗ trống.`;
+  }
+  if (blocker.kind === 'area') return `Chờ việc #${blocker.sequence ?? 0} trả vùng ${blocker.area ?? ''}.`;
+  if (blocker.kind === 'no_member') return 'Chưa có agent rảnh trong repo này.';
   return `Việc #${blocker.sequence ?? 0} bị lỗi, gỡ chờ hoặc giao lại.`;
 }
 

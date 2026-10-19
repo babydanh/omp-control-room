@@ -35,6 +35,7 @@ import {
   useState,
 } from 'react';
 
+import type { SquadSettings } from '../../../../core/src/messages.js';
 import type { AgentBoardCard, AgentCardSubject } from '../agentBoard.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
@@ -69,6 +70,7 @@ import { queueOrder, workItemKey, type WorkItemRef } from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
 import { Icon } from './Icon.js';
 import { SquadRunCard } from './SquadRunCard.js';
+import { SquadSettingsSection } from './SquadSettingsSection.js';
 import { StatusDot } from './StatusDot.js';
 import { WorkItemCard } from './WorkItemCard.js';
 
@@ -97,6 +99,8 @@ export interface CompanyBoardProps {
   onMenu: (request: AgentMenuRequest) => void;
   /** The folder a card's id belongs to, shown as a tag in all mode; null outside it. */
   identityOf: (id: string) => FolderIdentity | null;
+  /** The folder whose squad settings the board's top shows; null when no folder is active. */
+  squadFolder: { workspacePath: string; settings: SquadSettings | null } | null;
 }
 
 /**
@@ -406,6 +410,7 @@ export function CompanyBoard({
   client,
   onMenu,
   identityOf,
+  squadFolder,
 }: CompanyBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const lanesRef = useRef<HTMLDivElement>(null);
@@ -580,6 +585,15 @@ export function CompanyBoard({
       data-testid="company-board"
     >
       <FlowStrip flow={flow} />
+      {squadFolder !== null && (
+        <div className="px-3 pb-1.5">
+          <SquadSettingsSection
+            client={client}
+            workspacePath={squadFolder.workspacePath}
+            settings={squadFolder.settings}
+          />
+        </div>
+      )}
       {mode === 'phone' ? (
         <>
           <div

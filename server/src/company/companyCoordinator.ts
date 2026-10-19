@@ -24,6 +24,7 @@ import type {
   Attempt,
   CompanyDiagnostics,
   CompanyPrompt,
+  CompanyRole,
   CompanySnapshot,
   QuestionAnswerInput,
   RoleProfile,
@@ -206,8 +207,12 @@ export interface CompanyCoordinator {
   /**
    * Open a plain omp chat session in this workspace with no prompt and return its
    * board session id. Nothing is sent; the session waits for the first message.
+   * With no input the session runs in the folder root under the chat role. `cwd`
+   * is the absolute, canonical directory its process runs in (a repo or worktree
+   * inside the folder); `role` defaults to chat. Approvals still answer for the
+   * folder root.
    */
-  openNewChat(): Promise<string>;
+  openNewChat(input?: { cwd?: string; role?: CompanyRole }): Promise<string>;
 
   /**
    * Open a saved OMP session as a chat session in this workspace and return its

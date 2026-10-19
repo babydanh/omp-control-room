@@ -23,8 +23,10 @@ import type {
 } from '../../../core/src/company.js';
 import type {
   ClientMessage,
+  CompanyRole,
   HerdrKey,
   SquadRowInput,
+  SquadSettings,
   WorkItemAssignee,
   WorkItemVerdict,
 } from '../../../core/src/messages.js';
@@ -324,10 +326,22 @@ export function sessionRename(requestId: string, sessionId: string, name: string
 }
 
 /**
- * The optional fields of a new work item: its priority, its acceptance, and the items it waits
- * for (real ids). A field left out is not sent, so the server applies its default.
+ * The optional fields a work item carries besides its text: the repo it runs in, the role it is
+ * filed under, its code areas, and the omp subagent that takes it. Absent fields are cleared on
+ * the server, so an assign always sends all four.
  */
-export interface WorkItemCreateOptions {
+export interface WorkItemFields {
+  repo?: string;
+  role?: CompanyRole;
+  areas?: string[];
+  agent?: string;
+}
+
+/**
+ * The optional fields of a new work item: its priority, its acceptance, the items it waits for
+ * (real ids), and its fields. A field left out is not sent, so the server applies its default.
+ */
+export interface WorkItemCreateOptions extends WorkItemFields {
   priority?: number;
   acceptance?: string;
   dependsOn?: string[];
@@ -344,14 +358,28 @@ export function workItemCreate(
   return { type: 'companyWorkItemCreate', requestId, workspacePath, text, assignee, ...options };
 }
 
-/** Hand an existing work item to another agent. The verdict is a companyCommandResult. */
+/**
+ * Hand an existing work item to another agent, with its fields. Absent fields are cleared, so the
+ * dialog always passes all four. The verdict is a companyCommandResult.
+ */
 export function workItemAssign(
   requestId: string,
   workspacePath: string,
   id: string,
   assignee: WorkItemAssignee,
+  fields: WorkItemFields = {},
 ): ClientMessage {
-  return { type: 'companyWorkItemAssign', requestId, workspacePath, id, assignee };
+  return {
+    type: 'companyWorkItemAssign',
+    requestId,
+    workspacePath,
+    id,
+    assignee,
+    repo: fields.repo,
+    role: fields.role,
+    areas: fields.areas,
+    agent: fields.agent,
+  };
 }
 
 /** Send more text to the agent holding a work item. The verdict is a companyCommandResult. */
@@ -445,6 +473,18 @@ export function squadDismiss(
 /** Retry a failed run. The verdict is a companyCommandResult. */
 export function squadRetry(requestId: string, workspacePath: string, runId: string): ClientMessage {
   return { type: 'companySquadRetry', requestId, workspacePath, runId };
+}
+
+/**
+ * Save one folder's squad settings. A request id seen before saves nothing new. The verdict is a
+ * companyCommandResult.
+ */
+export function squadSettingsSet(
+  requestId: string,
+  workspacePath: string,
+  settings: SquadSettings,
+): ClientMessage {
+  return { type: 'companySquadSettingsSet', requestId, workspacePath, settings };
 }
 
 export function sessionInfoRequest(requestId: string, sessionId: string): ClientMessage {

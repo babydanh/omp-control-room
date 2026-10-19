@@ -6,12 +6,17 @@
 
 import { useState } from 'react';
 
-import type { WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
+import type { WorkItemAssignee } from '../../../../core/src/messages.js';
 import type { AssigneeOption } from '../assigneeOptions.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { useCommandDialog } from '../useCommandDialog.js';
-import { isOpenWorkItem, roleDescriptionFor, workItemsOf } from '../workItemView.js';
+import {
+  type FolderWorkItems,
+  isOpenWorkItem,
+  roleDescriptionFor,
+  workItemsOf,
+} from '../workItemView.js';
 import { AssignWorkDialog } from './AssignWorkDialog.js';
 import { RoleDescriptionDialog } from './RoleDescriptionDialog.js';
 
@@ -34,8 +39,8 @@ export interface CreateWorkDialogProps {
   textEditable: boolean;
   fixedAssignee?: WorkItemAssignee;
   options: AssigneeOption[];
-  /** The folder's work items; the create dialog offers the open ones to wait for. */
-  items: readonly WorkItem[];
+  /** The folder the new work belongs to: its open items to wait for, its repos and its agents. */
+  folder: FolderWorkItems;
   /** Runs once the server accepts the work item. */
   onAccepted(): void;
   onClose(): void;
@@ -50,7 +55,7 @@ export function CreateWorkDialog({
   textEditable,
   fixedAssignee,
   options,
-  items,
+  folder,
   onAccepted,
   onClose,
 }: CreateWorkDialogProps) {
@@ -63,9 +68,11 @@ export function CreateWorkDialog({
       textEditable={textEditable}
       fixedAssignee={fixedAssignee}
       options={options}
+      repos={folder.repos}
+      agents={folder.agents}
       pending={pending}
       notice={notice}
-      scheduling={{ openItems: items.filter((item) => isOpenWorkItem(item.status)) }}
+      scheduling={{ openItems: folder.items.filter((item) => isOpenWorkItem(item.status)) }}
       onSubmit={(assignee, text, schedule) =>
         void run(client.createWorkItem(workspacePath, text, assignee, schedule), ASSIGN_FALLBACK)
       }
@@ -126,7 +133,7 @@ export function WorkDialogHost({ client, state, request, onClose }: WorkDialogHo
         textEditable
         fixedAssignee={request.assignee}
         options={[]}
-        items={workItemsOf(state, request.workspacePath).items}
+        folder={workItemsOf(state, request.workspacePath)}
         onAccepted={onClose}
         onClose={onClose}
       />

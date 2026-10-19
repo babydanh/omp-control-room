@@ -15,18 +15,21 @@ import type { CompanyViewState } from './companyState.js';
 import { samePath } from './folderView.js';
 
 export interface AssigneeOption {
-  /** Stable for one assignee: `herdr:<paneId>`, `session:<sessionId>` or `new-session`. */
+  /** Stable for one assignee: `herdr:<paneId>`, `session:<sessionId>`, `new-session`, `auto`. */
   key: string;
   assignee: WorkItemAssignee;
   /** The name the picker shows. */
   label: string;
   /** A second line the picker may show: a repo and branch, a folder, or a session code. */
   detail?: string;
-  group: 'herdr' | 'session' | 'new';
+  group: 'auto' | 'herdr' | 'session' | 'new';
 }
 
 /** The label of the option that opens a new omp session. */
 export const NEW_SESSION_LABEL = 'Phiên omp mới';
+
+/** The assignee that leaves the agent to be picked when the item runs. The picker offers it first. */
+export const AUTO_ASSIGNEE: WorkItemAssignee = { kind: 'auto' };
 
 /** Session states that cannot take work: the session is archived, stopped or has crashed. */
 const CLOSED_SESSION_STATUSES: Record<string, true> = {
@@ -49,6 +52,8 @@ export function assigneeKeyOf(assignee: WorkItemAssignee): string {
       return `session:${assignee.sessionId ?? ''}`;
     case 'new-session':
       return 'new-session';
+    case 'auto':
+      return 'auto';
   }
 }
 

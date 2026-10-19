@@ -6,7 +6,16 @@
 
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardWorkItem } from '../boardView.js';
-import { blockerChip, priorityBadge, statusWordVi, workItemKey } from '../workItemView.js';
+import { companyRoleLabel } from '../roleProfiles.js';
+import {
+  areaChipsOf,
+  blockerChip,
+  blockerSentence,
+  priorityBadge,
+  repoShortName,
+  statusWordVi,
+  workItemKey,
+} from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
 
 export interface WorkItemCardProps {
@@ -22,6 +31,9 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
   const updated = relativeTimeVi(card.updatedAt, now);
   const badge = priorityBadge(card.priority);
   const chip = blockerChip(card);
+  const sentence = blockerSentence(card.blocker);
+  const repoName = card.repo === null ? '' : repoShortName(card.repo);
+  const areas = areaChipsOf(card.areas);
   const needsAttention = card.status === 'needs_input' || card.status === 'failed';
   return (
     <button
@@ -49,6 +61,24 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
           </span>
         )}
       </span>
+      {chip !== null && (
+        <span className="flex min-w-0 flex-col items-start gap-0.5">
+          <span
+            data-testid="work-item-blocker"
+            className={`max-w-full truncate rounded-full bg-well px-1.5 text-2xs ${chip.tone === 'danger' ? 'text-danger' : 'text-text-muted'}`}
+          >
+            {chip.text}
+          </span>
+          {sentence !== null && (
+            <span
+              data-testid="work-item-blocker-reason"
+              className="line-clamp-2 break-words text-2xs text-text-muted"
+            >
+              {sentence}
+            </span>
+          )}
+        </span>
+      )}
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         {card.head === '' ? 'Việc chưa có nội dung' : card.head}
       </span>
@@ -57,12 +87,36 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
         <span className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5 text-text">
           {card.assignee}
         </span>
-        {chip !== null && (
+        {repoName !== '' && (
           <span
-            data-testid="work-item-blocker"
-            className={`min-w-0 max-w-full truncate rounded-full bg-well px-1.5 ${chip.tone === 'danger' ? 'text-danger' : 'text-text-muted'}`}
+            data-testid="work-item-repo"
+            title={card.repo ?? undefined}
+            className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5"
           >
-            {chip.text}
+            {repoName}
+          </span>
+        )}
+        {card.role !== null && (
+          <span data-testid="work-item-role" className="shrink-0 rounded-full bg-well px-1.5">
+            {companyRoleLabel(card.role)}
+          </span>
+        )}
+        {card.agent !== null && card.agent !== '' && (
+          <span
+            data-testid="work-item-agent"
+            className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5"
+          >
+            {card.agent}
+          </span>
+        )}
+        {areas.shown.length > 0 && (
+          <span data-testid="work-item-areas" className="flex min-w-0 max-w-full items-center gap-1">
+            {areas.shown.map((area) => (
+              <span key={area} className="min-w-0 truncate rounded-full bg-well px-1.5">
+                {area}
+              </span>
+            ))}
+            {areas.more > 0 && <span className="shrink-0">+{areas.more}</span>}
           </span>
         )}
         {card.squadRunId !== null && (

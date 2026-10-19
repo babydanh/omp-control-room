@@ -5,16 +5,21 @@ import { describe, expect, it } from 'vitest';
 import type {
   CompanyWorkItemsMessage,
   HerdrAgent,
+  OmpAgentInfo,
   WorkItem,
   WorkItemAssignee,
 } from '../../core/src/messages.js';
 import { CompanyError } from '../src/company/companyError.js';
+import { BUNDLED_AGENTS } from '../src/company/workItems/agentCatalog.js';
+import { composeDispatchPrompt } from '../src/company/workItems/dispatchPrompt.js';
+import { GIB } from '../src/company/workItems/squadSettings.js';
 import {
   parseWorkItemsFile,
   WORK_ITEM_FINISHED_KEEP,
   WORK_ITEM_GRACE_MS,
   WORK_ITEM_REASON,
   WORK_ITEM_TEXT_MAX_BYTES,
+  type WorkItemDraft,
   type WorkItemsFile,
 } from '../src/company/workItems/workItemModel.js';
 import {
@@ -27,11 +32,19 @@ const T0 = Date.parse('2026-05-01T08:00:00.000Z');
 const PANE_A = 'wA:p1';
 const PANE_B = 'wA:p2';
 
+const REPO = '/work/folder/app';
+
+/** The prompt a plain item owes its agent: its text, the safe-work block, then acceptance. */
+function promptOf(text: string, acceptance?: string): string {
+  return composeDispatchPrompt({ text, acceptance, readOnly: false });
+}
+
 type PaneStatus = HerdrAgent['status'];
 
 interface PaneState {
   paneId: string;
   status: PaneStatus;
+  cwd?: string;
 }
 
 interface Timer {
@@ -49,8 +62,12 @@ class Fixture {
   readonly sessions: WorkItemSessionView[] = [];
   readonly submits: { sessionId: string; text: string; mode: 'chat' | 'company' }[] = [];
   chatsOpened = 0;
+  readonly openedWith: { cwd: string; role: string }[] = [];
   readonly saves: WorkItemsFile[] = [];
   saveError: Error | null = null;
+  repos: string[] = [];
+  agents: readonly OmpAgentInfo[] = BUNDLED_AGENTS;
+  freeBytes = 8 * GIB;
   readonly published: CompanyWorkItemsMessage[] = [];
   now = T0;
   private timers: Timer[] = [];
@@ -74,10 +91,11 @@ class Fixture {
         submit: async (sessionId, text, mode) => {
           this.submits.push({ sessionId, text, mode });
         },
-        openChat: async () => {
+        openChat: async (input) => {
           this.chatsOpened += 1;
           const id = `chat-${this.chatsOpened}`;
-          this.sessions.push({ id, status: 'idle', role: 'chat' });
+          this.openedWith.push({ cwd: input.cwd, role: input.role });
+          this.sessions.push({ id, status: 'idle', role: input.role, cwd: input.cwd });
           return id;
         },
       },
@@ -100,6 +118,8 @@ class Fixture {
           timer.cancelled = true;
         };
       },
+      catalog: async () => ({ repos: this.repos, agents: this.agents }),
+      freeMemoryBytes: () => this.freeBytes,
     });
   }
 
@@ -145,7 +165,7 @@ describe('WorkItemService: dispatch and status', () => {
       assignee: herdr(PANE_A),
     });
 
-    expect(f.prompts).toEqual([{ paneId: PANE_A, text: 'Sửa lỗi đăng nhập' }]);
+    expect(f.prompts).toEqual([{ paneId: PANE_A, text: promptOf('Sửa lỗi đăng nhập') }]);
     expect(itemOf(f, id).status).toBe('running');
 
     f.setPane(PANE_A, 'working');
@@ -180,7 +200,7 @@ describe('WorkItemService: dispatch and status', () => {
 
     expect(itemOf(f, first).status).toBe('review');
     expect(itemOf(f, second).status).toBe('running');
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['A', 'B']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('A'), promptOf('B')]);
   });
 
   it('moves a running item to needs_input when the pane blocks, and back when it works again', async () => {
@@ -388,7 +408,7 @@ describe('WorkItemService: commands', () => {
     expect(itemOf(f, id).status).toBe('review');
 
     await f.service.followUp({ requestId: randomUUID(), id, text: 'Thêm chi tiết' });
-    expect(f.prompts.at(-1)).toEqual({ paneId: PANE_A, text: 'Thêm chi tiết' });
+    expect(f.prompts.at(-1)).toEqual({ paneId: PANE_A, text: promptOf('Thêm chi tiết') });
     expect(itemOf(f, id).status).toBe('running');
   });
 
@@ -488,7 +508,9 @@ describe('WorkItemService: commands', () => {
       status: 'running',
       assignee: { kind: 'session', sessionId: 'chat-1' },
     });
-    expect(f.submits).toEqual([{ sessionId: 'chat-1', text: 'Việc mới', mode: 'chat' }]);
+    expect(f.submits).toEqual([
+      { sessionId: 'chat-1', text: promptOf('Việc mới'), mode: 'chat' },
+    ]);
     // The chat opened mid-pass is judged on the next pass, not failed or re-sent.
     await f.service.reconcileNow();
     expect(itemOf(f, id)).toMatchObject({
@@ -508,7 +530,9 @@ describe('WorkItemService: commands', () => {
     });
 
     expect(itemOf(f, id).status).toBe('running');
-    expect(f.submits).toEqual([{ sessionId: 's-worker', text: 'Cho worker', mode: 'company' }]);
+    expect(f.submits).toEqual([
+      { sessionId: 's-worker', text: promptOf('Cho worker'), mode: 'company' },
+    ]);
   });
 
   it('sends nothing and keeps nothing when the new item cannot be saved', async () => {
@@ -546,7 +570,7 @@ describe('WorkItemService: commands', () => {
     ).rejects.toMatchObject({ code: 'company_command_failed' });
     f.saveError = null;
     await f.service.reconcileNow();
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Đầu']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Đầu')]);
     expect(itemOf(f, id).status).toBe('review');
   });
 
@@ -590,7 +614,7 @@ describe('WorkItemService: commands', () => {
 
     f.saveError = null;
     await f.service.reconcileNow();
-    expect(f.prompts).toEqual([{ paneId: PANE_A, text: 'Chờ' }]);
+    expect(f.prompts).toEqual([{ paneId: PANE_A, text: promptOf('Chờ') }]);
     expect(itemOf(f, id).status).toBe('running');
   });
 
@@ -618,7 +642,7 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
       acceptance: 'Đăng nhập được bằng mật khẩu mới',
     });
     expect(f.prompts).toEqual([
-      { paneId: PANE_A, text: 'Sửa lỗi đăng nhập\n\nXong khi: Đăng nhập được bằng mật khẩu mới' },
+      { paneId: PANE_A, text: promptOf('Sửa lỗi đăng nhập', 'Đăng nhập được bằng mật khẩu mới') },
     ]);
     expect(itemOf(f, id)).toMatchObject({
       text: 'Sửa lỗi đăng nhập',
@@ -657,9 +681,9 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
 
     f.setPane(PANE_A, 'idle');
     await f.service.reconcileNow();
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Gấp']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Gấp')]);
     await f.service.mark({ requestId: randomUUID(), id: urgent, verdict: 'done' });
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Gấp', 'Thường một']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Gấp'), promptOf('Thường một')]);
   });
 
   it('passes over a blocked item for a ready one, and sends the blocked one once its wait ends', async () => {
@@ -675,7 +699,7 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
       dependsOn: [wait],
     });
     await f.service.create({ requestId: randomUUID(), text: 'Thường', assignee: herdr(PANE_A), priority: 3 });
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Nền', 'Đang làm']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Nền'), promptOf('Đang làm')]);
     expect(itemOf(f, blocked)).toMatchObject({
       status: 'queued',
       blocker: { kind: 'dependency', sequence: itemOf(f, wait).sequence },
@@ -683,7 +707,11 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
 
     // The current item finishes: the blocked item still waits, so the ready one goes first.
     await f.service.mark({ requestId: randomUUID(), id: current, verdict: 'done' });
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Nền', 'Đang làm', 'Thường']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([
+      promptOf('Nền'),
+      promptOf('Đang làm'),
+      promptOf('Thường'),
+    ]);
     expect(itemOf(f, blocked).status).toBe('queued');
 
     // The agent must be seen working before its finished item counts as done.
@@ -695,10 +723,10 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
     await f.service.mark({ requestId: randomUUID(), id: wait, verdict: 'done' });
     await f.service.reconcileNow();
     expect(f.prompts.map((prompt) => prompt.text)).toEqual([
-      'Nền',
-      'Đang làm',
-      'Thường',
-      'Gấp chờ nền',
+      promptOf('Nền'),
+      promptOf('Đang làm'),
+      promptOf('Thường'),
+      promptOf('Gấp chờ nền'),
     ]);
   });
 
@@ -713,7 +741,7 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
       dependsOn: [first],
     });
     const sequence = itemOf(f, first).sequence;
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Trước')]);
     expect(itemOf(f, second)).toMatchObject({
       status: 'queued',
       reason: `Chờ việc #${sequence} xong.`,
@@ -726,10 +754,10 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
     f.screen = 'Xong';
     await f.service.reconcileNow();
     expect(itemOf(f, first).status).toBe('review');
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Trước')]);
 
     await f.service.mark({ requestId: randomUUID(), id: first, verdict: 'done' });
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước', 'Sau']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Trước'), promptOf('Sau')]);
     expect(itemOf(f, second).status).toBe('running');
   });
 
@@ -752,7 +780,7 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
       blocker: { kind: 'failed', sequence },
     });
     await f.service.reconcileNow();
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Trước')]);
   });
 
   it('refuses to cancel an item that open items wait for, and names every #n that waits', async () => {
@@ -852,7 +880,7 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
       assignee: herdr(PANE_B),
       dependsOn: [first],
     });
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước', 'Sau']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Trước'), promptOf('Sau')]);
     expect(itemOf(f, second).status).toBe('running');
   });
 
@@ -905,14 +933,14 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
     ).rejects.toMatchObject({ code: 'company_command_failed' });
     f.saveError = null;
     await f.service.reconcileNow();
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Nền']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Nền')]);
     expect(itemOf(f, id)).toMatchObject({
       dependsOn: [wait],
       blocker: { kind: 'dependency', sequence },
     });
 
     await f.service.setDependencies({ requestId: randomUUID(), id, dependsOn: [] });
-    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Nền', 'Sau']);
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([promptOf('Nền'), promptOf('Sau')]);
   });
 
   it('links squad rows by batch position and refuses a loop inside the batch', async () => {
@@ -950,5 +978,277 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
 
     await f.service.mark({ requestId: randomUUID(), id, verdict: 'done' });
     expect(f.service.findOpen(sequence)).toBeUndefined();
+  });
+});
+
+describe('WorkItemService: squad fields, auto assignee, and settings', () => {
+  const SETTINGS = {
+    maxParallel: 4,
+    maxSquadSessions: 3,
+    minFreeRamGb: 2,
+    autoJudge: true,
+    autoApproveNext: false,
+  };
+
+  /** A fixture whose folder holds one repo, REPO, before any command runs. */
+  async function repoFixture(): Promise<Fixture> {
+    const f = new Fixture();
+    f.repos.push(REPO);
+    await f.service.load();
+    return f;
+  }
+
+  it('normalizes the repo, role and areas an item names, and clears them on a new assignee', async () => {
+    const f = await repoFixture();
+    f.panes.push(
+      { paneId: PANE_A, status: 'working', cwd: REPO },
+      { paneId: PANE_B, status: 'idle', cwd: REPO },
+    );
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa form',
+      assignee: herdr(PANE_A),
+      repo: `${REPO}/`,
+      role: 'qa',
+      areas: [' Web/UI ', 'web/ui', 'api/'],
+    });
+    expect(itemOf(f, id)).toMatchObject({ repo: REPO, role: 'qa', areas: ['web/ui', 'api'] });
+
+    await f.service.assign({ requestId: randomUUID(), id, assignee: herdr(PANE_B) });
+    const moved = itemOf(f, id);
+    expect(moved.status).toBe('running');
+    expect(moved.repo).toBeUndefined();
+    expect(moved.role).toBeUndefined();
+    expect(moved.areas).toEqual([]);
+  });
+
+  it('refuses a repo outside the folder, a director role, an unknown agent, and bad areas', async () => {
+    const f = await repoFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle', cwd: REPO });
+    const attempt = (extra: Partial<Omit<WorkItemDraft, 'text' | 'assignee'>>): Promise<string> =>
+      f.service.create({
+        requestId: randomUUID(),
+        text: 'Việc',
+        assignee: herdr(PANE_A),
+        ...extra,
+      });
+
+    await expect(attempt({ repo: '/elsewhere' })).rejects.toMatchObject({ code: 'repo_invalid' });
+    await expect(attempt({ role: 'director' })).rejects.toMatchObject({
+      code: 'item_role_invalid',
+    });
+    await expect(attempt({ agent: 'nope' })).rejects.toMatchObject({ code: 'agent_unknown' });
+    await expect(
+      attempt({ areas: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'] }),
+    ).rejects.toMatchObject({ code: 'areas_invalid' });
+    await expect(attempt({ areas: ['x'.repeat(121)] })).rejects.toMatchObject({
+      code: 'areas_invalid',
+    });
+    expect(f.service.snapshot().items).toHaveLength(0);
+  });
+
+  it('lets an auto item pick the idle pane in its repo, and never one outside it', async () => {
+    const f = await repoFixture();
+    f.panes.push(
+      { paneId: PANE_A, status: 'idle', cwd: REPO },
+      { paneId: PANE_B, status: 'idle', cwd: '/work/folder/other' },
+    );
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Tự chọn',
+      assignee: { kind: 'auto' },
+      repo: REPO,
+    });
+    expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: herdr(PANE_A) });
+    expect(f.openedWith).toEqual([]);
+  });
+
+  it('opens a new session in the item repo with the item role', async () => {
+    const f = await repoFixture();
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Viết test',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+    });
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'running',
+      assignee: { kind: 'session', sessionId: 'chat-1' },
+    });
+  });
+
+  it('opens a session for an auto item, then reuses that squad session for the next qa item', async () => {
+    const f = await repoFixture();
+    f.panes.push({ paneId: PANE_A, status: 'working', cwd: REPO });
+    const first = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Lần đầu',
+      assignee: { kind: 'auto' },
+      repo: REPO,
+      role: 'qa',
+    });
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'qa' }]);
+    expect(itemOf(f, first)).toMatchObject({
+      status: 'running',
+      assignee: { kind: 'session', sessionId: 'chat-1' },
+    });
+
+    await f.elapse(WORK_ITEM_GRACE_MS);
+    expect(itemOf(f, first).status).toBe('review');
+
+    f.setPane(PANE_A, 'idle');
+    const second = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Lần hai',
+      assignee: { kind: 'auto' },
+      repo: REPO,
+      role: 'qa',
+    });
+    expect(itemOf(f, second)).toMatchObject({
+      status: 'running',
+      assignee: { kind: 'session', sessionId: 'chat-1' },
+    });
+    expect(f.openedWith).toHaveLength(1);
+  });
+
+  it('holds an explicit item behind the parallel cap, then starts it when the first finishes', async () => {
+    const f = await repoFixture();
+    await f.service.setSettings({
+      requestId: randomUUID(),
+      settings: { ...SETTINGS, maxParallel: 1 },
+    });
+    f.panes.push(
+      { paneId: PANE_A, status: 'idle', cwd: REPO },
+      { paneId: PANE_B, status: 'idle', cwd: '/work/folder/other' },
+    );
+    const first = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Một',
+      assignee: herdr(PANE_A),
+    });
+    const second = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Hai',
+      assignee: herdr(PANE_B),
+    });
+    expect(itemOf(f, second)).toMatchObject({
+      status: 'queued',
+      blocker: { kind: 'capacity', running: 1, limit: 1 },
+    });
+
+    await f.elapse(WORK_ITEM_GRACE_MS);
+    expect(itemOf(f, first).status).toBe('review');
+    expect(itemOf(f, second).status).toBe('running');
+  });
+
+  it('holds an explicit item behind an overlapping area that a running item holds', async () => {
+    const f = await repoFixture();
+    f.panes.push(
+      { paneId: PANE_A, status: 'idle', cwd: REPO },
+      { paneId: PANE_B, status: 'idle', cwd: '/work/folder/other' },
+    );
+    const first = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Giao diện',
+      assignee: herdr(PANE_A),
+      areas: ['web'],
+    });
+    const second = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Nút',
+      assignee: herdr(PANE_B),
+      areas: ['web/ui'],
+    });
+    expect(itemOf(f, second).blocker).toEqual({
+      kind: 'area',
+      sequence: itemOf(f, first).sequence,
+      area: 'web/ui',
+    });
+
+    await f.elapse(WORK_ITEM_GRACE_MS);
+    expect(itemOf(f, first).status).toBe('review');
+    expect(itemOf(f, second).status).toBe('running');
+  });
+
+  it('lets a read-only agent share an area with an editing item', async () => {
+    const f = await repoFixture();
+    f.panes.push(
+      { paneId: PANE_A, status: 'idle', cwd: REPO },
+      { paneId: PANE_B, status: 'idle', cwd: '/work/folder/other' },
+    );
+    const reader = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Đọc',
+      assignee: herdr(PANE_A),
+      agent: 'scout',
+      areas: ['web'],
+    });
+    const editor = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa',
+      assignee: herdr(PANE_B),
+      areas: ['web/ui'],
+    });
+    expect(itemOf(f, reader).status).toBe('running');
+    expect(itemOf(f, editor).status).toBe('running');
+  });
+
+  it('leaves an auto item queued with a reason while the squad cap or free memory blocks it', async () => {
+    const f = await repoFixture();
+    await f.service.setSettings({
+      requestId: randomUUID(),
+      settings: { ...SETTINGS, maxSquadSessions: 0 },
+    });
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Không chỗ',
+      assignee: { kind: 'auto' },
+      repo: REPO,
+    });
+    expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'no_member' } });
+    expect(itemOf(f, id).reason).toContain('đội đã mở 0/0 phiên');
+    expect(f.openedWith).toEqual([]);
+
+    f.freeBytes = 1 * GIB;
+    await f.service.setSettings({ requestId: randomUUID(), settings: SETTINGS });
+    expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'no_member' } });
+    expect(itemOf(f, id).reason).toContain('RAM trống 1.0 GB, cần 2.0 GB');
+    expect(f.openedWith).toEqual([]);
+
+    // Memory frees up: the next pass opens the session in the repo with the default chat role.
+    f.freeBytes = 8 * GIB;
+    await f.service.reconcileNow();
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'chat' }]);
+    expect(itemOf(f, id).status).toBe('running');
+  });
+
+  it('saves squad settings once per request id and refuses values out of range', async () => {
+    const f = await openFixture();
+    const requestId = randomUUID();
+    const first = {
+      maxParallel: 2,
+      maxSquadSessions: 1,
+      minFreeRamGb: 4,
+      autoJudge: false,
+      autoApproveNext: true,
+    };
+    await f.service.setSettings({ requestId, settings: first });
+    await f.service.setSettings({ requestId, settings: { ...first, maxParallel: 8 } });
+    expect(f.service.snapshot().settings).toEqual(first);
+
+    await expect(
+      f.service.setSettings({ requestId: randomUUID(), settings: { ...first, maxParallel: 9 } }),
+    ).rejects.toMatchObject({ code: 'settings_invalid' });
+    expect(f.service.snapshot().settings).toEqual(first);
+  });
+
+  it('publishes the folder repos, omp agents and settings with the state', async () => {
+    const f = await repoFixture();
+    const snapshot = f.service.snapshot();
+    expect(snapshot.repos).toEqual([REPO]);
+    expect(snapshot.agents.map((agent) => agent.name)).toContain('scout');
+    expect(snapshot.settings).toEqual(SETTINGS);
   });
 });

@@ -92,6 +92,15 @@ describe('sendMenuEntries', () => {
       FOLDER_LIST_LOADING_MESSAGE,
     );
   });
+
+  it('keeps the description of an off entry, so its reason can sit on a line of its own', () => {
+    const onEntry = sendMenuEntries(READY).find((entry) => entry.id === 'squad');
+    const offEntry = sendMenuEntries({ ...READY, busy: true }).find(
+      (entry) => entry.id === 'squad',
+    );
+    expect(offEntry?.description).toBeTruthy();
+    expect(offEntry?.description).toBe(onEntry?.description);
+  });
 });
 
 describe('sendMenuStep', () => {

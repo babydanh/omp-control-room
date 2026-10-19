@@ -81,7 +81,8 @@ import {
 } from './sessionLog.js';
 import type { SquadService } from './squad/squadService.js';
 import type { UsageControl } from './usagePage.js';
-import { isWorkItemAssignee, type WorkItemDraft } from './workItems/workItemModel.js';
+import { isSquadSettings } from './workItems/squadSettings.js';
+import { isItemRole, isWorkItemAssignee, type WorkItemDraft } from './workItems/workItemModel.js';
 import type { WorkItemService } from './workItems/workItemService.js';
 import { listWorkspaceFiles, readWorkspaceFile } from './workspaceFiles.js';
 
@@ -285,6 +286,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyWorkItemMark',
   'companyWorkItemCancel',
   'companyWorkItemDependencies',
+  'companySquadSettingsSet',
   'companySquadRequest',
   'companySquadApprove',
   'companySquadDismiss',
@@ -326,6 +328,7 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companyWorkItemMark: true,
   companyWorkItemCancel: true,
   companyWorkItemDependencies: true,
+  companySquadSettingsSet: true,
   companySquadRequest: true,
   companySquadApprove: true,
   companySquadDismiss: true,
@@ -550,6 +553,7 @@ async function run(
       case 'companyWorkItemMark':
       case 'companyWorkItemCancel':
       case 'companyWorkItemDependencies':
+      case 'companySquadSettingsSet':
       case 'companyAgentRoleSet':
         await workItemCommand(msg, requestId, services, send);
         return;
@@ -1154,15 +1158,35 @@ async function cancelPrompt(
   ok(send, requestId);
 }
 
+/** The item fields a create or an assign carries. Null when one of them is present but malformed. */
+type ItemFields = Pick<WorkItemDraft, 'repo' | 'role' | 'areas' | 'agent'>;
+
+function itemFields(msg: Record<string, unknown>): ItemFields | null {
+  const { repo, role, areas, agent } = msg;
+  if (repo !== undefined && typeof repo !== 'string') return null;
+  if (agent !== undefined && typeof agent !== 'string') return null;
+  if (areas !== undefined && !isStringArray(areas)) return null;
+  if (role !== undefined && (typeof role !== 'string' || !isItemRole(role))) return null;
+  return {
+    ...(repo === undefined ? {} : { repo }),
+    ...(role === undefined ? {} : { role }),
+    ...(areas === undefined ? {} : { areas }),
+    ...(agent === undefined ? {} : { agent }),
+  };
+}
+
 /** The optional fields a create carries. Null when one of them is present but malformed. */
 function createFields(
   msg: Record<string, unknown>,
-): Pick<WorkItemDraft, 'priority' | 'acceptance' | 'dependsOn'> | null {
+): (Pick<WorkItemDraft, 'priority' | 'acceptance' | 'dependsOn'> & ItemFields) | null {
   const { priority, acceptance, dependsOn } = msg;
   if (priority !== undefined && !isWorkItemPriority(priority)) return null;
   if (acceptance !== undefined && typeof acceptance !== 'string') return null;
   if (dependsOn !== undefined && !isStringArray(dependsOn)) return null;
+  const fields = itemFields(msg);
+  if (fields === null) return null;
   return {
+    ...fields,
     ...(priority === undefined ? {} : { priority }),
     ...(acceptance === undefined ? {} : { acceptance }),
     ...(dependsOn === undefined ? {} : { dependsOn }),
@@ -1218,7 +1242,12 @@ async function workItemCommand(
       fail(send, requestId, 'assignee_invalid', 'Người nhận việc không hợp lệ.');
       return;
     }
-    await work.assign({ requestId, id, assignee: msg.assignee });
+    const fields = itemFields(msg);
+    if (fields === null) {
+      fail(send, requestId, 'invalid_request', 'Thông tin việc không hợp lệ.');
+      return;
+    }
+    await work.assign({ requestId, id, assignee: msg.assignee, ...fields });
     ok(send, requestId);
     return;
   }
@@ -1249,6 +1278,15 @@ async function workItemCommand(
       return;
     }
     await work.setDependencies({ requestId, id, dependsOn });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companySquadSettingsSet') {
+    if (!isSquadSettings(msg.settings)) {
+      fail(send, requestId, 'settings_invalid', 'Cài đặt đội không hợp lệ.');
+      return;
+    }
+    await work.setSettings({ requestId, settings: msg.settings });
     ok(send, requestId);
     return;
   }

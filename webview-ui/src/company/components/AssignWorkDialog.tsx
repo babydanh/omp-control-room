@@ -1,9 +1,10 @@
 /**
  * AssignWorkDialog: gives a piece of work to an agent. The parent sends the command and reads its
- * verdict; this dialog only gathers the text, the assignee and, when new work is filed, its
- * schedule: priority, acceptance and the open items it waits for. A fixed assignee is named rather
- * than picked, and a text that may not change is shown read-only (reassigning a work item keeps
- * its text and schedule). Escape closes the dialog; Ctrl/Cmd+Enter submits it.
+ * verdict; this dialog gathers the text, the assignee, the repo, role, code areas and subagent,
+ * and, when new work is filed, its schedule: priority, acceptance and the open items it waits
+ * for. A fixed assignee is named rather than picked, and a text that may not change is shown
+ * read-only (reassigning a work item keeps its text and schedule). Escape closes the dialog;
+ * Ctrl/Cmd+Enter submits it.
  */
 
 import {
@@ -15,21 +16,34 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
+import type {
+  CompanyRole,
+  OmpAgentInfo,
+  WorkItem,
+  WorkItemAssignee,
+} from '../../../../core/src/messages.js';
 import {
   priorityLabel,
   WORK_ITEM_ACCEPTANCE_MAX_CHARS,
   WORK_ITEM_DEPENDS_MAX,
   WORK_ITEM_PRIORITY_DEFAULT,
 } from '../../../../core/src/workItemGraph.js';
-import { assigneeKeyOf, type AssigneeOption } from '../assigneeOptions.js';
-import type { WorkItemCreateOptions } from '../companyMessages.js';
+import { assigneeKeyOf, type AssigneeOption,AUTO_ASSIGNEE } from '../assigneeOptions.js';
+import type { WorkItemCreateOptions, WorkItemFields } from '../companyMessages.js';
+import { companyRoleLabel } from '../roleProfiles.js';
 import { openItemsOf, PRIORITY_CHOICES, waitItemLabel } from '../squadView.js';
+import {
+  AUTO_ASSIGNEE_LABEL,
+  normalizeAreas,
+  repoShortName,
+  WORK_ITEM_AREAS_MAX,
+  WORK_ITEM_ROLES,
+} from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 
 /** What new work carries beyond its assignee and text. */
 export interface AssignScheduling {
-  /** Every item of the folder; the wait list offers the open ones, by #n. */
+  /** The folder's open items; the wait list offers them by #n. */
   openItems: readonly WorkItem[];
 }
 
@@ -44,6 +58,12 @@ export interface AssignWorkDialogProps {
   /** Preselected in the picker when it is among the options. */
   currentAssignee?: WorkItemAssignee;
   options: AssigneeOption[];
+  /** The folder's repos, offered as the repo the work runs in; the folder root is the default. */
+  repos: readonly string[];
+  /** The omp subagents the folder can run, offered in the Subagent field. */
+  agents: readonly OmpAgentInfo[];
+  /** The repo, role, areas and subagent the work starts with; a reassignment passes the item's. */
+  initialFields?: WorkItemFields;
   /**
    * Set when new work is filed: the dialog then offers priority, acceptance and a wait list. A
    * reassignment leaves it unset, so the item keeps its own schedule.
@@ -60,6 +80,15 @@ export interface AssignWorkDialogProps {
 
 const NO_AGENT_TEXT = 'Chưa có agent nào trong thư mục này. Mở agent herdr hoặc bấm Phiên mới.';
 
+/** The first picker row: the item goes to whichever agent is free when it runs. */
+const AUTO_OPTION: AssigneeOption = {
+  key: assigneeKeyOf(AUTO_ASSIGNEE),
+  assignee: AUTO_ASSIGNEE,
+  label: AUTO_ASSIGNEE_LABEL,
+  detail: 'Agent rảnh nhận khi chạy',
+  group: 'auto',
+};
+
 export function AssignWorkDialog({
   title,
   submitLabel,
@@ -68,7 +97,10 @@ export function AssignWorkDialog({
   fixedAssignee,
   currentAssignee,
   options,
+  repos,
+  agents,
   scheduling,
+  initialFields = {},
   pending = false,
   notice = null,
   onSubmit,
@@ -81,12 +113,16 @@ export function AssignWorkDialog({
   const [priority, setPriority] = useState<number>(WORK_ITEM_PRIORITY_DEFAULT);
   const [acceptance, setAcceptance] = useState('');
   const [waitIds, setWaitIds] = useState<string[]>([]);
+  const [repo, setRepo] = useState(initialFields.repo ?? '');
+  const [role, setRole] = useState<CompanyRole | ''>(initialFields.role ?? '');
+  const [areasText, setAreasText] = useState((initialFields.areas ?? []).join(', '));
+  const [agentName, setAgentName] = useState(initialFields.agent ?? '');
   const [opener] = useState<Element | null>(() => document.activeElement);
   const dialogRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const trimmed = text.trim();
-  const picked = options.find((option) => option.key === selectedKey) ?? null;
+  const picked = [AUTO_OPTION, ...options].find((option) => option.key === selectedKey) ?? null;
   const assignee: WorkItemAssignee | null = fixedAssignee ?? picked?.assignee ?? null;
   const waitItems: WorkItem[] = scheduling === undefined ? [] : openItemsOf(scheduling.openItems);
   // Only ids the folder still holds as open items can be waited for; a closed one is dropped.
@@ -94,6 +130,16 @@ export function AssignWorkDialog({
   const acceptanceText = acceptance.trim();
   const acceptanceTooLong = Array.from(acceptanceText).length > WORK_ITEM_ACCEPTANCE_MAX_CHARS;
   const canSubmit = trimmed !== '' && assignee !== null && !pending && !acceptanceTooLong;
+  const areas = normalizeAreas(areasText.split(','));
+  const fields: WorkItemFields = {
+    repo: repo === '' ? undefined : repo,
+    role: role === '' ? undefined : role,
+    areas: areas.length === 0 ? undefined : areas,
+    agent: agentName === '' ? undefined : agentName,
+  };
+  const chosenAgent = agents.find((agent) => agent.name === agentName);
+  const repoMissing = repo !== '' && !repos.includes(repo);
+  const agentMissing = agentName !== '' && chosenAgent === undefined;
 
   // The text takes the focus when it can change; otherwise the dialog does, so Escape reaches it.
   useEffect(() => {
@@ -114,10 +160,11 @@ export function AssignWorkDialog({
   function submit(): void {
     if (assignee === null || !canSubmit) return;
     if (scheduling === undefined) {
-      onSubmit(assignee, trimmed);
+      onSubmit(assignee, trimmed, fields);
       return;
     }
     onSubmit(assignee, trimmed, {
+      ...fields,
       priority,
       acceptance: acceptanceText === '' ? undefined : acceptanceText,
       dependsOn,
@@ -229,6 +276,7 @@ export function AssignWorkDialog({
                     aria-labelledby="assign-work-picker"
                     className="flex max-h-56 flex-col gap-2 overflow-y-auto"
                   >
+                    <div className="flex flex-col gap-0.5">{renderRow(AUTO_OPTION)}</div>
                     {hasAgents ? null : <p className="px-2 text-text-muted">{NO_AGENT_TEXT}</p>}
                     {groups.map((group) => (
                       <div key={group.heading} className="flex flex-col gap-0.5">
@@ -240,6 +288,83 @@ export function AssignWorkDialog({
                   </div>
                 </div>
               ) : null}
+              <div className="flex flex-col gap-3">
+                <label className="flex flex-col gap-1 text-text-muted">
+                  Repo
+                  <select
+                    value={repo}
+                    disabled={pending}
+                    onChange={(event) => setRepo(event.target.value)}
+                    className="rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted"
+                  >
+                    <option value="">Thư mục gốc</option>
+                    {repos.map((path) => (
+                      <option key={path} value={path} title={path}>
+                        {repoShortName(path)}
+                      </option>
+                    ))}
+                    {repoMissing ? (
+                      <option value={repo} title={repo}>
+                        {repoShortName(repo)} (không còn trong thư mục)
+                      </option>
+                    ) : null}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-text-muted">
+                  Vai
+                  <select
+                    value={role}
+                    disabled={pending}
+                    onChange={(event) => setRole(event.target.value as CompanyRole | '')}
+                    className="rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted"
+                  >
+                    <option value="">Không chọn</option>
+                    {WORK_ITEM_ROLES.map((choice) => (
+                      <option key={choice} value={choice}>
+                        {companyRoleLabel(choice)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-text-muted">
+                  Vùng code
+                  <input
+                    type="text"
+                    value={areasText}
+                    disabled={pending}
+                    placeholder="vd: auth, billing"
+                    onChange={(event) => setAreasText(event.target.value)}
+                    className="rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted"
+                  />
+                </label>
+                <p className="text-2xs text-text-muted">
+                  Cách nhau bằng dấu phẩy, tối đa {WORK_ITEM_AREAS_MAX} vùng.
+                </p>
+                <label className="flex flex-col gap-1 text-text-muted">
+                  Subagent omp
+                  <select
+                    value={agentName}
+                    disabled={pending}
+                    onChange={(event) => setAgentName(event.target.value)}
+                    className="rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted"
+                  >
+                    <option value="">Mặc định</option>
+                    {agents.map((agent) => (
+                      <option key={agent.name} value={agent.name}>
+                        {agent.name}
+                      </option>
+                    ))}
+                    {agentMissing ? (
+                      <option value={agentName}>{agentName} (không còn trong thư mục)</option>
+                    ) : null}
+                  </select>
+                </label>
+                <p className="text-2xs text-text-muted">
+                  {agentMissing
+                    ? 'Subagent này không còn trong thư mục.'
+                    : chosenAgent?.description || 'Không chọn thì dùng subagent mặc định.'}
+                </p>
+              </div>
               {scheduling === undefined ? null : (
                 <>
                   <div className="flex flex-col gap-1">

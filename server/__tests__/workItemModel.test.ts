@@ -3,6 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import { WORK_ITEM_ACCEPTANCE_MAX_CHARS } from '../../core/src/workItemGraph.js';
+import { composeDispatchPrompt } from '../src/company/workItems/dispatchPrompt.js';
+import { SQUAD_SETTINGS_DEFAULT } from '../src/company/workItems/squadSettings.js';
 import {
   assigneeKey,
   canCancel,
@@ -110,7 +112,15 @@ describe('work item assignees', () => {
 describe('work item file parsing', () => {
   it('reads a missing file as empty and not corrupt', () => {
     expect(parseWorkItemsFile(null)).toEqual({
-      file: { version: 1, revision: 0, nextSequence: 0, items: [], roles: [] },
+      file: {
+        version: 1,
+        revision: 0,
+        nextSequence: 0,
+        items: [],
+        roles: [],
+        settings: SQUAD_SETTINGS_DEFAULT,
+        squadSessionIds: [],
+      },
       dropped: 0,
       corrupt: false,
     });
@@ -163,7 +173,7 @@ describe('work item wire shape', () => {
     const [stored] = parsed.file.items;
     expect(stored).toBeDefined();
     if (stored === undefined) return;
-    expect(stored.pendingPrompt).toBe('Việc');
+    expect(stored.pendingPrompt).toBe(composeDispatchPrompt({ text: 'Việc', readOnly: false }));
     expect(toWorkItem(stored)).not.toHaveProperty('pendingPrompt');
   });
 });
@@ -176,7 +186,11 @@ describe('work item priority, waits, and acceptance in stored files', () => {
       roles: [],
     });
     expect(parsed.dropped).toBe(0);
-    expect(parsed.file.items[0]).toMatchObject({ priority: 2, dependsOn: [], pendingPrompt: 'Cũ' });
+    expect(parsed.file.items[0]).toMatchObject({
+      priority: 2,
+      dependsOn: [],
+      pendingPrompt: composeDispatchPrompt({ text: 'Cũ', readOnly: false }),
+    });
     expect(parsed.file.items[0]?.acceptance).toBeUndefined();
   });
 
