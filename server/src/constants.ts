@@ -29,6 +29,20 @@ export const EXTERNAL_STALE_CHECK_INTERVAL_MS = 30_000;
  *  so the file's mtime becomes stale before the dismissal expires. */
 export const DISMISSED_COOLDOWN_MS = 180_000; // 3 minutes
 
+// ── Browser Reaper (idle omp headless browsers) ──────────────
+/** How often the reaper lists omp's daemons and counts each browser's pages. */
+export const BROWSER_REAPER_CHECK_INTERVAL_MS = 120_000;
+/** Deadline for one `omp ps` listing or `omp ps stop`. A listing took ~5 s on the owner's machine. */
+export const BROWSER_REAPER_OMP_TIMEOUT_MS = 30_000;
+/** Deadline for one DevTools `/json/list` probe on the loopback endpoint. */
+export const BROWSER_REAPER_PROBE_TIMEOUT_MS = 3_000;
+/** Deadline for the process-tree read before a stop. Get-CimInstance is the slow part on Windows. */
+export const BROWSER_REAPER_MEMORY_TIMEOUT_MS = 15_000;
+/** The `--timeout` handed to `omp ps stop`, in seconds. */
+export const BROWSER_REAPER_STOP_TIMEOUT_SECONDS = 5;
+/** A reap is one stop plus one retry, each confirmed on the next listing. */
+export const BROWSER_REAPER_MAX_STOP_ATTEMPTS = 2;
+
 // ── Context Window Usage ────────────────────────────────────
 /** Window size assumed until a transcript proves otherwise. Transcripts never
  *  state the model's context limit, so this is the floor, not the truth. */

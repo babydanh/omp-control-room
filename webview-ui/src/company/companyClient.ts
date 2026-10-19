@@ -283,6 +283,11 @@ export class CompanyClient {
     );
   }
 
+  /** Stop every omp headless browser with no open page now, ignoring the grace period. */
+  reapIdleBrowsers(): SendOutcome {
+    return this.send(commands.browserReaperReapNow());
+  }
+
   /** The board only asks for diagnostics while it is actually on screen. */
   requestDiagnostics(): void {
     this.requestSnapshot(true);

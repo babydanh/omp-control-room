@@ -5,6 +5,7 @@ import { buildAgentDiagnostics } from './agentDiagnostics.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import type { LoadedAssets, LoadedCharacterSprites, LoadedPetSprites } from './assetLoader.js';
+import type { BrowserReaperControl } from './company/browserReaper.js';
 import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import { handleCompanyCommand } from './company/clientCommands.js';
 import type { CompanyViewMode } from './company/egress.js';
@@ -88,6 +89,8 @@ export interface ClientMessageContext {
   companyExecutionAllowed?: boolean;
   /** Server-level herdr link. `null` or absent means herdr is not linked into this process. */
   herdr?: HerdrLink | null;
+  /** Browser reaper control; absent or `null` when this process runs none. */
+  browserReaper?: BrowserReaperControl | null;
   /** Folder list and switching for this process; absent when it holds one fixed workspace. */
   workspaces?: CompanyWorkspaceControl | null;
   /** Called as soon as attach rotates the socket's terminal egress lease. */
@@ -174,6 +177,7 @@ export function handleClientMessage(
         onTerminalAttached: ctx.onTerminalAttached,
         onTerminalDetached: ctx.onTerminalDetached,
         herdr: ctx.herdr ?? null,
+        browserReaper: ctx.browserReaper ?? null,
         onCompanyViewMode: ctx.onCompanyViewMode,
         companyViewMode: ctx.companyViewMode,
       },
@@ -204,6 +208,11 @@ export function handleClientMessage(
   switch (msg.type) {
     case 'webviewReady':
       handleWebviewReady(send, ctx);
+      break;
+
+    case 'browserReaperReapNow':
+      // Past the read-only gate, so privileged. The reaper answers with a status broadcast.
+      void ctx.browserReaper?.reapNow();
       break;
 
     case 'launchAgent': {

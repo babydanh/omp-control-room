@@ -48,6 +48,7 @@ const COMPANY_PRIVATE_TYPES: ReadonlySet<string> = new Set([
   'herdrAgents',
   'herdrScreen',
   'herdrInfo',
+  'browserReaperStatus',
 ]);
 
 /** Server messages bound to exactly one attached session. */

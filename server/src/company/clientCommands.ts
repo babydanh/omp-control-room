@@ -46,6 +46,7 @@ import {
   type HerdrLink,
   isHerdrKey,
 } from '../herdr/herdrLink.js';
+import type { BrowserReaperControl } from './browserReaper.js';
 import type {
   CompanyCoordinator,
   CompanySessionAction,
@@ -166,6 +167,8 @@ export interface CompanyCommandContext {
   executionAllowed: boolean;
   /** Server-level herdr link; absent or `null` when this process runs without one. */
   herdr?: HerdrLink | null;
+  /** Browser reaper control; absent or `null` when this process runs none. */
+  browserReaper?: BrowserReaperControl | null;
   /** Updates the per-socket egress lease as soon as attach rotates ownership. */
   onTerminalAttached?: (sessionId: string, leaseId: string) => void;
   /**
@@ -385,6 +388,9 @@ export function handleCompanyCommand(
   }
   if (msg.type === 'companySnapshotRequest') {
     send(ctx.herdr?.snapshot() ?? HERDR_NOT_LINKED_ROSTER);
+  }
+  if (msg.type === 'companySnapshotRequest' && ctx.browserReaper) {
+    send(ctx.browserReaper.snapshot());
   }
   if (msg.type === 'companySnapshotRequest' && ctx.workspaces) {
     send({ type: 'companyWorkspaces', workspaces: ctx.workspaces.entries() });

@@ -11,6 +11,7 @@ import type {
   ReloadAssetsSideEffect,
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
+import type { BrowserReaperControl } from './company/browserReaper.js';
 import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import {
   SERVER_JSON_DIR,
@@ -83,6 +84,8 @@ export class PixelAgentsServer {
     /** Cây git board service; absent or null when the ledger is not wired. */
     ledger?: LedgerService | null;
     herdr?: HerdrLink | null;
+    /** Browser reaper control; absent when this process runs none. */
+    browserReaper?: BrowserReaperControl | null;
     ptyManager?: PtySessionManager;
     /** Extra privileged Host names (standalone; see wsAuth.privilegedHostnames). */
     allowedHosts?: readonly string[];
@@ -167,6 +170,7 @@ export class PixelAgentsServer {
       workspaces: options?.workspaces,
       ledger: options?.ledger,
       herdr: options?.herdr,
+      browserReaper: options?.browserReaper,
       ptyManager: options?.ptyManager,
       allowedHosts: standalone?.allowedHosts,
     });

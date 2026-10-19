@@ -38,6 +38,7 @@ import type {
   UsageRecord,
 } from '../../../core/src/company.js';
 import type {
+  BrowserReaperStatusMessage,
   CompanyFileContent,
   CompanyFileEntry,
   CompanyFolderBrowseMessage,
@@ -294,6 +295,8 @@ export interface CompanyViewState extends FolderScope {
   herdr: HerdrView;
   /** The server's whole herdr roster; `herdr.agents` and `herdr.sleeping` are its part in view. */
   herdrRoster: HerdrRoster;
+  /** The server's latest omp headless-browser report; null until one has arrived. */
+  browserReaper: BrowserReaperStatusMessage | null;
   /** The latest answer to a resume-picker request; null until one has arrived. */
   ompSessions: OmpSessionsView | null;
   /** The folders the server reports; null until the server has sent a list. */
@@ -338,6 +341,7 @@ export function emptyCompanyState(
     sessionInfos: {},
     herdr: emptyHerdrView(),
     herdrRoster: { agents: [], sleeping: [] },
+    browserReaper: null,
     ompSessions: null,
     workspaces: null,
     pendingWorkspaceOpen: null,
@@ -1146,6 +1150,8 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
       );
     case 'herdrScreen':
       return unchanged({ ...state, herdr: applyHerdrScreen(state.herdr, message) });
+    case 'browserReaperStatus':
+      return unchanged({ ...state, browserReaper: message });
     case 'herdrInfo':
       return unchanged({
         ...state,

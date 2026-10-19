@@ -12,6 +12,7 @@ import type {
   SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
 import { handleClientMessage } from './clientMessageHandler.js';
+import type { BrowserReaperControl } from './company/browserReaper.js';
 import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import { CompanyClientGate } from './company/egress.js';
 import {
@@ -65,6 +66,8 @@ export interface HttpServerOptions {
   isCompanyExecutionAllowed?: () => boolean;
   /** Server-level herdr link; absent when this process does not link herdr. */
   herdr?: HerdrLink | null;
+  /** Browser reaper control; absent when this process runs none. */
+  browserReaper?: BrowserReaperControl | null;
   /** Company folder list and switching; absent when the process holds one fixed workspace. */
   workspaces?: CompanyWorkspaceControl | null;
   /** Ledger board service. Live snapshots reach privileged sockets only; absent or null = no ledger. */
@@ -309,6 +312,7 @@ function registerWebSocketRoute(
             onCompanyViewMode: (mode) => gate.setCompanyView(mode),
             companyViewMode: () => gate.companyViewMode,
             herdr: options.herdr ?? null,
+            browserReaper: options.browserReaper ?? null,
             ptyManager: options.ptyManager,
           },
         );

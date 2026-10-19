@@ -159,6 +159,15 @@ describe('parseArgs', () => {
     });
   });
 
+  // The browser reaper is on by default; --no-browser-reaper turns it off.
+  it('defaults the browser reaper to enabled and --no-browser-reaper turns it off', () => {
+    expect(parseArgs([]).browserReaper).toBe(true);
+    expect(parseArgs(['--no-browser-reaper', '--port', '3100'])).toMatchObject({
+      browserReaper: false,
+      port: 3100,
+    });
+  });
+
   // 12. --allowed-host is repeatable and validated; --rotate-token is a switch
   it('collects repeated --allowed-host values', () => {
     expect(parseArgs([]).allowedHosts).toEqual([]);

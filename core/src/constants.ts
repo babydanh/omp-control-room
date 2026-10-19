@@ -36,3 +36,9 @@ export const TRANSPORT_STATE_CONNECTING = 'connecting';
 export const TRANSPORT_STATE_CONNECTED = 'connected';
 export const TRANSPORT_STATE_RECONNECTING = 'reconnecting';
 export const TRANSPORT_STATE_DISCONNECTED = 'disconnected';
+
+// ── Browser reaper ───────────────────────────────────────────
+// How long an omp headless browser must hold zero pages, on every check, before
+// the server stops it. The server enforces it; the board states it.
+
+export const BROWSER_REAPER_GRACE_MS = 10 * 60_000;

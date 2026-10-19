@@ -5,6 +5,7 @@
 ### Features
 
 - **Folder browser** — "Mở thư mục…" in the folder menu and the palette, and the "+ Phiên mới" picker when no folder is open, share one browser: quick places (recent folders by their names, drives, home and roots), a path field that takes a typed path, arrow keys to move, Backspace to go up, and Ctrl+Enter to choose the folder in view. The inline path box is gone.
+- **Idle omp browsers are stopped** — omp keeps a headless Chrome (~300 MB) alive for hours after its last page closes. The server now stops one that has had no open page for 10 minutes (checked every 2 minutes), shows them in the status pill as "Trình duyệt ẩn của omp", and offers "Dọn ngay" to stop the idle ones at once. Pass `--no-browser-reaper` or set `PIXEL_AGENTS_BROWSER_REAPER=0` to keep them running.
 
 ### Changes
 

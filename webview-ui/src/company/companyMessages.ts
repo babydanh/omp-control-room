@@ -48,6 +48,7 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   companyFolderBrowse: true,
   herdrAgents: true,
   herdrScreen: true,
+  browserReaperStatus: true,
   terminalAttached: true,
   terminalSnapshot: true,
   terminalData: true,
@@ -320,6 +321,11 @@ export function herdrRename(requestId: string, paneId: string, name: string): Cl
 
 export function herdrInfoRequest(requestId: string, paneId: string): ClientMessage {
   return { type: 'herdrInfoRequest', requestId, paneId };
+}
+
+/** Stop every omp headless browser with no open page now, ignoring the grace period. Privileged on the server. */
+export function browserReaperReapNow(): ClientMessage {
+  return { type: 'browserReaperReapNow' };
 }
 
 /** The catalog entry a `companyModelCatalog` reply resolves to. */

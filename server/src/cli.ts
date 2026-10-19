@@ -19,6 +19,9 @@ import {
   loadAllPets,
 } from './assetReload.js';
 import type { AssetCache, ReloadAssetsSideEffect } from './clientMessageHandler.js';
+import { browserReaperEnabled, createBrowserReaper } from './company/browserReaper.js';
+import { createBrowserReaperHostDeps } from './company/browserReaperProbes.js';
+import { resolveNativeLaunch } from './company/companyNativeLaunch.js';
 import {
   COMPANY_DEFAULT_WORKSPACE_PATH,
   COMPANY_OMP_BRIDGE_FILENAME,
@@ -70,6 +73,8 @@ export interface CliArgs {
   allowedHosts: string[];
   /** --rotate-token: replace the persisted server token before starting. */
   rotateToken: boolean;
+  /** False when --no-browser-reaper was passed: idle omp headless browsers are left running. */
+  browserReaper: boolean;
 }
 
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
@@ -82,6 +87,7 @@ export function parseArgs(argv: string[]): CliArgs {
     host: '127.0.0.1',
     workspace: COMPANY_DEFAULT_WORKSPACE_PATH,
     terminal: true,
+    browserReaper: true,
     allowedHosts: [],
     rotateToken: false,
   };
@@ -127,6 +133,8 @@ export function parseArgs(argv: string[]): CliArgs {
       args.rotateToken = true;
     } else if (argv[i] === '--no-terminal') {
       args.terminal = false;
+    } else if (argv[i] === '--no-browser-reaper') {
+      args.browserReaper = false;
     } else if (argv[i] === '--help') {
       console.log(`Usage: pixel-agents [options]
 
@@ -141,6 +149,8 @@ Options:
                         old one (bookmarks, other devices) stops working
   --no-terminal         Disable the embedded terminal (watch agents only; no
                         launching or attaching from the browser)
+  --no-browser-reaper   Leave idle omp headless browsers running (default: stop
+                        those with no open page for 10 minutes)
   --help                Show this help message`);
       process.exit(0);
     }
@@ -266,6 +276,24 @@ async function main(): Promise<void> {
   const herdr = createHerdrLink({ workspaceFor: (cwd) => folderScope.folderOf(cwd) });
   herdr.onAgents((message) => store.broadcast(message as unknown as Record<string, unknown>));
   herdr.onScreen((message) => store.broadcast(message as unknown as Record<string, unknown>));
+  // Stops omp's idle headless browsers. --no-browser-reaper or
+  // PIXEL_AGENTS_BROWSER_REAPER=0 turns it off: then nothing is listed, probed or stopped.
+  const browserReaper = createBrowserReaper({
+    enabled: browserReaperEnabled(args.browserReaper, process.env),
+    deps: createBrowserReaperHostDeps({
+      // The company host's own OMP resolver, given the same bundled paths as the company below.
+      resolveCommand: () =>
+        resolveNativeLaunch({
+          extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
+          helperPath: path.join(distRoot, COMPANY_PTY_HOST_FILENAME),
+        }).command,
+      cwd: args.workspace,
+      publish: (message) => store.broadcast(message as unknown as Record<string, unknown>),
+      log: (message) => console.log(`[Pixel Agents] ${message}`),
+      warn: (message) => console.warn(`[Pixel Agents] ${message}`),
+    }),
+  });
+
   // Company folders: the initial one opens below; the board can open more and
   // switch between them. Only the active folder's traffic reaches the board.
   const company = new CompanyWorkspaceRegistry({
@@ -321,6 +349,7 @@ async function main(): Promise<void> {
         ledger.dispose();
         runtime.dispose();
         herdr.stop();
+        browserReaper.stop();
         await server.stop();
         store.dispose();
       }
@@ -435,12 +464,14 @@ async function main(): Promise<void> {
       workspaces: company,
       ledger,
       herdr,
+      browserReaper,
       ptyManager,
       allowedHosts: args.allowedHosts,
       rotateToken: args.rotateToken,
     });
     currentConfig = { port: config.port, token: config.token };
     herdr.start();
+    browserReaper.start();
     if (args.rotateToken) {
       console.log(
         '[Pixel Agents] Server token rotated: URLs carrying the old token no longer grant access. Open the new URL below on each device.',

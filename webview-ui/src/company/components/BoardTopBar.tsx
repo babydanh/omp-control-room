@@ -197,7 +197,7 @@ export function BoardTopBar({
       </div>
       {!phone && <div className="min-w-0 flex-1" />}
       <ChatNewButton client={client} compact={phone} />
-      <StatusPill state={state} />
+      <StatusPill client={client} state={state} />
       <button
         type="button"
         onClick={onOpenPalette}

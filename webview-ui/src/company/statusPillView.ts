@@ -6,12 +6,13 @@
  */
 
 import {
+  BROWSER_REAPER_GRACE_MS,
   TRANSPORT_STATE_CONNECTED,
   TRANSPORT_STATE_CONNECTING,
   TRANSPORT_STATE_DISCONNECTED,
   TRANSPORT_STATE_RECONNECTING,
 } from '../../../core/src/constants.js';
-import type { CompanyDiagnostics } from '../../../core/src/messages.js';
+import type { BrowserReaperBrowser, CompanyDiagnostics } from '../../../core/src/messages.js';
 import type { TransportState } from '../../../core/src/transport.js';
 import type { CompanyViewState } from './companyState.js';
 import { showsAllFolders } from './folderIdentity.js';
@@ -32,6 +33,66 @@ export interface StatusPillView {
   /** What the pill itself says, short enough for a phone bar. */
   summary: string;
   rows: readonly StatusRow[];
+  /** The popover's omp headless-browser section, with the reap affordance. */
+  browsers: BrowserSectionView;
+}
+
+/** The popover's section for the omp headless browsers that stay alive after their last page closes. */
+export interface BrowserSectionView {
+  rows: readonly StatusRow[];
+  /** Whether "Dọn ngay" would stop a browser now: the reaper is on and some browser has no page. */
+  reapable: boolean;
+}
+
+/** The section's heading; the popover draws it, so it stays with the rows it heads. */
+export const BROWSER_SECTION_TITLE = 'Trình duyệt ẩn của omp';
+
+const MS_PER_MINUTE = 60_000;
+
+/** One browser's reading: what it holds open, and when it went idle and when it is reaped. */
+function browserText(browser: BrowserReaperBrowser): string {
+  const minutes = Math.floor(browser.uptimeMs / MS_PER_MINUTE);
+  const grace = BROWSER_REAPER_GRACE_MS / MS_PER_MINUTE;
+  if (browser.pages > 0) return `${browser.pages} trang · chạy ${minutes} phút`;
+  if (browser.idleSince === null) {
+    return `0 trang · chạy ${minutes} phút · dọn sau ${grace} phút rảnh`;
+  }
+  const idleAt = new Date(browser.idleSince);
+  const clock = `${String(idleAt.getHours()).padStart(2, '0')}:${String(idleAt.getMinutes()).padStart(2, '0')}`;
+  return `0 trang · chạy ${minutes} phút · rảnh từ ${clock} · dọn sau ${grace} phút rảnh`;
+}
+
+/**
+ * The browsers section. A reading the server has not sent yet is unknown, never "no browsers";
+ * a disabled reaper reads as off.
+ */
+function browserSection(state: CompanyViewState): BrowserSectionView {
+  const reaper = state.browserReaper;
+  if (reaper === null) {
+    return {
+      rows: [{ label: 'Trạng thái', value: 'chưa có số liệu', attention: false }],
+      reapable: false,
+    };
+  }
+  if (!reaper.enabled) {
+    return { rows: [{ label: 'Trạng thái', value: 'Tắt', attention: false }], reapable: false };
+  }
+  return {
+    rows: [
+      { label: 'Đang chạy', value: `${reaper.browsers.length} trình duyệt`, attention: false },
+      ...reaper.browsers.map((browser) => ({
+        label: folderLabelFor(state.workspaces, browser.projectDir),
+        value: browserText(browser),
+        attention: false,
+      })),
+      {
+        label: 'Đã giải phóng',
+        value: `${reaper.freedMb} MB · ${reaper.reapedCount} trình duyệt`,
+        attention: false,
+      },
+    ],
+    reapable: reaper.browsers.some((browser) => browser.pages === 0),
+  };
 }
 
 function connectionLabel(connection: TransportState): string {
@@ -132,5 +193,6 @@ export function statusPillView(
     tone: !connected || spent ? 'attention' : 'calm',
     summary: pillSummary(connection, spent),
     rows,
+    browsers: browserSection(state),
   };
 }

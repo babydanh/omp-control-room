@@ -136,6 +136,7 @@ components:
         - $ref: '#/components/schemas/CompanySessionLogMessage'
         - $ref: '#/components/schemas/HerdrAgentsMessage'
         - $ref: '#/components/schemas/HerdrScreenMessage'
+        - $ref: '#/components/schemas/BrowserReaperStatusMessage'
         - $ref: '#/components/schemas/CompanySessionInfoMessage'
         - $ref: '#/components/schemas/HerdrInfoMessage'
         - $ref: '#/components/schemas/CompanyModelCatalogMessage'
@@ -224,6 +225,7 @@ components:
         - $ref: '#/components/schemas/HerdrRenameMessage'
         - $ref: '#/components/schemas/HerdrInfoRequestMessage'
         - $ref: '#/components/schemas/HerdrWakeMessage'
+        - $ref: '#/components/schemas/BrowserReaperReapNow'
         # Native terminal
         - $ref: '#/components/schemas/TerminalAttachMessage'
         - $ref: '#/components/schemas/TerminalInputMessage'
@@ -4895,6 +4897,67 @@ components:
         at:
           type: string
           format: date-time
+
+    BrowserReaperStatusMessage:
+      description: |
+        The omp headless browsers this host's browser reaper manages, and what it
+        has stopped. Sent to privileged connections only: on a company snapshot
+        request, and after every reaper check or "Dọn ngay". `enabled: false`
+        means the reaper is off (`--no-browser-reaper` or
+        `PIXEL_AGENTS_BROWSER_REAPER=0`): nothing is probed or stopped and
+        `browsers` is empty. `reapedCount` and `freedMb` count since this server
+        started; `freedMb` is the summed working set of each stopped browser's
+        process tree, read before the stop, so it is an estimate.
+      type: object
+      additionalProperties: false
+      required: [type, enabled, browsers, reapedCount, freedMb]
+      properties:
+        type:
+          const: browserReaperStatus
+        enabled:
+          type: boolean
+        browsers:
+          type: array
+          description: Ready, non-persistent omp headless browsers whose DevTools endpoint this check could reach.
+          items:
+            $ref: '#/components/schemas/BrowserReaperBrowser'
+        reapedCount:
+          type: integer
+          minimum: 0
+        freedMb:
+          type: number
+          minimum: 0
+
+    BrowserReaperBrowser:
+      type: object
+      additionalProperties: false
+      required: [projectDir, pages, idleSince, uptimeMs]
+      properties:
+        projectDir:
+          type: string
+          description: The project folder omp runs this browser for.
+        pages:
+          type: integer
+          minimum: 0
+          description: Page targets open on the browser's DevTools endpoint at this check.
+        idleSince:
+          type: [string, 'null']
+          description: ISO time this browser first had zero pages in its current run of checks; null while it has pages.
+        uptimeMs:
+          type: integer
+          minimum: 0
+
+    BrowserReaperReapNow:
+      description: |
+        "Dọn ngay": stop every managed omp headless browser that has zero pages
+        now, without waiting out the grace period. A browser with pages is never
+        touched. Privileged; answered by a `browserReaperStatus` broadcast.
+      type: object
+      additionalProperties: false
+      required: [type]
+      properties:
+        type:
+          const: browserReaperReapNow
 
     AgentToolInfo:
       type: object
