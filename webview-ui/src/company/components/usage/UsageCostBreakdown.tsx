@@ -33,11 +33,8 @@ export function UsageCostBreakdown({
   const showRows = !(totals.unpricedRequests > 0 && totals.totalCost === 0);
 
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-        <h3 className="text-xs font-semibold text-text-secondary">Chi phí theo loại</h3>
-        <span className="text-xs tabular-nums text-text">{costLabel(totals)}</span>
-      </div>
+    <div className="flex flex-col gap-3">
+      <p className="text-xs tabular-nums text-text">{costLabel(totals)}</p>
       {showRows && (
         <ul className="flex flex-col gap-2">
           {rows.map((row) => {

@@ -57,7 +57,7 @@ export function UsageTable<Row>({
   };
 
   return (
-    <div className="overflow-x-auto">
+    <div className="max-h-[26rem] overflow-auto rounded-(--company-radius-sm)">
       <table className="w-full min-w-[30rem] border-collapse text-xs">
         <caption className="sr-only">{caption}</caption>
         <thead>
@@ -75,7 +75,7 @@ export function UsageTable<Row>({
                   key={column.key}
                   scope="col"
                   aria-sort={ariaSort}
-                  className={`border-b border-hairline py-1.5 pr-3 font-normal text-text-muted ${align}`}
+                  className={`sticky top-0 z-[1] bg-raised px-3 py-2 font-normal text-text-muted ${align}`}
                 >
                   <button
                     type="button"
@@ -92,11 +92,11 @@ export function UsageTable<Row>({
         </thead>
         <tbody>
           {sorted.map((row) => (
-            <tr key={rowKey(row)} className="border-b border-hairline">
+            <tr key={rowKey(row)} className="even:bg-panel hover:bg-hover">
               {columns.map((column) => {
                 const align = column.align === 'end' ? 'text-right' : 'text-left';
                 return (
-                  <td key={column.key} className={`py-1.5 pr-3 tabular-nums text-text ${align}`}>
+                  <td key={column.key} className={`px-3 py-2 tabular-nums text-text ${align}`}>
                     {column.cell(row)}
                   </td>
                 );

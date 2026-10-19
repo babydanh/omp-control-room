@@ -3,8 +3,6 @@
  * table. Each one sorts on its headers; the defaults put the costliest or busiest rows first.
  */
 
-import type { ReactNode } from 'react';
-
 import type {
   UsageStatsAgentRow,
   UsageStatsFolderRow,
@@ -19,6 +17,7 @@ import {
   modelPerformanceRows,
   tokenSum,
 } from '../../usage/usageStats.js';
+import { UsageCard } from './UsageCard.js';
 import { milliText, speedText } from './usageMetrics.js';
 import { type UsageColumn, UsageTable } from './UsageTable.js';
 
@@ -166,19 +165,10 @@ const PERFORMANCE_COLUMNS: UsageColumn<ModelPerformanceRow>[] = [
   },
 ];
 
-function TableBlock({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-2">
-      <h3 className="text-xs font-semibold text-text-secondary">{title}</h3>
-      {children}
-    </div>
-  );
-}
-
 export function UsageTables({ data }: { data: UsageStatsMessage }) {
   return (
-    <div className="flex flex-col gap-6">
-      <TableBlock title="Theo mô hình">
+    <>
+      <UsageCard title="Theo mô hình">
         <UsageTable
           caption="Token theo mô hình"
           rows={data.byModel}
@@ -186,8 +176,8 @@ export function UsageTables({ data }: { data: UsageStatsMessage }) {
           defaultKey="cost"
           rowKey={(row) => `${row.provider}/${row.model}`}
         />
-      </TableBlock>
-      <TableBlock title="Theo thư mục">
+      </UsageCard>
+      <UsageCard title="Theo thư mục">
         <UsageTable
           caption="Token theo thư mục"
           rows={data.byFolder}
@@ -195,8 +185,8 @@ export function UsageTables({ data }: { data: UsageStatsMessage }) {
           defaultKey="cost"
           rowKey={(row) => row.folder}
         />
-      </TableBlock>
-      <TableBlock title="Theo loại agent">
+      </UsageCard>
+      <UsageCard title="Theo loại agent">
         <UsageTable
           caption="Token theo loại agent"
           rows={data.byAgentType}
@@ -204,8 +194,8 @@ export function UsageTables({ data }: { data: UsageStatsMessage }) {
           defaultKey="cost"
           rowKey={(row) => row.agentType}
         />
-      </TableBlock>
-    </div>
+      </UsageCard>
+    </>
   );
 }
 
@@ -215,7 +205,7 @@ export function ModelPerformanceTable({
   points: readonly UsageStatsModelPerformancePoint[];
 }) {
   return (
-    <TableBlock title="Hiệu năng theo mô hình">
+    <UsageCard title="Hiệu năng theo mô hình">
       <UsageTable
         caption="Trung bình theo số yêu cầu của mỗi mô hình"
         rows={modelPerformanceRows(points)}
@@ -223,6 +213,6 @@ export function ModelPerformanceTable({
         defaultKey="requests"
         rowKey={(row) => row.key}
       />
-    </TableBlock>
+    </UsageCard>
   );
 }

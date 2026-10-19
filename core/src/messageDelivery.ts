@@ -34,6 +34,9 @@ const REPLAYABLE_MESSAGE_TYPES: ReadonlySet<string> = new Set([
   'companySessionInfoRequest',
   'companyOmpSessionsRequest',
   'herdrInfoRequest',
+  'usageLimitsRequest',
+  'usageStatsRequest',
+  'usageHistoryRequest',
 ]);
 
 /** Error a UI surfaces to keep a draft instead of losing it to a silent drop. */

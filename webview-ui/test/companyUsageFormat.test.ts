@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import {
   formatClock,
   formatCount,
-  formatCountdown,
-  formatDuration,
+  formatCountdownClock,
   formatPercent,
+  formatResetIn,
   formatTokens,
   formatUsd,
   prettyFolder,
@@ -114,54 +114,47 @@ describe('formatTokens', () => {
   });
 });
 
-describe('formatDuration', () => {
-  it('reads zero and negative spans as zero minutes', () => {
-    expect(formatDuration(0)).toBe('0 phút');
-    expect(formatDuration(-MINUTE)).toBe('0 phút');
-  });
-
-  it('reads a span under one minute as such', () => {
-    expect(formatDuration(30 * 1000)).toBe('dưới 1 phút');
-  });
-
-  it('shows minutes under an hour', () => {
-    expect(formatDuration(45 * MINUTE)).toBe('45 phút');
-  });
-
-  it('shows hours and minutes, dropping zero minutes', () => {
-    expect(formatDuration(2 * HOUR + 16 * MINUTE)).toBe('2 giờ 16 phút');
-    expect(formatDuration(2 * HOUR)).toBe('2 giờ');
-  });
-
-  it('shows days and hours, dropping zero hours', () => {
-    expect(formatDuration(3 * DAY + 4 * HOUR)).toBe('3 ngày 4 giờ');
-    expect(formatDuration(DAY)).toBe('1 ngày');
-  });
-
-  it('shows a dash for a missing span', () => {
-    expect(formatDuration(Number.NaN)).toBe('—');
-  });
-});
-
-describe('formatCountdown', () => {
+describe('formatResetIn', () => {
   const now = 1_000_000_000_000;
 
-  it('counts down to a future reset', () => {
-    expect(formatCountdown(now + 2 * HOUR + 16 * MINUTE, now)).toBe('đặt lại sau 2 giờ 16 phút');
-    expect(formatCountdown(now + 3 * DAY + 4 * HOUR, now)).toBe('đặt lại sau 3 ngày 4 giờ');
-    expect(formatCountdown(now + 45 * MINUTE, now)).toBe('đặt lại sau 45 phút');
-    expect(formatCountdown(now + 30 * 1000, now)).toBe('đặt lại sau dưới 1 phút');
+  it('counts down to a future reset in minutes, hours and days', () => {
+    expect(formatResetIn(now + 45 * MINUTE, now)).toBe('còn 45p');
+    expect(formatResetIn(now + 4 * HOUR + 30 * MINUTE, now)).toBe('còn 4g 30p');
+    expect(formatResetIn(now + 4 * HOUR, now)).toBe('còn 4g');
+    expect(formatResetIn(now + 2 * DAY + 3 * HOUR, now)).toBe('còn 2n 3g');
+    expect(formatResetIn(now + 2 * DAY, now)).toBe('còn 2n');
+  });
+
+  it('reads a reset under a minute away as such', () => {
+    expect(formatResetIn(now + 30 * 1000, now)).toBe('còn dưới 1p');
   });
 
   it('reads a reset that is now or past as already reset', () => {
-    expect(formatCountdown(now, now)).toBe('đã đặt lại');
-    expect(formatCountdown(now - MINUTE, now)).toBe('đã đặt lại');
+    expect(formatResetIn(now, now)).toBe('đã đặt lại');
+    expect(formatResetIn(now - MINUTE, now)).toBe('đã đặt lại');
   });
 
   it('shows nothing when the time cannot be read', () => {
-    expect(formatCountdown(Number.NaN, now)).toBe('');
-    expect(formatCountdown(Number.POSITIVE_INFINITY, now)).toBe('');
-    expect(formatCountdown(now + HOUR, Number.NaN)).toBe('');
+    expect(formatResetIn(Number.NaN, now)).toBe('');
+    expect(formatResetIn(Number.POSITIVE_INFINITY, now)).toBe('');
+    expect(formatResetIn(now + HOUR, Number.NaN)).toBe('');
+  });
+});
+
+describe('formatCountdownClock', () => {
+  it('shows minutes and seconds, clamping a span under zero to zero', () => {
+    expect(formatCountdownClock(102_000)).toBe('1:42');
+    expect(formatCountdownClock(5_000)).toBe('0:05');
+    expect(formatCountdownClock(0)).toBe('0:00');
+    expect(formatCountdownClock(-5_000)).toBe('0:00');
+  });
+
+  it('adds hours past an hour', () => {
+    expect(formatCountdownClock(HOUR + 2 * MINUTE + 3_000)).toBe('1:02:03');
+  });
+
+  it('shows a dash for a missing span', () => {
+    expect(formatCountdownClock(Number.NaN)).toBe('—');
   });
 });
 

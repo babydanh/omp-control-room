@@ -7,6 +7,7 @@ import type {
 } from '../../core/src/messages.js';
 import {
   cacheRateLabel,
+  cacheReadShare,
   costBreakdown,
   costLabel,
   modelPerformanceRows,
@@ -125,6 +126,20 @@ describe('cacheRateLabel', () => {
 
   it('says there is nothing to rate when no token has been counted', () => {
     expect(cacheRateLabel(totals())).toBe('Chưa có token để tính tỷ lệ');
+  });
+});
+
+describe('cacheReadShare', () => {
+  it('is the cache read share of input, cache read and cache write tokens', () => {
+    expect(
+      cacheReadShare(
+        totals({ totalInputTokens: 100, totalCacheReadTokens: 300, totalCacheWriteTokens: 100 }),
+      ),
+    ).toBeCloseTo(0.6);
+  });
+
+  it('is null when no input or cache token has been counted', () => {
+    expect(cacheReadShare(totals())).toBeNull();
   });
 });
 

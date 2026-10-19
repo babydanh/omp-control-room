@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   isRefreshDue,
+  nextRefreshDueAt,
   USAGE_LIMITS_REFRESH_MS,
   USAGE_STATS_REFRESH_MS,
 } from '../src/company/usage/usageRefresh.js';
@@ -41,5 +42,17 @@ describe('isRefreshDue', () => {
     expect(isRefreshDue(now - USAGE_STATS_REFRESH_MS * 2, USAGE_STATS_REFRESH_MS, now, true)).toBe(
       true,
     );
+  });
+});
+
+describe('nextRefreshDueAt', () => {
+  const now = 1_000_000;
+
+  it('falls due now for a report that was never asked for', () => {
+    expect(nextRefreshDueAt(null, USAGE_LIMITS_REFRESH_MS, now)).toBe(now);
+  });
+
+  it('falls due one interval after the last request', () => {
+    expect(nextRefreshDueAt(now - 30_000, USAGE_LIMITS_REFRESH_MS, now)).toBe(now + 90_000);
   });
 });

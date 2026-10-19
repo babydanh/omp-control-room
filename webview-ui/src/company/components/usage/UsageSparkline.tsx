@@ -1,8 +1,8 @@
 /**
- * UsageHistoryChart: one account's limit share over the chosen window, drawn as an inline SVG
- * line. The x axis runs from the window's start to the server's report time, so every chart on the
- * page shares one time scale. Reset points are ticks. Hovering or tapping names a sample's value
- * and time; with no pointer on the chart, the newest sample is named.
+ * UsageSparkline: one limit's share over the chosen window, drawn as an inline SVG line. The x axis
+ * runs from the window's start to the server's report time, so every sparkline on the page shares
+ * one time scale. Reset points are ticks. Hovering or tapping names a sample's value and time; with
+ * no pointer on the chart, the newest sample is named.
  */
 
 import { type PointerEvent, useState } from 'react';
@@ -17,19 +17,21 @@ import {
 } from '../../usage/usageHistory.js';
 import { WHEN_FORMAT } from './usageTime.js';
 
-/** The drawing space; the SVG stretches to the card's width. */
+/** The drawing space; the SVG stretches to the row's width. */
 const VIEW_W = 1000;
 const VIEW_H = 100;
 /** The most samples drawn and searched; a longer series keeps its peaks and resets. */
 const MAX_POINTS = 240;
 
-interface UsageHistoryChartProps {
+interface UsageSparklineProps {
   series: HistorySeries;
+  /** The limit's name, which the chart names for assistive tech. */
+  label: string;
   sinceMs: number;
   endMs: number;
 }
 
-export function UsageHistoryChart({ series, sinceMs, endMs }: UsageHistoryChartProps) {
+export function UsageSparkline({ series, label, sinceMs, endMs }: UsageSparklineProps) {
   const [hovered, setHovered] = useState<HistoryPoint | null>(null);
   const points = downsampleSeries(series.points, MAX_POINTS);
   const first = points[0];
@@ -65,18 +67,12 @@ export function UsageHistoryChart({ series, sinceMs, endMs }: UsageHistoryChartP
 
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-2 text-xs">
-        <span className="min-w-0 truncate text-text">
-          {series.email ?? series.accountKey} · {series.label}
-        </span>
-        <span className="shrink-0 text-2xs text-text-muted">{series.provider}</span>
-      </div>
       <p className="text-2xs tabular-nums text-text-secondary" aria-live="polite">
         {hovered === null ? 'Mới nhất: ' : ''}
         {readingText}
       </p>
       <div
-        className="relative h-14 w-full touch-pan-y overflow-hidden rounded-(--company-radius-sm) bg-well"
+        className="relative h-16 w-full touch-pan-y overflow-hidden rounded-(--company-radius-sm) bg-well"
         onPointerMove={readPointer}
         onPointerDown={readPointer}
         onPointerLeave={clearHover}
@@ -85,7 +81,7 @@ export function UsageHistoryChart({ series, sinceMs, endMs }: UsageHistoryChartP
           viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
           preserveAspectRatio="none"
           role="img"
-          aria-label={`Biểu đồ ${series.label}`}
+          aria-label={`Biểu đồ ${label}`}
           className="block h-full w-full"
         >
           <line

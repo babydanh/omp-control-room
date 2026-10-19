@@ -11,7 +11,6 @@ export const MISSING_TEXT = '—';
 
 const MINUTE_MS = 60_000;
 const MINUTES_PER_HOUR = 60;
-const MINUTES_PER_DAY = 24 * MINUTES_PER_HOUR;
 
 /** Token magnitudes from largest to smallest, with their Vietnamese names. */
 const TOKEN_SCALES = [
@@ -92,36 +91,33 @@ export function formatPercent(fraction: number): string {
 }
 
 /**
- * A span as Vietnamese text with at most two units: `3 ngày 4 giờ`, `2 giờ 16 phút`, `45 phút`.
- * A span under a minute reads `dưới 1 phút`; a zero or negative span reads `0 phút`.
+ * Time left until a window resets, as a limit row shows it: `còn 4g 30p`, `còn 45p`, `còn 2n 3g`.
+ * Under a minute it reads `còn dưới 1p`, and a reset already passed reads `đã đặt lại`. Empty when
+ * either time is unknown, so no countdown is invented.
  */
-export function formatDuration(ms: number): string {
-  if (!Number.isFinite(ms)) return MISSING_TEXT;
-  if (ms <= 0) return '0 phút';
-  const minutes = Math.floor(ms / MINUTE_MS);
-  if (minutes === 0) return 'dưới 1 phút';
-  if (minutes >= MINUTES_PER_DAY) {
-    const days = Math.floor(minutes / MINUTES_PER_DAY);
-    const hours = Math.floor((minutes % MINUTES_PER_DAY) / MINUTES_PER_HOUR);
-    return hours === 0 ? `${days} ngày` : `${days} ngày ${hours} giờ`;
-  }
-  if (minutes >= MINUTES_PER_HOUR) {
-    const hours = Math.floor(minutes / MINUTES_PER_HOUR);
-    const rest = minutes % MINUTES_PER_HOUR;
-    return rest === 0 ? `${hours} giờ` : `${hours} giờ ${rest} phút`;
-  }
-  return `${minutes} phút`;
-}
-
-/**
- * When a window resets, as seen from `nowMs`: `đặt lại sau 2 giờ 16 phút`, or `đã đặt lại` once
- * the reset time has passed. Empty when either time is unknown, so no countdown is invented.
- */
-export function formatCountdown(resetAtMs: number, nowMs: number): string {
+export function formatResetIn(resetAtMs: number, nowMs: number): string {
   if (!Number.isFinite(resetAtMs) || !Number.isFinite(nowMs)) return '';
   const remaining = resetAtMs - nowMs;
   if (remaining <= 0) return 'đã đặt lại';
-  return `đặt lại sau ${formatDuration(remaining)}`;
+  const minutes = Math.floor(remaining / MINUTE_MS);
+  if (minutes === 0) return 'còn dưới 1p';
+  if (minutes < MINUTES_PER_HOUR) return `còn ${minutes}p`;
+  const hours = Math.floor(minutes / MINUTES_PER_HOUR);
+  const restMinutes = minutes % MINUTES_PER_HOUR;
+  if (hours < 24) return restMinutes === 0 ? `còn ${hours}g` : `còn ${hours}g ${restMinutes}p`;
+  const days = Math.floor(hours / 24);
+  const restHours = hours % 24;
+  return restHours === 0 ? `còn ${days}n` : `còn ${days}n ${restHours}g`;
+}
+
+/** A span as a clock for the refresh countdown: `1:42`, or `1:02:03` past an hour. */
+export function formatCountdownClock(ms: number): string {
+  if (!Number.isFinite(ms)) return MISSING_TEXT;
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const rest = seconds % 60;
+  return hours > 0 ? `${hours}:${pad2(minutes)}:${pad2(rest)}` : `${minutes}:${pad2(rest)}`;
 }
 
 /** A local-time clock reading, `HH:mm`. Local on purpose: the page shows the user's own time. */

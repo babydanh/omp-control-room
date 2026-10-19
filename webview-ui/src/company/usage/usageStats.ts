@@ -58,17 +58,26 @@ export function costLabel(
   return formatUsd(totals.totalCost);
 }
 
+/** Input, cache read and cache write tokens: what the cache share is a share of. */
+function cacheDenominator(totals: TokenTotals): number {
+  return totals.totalInputTokens + totals.totalCacheReadTokens + totals.totalCacheWriteTokens;
+}
+
+/** The share of input served from the cache, or null with no input tokens to divide by. */
+export function cacheReadShare(totals: TokenTotals): number | null {
+  const denominator = cacheDenominator(totals);
+  return denominator === 0 ? null : totals.totalCacheReadTokens / denominator;
+}
+
 /**
- * The share of input served from the cache. The denominator is the same one `cacheHitRate` in
- * usageView.ts uses: input + cache read + cache write. The label names that denominator, and
- * with no tokens at all it says so rather than showing a rate.
+ * The cache share as the page words it. The label names its denominator, the same one
+ * `cacheHitRate` in usageView.ts uses, and with no tokens at all it says so rather than a rate.
  */
 export function cacheRateLabel(totals: TokenTotals): string {
-  const denominator =
-    totals.totalInputTokens + totals.totalCacheReadTokens + totals.totalCacheWriteTokens;
-  if (denominator === 0) return 'Chưa có token để tính tỷ lệ';
-  const rate = totals.totalCacheReadTokens / denominator;
-  return `${formatPercent(rate)} từ cache · tính trên ${formatTokens(denominator)} token đầu vào và cache`;
+  const share = cacheReadShare(totals);
+  if (share === null) return 'Chưa có token để tính tỷ lệ';
+  const denominator = formatTokens(cacheDenominator(totals));
+  return `${formatPercent(share)} từ cache · tính trên ${denominator} token đầu vào và cache`;
 }
 
 /** Input, output, cache read and cache write tokens added together. */

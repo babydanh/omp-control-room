@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { CompanyClient } from './companyClient.js';
 import {
   isRefreshDue,
+  nextRefreshDueAt,
   USAGE_LIMITS_REFRESH_MS,
   USAGE_STATS_REFRESH_MS,
 } from './usage/usageRefresh.js';
@@ -35,6 +36,8 @@ export interface UsageRefresh {
   selectDays(days: UsageHistoryDays): void;
   /** Requests all three reports with force: the reader's Làm mới. */
   refreshAll(): void;
+  /** When the next automatic request falls due, in epoch ms; now when a report was never asked for. */
+  nextDueAt(): number;
 }
 
 // Each send records the request time even when the report is in flight, so the next
@@ -111,5 +114,16 @@ export function useUsageRefresh(client: CompanyClient): UsageRefresh {
     sendHistory(client, times, daysRef.current, true);
   }
 
-  return { days, selectDays, refreshAll };
+  /** When the next automatic request falls due: the soonest of the three report schedules. */
+  function nextDueAt(): number {
+    const now = Date.now();
+    const times = timesRef.current;
+    return Math.min(
+      nextRefreshDueAt(times.limits, USAGE_LIMITS_REFRESH_MS, now),
+      nextRefreshDueAt(times.stats, USAGE_STATS_REFRESH_MS, now),
+      nextRefreshDueAt(times.history[daysRef.current], USAGE_STATS_REFRESH_MS, now),
+    );
+  }
+
+  return { days, selectDays, refreshAll, nextDueAt };
 }

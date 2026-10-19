@@ -1,12 +1,11 @@
 /**
  * UsageClientSection: what each client (its host name, or its install id when no host is known)
- * used over the history window. Shown only when the server reports clients.
+ * used over the history window, as one table with a column per metric. A client that reported no
+ * value for a metric shows a dash, never a zero.
  */
 
-import { useId } from 'react';
-
 import type { UsageClientBurn } from '../../../../../core/src/messages.js';
-import { formatCount, formatTokens, formatUsd } from '../../usage/usageFormat.js';
+import { formatCount, formatTokens, formatUsd, MISSING_TEXT } from '../../usage/usageFormat.js';
 
 /** The Vietnamese label for each client metric the server reports. */
 const METRIC_LABELS: Record<string, string> = {
@@ -26,35 +25,53 @@ function metricText(key: string, value: number): string {
 }
 
 export function UsageClientSection({ clients }: { clients: readonly UsageClientBurn[] }) {
-  const headingId = useId();
-  if (clients.length === 0) return null;
+  const keys = [
+    ...new Set(clients.flatMap((client) => client.metrics.map((metric) => metric.key))),
+  ];
   return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <h2 id={headingId} className="text-sm font-semibold text-text">
-        Mức dùng theo máy khách
-      </h2>
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-        {clients.map((client) => (
-          <article
-            key={client.name}
-            className="flex min-w-0 flex-col gap-2 rounded-(--company-radius-md) bg-raised p-3"
-          >
-            <h3 className="truncate text-sm text-text">{client.name}</h3>
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-2xs">
-              {client.metrics.map((metric) => (
-                <div key={metric.key} className="flex min-w-0 items-baseline justify-between gap-2">
-                  <dt className="truncate text-text-muted">
-                    {METRIC_LABELS[metric.key] ?? metric.key}
-                  </dt>
-                  <dd className="shrink-0 tabular-nums text-text">
-                    {metricText(metric.key, metric.value)}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </article>
-        ))}
-      </div>
-    </section>
+    <div className="max-h-[26rem] overflow-auto rounded-(--company-radius-sm)">
+      <table className="w-full min-w-[28rem] border-collapse text-xs">
+        <caption className="sr-only">Mức dùng theo máy khách</caption>
+        <thead>
+          <tr>
+            <th
+              scope="col"
+              className="sticky top-0 z-[1] bg-raised px-3 py-2 text-left font-normal text-text-muted"
+            >
+              Máy khách
+            </th>
+            {keys.map((key) => (
+              <th
+                key={key}
+                scope="col"
+                className="sticky top-0 z-[1] bg-raised px-3 py-2 text-right font-normal text-text-muted"
+              >
+                {METRIC_LABELS[key] ?? key}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {clients.map((client) => (
+            <tr key={client.name} className="even:bg-panel hover:bg-hover">
+              <th
+                scope="row"
+                className="whitespace-nowrap px-3 py-2 text-left font-normal text-text"
+              >
+                {client.name}
+              </th>
+              {keys.map((key) => {
+                const metric = client.metrics.find((candidate) => candidate.key === key);
+                return (
+                  <td key={key} className="px-3 py-2 text-right tabular-nums text-text">
+                    {metric === undefined ? MISSING_TEXT : metricText(key, metric.value)}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

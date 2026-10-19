@@ -24,3 +24,11 @@ export function isRefreshDue(
   if (lastAt === null) return true;
   return nowMs - lastAt >= intervalMs;
 }
+
+/**
+ * When a report next falls due: its interval after the last request, or now when it was never
+ * asked for, so the first due check sends it at once.
+ */
+export function nextRefreshDueAt(lastAt: number | null, intervalMs: number, nowMs: number): number {
+  return lastAt === null ? nowMs : lastAt + intervalMs;
+}

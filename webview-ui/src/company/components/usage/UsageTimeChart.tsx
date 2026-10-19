@@ -46,12 +46,12 @@ export function UsageTimeChart({ points }: { points: readonly UsageStatsTimePoin
     .join(' ');
 
   return (
-    <div className="flex flex-col gap-1.5">
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 text-2xs text-text-muted">
         <span>Cột: token, cao nhất {formatTokens(maxTokens)}</span>
         <span>Đường: chi phí đã báo cáo, cao nhất {formatUsd(maxCost)}</span>
       </div>
-      <div className="h-32 w-full overflow-hidden rounded-(--company-radius-sm) bg-well">
+      <div className="min-h-[14rem] w-full flex-1 overflow-hidden rounded-(--company-radius-sm) bg-well">
         <svg
           viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
           preserveAspectRatio="none"
@@ -59,7 +59,7 @@ export function UsageTimeChart({ points }: { points: readonly UsageStatsTimePoin
           aria-label="Token và chi phí theo giờ"
           className="block h-full w-full"
         >
-          <g className="text-accent" fill="currentColor" opacity={0.6}>
+          <g className="text-status-active" fill="currentColor" opacity={0.45}>
             {bars}
           </g>
           {maxCost > 0 && (
