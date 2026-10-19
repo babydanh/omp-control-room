@@ -15,7 +15,13 @@ import { folderLabelFor } from './workspaces.js';
 export type PaletteGroup = 'action' | 'session' | 'task' | 'herdr' | 'sleeping' | 'folder' | 'file';
 
 export type PaletteActionId =
-  'new-chat' | 'open-agents' | 'open-git-tree' | 'open-files' | 'open-folder' | 'show-shortcuts';
+  | 'new-chat'
+  | 'open-agents'
+  | 'open-git-tree'
+  | 'open-files'
+  | 'open-folder'
+  | 'show-shortcuts'
+  | 'open-usage';
 
 export type PaletteTarget =
   | { kind: 'action'; action: PaletteActionId }
@@ -64,6 +70,7 @@ export const PALETTE_ACTION_LABELS: Readonly<Record<PaletteActionId, string>> = 
   'open-git-tree': 'Mở Cây git',
   'open-files': 'Mở tệp trong workspace',
   'open-folder': 'Mở thư mục…',
+  'open-usage': 'Mở trang sử dụng token',
   'show-shortcuts': 'Xem phím tắt',
 };
 
@@ -104,6 +111,12 @@ export const PALETTE_ACTIONS: readonly PaletteActionInfo[] = [
     title: PALETTE_ACTION_LABELS['open-folder'],
     subtitle: 'Duyệt các thư mục trên máy chủ để chọn một thư mục khác',
     keywords: 'folder directory open thư mục đường dẫn',
+  },
+  {
+    id: 'open-usage',
+    title: PALETTE_ACTION_LABELS['open-usage'],
+    subtitle: 'Giới hạn tài khoản, lịch sử giới hạn và token đã dùng',
+    keywords: 'usage token quota limit giới hạn hạn mức chi phí sử dụng lịch sử',
   },
   {
     id: 'show-shortcuts',

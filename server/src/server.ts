@@ -13,6 +13,7 @@ import type {
 } from './clientMessageHandler.js';
 import type { BrowserReaperControl } from './company/browserReaper.js';
 import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
+import type { UsageControl } from './company/usagePage.js';
 import {
   SERVER_JSON_DIR,
   SERVER_JSON_NAME,
@@ -86,6 +87,8 @@ export class PixelAgentsServer {
     herdr?: HerdrLink | null;
     /** Browser reaper control; absent when this process runs none. */
     browserReaper?: BrowserReaperControl | null;
+    /** Usage page reader; absent when this process runs none. */
+    usage?: UsageControl | null;
     ptyManager?: PtySessionManager;
     /** Extra privileged Host names (standalone; see wsAuth.privilegedHostnames). */
     allowedHosts?: readonly string[];
@@ -171,6 +174,7 @@ export class PixelAgentsServer {
       ledger: options?.ledger,
       herdr: options?.herdr,
       browserReaper: options?.browserReaper,
+      usage: options?.usage,
       ptyManager: options?.ptyManager,
       allowedHosts: standalone?.allowedHosts,
     });

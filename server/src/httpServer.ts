@@ -15,6 +15,7 @@ import { handleClientMessage } from './clientMessageHandler.js';
 import type { BrowserReaperControl } from './company/browserReaper.js';
 import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import { CompanyClientGate } from './company/egress.js';
+import type { UsageControl } from './company/usagePage.js';
 import {
   HOOK_API_PREFIX,
   MAX_HOOK_BODY_SIZE,
@@ -68,6 +69,8 @@ export interface HttpServerOptions {
   herdr?: HerdrLink | null;
   /** Browser reaper control; absent when this process runs none. */
   browserReaper?: BrowserReaperControl | null;
+  /** Usage page reader; absent when this process runs none. */
+  usage?: UsageControl | null;
   /** Company folder list and switching; absent when the process holds one fixed workspace. */
   workspaces?: CompanyWorkspaceControl | null;
   /** Ledger board service. Live snapshots reach privileged sockets only; absent or null = no ledger. */
@@ -313,6 +316,7 @@ function registerWebSocketRoute(
             companyViewMode: () => gate.companyViewMode,
             herdr: options.herdr ?? null,
             browserReaper: options.browserReaper ?? null,
+            usage: options.usage ?? null,
             ptyManager: options.ptyManager,
           },
         );

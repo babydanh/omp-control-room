@@ -42,4 +42,5 @@ export type IconName =
   | 'alert-triangle'
   | 'search'
   | 'keyboard'
-  | 'users';
+  | 'users'
+  | 'bar-chart';

@@ -2,8 +2,8 @@
  * BoardTopBar: one row. On the left, the title and where the board is pointed (the
  * folder switcher); on the right, the new chat button, the company's health pill, the
  * search and the "⋯" menu. The menu holds the agent sidebar, the workspace files, the
- * git tree and the shortcuts sheet, each labelled and showing its shortcut. On a phone
- * the title is kept for screen readers only and the new chat button shrinks to a plus.
+ * git tree, the usage page and the shortcuts sheet, each labelled (with its shortcut, if any).
+ * On a phone the title is kept for screen readers only and the new chat button shrinks to a plus.
  */
 
 import { useEffect, useId, useRef, useState } from 'react';
@@ -34,6 +34,8 @@ export interface BoardTopBarProps {
   isMac: boolean;
   onOpenPalette: () => void;
   onOpenShortcuts: () => void;
+  /** Opens the usage page: a route of its own, so the board is not drawn beneath it. */
+  onOpenUsage: () => void;
   /** Bumped by the palette to open the folder browser once per bump. */
   browseRequest: number;
 }
@@ -54,7 +56,7 @@ interface ToolsMenuItem {
   key: string;
   icon: IconName;
   label: string;
-  shortcut: ShortcutId;
+  shortcut?: ShortcutId;
   /** Set for a tool that stays open or closed; the row reads as selected while it is open. */
   pressed?: boolean;
   onSelect: () => void;
@@ -105,7 +107,7 @@ function ToolsMenu({ items, isMac }: { items: readonly ToolsMenuItem[]; isMac: b
           className="absolute right-0 top-full z-40 mt-1 flex w-60 max-w-[calc(100vw-1rem)] flex-col gap-0.5 rounded-(--company-radius-md) bg-raised p-1 text-2xs"
         >
           {items.map((item) => {
-            const hint = shortcutHint(item.shortcut, isMac);
+            const hint = item.shortcut === undefined ? null : shortcutHint(item.shortcut, isMac);
             return (
               <button
                 key={item.key}
@@ -143,6 +145,7 @@ export function BoardTopBar({
   isMac,
   onOpenPalette,
   onOpenShortcuts,
+  onOpenUsage,
   browseRequest,
 }: BoardTopBarProps) {
   const phone = mode === 'phone';
@@ -176,6 +179,12 @@ export function BoardTopBar({
           },
         ]
       : []),
+    {
+      key: 'usage',
+      icon: 'bar-chart',
+      label: 'Sử dụng token',
+      onSelect: onOpenUsage,
+    },
     {
       key: 'shortcuts',
       icon: 'keyboard',

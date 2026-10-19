@@ -142,10 +142,24 @@ export const COMPANY_MODEL_CATALOG_TIMEOUT_MS = 30_000;
 export const COMPANY_MODEL_CATALOG_TTL_MS = 60_000;
 
 // ── Usage + quota ────────────────────────────────────────────
-/** At most one `omp usage` process per this window, whatever the caller asks. */
-export const COMPANY_QUOTA_MIN_REFRESH_MS = 300_000;
-/** A quota read that has not answered by now is killed, not awaited. */
+/** Limits reused for this long; a non-forced request inside the window runs nothing. */
+export const COMPANY_USAGE_LIMITS_TTL_MS = 60_000;
+/** A forced limits request runs OMP only after this long since the last read; also the process cooldown. */
+export const COMPANY_USAGE_LIMITS_MIN_INTERVAL_MS = 60_000;
+/** A limits read that has not answered by now is killed, not awaited. */
 export const COMPANY_QUOTA_TIMEOUT_MS = 20_000;
+/** Stats reused for this long before a non-forced request runs `omp stats` again. */
+export const COMPANY_USAGE_STATS_TTL_MS = 300_000;
+/** A forced stats request runs `omp stats` only after this long since the last read. */
+export const COMPANY_USAGE_STATS_MIN_INTERVAL_MS = 30_000;
+/** Usage history and clients reused for this long per window size. */
+export const COMPANY_USAGE_HISTORY_TTL_MS = 300_000;
+/** A forced history request runs OMP only after this long since the last read of that window size. */
+export const COMPANY_USAGE_HISTORY_MIN_INTERVAL_MS = 30_000;
+/** A history or clients read that has not answered by now is killed, not awaited. */
+export const COMPANY_USAGE_HISTORY_TIMEOUT_MS = 30_000;
+/** A stats read that has not answered by now is killed, not awaited. */
+export const COMPANY_USAGE_STATS_TIMEOUT_MS = 60_000;
 
 // ── Verification ─────────────────────────────────────────────
 /** Applied when a Contract command declares no usable timeout of its own. */

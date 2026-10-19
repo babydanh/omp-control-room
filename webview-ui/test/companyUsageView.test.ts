@@ -117,7 +117,7 @@ describe('provider quota', () => {
         accountLabel: 'acct-***',
         fetchedAt: '2026-10-02T10:00:00.000Z',
         status: 'available',
-        windows: [{ label: '5h', remaining: 120, reportedUnit: 'requests' }],
+        windows: [{ id: 'openai-codex:5h', label: '5h', remaining: 120, reportedUnit: 'requests' }],
       },
       {
         provider: 'anthropic',

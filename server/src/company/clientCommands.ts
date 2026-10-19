@@ -78,6 +78,7 @@ import {
   SESSION_LOG_MAX_LIMIT,
   sessionLogDirectory,
 } from './sessionLog.js';
+import type { UsageControl } from './usagePage.js';
 import { listWorkspaceFiles, readWorkspaceFile } from './workspaceFiles.js';
 
 /** Controller lease returned by an attach; the last attach for a session wins. */
@@ -169,6 +170,8 @@ export interface CompanyCommandContext {
   herdr?: HerdrLink | null;
   /** Browser reaper control; absent or `null` when this process runs none. */
   browserReaper?: BrowserReaperControl | null;
+  /** Usage page reader; absent or `null` when this process runs none. */
+  usage?: UsageControl | null;
   /** Updates the per-socket egress lease as soon as attach rotates ownership. */
   onTerminalAttached?: (sessionId: string, leaseId: string) => void;
   /**
@@ -239,6 +242,13 @@ const FOLDER_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyFolderForget',
 ]);
 
+/** Usage page reads. They need no open workspace, so they run before routing. */
+const USAGE_COMMAND_TYPES: ReadonlySet<string> = new Set([
+  'usageLimitsRequest',
+  'usageHistoryRequest',
+  'usageStatsRequest',
+]);
+
 /** Message types this dispatcher owns. Everything else is not a company command. */
 const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySnapshotRequest',
@@ -262,6 +272,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyAttachmentUpload',
   'companyWorkspaceOpen',
   ...FOLDER_COMMAND_TYPES,
+  ...USAGE_COMMAND_TYPES,
   'companyViewMode',
   'terminalAttach',
   'terminalInput',
@@ -282,6 +293,7 @@ const READ_ONLY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySessionInfoRequest',
   'companyOmpSessionsRequest',
   'companyViewMode',
+  ...USAGE_COMMAND_TYPES,
 ]);
 
 /** Commands that create a session or a prompt. They have no id to find a folder by, so they must name one. */
@@ -388,6 +400,11 @@ export function handleCompanyCommand(
     );
     return true;
   }
+  if (USAGE_COMMAND_TYPES.has(String(msg.type))) {
+    void usageCommand(msg, requestId, ctx.usage ?? null, send);
+    return true;
+  }
+
   if (msg.type === 'companySnapshotRequest') {
     send(ctx.herdr?.snapshot() ?? HERDR_NOT_LINKED_ROSTER);
   }
@@ -628,6 +645,49 @@ async function openWorkspace(
   try {
     await workspaces.open(workspacePath);
     ok(send, requestId);
+  } catch (err) {
+    fail(send, requestId, codeOf(err), messageOf(err));
+  }
+}
+
+const INVALID_USAGE_REQUEST_MESSAGE = 'Yêu cầu đọc sử dụng token không hợp lệ.';
+
+/**
+ * The usage page reads: account limits, recorded limit history, and the stats roll-up. Answered from the
+ * usage reader's cache; they need no open workspace, so they run before routing.
+ */
+async function usageCommand(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  usage: UsageControl | null,
+  send: Send,
+): Promise<void> {
+  if (requestId === null) {
+    fail(send, null, 'invalid_request', INVALID_USAGE_REQUEST_MESSAGE);
+    return;
+  }
+  if (msg.force !== undefined && typeof msg.force !== 'boolean') {
+    fail(send, requestId, 'invalid_request', INVALID_USAGE_REQUEST_MESSAGE);
+    return;
+  }
+  if (usage === null) {
+    fail(send, requestId, 'usage_unavailable', 'Máy chủ này chưa bật đọc sử dụng token.');
+    return;
+  }
+  const force = msg.force === true;
+  try {
+    if (msg.type === 'usageLimitsRequest') {
+      send({ type: 'usageLimits', requestId, ...(await usage.limits(force)) });
+    } else if (msg.type === 'usageHistoryRequest') {
+      const days = msg.days;
+      if (days !== 1 && days !== 7 && days !== 30) {
+        fail(send, requestId, 'invalid_request', INVALID_USAGE_REQUEST_MESSAGE);
+        return;
+      }
+      send({ type: 'usageHistory', requestId, ...(await usage.history(days, force)) });
+    } else {
+      send({ type: 'usageStats', requestId, ...(await usage.stats(force)) });
+    }
   } catch (err) {
     fail(send, requestId, codeOf(err), messageOf(err));
   }

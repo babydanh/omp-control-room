@@ -53,6 +53,7 @@ import {
   promptSubmitInput,
 } from './promptSubmission.js';
 import { selectionWith } from './selection.js';
+import { type UsageHistoryDays, usageSlotSent, type UsageState } from './usage/usageState.js';
 
 export interface SendOutcome {
   ok: boolean;
@@ -607,6 +608,45 @@ export class CompanyClient {
     return new Promise<CommandResultView>((resolve) => {
       this.commandWaiters.set(handle.requestId, resolve);
     });
+  }
+
+  // ── Usage ────────────────────────────────────────────────────────────────
+
+  /**
+   * Ask for the account limits. The answer is a usageLimits under the handle's requestId; a
+   * refusal is a companyCommandResult under the same id. The slot shows loading at once.
+   */
+  requestUsageLimits(force = false): CompanyCommandHandle {
+    const handle = this.command((requestId) => commands.usageLimitsRequest(requestId, force));
+    const slots = this.state.usageSlots;
+    this.setUsageSlots({ ...slots, limits: usageSlotSent(slots.limits, handle) });
+    return handle;
+  }
+
+  /** Ask for the limit history and per-client burn over `days` days. The answer is a usageHistory. */
+  requestUsageHistory(days: UsageHistoryDays, force = false): CompanyCommandHandle {
+    const handle = this.command((requestId) =>
+      commands.usageHistoryRequest(requestId, days, force),
+    );
+    const slots = this.state.usageSlots;
+    this.setUsageSlots({
+      ...slots,
+      history: { ...slots.history, [days]: usageSlotSent(slots.history[days], handle) },
+    });
+    return handle;
+  }
+
+  /** Ask for the token, cost and performance totals. The answer is a usageStats. */
+  requestUsageStats(force = false): CompanyCommandHandle {
+    const handle = this.command((requestId) => commands.usageStatsRequest(requestId, force));
+    const slots = this.state.usageSlots;
+    this.setUsageSlots({ ...slots, stats: usageSlotSent(slots.stats, handle) });
+    return handle;
+  }
+
+  private setUsageSlots(usageSlots: UsageState): void {
+    this.state = { ...this.state, usageSlots };
+    this.emit();
   }
 
   // ── Herdr ────────────────────────────────────────────────────────────────

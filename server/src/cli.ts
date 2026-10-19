@@ -28,6 +28,7 @@ import {
   COMPANY_PTY_HOST_FILENAME,
 } from './company/constants.js';
 import { FolderScope } from './company/folderScope.js';
+import { createUsageReader } from './company/usagePage.js';
 import { openWorkspaceCompany } from './company/workspaceCompanyHost.js';
 import { CompanyWorkspaceRegistry } from './company/workspaceRegistry.js';
 import {
@@ -294,6 +295,17 @@ async function main(): Promise<void> {
     }),
   });
 
+  // Usage page reads run the company's bundled OMP on demand only: no timers, no polling.
+  const usage = createUsageReader({
+    command: () =>
+      resolveNativeLaunch({
+        extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
+        helperPath: path.join(distRoot, COMPANY_PTY_HOST_FILENAME),
+      }).command,
+    cwd: args.workspace,
+    logger: (message) => console.log(`[Pixel Agents] ${message}`),
+  });
+
   // Company folders: the initial one opens below; the board can open more and
   // switch between them. Only the active folder's traffic reaches the board.
   const company = new CompanyWorkspaceRegistry({
@@ -465,6 +477,7 @@ async function main(): Promise<void> {
       ledger,
       herdr,
       browserReaper,
+      usage,
       ptyManager,
       allowedHosts: args.allowedHosts,
       rotateToken: args.rotateToken,

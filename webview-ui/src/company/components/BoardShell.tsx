@@ -49,6 +49,7 @@ import {
 import { useCompanyState } from '../useCompanyState.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useSessionLogBackfill } from '../useSessionLogBackfill.js';
+import { openUsagePage } from '../useUsageRoute.js';
 import { AgentContextMenu } from './AgentContextMenu.js';
 import { AgentRail } from './AgentRail.js';
 import { AgentSidebar } from './AgentSidebar.js';
@@ -355,6 +356,9 @@ export function BoardShell({ client }: BoardShellProps) {
       case 'open-folder':
         setBrowseRequest((count) => count + 1);
         return;
+      case 'open-usage':
+        openUsagePage();
+        return;
       case 'show-shortcuts':
         setShortcutsOpen(true);
         return;
@@ -382,6 +386,7 @@ export function BoardShell({ client }: BoardShellProps) {
         isMac={IS_MAC}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
+        onOpenUsage={openUsagePage}
         browseRequest={browseRequest}
       />
       {state.needsSnapshot && (

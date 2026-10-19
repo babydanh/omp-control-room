@@ -76,6 +76,12 @@ import {
 } from './promptSubmission.js';
 import { selectionForSession } from './selection.js';
 import { excerptLine } from './textExcerpt.js';
+import {
+  emptyUsageState,
+  reduceUsageMessage,
+  usageCommandFailed,
+  type UsageState,
+} from './usage/usageState.js';
 
 export type CompanyPutChange = Exclude<
   CompanyStateChangedMessage['changes'][number],
@@ -313,6 +319,8 @@ export interface CompanyViewState extends FolderScope {
   folderBrowse: CompanyFolderBrowseMessage | null;
   /** requestId of the latest folder browse; a listing under any other id is dropped. */
   folderBrowseRequest: string | null;
+  /** The usage page's data: the latest answer per request, and which requests are waiting. */
+  usageSlots: UsageState;
 }
 
 export function emptyCompanyState(
@@ -350,6 +358,7 @@ export function emptyCompanyState(
     workspaceSelectionNotice: null,
     folderBrowse: null,
     folderBrowseRequest: null,
+    usageSlots: emptyUsageState(),
   };
 }
 
@@ -881,6 +890,8 @@ function applyCommandResult(
     // The draft is the user's text until the server accepts it: a refused
     // prompt, a refused upload, or an answer to something else all leave it be.
     prompt: applySubmitResult(state.prompt, result),
+    // A refused usage request fails its own slot. Any other verdict leaves the usage page as it was.
+    usageSlots: usageCommandFailed(state.usageSlots, result),
   };
   const withSelection = applyWorkspaceSelectionVerdict(recorded, result);
   if (state.pendingWorkspaceOpen === result.requestId) {
@@ -1187,6 +1198,10 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
       return unchanged(applyTerminalFrame(state, message, 'data'));
     case 'terminalClosed':
       return unchanged(applyTerminalFrame(state, message, 'snapshot'));
+    case 'usageLimits':
+    case 'usageHistory':
+    case 'usageStats':
+      return unchanged({ ...state, usageSlots: reduceUsageMessage(state.usageSlots, message) });
     default:
       return unchanged(state);
   }

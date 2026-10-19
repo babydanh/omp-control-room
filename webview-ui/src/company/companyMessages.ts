@@ -29,6 +29,7 @@ import {
   COMPANY_TERMINAL_DEFAULT_ROWS,
 } from './constants.js';
 import type { CompanyViewMode } from './folderView.js';
+import type { UsageHistoryDays } from './usage/usageState.js';
 
 const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   companySnapshot: true,
@@ -53,6 +54,9 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   terminalSnapshot: true,
   terminalData: true,
   terminalClosed: true,
+  usageLimits: true,
+  usageHistory: true,
+  usageStats: true,
 };
 
 /** Whether a received message belongs to the company client. */
@@ -79,6 +83,11 @@ export function newRequestId(): string {
  */
 function folderField(workspacePath: string | undefined): { workspacePath?: string } {
   return workspacePath === undefined ? {} : { workspacePath };
+}
+
+/** `force` is sent only when set; without it the server answers from its cache while that is fresh. */
+function forceField(force: boolean): { force?: true } {
+  return force ? { force: true } : {};
 }
 
 export function companySnapshotRequest(
@@ -198,6 +207,25 @@ export function settingsUpdate(
 
 export function modelCatalogRequest(requestId: string, workspacePath?: string): ClientMessage {
   return { type: 'companyModelCatalogRequest', requestId, ...folderField(workspacePath) };
+}
+
+/** Read-only and privileged: the account limits the usage page shows. */
+export function usageLimitsRequest(requestId: string, force = false): ClientMessage {
+  return { type: 'usageLimitsRequest', requestId, ...forceField(force) };
+}
+
+/** Read-only and privileged: the limit history and per-client burn over the last `days` days. */
+export function usageHistoryRequest(
+  requestId: string,
+  days: UsageHistoryDays,
+  force = false,
+): ClientMessage {
+  return { type: 'usageHistoryRequest', requestId, days, ...forceField(force) };
+}
+
+/** Read-only and privileged: the token, cost and performance totals. */
+export function usageStatsRequest(requestId: string, force = false): ClientMessage {
+  return { type: 'usageStatsRequest', requestId, ...forceField(force) };
 }
 
 export function artifactRequest(

@@ -146,6 +146,10 @@ components:
         - $ref: '#/components/schemas/CompanyFileListMessage'
         - $ref: '#/components/schemas/CompanyFileReadMessage'
         - $ref: '#/components/schemas/CompanyAttachmentUploadedMessage'
+        # Usage page (privileged; server-level token and quota reads)
+        - $ref: '#/components/schemas/UsageLimitsMessage'
+        - $ref: '#/components/schemas/UsageHistoryMessage'
+        - $ref: '#/components/schemas/UsageStatsMessage'
         # Ledger (privileged; git graph and activity timeline)
         - $ref: '#/components/schemas/LedgerSnapshotMessage'
         - $ref: '#/components/schemas/LedgerTimelineMessage'
@@ -227,6 +231,10 @@ components:
         - $ref: '#/components/schemas/HerdrWakeMessage'
         - $ref: '#/components/schemas/HerdrWatchMessage'
         - $ref: '#/components/schemas/BrowserReaperReapNow'
+        # Usage page (privileged; read-only, server-level)
+        - $ref: '#/components/schemas/UsageLimitsRequestMessage'
+        - $ref: '#/components/schemas/UsageHistoryRequestMessage'
+        - $ref: '#/components/schemas/UsageStatsRequestMessage'
         # Native terminal
         - $ref: '#/components/schemas/TerminalAttachMessage'
         - $ref: '#/components/schemas/TerminalInputMessage'
@@ -2567,21 +2575,73 @@ components:
     QuotaWindow:
       type: object
       additionalProperties: false
-      required: [label, reportedUnit]
+      required: [id, label, reportedUnit]
       properties:
+        id:
+          type: string
+          description: The limit id OMP reports, e.g. `anthropic:5h`. Stable across reads.
         label:
           type: string
+        windowLabel:
+          type: string
+          description: The window's own label (e.g. `5 Hour`), when OMP names one.
+        durationMs:
+          type: integer
+          minimum: 0
+        shared:
+          type: boolean
+          description: True for a limit every model of the account shares. Absent when OMP does not say.
+        tier:
+          type: string
+          description: The model tier a per-model limit applies to, e.g. `fable`.
         used:
+          type: number
+          minimum: 0
+        limit:
           type: number
           minimum: 0
         remaining:
           type: number
+        usedFraction:
+          type: number
           minimum: 0
+          description: Used over limit as OMP reports it. May exceed 1 when the limit is overrun.
         resetAt:
           type: string
           format: date-time
         reportedUnit:
           type: string
+          description: The provider's own unit (percent, credits, tokens), never normalised.
+        status:
+          type: string
+          description: OMP's status for the window (ok, warning, exhausted). Absent when OMP reports none.
+
+    QuotaCapacityRow:
+      type: object
+      additionalProperties: false
+      required: [provider, window, durationMs, accounts, usedAccounts, remainingAccounts]
+      properties:
+        provider:
+          type: string
+        window:
+          type: string
+          description: The window id the capacity sums over, e.g. `5h` or `7d`.
+        durationMs:
+          type: integer
+          minimum: 0
+        meter:
+          type: string
+          description: The meter the window belongs to (chat, fable), when OMP names one.
+        accounts:
+          type: integer
+          minimum: 0
+        usedAccounts:
+          type: number
+          minimum: 0
+          description: Account-equivalents used, summed across the provider's accounts.
+        remainingAccounts:
+          type: number
+          description: Account-equivalents still available, summed across the provider's accounts.
 
     QuotaSnapshot:
       type: object
@@ -2590,8 +2650,14 @@ components:
       properties:
         provider:
           type: string
+        accountId:
+          type: string
+          description: OMP's redacted account id. One provider can hold several accounts, so snapshots are keyed by provider and account.
         accountLabel:
           type: string
+        note:
+          type: string
+          description: Why the snapshot carries no windows (no usage endpoint, disabled credential). Redacted.
         windows:
           type: array
           items:
@@ -2602,6 +2668,252 @@ components:
         status:
           type: string
           enum: [available, unsupported, unauthenticated, error, stale]
+
+    UsageHistoryEntry:
+      type: object
+      additionalProperties: false
+      required: [recordedAt, provider, accountKey, limitId, label]
+      properties:
+        recordedAt:
+          type: string
+          format: date-time
+        provider:
+          type: string
+        accountKey:
+          type: string
+          description: OMP's identity key for the account, redacted.
+        email:
+          type: string
+        accountId:
+          type: string
+        limitId:
+          type: string
+        label:
+          type: string
+        windowLabel:
+          type: string
+        usedFraction:
+          type: number
+          minimum: 0
+          description: Used over limit. Absent for a limit that reports only a balance, which has no window to fill.
+        status:
+          type: string
+        resetAt:
+          type: string
+          format: date-time
+
+    UsageClientBurn:
+      type: object
+      additionalProperties: false
+      required: [name, metrics]
+      properties:
+        name:
+          type: string
+        metrics:
+          type: array
+          description: The numeric fields OMP reports for this client, one row each.
+          items:
+            type: object
+            additionalProperties: false
+            required: [key, value]
+            properties:
+              key:
+                type: string
+              value:
+                type: number
+
+    UsageStatsTotals:
+      type: object
+      additionalProperties: false
+      required: [totalRequests, successfulRequests, failedRequests, errorRate, totalInputTokens, totalOutputTokens, totalCacheReadTokens, totalCacheWriteTokens, cacheRate, cacheSavings, totalCost, unpricedRequests, totalPremiumRequests]
+      properties:
+        totalRequests:
+          type: integer
+          minimum: 0
+        successfulRequests:
+          type: integer
+          minimum: 0
+        failedRequests:
+          type: integer
+          minimum: 0
+        errorRate:
+          type: number
+          minimum: 0
+        totalInputTokens:
+          type: integer
+          minimum: 0
+        totalOutputTokens:
+          type: integer
+          minimum: 0
+        totalCacheReadTokens:
+          type: integer
+          minimum: 0
+        totalCacheWriteTokens:
+          type: integer
+          minimum: 0
+        cacheRate:
+          type: number
+          minimum: 0
+          description: Cache-read tokens over all input-side tokens, as OMP computes it.
+        cacheSavings:
+          type: number
+          description: Share of the uncached prompt cost saved by caching, 0-1 as OMP computes it (negative when cache writes cost more than reads save). Not a dollar amount.
+        totalCost:
+          type: number
+          minimum: 0
+          description: USD. Partial when unpricedRequests is above zero.
+        unpricedRequests:
+          type: integer
+          minimum: 0
+        totalPremiumRequests:
+          type: number
+          minimum: 0
+        avgDuration:
+          type: number
+          minimum: 0
+          description: Average request duration in ms. Absent when no request in the group was timed.
+        avgTtft:
+          type: number
+          minimum: 0
+          description: Average time to first token in ms. Absent when no request in the group reported one.
+        avgTokensPerSecond:
+          type: number
+          minimum: 0
+          description: Average output speed in tokens per second. Absent when no request in the group reported one.
+        firstAt:
+          type: string
+          format: date-time
+        lastAt:
+          type: string
+          format: date-time
+
+    UsageStatsModelRow:
+      type: object
+      additionalProperties: false
+      required: [model, provider, totals]
+      properties:
+        model:
+          type: string
+        provider:
+          type: string
+        totals:
+          $ref: '#/components/schemas/UsageStatsTotals'
+
+    UsageStatsFolderRow:
+      type: object
+      additionalProperties: false
+      required: [folder, totals]
+      properties:
+        folder:
+          type: string
+          description: The folder as OMP names it, e.g. `/D//`. The page pretty-prints it.
+        totals:
+          $ref: '#/components/schemas/UsageStatsTotals'
+
+    UsageStatsAgentRow:
+      type: object
+      additionalProperties: false
+      required: [agentType, totalRequests, totalInputTokens, totalOutputTokens, totalCacheReadTokens, totalCacheWriteTokens, totalCost]
+      properties:
+        agentType:
+          type: string
+        totalRequests:
+          type: integer
+          minimum: 0
+        totalInputTokens:
+          type: integer
+          minimum: 0
+        totalOutputTokens:
+          type: integer
+          minimum: 0
+        totalCacheReadTokens:
+          type: integer
+          minimum: 0
+        totalCacheWriteTokens:
+          type: integer
+          minimum: 0
+        totalCost:
+          type: number
+          minimum: 0
+
+    UsageStatsTimePoint:
+      type: object
+      additionalProperties: false
+      required: [timestamp, requests, errors, tokens, cost]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        requests:
+          type: integer
+          minimum: 0
+        errors:
+          type: integer
+          minimum: 0
+        tokens:
+          type: integer
+          minimum: 0
+        cost:
+          type: number
+          minimum: 0
+
+    UsageStatsModelPerformancePoint:
+      type: object
+      additionalProperties: false
+      required: [timestamp, model, provider, requests]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        model:
+          type: string
+        provider:
+          type: string
+        requests:
+          type: integer
+          minimum: 0
+        avgTtft:
+          type: number
+          minimum: 0
+          description: Average time to first token in ms. Absent when no request in the point was timed.
+        avgTokensPerSecond:
+          type: number
+          minimum: 0
+          description: Average output speed in tokens per second. Absent when no request in the point was timed.
+
+    UsageStatsCostPoint:
+      type: object
+      additionalProperties: false
+      required: [timestamp, model, provider, cost, costInput, costOutput, costCacheRead, costCacheWrite, requests, unpricedRequests]
+      properties:
+        timestamp:
+          type: string
+          format: date-time
+        model:
+          type: string
+        provider:
+          type: string
+        cost:
+          type: number
+          minimum: 0
+        costInput:
+          type: number
+          minimum: 0
+        costOutput:
+          type: number
+          minimum: 0
+        costCacheRead:
+          type: number
+          minimum: 0
+        costCacheWrite:
+          type: number
+          minimum: 0
+        requests:
+          type: integer
+          minimum: 0
+        unpricedRequests:
+          type: integer
+          minimum: 0
 
     RequirementResult:
       type: object
@@ -5263,6 +5575,154 @@ components:
           format: uuid
         attachment:
           $ref: '#/components/schemas/PromptAttachment'
+
+    UsageLimitsRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: usageLimitsRequest
+        requestId:
+          type: string
+          format: uuid
+        force:
+          type: boolean
+          description: Read OMP again instead of answering from the server's cache.
+
+    UsageHistoryRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, days]
+      properties:
+        type:
+          const: usageHistoryRequest
+        requestId:
+          type: string
+          format: uuid
+        days:
+          type: integer
+          enum: [1, 7, 30]
+        force:
+          type: boolean
+          description: Read OMP again instead of answering from the server's cache.
+
+    UsageStatsRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: usageStatsRequest
+        requestId:
+          type: string
+          format: uuid
+        force:
+          type: boolean
+          description: Read OMP again instead of answering from the server's cache.
+
+    UsageLimitsMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, generatedAt, status, cached, snapshots, capacity]
+      properties:
+        type:
+          const: usageLimits
+        requestId:
+          type: string
+          format: uuid
+        generatedAt:
+          type: string
+          format: date-time
+          description: When the read that produced these numbers ran. A cached reply keeps its original time.
+        status:
+          type: string
+          enum: [available, unsupported, unauthenticated, error]
+          description: Outcome of the last real read. With `error`, the snapshots are the previous ones, marked stale.
+        message:
+          type: string
+          description: Redacted diagnostic, present for any status other than available.
+        cached:
+          type: boolean
+          description: True when this reply reused an earlier read, so no process ran for it.
+        snapshots:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaSnapshot'
+        capacity:
+          type: array
+          items:
+            $ref: '#/components/schemas/QuotaCapacityRow'
+
+    UsageHistoryMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, generatedAt, sinceAt, days, entries, clients]
+      properties:
+        type:
+          const: usageHistory
+        requestId:
+          type: string
+          format: uuid
+        generatedAt:
+          type: string
+          format: date-time
+        sinceAt:
+          type: string
+          format: date-time
+          description: Start of the window the history covers.
+        days:
+          type: integer
+          minimum: 1
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageHistoryEntry'
+        clients:
+          type: array
+          description: Per-client burn; empty when OMP reports no client for the window.
+          items:
+            $ref: '#/components/schemas/UsageClientBurn'
+
+    UsageStatsMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, generatedAt, overall, byModel, byFolder, byAgentType, timeSeries, modelPerformanceSeries, costSeries]
+      properties:
+        type:
+          const: usageStats
+        requestId:
+          type: string
+          format: uuid
+        generatedAt:
+          type: string
+          format: date-time
+        overall:
+          $ref: '#/components/schemas/UsageStatsTotals'
+        byModel:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageStatsModelRow'
+        byFolder:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageStatsFolderRow'
+        byAgentType:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageStatsAgentRow'
+        timeSeries:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageStatsTimePoint'
+        modelPerformanceSeries:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageStatsModelPerformancePoint'
+        costSeries:
+          type: array
+          items:
+            $ref: '#/components/schemas/UsageStatsCostPoint'
 
     TerminalAttachedMessage:
       type: object

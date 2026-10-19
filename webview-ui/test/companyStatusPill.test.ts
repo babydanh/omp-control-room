@@ -75,7 +75,7 @@ describe('statusPillView', () => {
           {
             provider: 'anthropic',
             accountLabel: 'main',
-            windows: [{ label: '5 giờ', remaining: 0, reportedUnit: 'lượt' }],
+            windows: [{ id: 'anthropic:5h', label: '5 giờ', remaining: 0, reportedUnit: 'lượt' }],
             fetchedAt: '2026-01-01T00:00:00.000Z',
             status: 'available',
           },
