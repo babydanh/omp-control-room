@@ -33,11 +33,7 @@ function reasonOf(facts: SendMenuFacts, id: SendMenuEntryId): string | null {
 
 describe('sendMenuEntries', () => {
   it('lists the agent, squad and company entries in that order', () => {
-    expect(sendMenuEntries(READY).map((entry) => entry.label)).toEqual([
-      'Một agent…',
-      'Đội (đội trưởng chia việc)',
-      'Công ty (Giám đốc lập kế hoạch)',
-    ]);
+    expect(sendMenuEntries(READY).map((entry) => entry.id)).toEqual(['agent', 'squad', 'company']);
   });
 
   it('gives the squad and company entries the shortcuts that run them, and the agent none', () => {

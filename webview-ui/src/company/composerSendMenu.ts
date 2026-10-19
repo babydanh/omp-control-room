@@ -96,7 +96,7 @@ export function sendMenuEntries(facts: SendMenuFacts): readonly SendMenuEntry[] 
     },
     {
       id: 'squad',
-      label: 'Đội (đội trưởng chia việc)',
+      label: 'Đội',
       description: 'Đội trưởng chia nội dung này cho các agent trong thư mục.',
       icon: 'users',
       shortcut: 'composer.squad',
@@ -104,7 +104,7 @@ export function sendMenuEntries(facts: SendMenuFacts): readonly SendMenuEntry[] 
     },
     {
       id: 'company',
-      label: 'Công ty (Giám đốc lập kế hoạch)',
+      label: 'Công ty',
       description: 'Giám đốc lập kế hoạch, duyệt, rồi giao cho các agent làm.',
       icon: 'flag',
       shortcut: 'composer.company',
