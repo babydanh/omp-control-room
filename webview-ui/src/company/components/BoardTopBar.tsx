@@ -34,6 +34,8 @@ export interface BoardTopBarProps {
   isMac: boolean;
   onOpenPalette: () => void;
   onOpenShortcuts: () => void;
+  /** Opens the "Vai trò & model" dialog. */
+  onOpenRoles: () => void;
   /** Opens the usage page: a route of its own, so the board is not drawn beneath it. */
   onOpenUsage: () => void;
   /** Bumped by the palette to open the folder browser once per bump. */
@@ -145,6 +147,7 @@ export function BoardTopBar({
   isMac,
   onOpenPalette,
   onOpenShortcuts,
+  onOpenRoles,
   onOpenUsage,
   browseRequest,
 }: BoardTopBarProps) {
@@ -158,6 +161,12 @@ export function BoardTopBar({
       shortcut: 'board.sidebar',
       pressed: !sidebarCollapsed,
       onSelect: onToggleSidebar,
+    },
+    {
+      key: 'roles',
+      icon: 'settings',
+      label: 'Vai trò & model',
+      onSelect: onOpenRoles,
     },
     {
       key: 'files',

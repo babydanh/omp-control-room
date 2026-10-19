@@ -17,6 +17,7 @@ export type PaletteGroup = 'action' | 'session' | 'task' | 'herdr' | 'sleeping' 
 export type PaletteActionId =
   | 'new-chat'
   | 'open-agents'
+  | 'open-roles'
   | 'open-git-tree'
   | 'open-files'
   | 'open-folder'
@@ -66,7 +67,8 @@ export const PALETTE_GROUP_ORDER: readonly PaletteGroup[] = [
 
 export const PALETTE_ACTION_LABELS: Readonly<Record<PaletteActionId, string>> = {
   'new-chat': 'Phiên mới',
-  'open-agents': 'Mở đàn agent (mô hình theo vai trò)',
+  'open-agents': 'Mở đàn agent',
+  'open-roles': 'Mở vai trò & model',
   'open-git-tree': 'Mở Cây git',
   'open-files': 'Mở tệp trong workspace',
   'open-folder': 'Mở thư mục…',
@@ -91,8 +93,14 @@ export const PALETTE_ACTIONS: readonly PaletteActionInfo[] = [
   {
     id: 'open-agents',
     title: PALETTE_ACTION_LABELS['open-agents'],
-    subtitle: 'Chọn mô hình cho từng vai trò',
-    keywords: 'agents agent model role mô hình vai trò đàn',
+    subtitle: 'Hiện danh sách phiên ở cột bên trái',
+    keywords: 'agents agent sidebar đàn phiên cột',
+  },
+  {
+    id: 'open-roles',
+    title: PALETTE_ACTION_LABELS['open-roles'],
+    subtitle: 'Đổi model và mức suy nghĩ của từng vai trò',
+    keywords: 'roles role model models thinking vai trò mô hình suy nghĩ',
   },
   {
     id: 'open-git-tree',

@@ -1,6 +1,6 @@
 /**
- * ModelPicker: OMP's model switcher for one role, opened inline under the
- * role's header in the agent sidebar.
+ * ModelPicker: OMP's model switcher for one role, opened in place under that role's
+ * row in the "Vai trò & model" dialog.
  *
  * Search the live catalog, pick a model, pick a thinking level the model
  * declares. The server validates the choice against the same catalog and

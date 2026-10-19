@@ -10,17 +10,15 @@
  */
 
 import {
-  COMPANY_HOST_ROLE_BY_ROLE,
   type CompanyRole,
   type CompanySessionLogEntry,
   type CompanySessionSummary,
   type HerdrAgent,
-  type RoleProfile,
 } from '../../../core/src/company.js';
 import type { CompanyWorkspaceSession, HerdrSleepingSession } from '../../../core/src/messages.js';
 import type { CompanyViewState, HerdrView } from './companyState.js';
 import { HERDR_TONE_LABELS, HERDR_TONE_RANK, type HerdrTone, herdrToneFor } from './herdrView.js';
-import { COMPANY_ROLES, companyRoleLabel, ROLE_LABELS, roleProfile } from './roleProfiles.js';
+import { COMPANY_ROLES, companyRoleLabel } from './roleProfiles.js';
 import { type LogTone, logTone, splitCommandText } from './sessionLogView.js';
 import { sessionStatusLabel } from './statusLabels.js';
 
@@ -87,10 +85,6 @@ export interface AgentRow {
 
 export interface AgentRoleGroup {
   role: CompanyRole;
-  label: string;
-  /** The host role that runs this role's agents (plan, advisor, task or default). */
-  hostRole: string;
-  profile: RoleProfile | null;
   /** Live rows, with the ones waiting on the user first. */
   active: AgentRow[];
   /**
@@ -191,9 +185,6 @@ export function buildAgentGroups(state: CompanyViewState, now: number): AgentRol
       .sort(compareAgentRows);
     return {
       role,
-      label: ROLE_LABELS[role],
-      hostRole: COMPANY_HOST_ROLE_BY_ROLE[role],
-      profile: roleProfile(state, role),
       active: rows.filter((row) => !isFolded(row)),
       parked: rows.filter(isFolded),
     };

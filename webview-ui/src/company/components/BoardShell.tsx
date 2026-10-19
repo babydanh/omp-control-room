@@ -59,6 +59,7 @@ import { CommandPalette } from './CommandPalette.js';
 import { CompanyBoard } from './CompanyBoard.js';
 import { DetailDrawer } from './DetailDrawer.js';
 import { PromptComposer } from './PromptComposer.js';
+import { RolesDialog } from './RolesDialog.js';
 import { ShortcutsSheet } from './ShortcutsSheet.js';
 import { TerminalPreviewProvider } from './TerminalPreview.js';
 import { WorkDialogHost, type WorkDialogRequest } from './WorkDialogHost.js';
@@ -112,6 +113,7 @@ export function BoardShell({ client }: BoardShellProps) {
   const [tabPrefs, setTabPrefs] = useState(() => readDrawerTabPrefs(browserStorage()));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [rolesOpen, setRolesOpen] = useState(false);
   const [browseRequest, setBrowseRequest] = useState(0);
   const [herdrTab, setHerdrTab] = useState<HerdrDrawerTab>('screen');
   const [menu, setMenu] = useState<(AgentMenuRequest & { token: number }) | null>(null);
@@ -252,15 +254,15 @@ export function BoardShell({ client }: BoardShellProps) {
     setSheetOpen(false);
   }
 
-  // On a phone the open sheet closes on Escape, as a modal does.
+  // On a phone the open sheet closes on Escape, as a modal does, unless the roles dialog is open.
   useEffect(() => {
-    if (mode !== 'phone' || !sheetOpen) return;
+    if (mode !== 'phone' || !sheetOpen || rolesOpen) return;
     function onKey(event: KeyboardEvent): void {
       if (matchShortcut('board.escape', event)) setSheetOpen(false);
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [mode, sheetOpen]);
+  }, [mode, sheetOpen, rolesOpen]);
 
   function selectSession(sessionId: string): void {
     setOpened(null);
@@ -364,6 +366,9 @@ export function BoardShell({ client }: BoardShellProps) {
       case 'open-folder':
         setBrowseRequest((count) => count + 1);
         return;
+      case 'open-roles':
+        setRolesOpen(true);
+        return;
       case 'open-usage':
         openUsagePage();
         return;
@@ -394,6 +399,7 @@ export function BoardShell({ client }: BoardShellProps) {
         isMac={IS_MAC}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
+        onOpenRoles={() => setRolesOpen(true)}
         onOpenUsage={openUsagePage}
         browseRequest={browseRequest}
       />
@@ -467,6 +473,7 @@ export function BoardShell({ client }: BoardShellProps) {
               onOpenSleeping={openSleeping}
               onToggleProject={toggleProject}
               onMenu={openMenu}
+              onOpenRoles={() => setRolesOpen(true)}
               onDismiss={dismissSheet}
             />
           )}
@@ -530,6 +537,9 @@ export function BoardShell({ client }: BoardShellProps) {
           onRun={runPaletteItem}
           onClose={() => setPaletteOpen(false)}
         />
+      )}
+      {rolesOpen && (
+        <RolesDialog client={client} state={state} onClose={() => setRolesOpen(false)} />
       )}
       {shortcutsOpen && <ShortcutsSheet isMac={IS_MAC} onClose={() => setShortcutsOpen(false)} />}
       {menu !== null && (

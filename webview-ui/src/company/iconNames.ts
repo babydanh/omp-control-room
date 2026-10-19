@@ -43,4 +43,5 @@ export type IconName =
   | 'search'
   | 'keyboard'
   | 'users'
-  | 'bar-chart';
+  | 'bar-chart'
+  | 'settings';
