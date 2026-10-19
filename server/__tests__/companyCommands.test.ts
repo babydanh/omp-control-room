@@ -951,6 +951,7 @@ describe('company client commands', () => {
         activeServices: () => (activeRoot === null ? null : find(activeRoot)),
         activePath: () => activeRoot,
         setFolderName: () => undefined,
+        forget: async () => undefined,
       };
     }
 

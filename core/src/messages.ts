@@ -124,6 +124,7 @@ export type ClientMessage =
   | CompanyFolderBrowseRequestMessage
   | CompanyFolderCreateMessage
   | CompanyFolderNameMessage
+  | CompanyFolderForgetMessage
   | LedgerViewRequestMessage
   | LedgerTimelineRequestMessage
   | LedgerFileDiffRequestMessage
@@ -1264,6 +1265,7 @@ export interface CompanyWorkspaceEntry {
   open: boolean;
   working: number;
   waiting: number;
+  missing?: boolean;
   sessions?: CompanyWorkspaceSession[];
 }
 
@@ -1300,12 +1302,12 @@ export interface CompanyFileListMessage {
 export interface CompanyFileEntry {
   name: string;
   path: string;
-  kind: AnonymousSchema_713;
+  kind: AnonymousSchema_714;
   sizeBytes?: number;
   modifiedAt?: string;
 }
 
-export type AnonymousSchema_713 = 'file' | 'directory';
+export type AnonymousSchema_714 = 'file' | 'directory';
 
 export interface CompanyFileReadMessage {
   type: 'companyFileRead';
@@ -1317,14 +1319,14 @@ export interface CompanyFileContent {
   path: string;
   totalBytes: number;
   offset: number;
-  encoding: AnonymousSchema_721;
+  encoding: AnonymousSchema_722;
   text?: string;
   dataBase64?: string;
   mediaType?: string;
   truncated: boolean;
 }
 
-export type AnonymousSchema_721 = 'utf8' | 'base64';
+export type AnonymousSchema_722 = 'utf8' | 'base64';
 
 export interface CompanyAttachmentUploadedMessage {
   type: 'companyAttachmentUploaded';
@@ -1352,11 +1354,11 @@ export interface LedgerView {
 }
 
 export interface LedgerDatabaseStatus {
-  state: AnonymousSchema_731;
+  state: AnonymousSchema_732;
   error?: string;
 }
 
-export type AnonymousSchema_731 = 'ok' | 'missing' | 'unreadable';
+export type AnonymousSchema_732 = 'ok' | 'missing' | 'unreadable';
 
 export interface LedgerRepo {
   repo: string;
@@ -1438,7 +1440,7 @@ export interface LedgerMainWrite {
 
 export interface LedgerOverlapScan {
   repo: string;
-  state: AnonymousSchema_800;
+  state: AnonymousSchema_801;
   startedAt: string | null;
   finishedAt: string | null;
   base: string | null;
@@ -1450,7 +1452,7 @@ export interface LedgerOverlapScan {
   error: string | null;
 }
 
-export type AnonymousSchema_800 = 'idle' | 'running' | 'done' | 'partial' | 'error';
+export type AnonymousSchema_801 = 'idle' | 'running' | 'done' | 'partial' | 'error';
 
 export interface LedgerOverlapPair {
   a: string;
@@ -1741,25 +1743,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_963;
-  mode?: AnonymousSchema_964;
+  delivery: AnonymousSchema_964;
+  mode?: AnonymousSchema_965;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_963 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_964 = 'prompt' | 'steer' | 'follow_up';
 
-export type AnonymousSchema_964 = 'chat' | 'company';
+export type AnonymousSchema_965 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_971;
+  decision: AnonymousSchema_972;
   note?: string;
 }
 
-export type AnonymousSchema_971 = 'approve' | 'reject';
+export type AnonymousSchema_972 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1772,7 +1774,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_983;
+  decision?: AnonymousSchema_984;
 }
 
 export interface QuestionAnswer {
@@ -1781,17 +1783,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_983 = 'approve_once' | 'reject';
+export type AnonymousSchema_984 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_988;
+  action: AnonymousSchema_989;
 }
 
-export type AnonymousSchema_988 =
+export type AnonymousSchema_989 =
   'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
 
 export interface CompanyPromptCancelMessage {
@@ -1895,10 +1897,10 @@ export interface CompanyChatNewMessage {
 export interface CompanyViewModeMessage {
   type: 'companyViewMode';
   requestId: string;
-  mode: AnonymousSchema_1047;
+  mode: AnonymousSchema_1048;
 }
 
-export type AnonymousSchema_1047 = 'all' | 'folder';
+export type AnonymousSchema_1048 = 'all' | 'folder';
 
 export interface CompanyFolderBrowseRequestMessage {
   type: 'companyFolderBrowseRequest';
@@ -1920,6 +1922,12 @@ export interface CompanyFolderNameMessage {
   name: string;
 }
 
+export interface CompanyFolderForgetMessage {
+  type: 'companyFolderForget';
+  requestId: string;
+  path: string;
+}
+
 export interface LedgerViewRequestMessage {
   type: 'ledgerViewRequest';
   requestId: string;
@@ -1928,10 +1936,10 @@ export interface LedgerViewRequestMessage {
 export interface LedgerTimelineRequestMessage {
   type: 'ledgerTimelineRequest';
   requestId: string;
-  windowMinutes: AnonymousSchema_1063;
+  windowMinutes: AnonymousSchema_1067;
 }
 
-export type AnonymousSchema_1063 = 15 | 60 | 360 | 1440;
+export type AnonymousSchema_1067 = 15 | 60 | 360 | 1440;
 
 export interface LedgerFileDiffRequestMessage {
   type: 'ledgerFileDiffRequest';

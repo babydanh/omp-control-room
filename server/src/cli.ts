@@ -27,6 +27,7 @@ import {
 import { openWorkspaceCompany } from './company/workspaceCompanyHost.js';
 import { CompanyWorkspaceRegistry } from './company/workspaceRegistry.js';
 import {
+  forgetRecentCompanyWorkspace,
   getHooksConsent,
   getHooksEnabled,
   grantHooksConsent,
@@ -271,7 +272,11 @@ async function main(): Promise<void> {
       helperPath: path.join(distRoot, COMPANY_PTY_HOST_FILENAME),
       extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
     },
-    recents: { read: readRecentCompanyWorkspaces, remember: rememberRecentCompanyWorkspace },
+    recents: {
+      read: readRecentCompanyWorkspaces,
+      remember: rememberRecentCompanyWorkspace,
+      forget: forgetRecentCompanyWorkspace,
+    },
     names: { read: readCompanyFolderNames, set: setCompanyFolderName },
   });
   // Cây git board: scans the repos seen in recent activity plus the open company folders.

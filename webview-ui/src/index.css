@@ -315,9 +315,10 @@
     scrollbar-color: var(--color-border) var(--color-bg-dark);
   }
 
-  /* Company motion. The drawer's open state animates in on mount, and its closed
-     state's translate transitions out; durations are set inline from one constant.
-     Every animation here is switched off by the reduced-motion block at the end. */
+  /* Company motion. The ease is a custom property and durations are set inline, both
+     from COMPANY_MOTION (constants.ts). The drawer's open state animates in on mount,
+     and its closed state's translate transitions out. Every animation here is switched
+     off by the reduced-motion block at the end. */
   .company-spinner {
     display: inline-block;
     width: 1em;
@@ -351,7 +352,7 @@
     bottom: 0;
     width: 100%;
     transition-property: translate;
-    transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    transition-timing-function: var(--company-ease);
   }
   .company-drawer[data-presentation='docked'] {
     position: relative;
@@ -366,7 +367,7 @@
     width: 100%;
   }
   .company-drawer-in {
-    animation: company-drawer-in 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    animation: company-drawer-in var(--company-ease);
   }
   /* The handle on the drawer's left edge that resizes a docked drawer. The board
      renders it only while the drawer is docked. */
@@ -391,7 +392,8 @@
 
   /* Lanes are panel-tone columns with no border. The header is plain text: the
      lane's icon takes the lane colour, then the name and a count. A collapsed lane
-     keeps its narrow strip, tone only. data-lane sets the lane colour. */
+     folds to a narrow strip: its width eases, and its strip and body cross-fade
+     (rules below). data-lane sets the lane colour. */
   .company-lane {
     --lane-color: var(--color-idle);
     display: flex;
@@ -399,6 +401,40 @@
     overflow: hidden;
     border-radius: var(--company-radius-lg);
     background: var(--color-panel);
+    transition: width var(--company-lane-ms) var(--company-ease);
+  }
+
+  /* Width and content. Expanding eases the width open, then the body fades and rises
+     in; collapsing fades the body out, then eases the width shut and the strip in.
+     The durations and the ease are set inline on the board (CompanyBoard.tsx). */
+  .company-lane[data-collapsed='true'] {
+    transition-delay: var(--company-lane-content-ms);
+  }
+  .company-lane-strip {
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity var(--company-lane-ms) var(--company-ease),
+      visibility var(--company-lane-ms) var(--company-ease);
+  }
+  .company-lane[data-collapsed='true'] > .company-lane-strip {
+    opacity: 1;
+    visibility: visible;
+    transition-delay: var(--company-lane-content-ms);
+  }
+  .company-lane-body {
+    transition:
+      opacity var(--company-lane-content-ms) var(--company-ease),
+      transform var(--company-lane-content-ms) var(--company-ease),
+      visibility var(--company-lane-content-ms) var(--company-ease);
+  }
+  .company-lane[data-collapsed='false'] > .company-lane-body {
+    transition-delay: var(--company-lane-ms);
+  }
+  .company-lane[data-collapsed='true'] > .company-lane-body {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(var(--company-lane-rise));
   }
   .company-lane[data-lane='planned'] {
     --lane-color: #a98bff;
@@ -661,9 +697,9 @@
     box-shadow 240ms ease-out;
 }
 
-/* Reduced motion switches off every company animation and transition, so the
-   board stays readable and still. The FLIP flight checks the same preference
-   in script (flip.ts). */
+/* Reduced motion switches off every company animation and transition, the lane
+   width and its body and strip fades included, so the board stays readable and
+   still. The FLIP flights check the same preference in script (flip.ts). */
 @media (prefers-reduced-motion: reduce) {
   .company-ui *,
   .company-ui *::before,

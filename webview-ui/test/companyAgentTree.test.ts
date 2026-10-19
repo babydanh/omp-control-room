@@ -263,6 +263,21 @@ describe('buildProjectTree', () => {
       counts: { working: 2, needs: 1, idle: 0, error: 0 },
     });
   });
+
+  it('flags an open folder the server reports as gone, and leaves a present folder unflagged', () => {
+    const state: CompanyViewState = {
+      ...stateFrom(),
+      viewMode: 'folder',
+      workspaces: [
+        workspace('/work/alpha', true, 0, 0),
+        { path: '/work/beta', active: false, open: true, working: 0, waiting: 0, missing: true },
+      ],
+    };
+    const [alpha, beta] = buildProjectTree(state, NOW, new Set()).projects;
+
+    expect(alpha).toMatchObject({ missing: false });
+    expect(beta).toMatchObject({ missing: true, notOpen: false });
+  });
 });
 
 describe('buildRailTree', () => {

@@ -34,6 +34,9 @@ import type { WorkspaceCompanyHost, WorkspaceCompanyHostOptions } from './worksp
 /** Quiet window before recounting work: a burst of frames collapses into one check. */
 export const COMPANY_WORKSPACE_COUNT_DEBOUNCE_MS = 250;
 
+/** How often the list re-checks that its folders are still on disk, so a folder removed while open shows at once. */
+export const COMPANY_WORKSPACE_PRESENCE_CHECK_MS = 5000;
+
 /**
  * Request id on the snapshot pushed to every privileged client when the active
  * folder changes. No client request produced it, so it is a fixed sentinel.
@@ -93,6 +96,15 @@ function snapshotOf(host: WorkspaceCompanyHost): CompanySnapshot | null {
   }
 }
 
+/** Whether a folder is on disk now. A path that cannot be read, or is a file, is not a folder. */
+function folderOnDisk(workspacePath: string): boolean {
+  try {
+    return fs.statSync(workspacePath).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 /** The most sessions one folder lists in the board's tree; the wire contract allows the same. */
 export const COMPANY_WORKSPACE_SESSION_LIMIT = 100;
 
@@ -138,6 +150,8 @@ export interface CompanyWorkspaceRegistryOptions {
   readonly recents: {
     read(): string[];
     remember(workspacePath: string): void;
+    /** Take a folder off the recent list. Returns whether the change reached the disk. */
+    forget(workspacePath: string): boolean;
   };
   /**
    * Display names of Company folders, keyed by path key. `set` stores a name (or clears it with `null`) and reports
@@ -149,6 +163,11 @@ export interface CompanyWorkspaceRegistryOptions {
   };
   /** Overrides the recount window; production uses the default. */
   readonly countDebounceMs?: number;
+  /**
+   * Whether a folder is on disk now. A folder that is not is left out of the list: a recent one is dropped, and an
+   * open one is flagged `missing`. Production asks the file system; tests pass a fake.
+   */
+  readonly folderExists?: (workspacePath: string) => boolean;
 }
 
 interface OpenFolder {
@@ -171,6 +190,8 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
   /** Each open waits for the previous one, so the last request the user made is the one left active. */
   private queue: Promise<void> = Promise.resolve();
   private recountTimer: NodeJS.Timeout | undefined;
+  private presenceTimer: NodeJS.Timeout | undefined;
+  private readonly folderExists: (workspacePath: string) => boolean;
   /** The folder list last broadcast, serialised, so unchanged lists are not resent. */
   private lastPublished: string | null = null;
   private disposed = false;
@@ -178,6 +199,13 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
 
   constructor(private readonly options: CompanyWorkspaceRegistryOptions) {
     this.recentPaths = options.recents.read();
+    this.folderExists = options.folderExists ?? folderOnDisk;
+    // Re-check the folders on a timer, so a folder removed while open shows as missing without waiting for work.
+    this.presenceTimer = setInterval(
+      () => this.publishWorkspaces(),
+      COMPANY_WORKSPACE_PRESENCE_CHECK_MS,
+    );
+    this.presenceTimer.unref?.();
   }
 
   /** Services of the active folder, or `null` when none is active or the server is shutting down. */
@@ -231,12 +259,15 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
         open: true,
         working: work.working,
         waiting: work.waiting,
+        // An open folder whose directory was removed stays listed once, flagged, until it is forgotten.
+        ...(this.folderExists(folder.path) ? {} : { missing: true }),
         // Without a readable state the folder is listed by its counts alone, so no sessions are sent.
         ...(snapshot === null ? {} : { sessions: companyWorkspaceSessions(snapshot) }),
       });
     }
+    // A recent folder that is no longer on disk is left out. Its display name stays in the names store.
     const recentEntries: CompanyWorkspaceEntry[] = this.recentPaths
-      .filter((recent) => !openKeys.has(toPathKey(recent)))
+      .filter((recent) => !openKeys.has(toPathKey(recent)) && this.folderExists(recent))
       .map((recent) => {
         const name = companyFolderNameFor(names, recent);
         return {
@@ -261,6 +292,20 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
       throw new CompanyError('company_command_failed', 'Không lưu được tên thư mục.');
     }
     this.publishWorkspaces();
+  }
+
+  /**
+   * Remove a folder from the list: its recent entry is dropped and, when it is open, its Company is stopped. Refused
+   * while that folder still has working or waiting sessions, so a list edit never stops live work. The path is taken
+   * as listed rather than resolved on disk, so a folder that is already gone can still be taken off the list.
+   */
+  forget(workspacePath: string): Promise<void> {
+    const run = this.queue.then(() => this.forgetFolder(workspacePath));
+    this.queue = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   open(workspacePath: string): Promise<void> {
@@ -291,6 +336,8 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
       this.disposed = true;
       clearTimeout(this.recountTimer);
       this.recountTimer = undefined;
+      clearInterval(this.presenceTimer);
+      this.presenceTimer = undefined;
       const hosts = [...this.folders.values()];
       this.folders.clear();
       this.activeKey = null;
@@ -332,6 +379,33 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
       workspacePath: folder.path,
     });
     return folder.host.services;
+  }
+
+  /** Drop a folder from the list and stop its Company when it is open. The active folder then becomes none. */
+  private async forgetFolder(workspacePath: string): Promise<void> {
+    this.assertRunning();
+    const key = toPathKey(workspacePath);
+    const open = [...this.folders.values()].find((folder) => toPathKey(folder.path) === key);
+    if (open !== undefined) {
+      const snapshot = snapshotOf(open.host);
+      const work = snapshot === null ? IDLE_WORK : countCompanyWork(snapshot);
+      if (work.working > 0 || work.waiting > 0) {
+        throw new CompanyError(
+          'workspace_busy',
+          'Thư mục này còn phiên đang chạy hoặc đang chờ bạn. Hãy xử lý xong rồi gỡ.',
+        );
+      }
+    }
+    if (!this.options.recents.forget(workspacePath)) {
+      throw new CompanyError('company_command_failed', 'Không lưu được danh sách thư mục.');
+    }
+    this.recentPaths = this.options.recents.read();
+    if (open !== undefined) {
+      this.folders.delete(open.key);
+      if (this.activeKey === open.key) this.activeKey = null;
+    }
+    this.publishWorkspaces();
+    if (open !== undefined) await open.host.dispose();
   }
 
   private async openFolder(target: ResolvedFolder): Promise<OpenFolder> {

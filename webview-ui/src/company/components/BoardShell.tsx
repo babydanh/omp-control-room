@@ -105,7 +105,7 @@ export function BoardShell({ client }: BoardShellProps) {
   const [tabPrefs, setTabPrefs] = useState(() => readDrawerTabPrefs(browserStorage()));
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
-  const [folderRequest, setFolderRequest] = useState(0);
+  const [browseRequest, setBrowseRequest] = useState(0);
   const [herdrTab, setHerdrTab] = useState<HerdrDrawerTab>('screen');
   const [menu, setMenu] = useState<(AgentMenuRequest & { token: number }) | null>(null);
   // Each open gets a new token, so the menu remounts and starts from its first view.
@@ -329,7 +329,7 @@ export function BoardShell({ client }: BoardShellProps) {
         setOpened({ kind: 'files' });
         return;
       case 'open-folder':
-        setFolderRequest((count) => count + 1);
+        setBrowseRequest((count) => count + 1);
         return;
       case 'show-shortcuts':
         setShortcutsOpen(true);
@@ -358,7 +358,7 @@ export function BoardShell({ client }: BoardShellProps) {
         isMac={IS_MAC}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        folderRequest={folderRequest}
+        browseRequest={browseRequest}
       />
       {state.needsSnapshot && (
         <p className="bg-warning/12 px-3 py-1.5 text-2xs text-warning">

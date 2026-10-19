@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Features
+
+- **Folder browser** — 📁 and "Chọn thư mục…" open one browser: quick places (recent folders by their names, drives, home and roots), a path field that takes a typed path, arrow keys to move, Backspace to go up, and Ctrl+Enter to choose the folder in view. The inline path box is gone.
+
+### Changes
+
+- Folders whose directory has gone are no longer listed in the tree, the switcher or the rail. An open folder that disappears stays once as "Thư mục không còn" with a "Gỡ khỏi danh sách" action; the recent list drops missing folders and keeps their display names.
+- Cards that move between lanes glide along a slow arc instead of snapping, and opening or collapsing a lane eases its width. Reduced motion keeps the instant layout.
+
 ## v1.5.0
 
 ### Features

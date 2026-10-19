@@ -105,6 +105,7 @@ interface TreeView {
   onSelectSession: (sessionId: string) => void;
   onSelectWorkspaceSession: (path: string, sessionId: string) => void;
   onOpenWorkspace: (path: string) => void;
+  onForgetWorkspace: (path: string) => void;
   /** The folder the board is switching to for a session chosen in another folder; null when none. */
   switchingPath: string | null;
   onOpenHerdr: (paneId: string) => void;
@@ -188,6 +189,9 @@ export function AgentSidebar({
     onSelectWorkspaceSession,
     onOpenWorkspace: (path) => {
       client.openWorkspace(path);
+    },
+    onForgetWorkspace: (path) => {
+      client.forgetFolder(path);
     },
     switchingPath: state.pendingWorkspaceSelection?.path ?? null,
     onOpenHerdr,
@@ -290,6 +294,33 @@ function ProjectSection({ project, view }: { project: ProjectNode; view: TreeVie
 
 /** A project's children, indented under a guide: its roles, its panes, or a note. */
 function ProjectBody({ project, view }: { project: ProjectNode; view: TreeView }) {
+  const contents = <ProjectContents project={project} view={view} />;
+  if (!project.missing || project.path === null) return contents;
+  return (
+    <>
+      <MissingFolderNote path={project.path} view={view} />
+      {contents}
+    </>
+  );
+}
+
+/** A folder the server reports as gone from disk: said once, with the action that takes it off. */
+function MissingFolderNote({ path, view }: { path: string; view: TreeView }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 px-4 pb-1 text-xs text-text-muted">
+      <span>Thư mục không còn</span>
+      <button
+        type="button"
+        onClick={() => view.onForgetWorkspace(path)}
+        className="cursor-pointer rounded-(--company-radius-sm) px-1 text-text hover:bg-hover"
+      >
+        Gỡ khỏi danh sách
+      </button>
+    </div>
+  );
+}
+
+function ProjectContents({ project, view }: { project: ProjectNode; view: TreeView }) {
   if (project.kind === 'herdr') {
     return (
       <>

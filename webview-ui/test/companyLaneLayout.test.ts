@@ -5,6 +5,7 @@ import {
   COMPANY_LANE_MIN_WIDTH_PX,
   COMPANY_LANE_STRIP_WIDTH_PX,
   COMPANY_LANE_WIDTH_PX,
+  COMPANY_MOTION,
 } from '../src/company/constants.js';
 import { isLaneCollapsed, packLanes } from '../src/company/laneLayout.js';
 
@@ -99,5 +100,16 @@ describe('packLanes', () => {
         }
       }
     }
+  });
+});
+
+describe('lane motion timing', () => {
+  it('eases the lane width over 420ms and fades the lane body over 240ms', () => {
+    expect(COMPANY_MOTION.laneWidthMs).toBe(420);
+    expect(COMPANY_MOTION.laneContentMs).toBe(240);
+  });
+
+  it('keeps the body fade shorter than the width ease it follows or precedes', () => {
+    expect(COMPANY_MOTION.laneContentMs).toBeLessThan(COMPANY_MOTION.laneWidthMs);
   });
 });

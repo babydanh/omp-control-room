@@ -15,6 +15,7 @@ import type {
   WorkspaceCompanyHostOptions,
 } from '../src/company/workspaceCompanyHost.js';
 import {
+  COMPANY_WORKSPACE_PRESENCE_CHECK_MS,
   COMPANY_WORKSPACE_PUSH_REQUEST_ID,
   COMPANY_WORKSPACE_SESSION_LIMIT,
   CompanyWorkspaceRegistry,
@@ -120,6 +121,10 @@ function createHarness(
     beforeOpen?: (workspacePath: string) => Promise<void>;
     /** When false, every display-name save is refused, as a failed config write would be. */
     namesWritable?: boolean;
+    /** When false, every recent-list save is refused, as a failed config write would be. */
+    recentsWritable?: boolean;
+    /** The fake file system's view of which folders exist. Defaults to the real one. */
+    folderExists?: (workspacePath: string) => boolean;
   } = {},
 ): Harness {
   const broadcasts: ServerMessage[] = [];
@@ -127,6 +132,7 @@ function createHarness(
   const recents = [...(options.recents ?? [])];
   const names: Record<string, string> = {};
   const namesWritable = options.namesWritable ?? true;
+  const recentsWritable = options.recentsWritable ?? true;
   const control = { failNextOpen: false, openCalls: 0 };
   const registry = new CompanyWorkspaceRegistry({
     broadcast: (message) => {
@@ -150,6 +156,13 @@ function createHarness(
         const next = [workspacePath, ...recents.filter((entry) => entry !== workspacePath)];
         recents.splice(0, recents.length, ...next.slice(0, 10));
       },
+      forget: (workspacePath) => {
+        if (!recentsWritable) return false;
+        const key = toPathKey(workspacePath);
+        const kept = recents.filter((entry) => toPathKey(entry) !== key);
+        recents.splice(0, recents.length, ...kept);
+        return true;
+      },
     },
     names: {
       read: () => ({ ...names }),
@@ -165,6 +178,7 @@ function createHarness(
       },
     },
     countDebounceMs: 250,
+    folderExists: options.folderExists,
   });
   return { registry, broadcasts, hosts, recents, control, names };
 }
@@ -481,11 +495,10 @@ describe('CompanyWorkspaceRegistry', () => {
   });
 
   it('lists recently used folders that are not open after the open ones, without duplicating them', async () => {
-    const gone = path.join(root, 'gone');
-    const h = createHarness({ recents: [gone, alphaReal] });
+    const h = createHarness({ recents: [betaReal, alphaReal] });
 
     expect(h.registry.entries()).toEqual([
-      { path: gone, active: false, open: false, working: 0, waiting: 0 },
+      { path: betaReal, active: false, open: false, working: 0, waiting: 0 },
       { path: alphaReal, active: false, open: false, working: 0, waiting: 0 },
     ]);
 
@@ -493,8 +506,119 @@ describe('CompanyWorkspaceRegistry', () => {
 
     expect(h.registry.entries()).toEqual([
       { path: alphaReal, active: true, open: true, working: 0, waiting: 0, sessions: [] },
-      { path: gone, active: false, open: false, working: 0, waiting: 0 },
+      { path: betaReal, active: false, open: false, working: 0, waiting: 0 },
     ]);
+  });
+
+  it('drops a recent folder that is no longer on disk, and keeps its display name', () => {
+    const onDisk = new Set([toPathKey(alphaReal)]);
+    const h = createHarness({
+      recents: [betaReal, alphaReal],
+      folderExists: (workspacePath) => onDisk.has(toPathKey(workspacePath)),
+    });
+    h.names[toPathKey(betaReal)] = 'Mốc B';
+
+    expect(h.registry.entries()).toEqual([
+      { path: alphaReal, active: false, open: false, working: 0, waiting: 0 },
+    ]);
+    expect(h.names).toEqual({ [toPathKey(betaReal)]: 'Mốc B' });
+  });
+
+  it('flags an open folder whose directory was removed, and lists it once', async () => {
+    const onDisk = new Set([toPathKey(alphaReal), toPathKey(betaReal)]);
+    const h = createHarness({
+      recents: [alphaReal, betaReal],
+      folderExists: (workspacePath) => onDisk.has(toPathKey(workspacePath)),
+    });
+    await h.registry.open(alpha);
+    onDisk.delete(toPathKey(alphaReal));
+
+    const entries = h.registry.entries();
+    expect(entries.filter((entry) => entry.path === alphaReal)).toHaveLength(1);
+    expect(entries).toEqual([
+      {
+        path: alphaReal,
+        active: true,
+        open: true,
+        working: 0,
+        waiting: 0,
+        missing: true,
+        sessions: [],
+      },
+      { path: betaReal, active: false, open: false, working: 0, waiting: 0 },
+    ]);
+  });
+
+  it('republishes the folder list when an open folder disappears, without waiting for work', async () => {
+    vi.useFakeTimers();
+    const onDisk = new Set([toPathKey(alphaReal)]);
+    const h = createHarness({
+      folderExists: (workspacePath) => onDisk.has(toPathKey(workspacePath)),
+    });
+    await h.registry.open(alpha);
+    const listsBefore = workspaceLists(h.broadcasts).length;
+
+    onDisk.delete(toPathKey(alphaReal));
+    await vi.advanceTimersByTimeAsync(COMPANY_WORKSPACE_PRESENCE_CHECK_MS);
+
+    const lists = workspaceLists(h.broadcasts);
+    expect(lists).toHaveLength(listsBefore + 1);
+    expect(lists.at(-1)).toEqual([
+      expect.objectContaining({ path: alphaReal, open: true, missing: true }),
+    ]);
+    await h.registry.dispose();
+  });
+
+  it('forgets a recent folder: drops it from the list and from the recents store', async () => {
+    const h = createHarness({ recents: [betaReal, alphaReal] });
+
+    await h.registry.forget(betaReal);
+
+    expect(h.registry.entries()).toEqual([
+      { path: alphaReal, active: false, open: false, working: 0, waiting: 0 },
+    ]);
+    expect(h.recents).toEqual([alphaReal]);
+  });
+
+  it('forgets a folder already gone from disk, without needing it to exist', async () => {
+    const gone = path.join(root, 'gone');
+    const h = createHarness({ recents: [gone] });
+
+    await h.registry.forget(gone);
+
+    expect(h.recents).toEqual([]);
+    expect(h.registry.entries()).toEqual([]);
+  });
+
+  it('forgets an open folder: stops its Company and leaves no folder active', async () => {
+    const h = createHarness();
+    await h.registry.open(alpha);
+
+    await h.registry.forget(alphaReal);
+
+    expect(hostAt(h.hosts, 0).state.disposeCalls).toBe(1);
+    expect(h.registry.activePath()).toBeNull();
+    expect(h.registry.entries()).toEqual([]);
+  });
+
+  it('refuses to forget an open folder that still has working or waiting sessions', async () => {
+    const h = createHarness();
+    await h.registry.open(alpha);
+    hostAt(h.hosts, 0).state.snapshot = snapshotWith({ sessions: ['busy'] });
+
+    await expect(h.registry.forget(alphaReal)).rejects.toMatchObject({ code: 'workspace_busy' });
+
+    expect(hostAt(h.hosts, 0).state.disposeCalls).toBe(0);
+    expect(h.registry.activePath()).toBe(alphaReal);
+  });
+
+  it('refuses a forget the recent list cannot save, and keeps the folder', async () => {
+    const h = createHarness({ recents: [betaReal], recentsWritable: false });
+
+    await expect(h.registry.forget(betaReal)).rejects.toMatchObject({
+      code: 'company_command_failed',
+    });
+    expect(h.recents).toEqual([betaReal]);
   });
 
   it('coalesces count changes into one list broadcast and skips lists that did not change', async () => {

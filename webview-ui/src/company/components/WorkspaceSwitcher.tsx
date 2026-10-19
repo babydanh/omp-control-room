@@ -1,22 +1,18 @@
 /**
  * WorkspaceSwitcher: what the board shows. The menu lists the folders the server knows,
  * with a first row that stands for all of them together; a folder row opens that folder,
- * and right-click or its pencil names it. Beside the menu: a button that browses the
- * server's folders, and a field to open a folder by typed path. Switching is a server
- * command: while it is in flight the controls wait, and a refusal stays visible beside them.
+ * and right-click or its pencil names it. Beside the menu: a button that opens the folder
+ * browser. Switching is a server command: while it is in flight the controls wait, and a
+ * refusal stays visible beside them. A folder whose directory is gone shows once, with a
+ * way to take it off the list.
  */
 
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { CompanyWorkspaceEntry } from '../../../../core/src/messages.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
-import {
-  activeWorkspace,
-  folderLabel,
-  planWorkspaceOpen,
-  workspaceActivity,
-} from '../workspaces.js';
+import { activeWorkspace, folderLabel, workspaceActivity } from '../workspaces.js';
 import { FolderBrowserDialog } from './FolderBrowserDialog.js';
 import { FolderNameDialog } from './FolderNameDialog.js';
 import { Icon } from './Icon.js';
@@ -24,16 +20,13 @@ import { Icon } from './Icon.js';
 export interface WorkspaceSwitcherProps {
   client: CompanyClient;
   state: CompanyViewState;
-  /** Bumped by the command palette to open the path field; a new value opens it once. */
-  openRequest?: number;
+  /** Bumped by the command palette to open the folder browser; a new value opens it once. */
+  browseRequest?: number;
 }
 
 /** The class every control in the switcher shares: a small ghost button, no edge. */
 const CONTROL_CLASS =
   'touch-target company-btn-ghost cursor-pointer rounded-(--company-radius-sm) px-2.5 py-1 text-2xs disabled:cursor-default disabled:opacity-50';
-/** The one affirmative action in the switcher: the filled accent button. */
-const ACTION_CLASS =
-  'touch-target company-btn-accent cursor-pointer rounded-(--company-radius-sm) px-2.5 py-1 text-2xs disabled:cursor-default disabled:opacity-50';
 /** One row of the folder menu. A row reads as pressed when it is the folder the board shows. */
 const MENU_ROW_CLASS =
   'touch-target flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-(--company-radius-sm) px-2 py-1.5 text-left text-text hover:bg-hover aria-pressed:bg-selected disabled:cursor-default disabled:opacity-50';
@@ -44,15 +37,13 @@ interface NamingTarget {
   currentName: string | null;
 }
 
-export function WorkspaceSwitcher({ client, state, openRequest = 0 }: WorkspaceSwitcherProps) {
-  const [typing, setTyping] = useState(false);
-  const [draft, setDraft] = useState('');
+export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: WorkspaceSwitcherProps) {
   /** A refusal of the request itself, shown until the next attempt. */
   const [refusal, setRefusal] = useState<string | null>(null);
   /** requestId of the last switch sent, so its verdict can be shown if it failed. */
   const [lastOpen, setLastOpen] = useState<string | null>(null);
-  /** The last palette request this switcher answered; a new value opens the path field. */
-  const [seenRequest, setSeenRequest] = useState(openRequest);
+  /** The last palette request this switcher answered; a new value opens the folder browser. */
+  const [seenRequest, setSeenRequest] = useState(browseRequest);
   /** Whether the folder menu is open. */
   const [menuOpen, setMenuOpen] = useState(false);
   /** Whether the folder browser dialog is open. */
@@ -60,10 +51,11 @@ export function WorkspaceSwitcher({ client, state, openRequest = 0 }: WorkspaceS
   /** The folder being named, or null when no naming dialog is open. */
   const [naming, setNaming] = useState<NamingTarget | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  if (openRequest !== seenRequest) {
-    setSeenRequest(openRequest);
+  if (browseRequest !== seenRequest) {
+    setSeenRequest(browseRequest);
     setRefusal(null);
-    setTyping(true);
+    setMenuOpen(false);
+    setBrowsing(true);
   }
 
   // The menu closes on a press outside it, or on Escape.
@@ -105,33 +97,8 @@ export function WorkspaceSwitcher({ client, state, openRequest = 0 }: WorkspaceS
   if (allMode) {
     triggerText = `Tất cả thư mục · ${workspaceActivity(everything)}`;
   } else if (active !== null) {
-    triggerText = `${folderLabel(active)} · ${workspaceActivity(active)}`;
-  }
-
-  function openFolder(input: string): void {
-    const plan = planWorkspaceOpen(workspaces, input);
-    if (plan.kind === 'refuse') {
-      setRefusal(plan.message);
-      return;
-    }
-    setRefusal(null);
-    if (plan.kind === 'stay') {
-      setTyping(false);
-      return;
-    }
-    const handle = client.openWorkspace(plan.path);
-    setLastOpen(handle.requestId);
-    if (!handle.ok) {
-      setRefusal(handle.message ?? 'Không gửi được yêu cầu mở thư mục.');
-      return;
-    }
-    setDraft('');
-    setTyping(false);
-  }
-
-  function submitDraft(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    openFolder(draft);
+    const activity = active.missing === true ? 'Thư mục không còn' : workspaceActivity(active);
+    triggerText = `${folderLabel(active)} · ${activity}`;
   }
 
   function chooseAll(): void {
@@ -152,6 +119,14 @@ export function WorkspaceSwitcher({ client, state, openRequest = 0 }: WorkspaceS
   function openNaming(entry: CompanyWorkspaceEntry): void {
     setMenuOpen(false);
     setNaming({ path: entry.path, currentName: entry.name ?? null });
+  }
+
+  function forgetFolder(entry: CompanyWorkspaceEntry): void {
+    setMenuOpen(false);
+    setRefusal(null);
+    const handle = client.forgetFolder(entry.path);
+    setLastOpen(handle.requestId);
+    if (!handle.ok) setRefusal(handle.message ?? 'Không gửi được yêu cầu gỡ thư mục.');
   }
 
   return (
@@ -200,7 +175,7 @@ export function WorkspaceSwitcher({ client, state, openRequest = 0 }: WorkspaceS
                     aria-pressed={!allMode && entry.active}
                     data-testid="folder-option"
                     title={entry.path}
-                    disabled={opening}
+                    disabled={opening || entry.missing === true}
                     onClick={() => chooseFolder(entry)}
                     onContextMenu={(event) => {
                       event.preventDefault();
@@ -209,17 +184,30 @@ export function WorkspaceSwitcher({ client, state, openRequest = 0 }: WorkspaceS
                     className={MENU_ROW_CLASS}
                   >
                     <span className="min-w-0 flex-1 truncate">{folderLabel(entry)}</span>
-                    <span className="shrink-0 text-text-muted">{workspaceActivity(entry)}</span>
+                    <span className="shrink-0 text-text-muted">
+                      {entry.missing === true ? 'Thư mục không còn' : workspaceActivity(entry)}
+                    </span>
                   </button>
-                  <button
-                    type="button"
-                    aria-label={`Đặt tên cho ${folderLabel(entry)}`}
-                    title="Đặt tên thư mục"
-                    onClick={() => openNaming(entry)}
-                    className="company-icon-btn touch-target shrink-0 px-2 text-2xs"
-                  >
-                    <Icon name="pencil" />
-                  </button>
+                  {entry.missing === true ? (
+                    <button
+                      type="button"
+                      disabled={opening}
+                      onClick={() => forgetFolder(entry)}
+                      className={`${CONTROL_CLASS} shrink-0`}
+                    >
+                      Gỡ khỏi danh sách
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      aria-label={`Đặt tên cho ${folderLabel(entry)}`}
+                      title="Đặt tên thư mục"
+                      onClick={() => openNaming(entry)}
+                      className="company-icon-btn touch-target shrink-0 px-2 text-2xs"
+                    >
+                      <Icon name="pencil" />
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -233,58 +221,20 @@ export function WorkspaceSwitcher({ client, state, openRequest = 0 }: WorkspaceS
           {state.settings?.workspacePath ?? 'đang chờ máy chủ…'}
         </span>
       )}
-      {typing ? (
-        <form onSubmit={submitDraft} className="flex items-center gap-1.5">
-          <input
-            type="text"
-            aria-label="Đường dẫn thư mục"
-            placeholder="Dán đường dẫn thư mục"
-            value={draft}
-            autoFocus
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Escape') setTyping(false);
-            }}
-            className="w-[260px] rounded-(--company-radius-sm) bg-raised px-2 py-1 text-2xs text-text"
-          />
-          <button type="submit" disabled={opening} className={ACTION_CLASS}>
-            Mở
-          </button>
-          <button type="button" onClick={() => setTyping(false)} className={CONTROL_CLASS}>
-            Huỷ
-          </button>
-        </form>
-      ) : (
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            disabled={opening}
-            aria-label="Duyệt thư mục"
-            title="Duyệt thư mục"
-            data-testid="folder-browser-open"
-            onClick={() => {
-              setMenuOpen(false);
-              setBrowsing(true);
-            }}
-            className="company-icon-btn touch-target shrink-0 px-2 text-sm"
-          >
-            <Icon name="folder" />
-          </button>
-          <button
-            type="button"
-            disabled={opening}
-            aria-label="Nhập đường dẫn thư mục"
-            title="Nhập đường dẫn thư mục"
-            onClick={() => {
-              setRefusal(null);
-              setTyping(true);
-            }}
-            className={CONTROL_CLASS}
-          >
-            Nhập đường dẫn
-          </button>
-        </div>
-      )}
+      <button
+        type="button"
+        disabled={opening}
+        aria-label="Duyệt thư mục"
+        title="Duyệt thư mục"
+        data-testid="folder-browser-open"
+        onClick={() => {
+          setMenuOpen(false);
+          setBrowsing(true);
+        }}
+        className="company-icon-btn touch-target shrink-0 px-2 text-sm"
+      >
+        <Icon name="folder" />
+      </button>
       {opening && <span className="text-2xs text-text-muted">Đang mở thư mục…</span>}
       {message !== null && (
         <span role="alert" className="break-all text-2xs text-warning">

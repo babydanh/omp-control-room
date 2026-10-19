@@ -210,6 +210,7 @@ components:
         - $ref: '#/components/schemas/CompanyFolderBrowseRequestMessage'
         - $ref: '#/components/schemas/CompanyFolderCreateMessage'
         - $ref: '#/components/schemas/CompanyFolderNameMessage'
+        - $ref: '#/components/schemas/CompanyFolderForgetMessage'
         # Ledger (privileged; read-only views and one message command)
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
@@ -3424,6 +3425,25 @@ components:
           type: string
           maxLength: 80
 
+    CompanyFolderForgetMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path]
+      description: >-
+        Take a folder off the folder list. Its recent entry is dropped and, when it is open, its Company is stopped.
+        Refused while that folder has working or waiting sessions. The path is taken as listed, so a folder that is
+        already gone can still be removed from the list.
+      properties:
+        type:
+          const: companyFolderForget
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          minLength: 1
+          maxLength: 4096
+
     CompanyViewModeMessage:
       type: object
       additionalProperties: false
@@ -5026,6 +5046,9 @@ components:
           type: integer
           minimum: 0
           description: Sessions or Contracts waiting on the user.
+        missing:
+          type: boolean
+          description: An open folder whose directory is no longer on disk. It stays listed once until it is forgotten.
         sessions:
           type: array
           maxItems: 100

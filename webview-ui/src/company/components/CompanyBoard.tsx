@@ -15,9 +15,10 @@
  *
  * Each lane names who holds its cards, and a card in review names whether QA or
  * the Trọng tài holds it. A card sent back after a failed verification says so.
- * When a card changes lane, it flies there (flip.ts); reduced motion skips it. A lane
- * with no cards folds to a strip that a click opens, and a card that lands in an empty
- * lane opens that lane first, so the flight has room to land.
+ * When a card changes lane it arcs there, and a card that moves within its lane
+ * glides (flip.ts); reduced motion skips both. A lane with no cards folds to a strip
+ * that a click opens. Its width eases open or shut while its body fades in after it
+ * (or out before it), so a card that lands in an empty lane opens that lane first.
  *
  * A card is a button, not a draggable: the only thing clicking does is select,
  * because status is the server's to change.
@@ -39,7 +40,12 @@ import type { AgentMenuRequest } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
-import { COMPANY_LANE_ICONS, COMPANY_LANE_OWNERS, type CompanyLaneId } from '../constants.js';
+import {
+  COMPANY_LANE_ICONS,
+  COMPANY_LANE_OWNERS,
+  COMPANY_MOTION,
+  type CompanyLaneId,
+} from '../constants.js';
 import type { FolderIdentity } from '../folderIdentity.js';
 import { isLaneCollapsed, packLanes } from '../laneLayout.js';
 import {
@@ -361,7 +367,7 @@ function LaneStrip({
       type="button"
       onClick={onOpen}
       title={`Mở cột ${lane.label}`}
-      className="flex h-full w-full cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-hover hover:text-text"
+      className="company-lane-strip absolute inset-0 flex cursor-pointer flex-col items-center gap-2 px-1 py-2 text-text-muted hover:bg-hover hover:text-text"
     >
       <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-sm text-[var(--lane-color)]" />
       <span className="text-2xs font-semibold text-text">{count}</span>
@@ -386,6 +392,17 @@ const LANE_ATTENTION_ORDER: readonly CompanyLaneId[] = [
 
 /** The lanes row's padding on each side (p-1.5), taken out of the width the lanes pack into. */
 const LANES_PADDING_PX = 6;
+
+/**
+ * The motion custom properties the board's CSS reads (the lane rules in index.css):
+ * the ease, the lane width and body fade durations, and the body's rise.
+ */
+const BOARD_MOTION_VARS: CSSProperties & Record<string, string> = {
+  '--company-ease': COMPANY_MOTION.easing,
+  '--company-lane-ms': `${COMPANY_MOTION.laneWidthMs}ms`,
+  '--company-lane-content-ms': `${COMPANY_MOTION.laneContentMs}ms`,
+  '--company-lane-rise': `${COMPANY_MOTION.laneContentRisePx}px`,
+};
 
 /** One lane as the board draws it: its drafts, its card count and whether it folds to a strip. */
 interface LaneView {
@@ -487,79 +504,76 @@ export function CompanyBoard({
         data-testid={`company-lane-${lane.id}`}
         data-lane={lane.id}
         data-collapsed={collapsed}
-        className={`company-lane min-h-0 min-w-0 ${fill ? 'flex-1' : ''}`}
+        className={`company-lane relative min-h-0 min-w-0 ${fill ? 'flex-1' : ''}`}
         style={style}
       >
-        {collapsed ? (
-          <LaneStrip lane={lane} count={count} onOpen={() => toggleLane(lane.id)} />
-        ) : (
-          <>
-            <header className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
-              <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
-                <span className="min-w-0">
-                  <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-[var(--lane-color)]" />{' '}
-                  {lane.label}
-                </span>
-                <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
-              </h3>
-              <p className="truncate text-xs text-status-active">{COMPANY_LANE_OWNERS[lane.id]}</p>
-            </header>
-            <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
-              {count === 0 && (
-                <div className="flex flex-col items-start gap-1 px-1">
-                  <p className="text-xs text-text-muted">Chưa có việc nào ở cột này.</p>
-                  {mode !== 'phone' && (
-                    <button
-                      type="button"
-                      onClick={() => toggleLane(lane.id)}
-                      className="company-icon-btn touch-target px-1 text-2xs"
-                    >
-                      Thu gọn cột
-                    </button>
-                  )}
-                </div>
-              )}
-              {drafts.map((prompt, index) => (
-                <PlanningCard
-                  key={prompt.promptId}
-                  prompt={prompt}
-                  index={index}
-                  onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
-                  onMenu={onMenu}
-                  folder={identityOf(prompt.promptId)}
-                />
-              ))}
-              {lane.cards.map((card, index) => (
-                <TaskCard
-                  key={card.taskId}
-                  card={card}
-                  index={index}
-                  onSelect={() => onSelectTask(card.taskId)}
-                  onMenu={onMenu}
-                  folder={identityOf(card.taskId)}
-                />
-              ))}
-              {lane.agents.map((agent, index) => (
-                <AgentCard
-                  key={agent.key}
-                  card={agent}
-                  index={lane.cards.length + drafts.length + index}
-                  now={now}
-                  selected={
-                    agent.subject.kind === 'herdr'
-                      ? agent.subject.paneId === selectedPaneId
-                      : agent.subject.sessionId === selectedSessionId
-                  }
-                  onOpen={() => openAgent(agent.subject)}
-                  onMenu={onMenu}
-                  folder={
-                    agent.subject.kind === 'session' ? identityOf(agent.subject.sessionId) : null
-                  }
-                />
-              ))}
-            </div>
-          </>
-        )}
+        <LaneStrip lane={lane} count={count} onOpen={() => toggleLane(lane.id)} />
+        <div className="company-lane-body flex min-h-0 min-w-0 flex-1 flex-col">
+          <header className="flex flex-col gap-0.5 px-2 pt-2 pb-1">
+            <h3 className="flex items-baseline justify-between gap-2 text-sm font-semibold text-text">
+              <span className="min-w-0">
+                <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-[var(--lane-color)]" />{' '}
+                {lane.label}
+              </span>
+              <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
+            </h3>
+            <p className="truncate text-xs text-status-active">{COMPANY_LANE_OWNERS[lane.id]}</p>
+          </header>
+          <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
+            {count === 0 && (
+              <div className="flex flex-col items-start gap-1 px-1">
+                <p className="text-xs text-text-muted">Chưa có việc nào ở cột này.</p>
+                {mode !== 'phone' && (
+                  <button
+                    type="button"
+                    onClick={() => toggleLane(lane.id)}
+                    className="company-icon-btn touch-target px-1 text-2xs"
+                  >
+                    Thu gọn cột
+                  </button>
+                )}
+              </div>
+            )}
+            {drafts.map((prompt, index) => (
+              <PlanningCard
+                key={prompt.promptId}
+                prompt={prompt}
+                index={index}
+                onSelect={() => prompt.session && onSelectSession(prompt.session.id)}
+                onMenu={onMenu}
+                folder={identityOf(prompt.promptId)}
+              />
+            ))}
+            {lane.cards.map((card, index) => (
+              <TaskCard
+                key={card.taskId}
+                card={card}
+                index={index}
+                onSelect={() => onSelectTask(card.taskId)}
+                onMenu={onMenu}
+                folder={identityOf(card.taskId)}
+              />
+            ))}
+            {lane.agents.map((agent, index) => (
+              <AgentCard
+                key={agent.key}
+                card={agent}
+                index={lane.cards.length + drafts.length + index}
+                now={now}
+                selected={
+                  agent.subject.kind === 'herdr'
+                    ? agent.subject.paneId === selectedPaneId
+                    : agent.subject.sessionId === selectedSessionId
+                }
+                onOpen={() => openAgent(agent.subject)}
+                onMenu={onMenu}
+                folder={
+                  agent.subject.kind === 'session' ? identityOf(agent.subject.sessionId) : null
+                }
+              />
+            ))}
+          </div>
+        </div>
       </section>
     );
   }
@@ -568,6 +582,7 @@ export function CompanyBoard({
     <div
       ref={boardRef}
       className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+      style={BOARD_MOTION_VARS}
       data-testid="company-board"
     >
       <FlowStrip flow={flow} />
@@ -617,7 +632,7 @@ export function CompanyBoard({
                 const view = views[index];
                 const width = packing.widths[index];
                 if (view === undefined || width === undefined) return null;
-                return renderLane(view, false, { flex: `0 0 ${width}px`, width });
+                return renderLane(view, false, { flex: '0 0 auto', width });
               })}
             </div>
           ))}

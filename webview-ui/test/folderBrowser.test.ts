@@ -5,6 +5,7 @@ import {
   defaultFolderName,
   filterFolderEntries,
   folderNameError,
+  stepHighlight,
 } from '../src/company/folderBrowser.js';
 
 describe('breadcrumbs', () => {
@@ -104,5 +105,18 @@ describe('defaultFolderName', () => {
   it('is the last segment of the path, whatever the separator', () => {
     expect(defaultFolderName('D:\\du-an\\')).toBe('du-an');
     expect(defaultFolderName('/home/me/app')).toBe('app');
+  });
+});
+
+describe('stepHighlight', () => {
+  it('moves one row at a time and stops at the first and last rows', () => {
+    expect(stepHighlight(0, 1, 3)).toBe(1);
+    expect(stepHighlight(1, -1, 3)).toBe(0);
+    expect(stepHighlight(2, 1, 3)).toBe(2);
+    expect(stepHighlight(0, -1, 3)).toBe(0);
+  });
+
+  it('keeps the first row when there are no rows to move over', () => {
+    expect(stepHighlight(4, 1, 0)).toBe(0);
   });
 });

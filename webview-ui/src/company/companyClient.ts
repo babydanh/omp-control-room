@@ -532,6 +532,14 @@ export class CompanyClient {
   }
 
   /**
+   * Take the folder at `path` off the folder list; an open one is stopped first, unless it still
+   * has work. The verdict is a companyCommandResult under the handle's requestId.
+   */
+  forgetFolder(path: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.folderForget(requestId, path));
+  }
+
+  /**
    * Point the board at another folder. The verdict is a companyCommandResult under the
    * handle's requestId; a success is followed by a snapshot and a companyWorkspaces.
    */

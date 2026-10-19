@@ -19,9 +19,11 @@ function fakeControl(open: (workspacePath: string) => Promise<void> = () => Prom
   control: CompanyWorkspaceControl;
   opened: string[];
   renamed: { path: string; name: string | null }[];
+  forgotten: string[];
 } {
   const opened: string[] = [];
   const renamed: { path: string; name: string | null }[] = [];
+  const forgotten: string[] = [];
   const control: CompanyWorkspaceControl = {
     entries: () => [{ path: 'D:/alpha', active: true, open: true, working: 1, waiting: 2 }],
     open: async (workspacePath) => {
@@ -38,8 +40,11 @@ function fakeControl(open: (workspacePath: string) => Promise<void> = () => Prom
     setFolderName: (workspacePath, name) => {
       renamed.push({ path: workspacePath, name });
     },
+    forget: async (workspacePath) => {
+      forgotten.push(workspacePath);
+    },
   };
-  return { control, opened, renamed };
+  return { control, opened, renamed, forgotten };
 }
 
 function context(overrides: Partial<CompanyCommandContext> = {}): CompanyCommandContext {
@@ -427,6 +432,48 @@ describe('company folder commands', () => {
       ok: false,
       errorCode: 'company_command_failed',
       message: 'Không lưu được tên thư mục.',
+    });
+  });
+
+  it('takes a folder off the list through the control, by the path as listed, and answers ok', async () => {
+    const { control, forgotten } = fakeControl();
+    expect(
+      await reply(
+        { type: 'companyFolderForget', requestId: REQUEST_ID, path: 'D:/gone' },
+        { workspaces: control },
+      ),
+    ).toMatchObject({ type: 'companyCommandResult', requestId: REQUEST_ID, ok: true });
+    expect(forgotten).toEqual(['D:/gone']);
+  });
+
+  it('refuses a forget with a blank path before the control is reached', async () => {
+    const { control, forgotten } = fakeControl();
+    expect(
+      await reply(
+        { type: 'companyFolderForget', requestId: REQUEST_ID, path: '  ' },
+        { workspaces: control },
+      ),
+    ).toMatchObject({ ok: false, errorCode: 'invalid_request' });
+    expect(forgotten).toEqual([]);
+  });
+
+  it('answers a forget refusal from the control with its code and message', async () => {
+    const { control } = fakeControl();
+    const busy: CompanyWorkspaceControl = {
+      ...control,
+      forget: async () => {
+        throw new CompanyError('workspace_busy', 'Thư mục này còn phiên đang chạy.');
+      },
+    };
+    expect(
+      await reply(
+        { type: 'companyFolderForget', requestId: REQUEST_ID, path: 'D:/alpha' },
+        { workspaces: busy },
+      ),
+    ).toMatchObject({
+      ok: false,
+      errorCode: 'workspace_busy',
+      message: 'Thư mục này còn phiên đang chạy.',
     });
   });
 

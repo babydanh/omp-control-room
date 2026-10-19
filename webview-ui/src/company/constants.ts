@@ -105,8 +105,41 @@ export const HERDR_SCREEN_LINES = 200;
 /** How often an open herdr screen is re-read while its agent is working. */
 export const HERDR_SCREEN_POLL_MS = 2000;
 
-/** Slide time of the detail drawer, matching the approved mockup. */
-export const COMPANY_DRAWER_SLIDE_MS = 320;
+/**
+ * Board motion: every duration, stagger, lift, tone and curve the company board
+ * animates. flip.ts, CompanyBoard and DetailDrawer read these, and the board's
+ * CSS reads the same values through custom properties set inline. Durations are
+ * milliseconds; distances are CSS pixels.
+ */
+export const COMPANY_MOTION = {
+  /** Ease-out cubic: quick off the mark, settling softly. Flights sample the same curve in flip.ts. */
+  easing: 'cubic-bezier(.33,1,.68,1)',
+  /** A lane column's width, on collapse and on expand. */
+  laneWidthMs: 420,
+  /** A lane's body fades and rises this long: after the width on expand, before it on collapse. */
+  laneContentMs: 240,
+  /** How far a lane's body rises into place. */
+  laneContentRisePx: 4,
+  /** A card that changes lane flies this long: inside the 650-800ms band. */
+  flightMs: 760,
+  /** How far a flying card lifts off its straight path, at the midpoint of its travel. */
+  flightLiftPx: 16,
+  /** How many samples a flight's arc is built from; the path is linear between them. */
+  flightSteps: 20,
+  /** A flying card starts at this scale and settles to 1 at its new place. */
+  flightScaleFrom: 0.98,
+  /** The surface a flying card rises to: one step above its resting raised tone, back at rest on landing. */
+  flightTone: 'var(--color-hover)',
+  /** Each card in one render starts this much after the card before it, so a wave cascades. */
+  flightStaggerMs: 40,
+  /** A card that moves within its own lane glides, translate only. */
+  glideMs: 300,
+  /** A card that arrives fades in and rises. */
+  enterMs: 300,
+  enterRisePx: 8,
+  /** The detail drawer's slide, open and closed. */
+  drawerSlideMs: 320,
+} as const;
 
 /** Detail drawer width bounds, in CSS pixels. The drawer never leaves the lanes fewer than their visible minimum. */
 export const COMPANY_DRAWER_MIN_WIDTH_PX = 280;

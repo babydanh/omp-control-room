@@ -476,3 +476,15 @@ export function rememberRecentCompanyWorkspace(workspacePath: string): void {
   cfg.recentCompanyWorkspaces = next;
   writeConfig(cfg);
 }
+
+/**
+ * Drop one folder from the recent list, so it no longer shows. Returns whether the change reached the disk; a folder
+ * that was not listed is already gone and counts as done. Its display name is kept.
+ */
+export function forgetRecentCompanyWorkspace(workspacePath: string): boolean {
+  const cfg = readConfig();
+  const next = cfg.recentCompanyWorkspaces.filter((entry) => !pathsMatch(entry, workspacePath));
+  if (next.length === cfg.recentCompanyWorkspaces.length) return true;
+  cfg.recentCompanyWorkspaces = next;
+  return writeConfig(cfg);
+}

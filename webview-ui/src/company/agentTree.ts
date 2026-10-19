@@ -74,6 +74,11 @@ export interface ProjectNode {
   switchTo: string | null;
   /** A board folder the board remembers but has not opened: switching to it opens it. */
   notOpen: boolean;
+  /**
+   * A board folder the server reports as gone from disk while it stays open. Its note offers to
+   * take it off the list; herdr groups are never missing.
+   */
+  missing: boolean;
   /** The git branch a herdr group reports, shown as a chip; null when none does. */
   branch: string | null;
   /** The colour slot of the project's left tick, 0 up to PROJECT_TONE_COUNT. */
@@ -146,6 +151,7 @@ export function buildProjectTree(
         active: false,
         switchTo: null,
         notOpen: false,
+        missing: false,
         branch: placed.find((row) => row.branch !== null)?.branch ?? null,
         tone: projectTone(key),
         counts: countTones(repo.rows.map((row) => row.tone)),
@@ -173,9 +179,11 @@ function folderProjects(
 ): ProjectNode[] {
   const groups = buildAgentGroups(state, now);
   const listed = state.workspaces ?? [];
-  const activePath =
-    listed.find((entry) => entry.active)?.path ?? state.settings?.workspacePath ?? null;
-  const projects: ProjectNode[] = [activeBoardProject(state, groups, activePath, collapsed)];
+  const activeEntry = listed.find((entry) => entry.active);
+  const activePath = activeEntry?.path ?? state.settings?.workspacePath ?? null;
+  const projects: ProjectNode[] = [
+    activeBoardProject(state, groups, activePath, collapsed, activeEntry?.missing === true),
+  ];
   for (const entry of listed) {
     if (entry.active || entry.path === activePath) continue;
     projects.push(inactiveBoardProject(entry, collapsed));
@@ -225,6 +233,7 @@ function loadedBoardProject(
     active: true,
     switchTo: null,
     notOpen: false,
+    missing: entry.missing === true,
     branch: null,
     tone: folderToneIndex(entry.path, FOLDER_TONE_COUNT),
     counts: countTones(groups.flatMap((group) => group.active.map((row) => row.tone))),
@@ -243,6 +252,7 @@ function activeBoardProject(
   groups: AgentRoleGroup[],
   activePath: string | null,
   collapsed: ReadonlySet<string>,
+  missing: boolean,
 ): ProjectNode {
   const key = boardProjectKey(activePath);
   return {
@@ -254,6 +264,7 @@ function activeBoardProject(
     active: true,
     switchTo: null,
     notOpen: false,
+    missing,
     branch: null,
     tone: projectTone(key),
     counts: countTones(groups.flatMap((group) => group.active.map((row) => row.tone))),
@@ -282,6 +293,7 @@ function inactiveBoardProject(
     active: false,
     switchTo: entry.path,
     notOpen: !entry.open,
+    missing: entry.missing === true,
     branch: null,
     tone: projectTone(key),
     counts: { working: entry.working, needs: entry.waiting, idle: 0, error: 0 },

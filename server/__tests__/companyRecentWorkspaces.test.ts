@@ -4,6 +4,7 @@ import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
+  forgetRecentCompanyWorkspace,
   readConfig,
   readRecentCompanyWorkspaces,
   RECENT_COMPANY_WORKSPACES_LIMIT,
@@ -100,5 +101,25 @@ describe('configPersistence: recent company workspaces', () => {
     );
 
     expect(readRecentCompanyWorkspaces()).toEqual([alpha, beta]);
+  });
+
+  it('forgets a folder, matching a trailing separator, and keeps the other entries', () => {
+    const alpha = path.join(tempHome, 'alpha');
+    const beta = path.join(tempHome, 'beta');
+    rememberRecentCompanyWorkspace(alpha);
+    rememberRecentCompanyWorkspace(beta);
+
+    expect(forgetRecentCompanyWorkspace(alpha + path.sep)).toBe(true);
+
+    expect(readRecentCompanyWorkspaces()).toEqual([beta]);
+  });
+
+  it('reports success and leaves the list alone when the folder was never remembered', () => {
+    const alpha = path.join(tempHome, 'alpha');
+    rememberRecentCompanyWorkspace(alpha);
+
+    expect(forgetRecentCompanyWorkspace(path.join(tempHome, 'never'))).toBe(true);
+
+    expect(readRecentCompanyWorkspaces()).toEqual([alpha]);
   });
 });

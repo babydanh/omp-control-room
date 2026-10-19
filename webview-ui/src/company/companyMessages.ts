@@ -177,6 +177,11 @@ export function folderName(requestId: string, path: string, name: string): Clien
   return { type: 'companyFolderName', requestId, path, name };
 }
 
+/** Take the folder at `path` off the folder list. The verdict is a companyCommandResult. */
+export function folderForget(requestId: string, path: string): ClientMessage {
+  return { type: 'companyFolderForget', requestId, path };
+}
+
 /** Which folders the server streams to this board: every open one, or only the active one. */
 export function companyViewMode(requestId: string, mode: CompanyViewMode): ClientMessage {
   return { type: 'companyViewMode', requestId, mode };

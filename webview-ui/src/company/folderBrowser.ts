@@ -91,3 +91,12 @@ export function folderNameError(name: string): string | null {
 export function defaultFolderName(path: string): string {
   return folderBasename(path);
 }
+
+/**
+ * The row the arrow keys land on: one step down or up from `current`, held inside the rows
+ * that exist. An empty list keeps the highlight at the first row.
+ */
+export function stepHighlight(current: number, step: 1 | -1, count: number): number {
+  if (count === 0) return 0;
+  return Math.min(Math.max(current + step, 0), count - 1);
+}

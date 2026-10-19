@@ -102,7 +102,7 @@ export const PALETTE_ACTIONS: readonly PaletteActionInfo[] = [
   {
     id: 'open-folder',
     title: PALETTE_ACTION_LABELS['open-folder'],
-    subtitle: 'Chọn hoặc dán đường dẫn một thư mục khác',
+    subtitle: 'Duyệt các thư mục trên máy chủ để chọn một thư mục khác',
     keywords: 'folder directory open thư mục đường dẫn',
   },
   {

@@ -32,7 +32,7 @@ import type { BoardCard, BoardLane } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
-import { COMPANY_DRAWER_MIN_WIDTH_PX, COMPANY_DRAWER_SLIDE_MS } from '../constants.js';
+import { COMPANY_DRAWER_MIN_WIDTH_PX, COMPANY_MOTION } from '../constants.js';
 import {
   clampDrawerWidth,
   type DrawerPrefs,
@@ -115,7 +115,7 @@ export function DetailDrawer({
   const open = subject !== null;
   useEffect(() => {
     if (open) return undefined;
-    const timer = window.setTimeout(() => setRetained(null), COMPANY_DRAWER_SLIDE_MS);
+    const timer = window.setTimeout(() => setRetained(null), COMPANY_MOTION.drawerSlideMs);
     return () => window.clearTimeout(timer);
   }, [open]);
 
@@ -148,11 +148,15 @@ export function DetailDrawer({
   const headerTriggers =
     menuSubject === null ? null : agentMenuTriggers<HTMLElement>(menuSubject, rest.onMenu);
   const motion = {
-    transitionDuration: `${COMPANY_DRAWER_SLIDE_MS}ms`,
-    animationDuration: `${COMPANY_DRAWER_SLIDE_MS}ms`,
+    transitionDuration: `${COMPANY_MOTION.drawerSlideMs}ms`,
+    animationDuration: `${COMPANY_MOTION.drawerSlideMs}ms`,
   };
-  // The drawer's width is a custom property, read by the company-drawer rules in index.css.
-  const style = { ...motion, '--company-drawer-width': `${width}px` } as CSSProperties;
+  // The drawer's width and slide easing are custom properties that index.css reads.
+  const style = {
+    ...motion,
+    '--company-drawer-width': `${width}px`,
+    '--company-ease': COMPANY_MOTION.easing,
+  } as CSSProperties;
 
   function onGripPointerDown(event: ReactPointerEvent<HTMLDivElement>): void {
     if (event.button !== 0) return;

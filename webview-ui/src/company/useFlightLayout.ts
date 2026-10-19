@@ -1,7 +1,7 @@
 /**
  * useFlightLayout: runs the board's card motion over one container after every
  * render. Keyed elements (`data-flight-key`) that moved lane or slot fly to their
- * new place, and new keys fade and scale in. The first render only records
+ * new place, and new keys fade and rise in. The first render only records
  * positions. Reduced motion is read live, so turning it on stops the motion.
  */
 

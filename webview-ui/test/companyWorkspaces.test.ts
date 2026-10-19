@@ -11,12 +11,7 @@ import {
   EMPTY_SELECTION,
   type TerminalView,
 } from '../src/company/companyState.js';
-import {
-  activeWorkspace,
-  folderLabel,
-  planWorkspaceOpen,
-  workspaceActivity,
-} from '../src/company/workspaces.js';
+import { activeWorkspace, folderLabel, workspaceActivity } from '../src/company/workspaces.js';
 import type { MessageTransport } from '../src/transport/types.js';
 import { session, snapshot, stateFrom } from './companyFixtures.js';
 
@@ -69,27 +64,8 @@ describe('folder names and activity', () => {
   });
 });
 
-describe('planning a folder switch', () => {
+describe('the active folder', () => {
   const list = [folder(DU_AN, true), folder(KHAC, false)];
-
-  it('refuses a blank entry before any command is sent', () => {
-    expect(planWorkspaceOpen(list, '   ')).toEqual({
-      kind: 'refuse',
-      message: 'Hãy nhập đường dẫn thư mục.',
-    });
-  });
-
-  it('needs no command for the folder already active, whatever its slash style or case', () => {
-    expect(planWorkspaceOpen(list, 'd:/du-an/')).toEqual({ kind: 'stay' });
-  });
-
-  it('sends any other folder as a switch, with the path trimmed', () => {
-    expect(planWorkspaceOpen(list, '  D:\\moi  ')).toEqual({ kind: 'open', path: 'D:\\moi' });
-  });
-
-  it('sends the switch when no folder list has arrived yet', () => {
-    expect(planWorkspaceOpen(null, DU_AN)).toEqual({ kind: 'open', path: DU_AN });
-  });
 
   it('finds the active folder, and none before a list arrives', () => {
     expect(activeWorkspace(list)?.path).toBe(DU_AN);

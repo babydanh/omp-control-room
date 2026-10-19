@@ -148,6 +148,11 @@ export interface CompanyWorkspaceControl {
    * message. The path must already be canonical.
    */
   setFolderName(workspacePath: string, name: string | null): void;
+  /**
+   * Take a folder off the list: drop its recent entry and, when it is open, stop its Company. Refused while that
+   * folder has working or waiting sessions. The path is taken as listed, not resolved on disk.
+   */
+  forget(workspacePath: string): Promise<void>;
 }
 
 export interface CompanyCommandContext {
@@ -227,6 +232,7 @@ const FOLDER_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyFolderBrowseRequest',
   'companyFolderCreate',
   'companyFolderName',
+  'companyFolderForget',
 ]);
 
 /** Message types this dispatcher owns. Everything else is not a company command. */
@@ -624,6 +630,8 @@ async function folderCommand(
       await browseFolders(msg, requestId, send);
     } else if (msg.type === 'companyFolderCreate') {
       await createFolderCommand(msg, requestId, send);
+    } else if (msg.type === 'companyFolderForget') {
+      await forgetFolderCommand(msg, requestId, workspaces, send);
     } else {
       await nameFolderCommand(msg, requestId, workspaces, send);
     }
@@ -696,6 +704,26 @@ async function nameFolderCommand(
     ok: true,
     workspacePath: canonical,
   });
+}
+
+/** Take a folder off the list, stopping its Company when it is open. The path is taken as listed. */
+async function forgetFolderCommand(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  workspaces: CompanyWorkspaceControl | null,
+  send: Send,
+): Promise<void> {
+  const folderPath = stringField(msg, 'path');
+  if (folderPath === null || folderPath.trim() === '') {
+    fail(send, requestId, 'invalid_request', 'Cần đường dẫn thư mục để gỡ.');
+    return;
+  }
+  if (workspaces === null) {
+    fail(send, requestId, 'company_unavailable', 'Máy chủ này không quản lý nhiều thư mục.');
+    return;
+  }
+  await workspaces.forget(folderPath);
+  ok(send, requestId);
 }
 
 /**

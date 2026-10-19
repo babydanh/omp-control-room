@@ -35,8 +35,8 @@ export interface BoardTopBarProps {
   isMac: boolean;
   onOpenPalette: () => void;
   onOpenShortcuts: () => void;
-  /** Bumped by the palette to open the folder path field once per bump. */
-  folderRequest: number;
+  /** Bumped by the palette to open the folder browser once per bump. */
+  browseRequest: number;
 }
 
 /** A tooltip that carries the shortcut for an action, when the registry has one. */
@@ -85,7 +85,7 @@ export function BoardTopBar({
   isMac,
   onOpenPalette,
   onOpenShortcuts,
-  folderRequest,
+  browseRequest,
 }: BoardTopBarProps) {
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -104,7 +104,7 @@ export function BoardTopBar({
           </button>
           <h1 className="min-w-0 shrink truncate text-base text-text">OMP Board</h1>
           <div className="min-w-0 flex-1">
-            <WorkspaceSwitcher client={client} state={state} openRequest={folderRequest} />
+            <WorkspaceSwitcher client={client} state={state} browseRequest={browseRequest} />
           </div>
           <ToolButton
             icon="search"
@@ -172,7 +172,7 @@ export function BoardTopBar({
   return (
     <header className="flex items-center gap-3 px-3 py-2">
       <h1 className="shrink-0 text-base text-text">OMP Board</h1>
-      <WorkspaceSwitcher client={client} state={state} openRequest={folderRequest} />
+      <WorkspaceSwitcher client={client} state={state} browseRequest={browseRequest} />
       <div className="min-w-0 flex-1" />
       <ChatNewButton client={client} />
       <StatusPill state={state} />

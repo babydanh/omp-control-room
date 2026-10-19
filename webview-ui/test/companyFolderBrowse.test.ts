@@ -260,6 +260,18 @@ describe('creating and renaming folders', () => {
     });
   });
 
+  it('forgets a folder by the path it is listed under, even when it is gone from disk', () => {
+    const { client, sent } = listedClient();
+
+    const forget = client.forgetFolder(KHAC);
+
+    expect(sent.at(-1)).toEqual({
+      type: 'companyFolderForget',
+      requestId: forget.requestId,
+      path: KHAC,
+    });
+  });
+
   it('reports a create the transport refuses on its handle', () => {
     const { client, setConnected } = listedClient();
     setConnected(false);
