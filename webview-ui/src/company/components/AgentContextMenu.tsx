@@ -13,7 +13,9 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { AgentInfo, CompanySessionSummary, HerdrAgent } from '../../../../core/src/company.js';
-import type { HerdrSleepingSession } from '../../../../core/src/messages.js';
+import type { HerdrSleepingSession, WorkItemAssignee } from '../../../../core/src/messages.js';
+import { isBrowserRuntime } from '../../runtime.js';
+import { serverToken } from '../../transport/serverToken.js';
 import { workingFolder } from '../agentInfoView.js';
 import {
   type AgentMenuAction,
@@ -35,8 +37,10 @@ import {
   sessionNameProblem,
   sleepingMenuItems,
   taskCardMenuItems,
+  type WorkMenuFacts,
 } from '../agentMenu.js';
 import { pendingQuestionSessionIds, sleepingName } from '../agentSidebarView.js';
+import { herdrAgentLabel, sessionLabelOf } from '../assigneeOptions.js';
 import { copyText } from '../clipboard.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
@@ -50,6 +54,7 @@ import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
 import { FolderNameDialog } from './FolderNameDialog.js';
 import { Icon } from './Icon.js';
+import type { WorkDialogRequest } from './WorkDialogHost.js';
 
 export interface AgentContextMenuProps {
   client: CompanyClient;
@@ -63,6 +68,7 @@ export interface AgentContextMenuProps {
   onOpenContract: (contractId: string) => void;
   onToggleMaximize: () => void;
   onToggleProject: (key: string) => void;
+  onWorkDialog: (request: WorkDialogRequest) => void;
 }
 
 /** The actions that ask first. Each names the item that opened the question. */
@@ -91,12 +97,19 @@ interface MenuFacts {
   prompt: { preview: string } | undefined;
   folder: string | null;
   taskContractId: string | null;
+  work: WorkMenuFacts;
 }
 
 const ITEM_SELECTOR = 'button[role="menuitem"]:not([aria-disabled="true"])';
 const NOT_SENT_NOTICE = 'Không gửi được.';
 const COPY_FAILED_NOTICE = 'Không sao chép được vào bộ nhớ tạm.';
 const GONE_TEXT = 'Mục này không còn trên bảng.';
+
+/**
+ * A browser tab without the server token is read-only: the server refuses its company commands,
+ * so no item here may send one. This is the rule PreviewPrompt applies to its input.
+ */
+const CONNECTION_PRIVILEGED = !isBrowserRuntime || serverToken !== null;
 
 /** The session a menu acts on: a session row's own, or the one a task or planning card names. */
 function actingSessionId(subject: AgentMenuSubject): string | null {
@@ -117,6 +130,30 @@ function herdrFolder(cwd: string | undefined, info: AgentInfo | undefined): stri
   return cwd || (info === undefined ? null : workingFolder(info)) || null;
 }
 
+/**
+ * The agent a work action names, with the label its dialog shows: a herdr pane, or the omp
+ * session a session row or task card acts on. Null for any other subject.
+ */
+function workAgentOf(
+  subject: AgentMenuSubject,
+  agent: HerdrAgent | undefined,
+  session: CompanySessionSummary | undefined,
+): { assignee: WorkItemAssignee; label: string } | null {
+  switch (subject.kind) {
+    case 'herdr':
+      if (agent === undefined) return null;
+      return { assignee: { kind: 'herdr', paneId: agent.paneId }, label: herdrAgentLabel(agent) };
+    case 'session':
+    case 'task':
+      if (session === undefined) return null;
+      return { assignee: { kind: 'session', sessionId: session.id }, label: sessionLabelOf(session) };
+    case 'planning':
+    case 'sleeping':
+    case 'project':
+      return null;
+  }
+}
+
 /** The items for the subject; null when what it names is gone from the board. */
 function itemsFor(subject: AgentMenuSubject, facts: MenuFacts): AgentMenuItem[] | null {
   switch (subject.kind) {
@@ -134,7 +171,8 @@ function itemsFor(subject: AgentMenuSubject, facts: MenuFacts): AgentMenuItem[] 
     case 'planning':
       return facts.prompt === undefined ? null : planningMenuItems(facts.session !== undefined);
     case 'herdr':
-      return facts.agent === undefined ? null : herdrMenuItems(facts.folder, subject.drawer);
+      if (facts.agent === undefined) return null;
+      return herdrMenuItems(facts.folder, subject.drawer, facts.work);
     case 'sleeping':
       return facts.sleeping === undefined ? null : sleepingMenuItems(subject.drawer);
     case 'project':
@@ -209,6 +247,7 @@ export function AgentContextMenu({
   onOpenContract,
   onToggleMaximize,
   onToggleProject,
+  onWorkDialog,
 }: AgentContextMenuProps) {
   const { subject, anchor, returnFocus } = request;
   const sessionId = actingSessionId(subject);
@@ -236,9 +275,18 @@ export function AgentContextMenu({
   const holdsWork =
     session !== undefined &&
     sessionHoldsWork(session, pendingQuestionSessionIds(state).has(session.id));
+  // The folder this agent's work is queued in: the one the server tags its folder with.
+  const taggedFolder = isHerdr
+    ? agent?.workspacePath
+    : session === undefined
+      ? undefined
+      : state.folderOf[session.id];
+  const work: WorkMenuFacts = { folder: taggedFolder || null, privileged: CONNECTION_PRIVILEGED };
+  const workAgent = workAgentOf(subject, agent, session);
   const facts: MenuFacts = {
     session,
-    sessionFacts: session === undefined ? null : { status: session.status, cwd: folder, holdsWork },
+    sessionFacts:
+      session === undefined ? null : { status: session.status, cwd: folder, holdsWork, work },
     agent,
     sleeping,
     task,
@@ -246,6 +294,7 @@ export function AgentContextMenu({
     folder,
     taskContractId:
       task !== undefined && task.contractId in state.contracts ? task.contractId : null,
+    work,
   };
   const items = itemsFor(subject, facts);
   const header = headerLines(subject, facts);
@@ -514,6 +563,28 @@ export function AgentContextMenu({
         return;
       case 'wake':
         if (paneId !== null) track(client.herdrWake(paneId));
+        return;
+      case 'assignWork':
+        if (workAgent !== null && work.folder !== null) {
+          onWorkDialog({
+            kind: 'assign',
+            workspacePath: work.folder,
+            assignee: workAgent.assignee,
+            label: workAgent.label,
+          });
+        }
+        onClose();
+        return;
+      case 'describeRole':
+        if (workAgent !== null && work.folder !== null) {
+          onWorkDialog({
+            kind: 'role',
+            workspacePath: work.folder,
+            agent: workAgent.assignee,
+            label: workAgent.label,
+          });
+        }
+        onClose();
         return;
     }
   }

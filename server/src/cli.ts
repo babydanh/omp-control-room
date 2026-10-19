@@ -78,6 +78,8 @@ export interface CliArgs {
   rotateToken: boolean;
   /** False when --no-browser-reaper was passed: idle omp headless browsers are left running. */
   browserReaper: boolean;
+  /** --hide-token: print the start URL with its token redacted, for output that goes to a log file. */
+  hideToken: boolean;
 }
 
 /** Thrown by parseArgs on an invalid --port. Kept separate from process.exit so
@@ -93,6 +95,7 @@ export function parseArgs(argv: string[]): CliArgs {
     browserReaper: true,
     allowedHosts: [],
     rotateToken: false,
+    hideToken: false,
   };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--port' || argv[i] === '-p') {
@@ -138,6 +141,8 @@ export function parseArgs(argv: string[]): CliArgs {
       args.terminal = false;
     } else if (argv[i] === '--no-browser-reaper') {
       args.browserReaper = false;
+    } else if (argv[i] === '--hide-token') {
+      args.hideToken = true;
     } else if (argv[i] === '--help') {
       console.log(`Usage: pixel-agents [options]
 
@@ -154,6 +159,8 @@ Options:
                         launching or attaching from the browser)
   --no-browser-reaper   Leave idle omp headless browsers running (default: stop
                         those with no open page for 10 minutes)
+  --hide-token          Print the start URL without its token (the token stays in
+                        ~/.pixel-agents/standalone-token), for output kept in a log
   --help                Show this help message`);
       process.exit(0);
     }
@@ -316,6 +323,7 @@ async function main(): Promise<void> {
     hostDefaults: {
       helperPath: path.join(distRoot, COMPANY_PTY_HOST_FILENAME),
       extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
+      herdr,
     },
     recents: {
       read: readRecentCompanyWorkspaces,
@@ -557,13 +565,13 @@ async function main(): Promise<void> {
     // address; only the consent-bearing toggle needs the token.
     const displayHost =
       args.host === '0.0.0.0' || args.host === '::' || args.host === '' ? '127.0.0.1' : args.host;
-    // Only a terminal gets the clickable token link. Anything else (a log file, a
-    // supervisor's output buffer) is written to disk, so it gets the redacted URL and
-    // where the persisted token lives, like the request logs (see redactTokenQuery).
+    // The operator opens this URL, so it carries the token. --hide-token is for output kept
+    // on disk (a launcher's log file): the token is redacted, like the request logs
+    // (see redactTokenQuery), and the line says where the persisted token lives.
     const url = `http://${displayHost}:${config.port}/?token=${config.token}`;
-    const shownUrl = process.stdout.isTTY
-      ? url
-      : `${redactTokenQuery(url)} (token: ~/${SERVER_JSON_DIR}/${STANDALONE_TOKEN_FILE_NAME})`;
+    const shownUrl = args.hideToken
+      ? `${redactTokenQuery(url)} (token: ~/${SERVER_JSON_DIR}/${STANDALONE_TOKEN_FILE_NAME})`
+      : url;
     console.log(`\n  Pixel Agents server running at ${shownUrl}\n`);
 
     // ── Graceful shutdown ──

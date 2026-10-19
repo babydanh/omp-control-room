@@ -13,6 +13,7 @@
  *  - Ctrl/Cmd+Shift+Enter, and the "Giao cho công ty" button: the Company workflow
  *    (Director, Contract, approval, workers). A selected Company session becomes the
  *    target; a plain omp chat never does.
+ *  - "Giao việc…" opens a dialog that gives the text to a chosen agent as a work item.
  *  - `/new` opens a new omp chat in this folder, with no prompt. `/resume` opens a
  *    picker over the omp sessions saved here. Neither reaches a terminal.
  *  - Attach. OMP's box carries an image picker that the company bridge cannot
@@ -32,6 +33,7 @@ import {
 
 import type { HerdrAgent } from '../../../../core/src/company.js';
 import type { OmpSessionEntry } from '../../../../core/src/messages.js';
+import { assigneeOptionsFor } from '../assigneeOptions.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient } from '../companyClient.js';
 import { composerInputHeight } from '../composerHeight.js';
@@ -58,6 +60,7 @@ import { useCompanyState } from '../useCompanyState.js';
 import { folderLabel, folderLabelFor } from '../workspaces.js';
 import { CompanyButton } from './CompanyButton.js';
 import { OmpSessionPicker } from './OmpSessionPicker.js';
+import { CreateWorkDialog } from './WorkDialogHost.js';
 
 /** Shown when a line is sent with no session selected. */
 const NO_SESSION_NOTICE = 'Chọn một phiên omp để gõ vào, hoặc bấm Phiên mới để mở phiên.';
@@ -127,6 +130,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const state = useCompanyState(client);
   const draft = state.prompt;
   const [notice, setNotice] = useState<string | null>(null);
+  const [assignOpen, setAssignOpen] = useState(false);
   /** The request of an open `/resume` picker, or null when no picker is open. */
   const [resumeRequest, setResumeRequest] = useState<string | null>(null);
   const [highlight, setHighlight] = useState(0);
@@ -500,6 +504,15 @@ export function PromptComposer({ client }: PromptComposerProps) {
         </CompanyButton>
         <CompanyButton
           size="sm"
+          variant="default"
+          className="shrink-0 whitespace-nowrap"
+          disabled={focus === null || folderLoading || draft.text.trim() === ''}
+          onClick={() => setAssignOpen(true)}
+        >
+          Giao việc…
+        </CompanyButton>
+        <CompanyButton
+          size="sm"
           variant="accent"
           className="shrink-0"
           disabled={blocker !== null || busy || resumeRequest !== null || newSessionWaits}
@@ -557,6 +570,21 @@ export function PromptComposer({ client }: PromptComposerProps) {
       )}
       {blocker !== null && draft.text.trim().length > 0 && (
         <p className="mt-1 text-2xs text-text-muted">{blocker}</p>
+      )}
+      {assignOpen && focus !== null && (
+        <CreateWorkDialog
+          client={client}
+          workspacePath={focus}
+          title="Giao việc"
+          initialText={draft.text}
+          textEditable
+          options={assigneeOptionsFor(state, focus)}
+          onAccepted={() => {
+            setAssignOpen(false);
+            client.setDraftText('');
+          }}
+          onClose={() => setAssignOpen(false)}
+        />
       )}
     </section>
   );

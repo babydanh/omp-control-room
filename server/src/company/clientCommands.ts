@@ -79,6 +79,8 @@ import {
   sessionLogDirectory,
 } from './sessionLog.js';
 import type { UsageControl } from './usagePage.js';
+import { isWorkItemAssignee } from './workItems/workItemModel.js';
+import type { WorkItemService } from './workItems/workItemService.js';
 import { listWorkspaceFiles, readWorkspaceFile } from './workspaceFiles.js';
 
 /** Controller lease returned by an attach; the last attach for a session wins. */
@@ -123,6 +125,8 @@ export interface CompanyCommandServices {
   modelCatalog(): Promise<CompanyModelCatalogEntry[]>;
   /** One managed session's description; a live run is asked, otherwise its record answers. */
   sessionInfo(sessionId: string): Promise<AgentInfo>;
+  /** The folder's manual work items; absent on a follower, which cannot change them. */
+  workItems?: WorkItemService;
 }
 
 /**
@@ -271,6 +275,12 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySessionLogRequest',
   'companyAttachmentUpload',
   'companyWorkspaceOpen',
+  'companyWorkItemCreate',
+  'companyWorkItemAssign',
+  'companyWorkItemFollowUp',
+  'companyWorkItemMark',
+  'companyWorkItemCancel',
+  'companyAgentRoleSet',
   ...FOLDER_COMMAND_TYPES,
   ...USAGE_COMMAND_TYPES,
   'companyViewMode',
@@ -301,6 +311,12 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companyChatNew: true,
   companySessionResume: true,
   companyPromptSubmit: true,
+  companyWorkItemCreate: true,
+  companyWorkItemAssign: true,
+  companyWorkItemFollowUp: true,
+  companyWorkItemMark: true,
+  companyWorkItemCancel: true,
+  companyAgentRoleSet: true,
 };
 
 export function isCompanyCommand(msg: Record<string, unknown>): boolean {
@@ -344,13 +360,20 @@ function fail(send: Send, requestId: string | null, code: string, message?: stri
   });
 }
 
-function ok(send: Send, requestId: string | null, revision?: number, sessionId?: string): void {
+function ok(
+  send: Send,
+  requestId: string | null,
+  revision?: number,
+  sessionId?: string,
+  workItemId?: string,
+): void {
   send({
     type: 'companyCommandResult',
     requestId: requestId ?? FALLBACK_REQUEST_ID,
     ok: true,
     ...(revision === undefined ? {} : { revision }),
     ...(sessionId === undefined ? {} : { sessionId }),
+    ...(workItemId === undefined ? {} : { workItemId }),
   });
 }
 
@@ -506,6 +529,14 @@ async function run(
         return;
       case 'companyAttachmentUpload':
         await attachmentUpload(msg, requestId, services, send);
+        return;
+      case 'companyWorkItemCreate':
+      case 'companyWorkItemAssign':
+      case 'companyWorkItemFollowUp':
+      case 'companyWorkItemMark':
+      case 'companyWorkItemCancel':
+      case 'companyAgentRoleSet':
+        await workItemCommand(msg, requestId, services, send);
         return;
       case 'terminalAttach':
         await terminalAttach(msg, requestId, services, send, ctx);
@@ -955,6 +986,7 @@ async function snapshot(
     snapshot: diagnostics ? { ...projection, diagnostics } : projection,
     workspacePath: services.workspaceRoot,
   });
+  if (services.workItems) send(services.workItems.snapshot());
 }
 
 async function submitPrompt(
@@ -1097,6 +1129,80 @@ async function cancelPrompt(
     return;
   }
   await services.coordinator.cancelPrompt(promptId);
+  ok(send, requestId);
+}
+
+/**
+ * Work item commands. The folder's work item service applies each one, and a reply carries the id
+ * of the item a create made. A resent command gets the same answer: the service remembers request ids.
+ */
+async function workItemCommand(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const work = services.workItems;
+  if (!work) {
+    fail(send, requestId, 'company_unavailable', 'Thư mục này chưa sẵn sàng để giao việc.');
+    return;
+  }
+  if (requestId === null) {
+    fail(send, requestId, 'invalid_request', 'Cần có requestId.');
+    return;
+  }
+  const id = stringField(msg, 'id') ?? '';
+  if (msg.type === 'companyWorkItemCreate') {
+    if (!isWorkItemAssignee(msg.assignee)) {
+      fail(send, requestId, 'assignee_invalid', 'Người nhận việc không hợp lệ.');
+      return;
+    }
+    const workItemId = await work.create({
+      requestId,
+      text: stringField(msg, 'text') ?? '',
+      assignee: msg.assignee,
+    });
+    ok(send, requestId, undefined, undefined, workItemId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemAssign') {
+    if (!isWorkItemAssignee(msg.assignee)) {
+      fail(send, requestId, 'assignee_invalid', 'Người nhận việc không hợp lệ.');
+      return;
+    }
+    await work.assign({ requestId, id, assignee: msg.assignee });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemFollowUp') {
+    await work.followUp({ requestId, id, text: stringField(msg, 'text') ?? '' });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemMark') {
+    const verdict = stringField(msg, 'verdict');
+    if (verdict !== 'done' && verdict !== 'failed') {
+      fail(send, requestId, 'invalid_work_item_verdict', 'Kết quả phải là done hoặc failed.');
+      return;
+    }
+    await work.mark({ requestId, id, verdict });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemCancel') {
+    await work.cancel({ requestId, id });
+    ok(send, requestId);
+    return;
+  }
+  if (!isWorkItemAssignee(msg.agent)) {
+    fail(send, requestId, 'assignee_invalid', 'Người nhận việc không hợp lệ.');
+    return;
+  }
+  await work.setRole({
+    requestId,
+    agent: msg.agent,
+    description: stringField(msg, 'description') ?? '',
+  });
   ok(send, requestId);
 }
 

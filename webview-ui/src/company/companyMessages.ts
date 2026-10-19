@@ -21,7 +21,12 @@ import type {
   RoleProfile,
   SubmitPromptInput,
 } from '../../../core/src/company.js';
-import type { ClientMessage, HerdrKey } from '../../../core/src/messages.js';
+import type {
+  ClientMessage,
+  HerdrKey,
+  WorkItemAssignee,
+  WorkItemVerdict,
+} from '../../../core/src/messages.js';
 import {
   COMPANY_ARTIFACT_PAGE_BYTES,
   COMPANY_FILE_PAGE_BYTES,
@@ -46,6 +51,7 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   herdrInfo: true,
   companyOmpSessions: true,
   companyWorkspaces: true,
+  companyWorkItems: true,
   companyFolderBrowse: true,
   herdrAgents: true,
   herdrScreen: true,
@@ -313,6 +319,65 @@ export function sessionLogRequest(requestId: string, sessionId: string): ClientM
 
 export function sessionRename(requestId: string, sessionId: string, name: string): ClientMessage {
   return { type: 'companySessionRename', requestId, sessionId, name };
+}
+
+/** File a new work item and hand it to `assignee`. The verdict names the item in `workItemId`. */
+export function workItemCreate(
+  requestId: string,
+  workspacePath: string,
+  text: string,
+  assignee: WorkItemAssignee,
+): ClientMessage {
+  return { type: 'companyWorkItemCreate', requestId, workspacePath, text, assignee };
+}
+
+/** Hand an existing work item to another agent. The verdict is a companyCommandResult. */
+export function workItemAssign(
+  requestId: string,
+  workspacePath: string,
+  id: string,
+  assignee: WorkItemAssignee,
+): ClientMessage {
+  return { type: 'companyWorkItemAssign', requestId, workspacePath, id, assignee };
+}
+
+/** Send more text to the agent holding a work item. The verdict is a companyCommandResult. */
+export function workItemFollowUp(
+  requestId: string,
+  workspacePath: string,
+  id: string,
+  text: string,
+): ClientMessage {
+  return { type: 'companyWorkItemFollowUp', requestId, workspacePath, id, text };
+}
+
+/** Close a work item as done or failed. The verdict is a companyCommandResult. */
+export function workItemMark(
+  requestId: string,
+  workspacePath: string,
+  id: string,
+  verdict: WorkItemVerdict,
+): ClientMessage {
+  return { type: 'companyWorkItemMark', requestId, workspacePath, id, verdict };
+}
+
+/** Withdraw a work item that is still queued. The verdict is a companyCommandResult. */
+export function workItemCancel(
+  requestId: string,
+  workspacePath: string,
+  id: string,
+): ClientMessage {
+  return { type: 'companyWorkItemCancel', requestId, workspacePath, id };
+}
+
+/** Set the description of an agent's role in a folder. The verdict is a companyCommandResult. */
+export function agentRoleSet(
+  requestId: string,
+  workspacePath: string,
+  agent: WorkItemAssignee,
+  description: string,
+): ClientMessage {
+  return { type: 'companyAgentRoleSet', requestId, workspacePath, agent, description };
 }
 
 export function sessionInfoRequest(requestId: string, sessionId: string): ClientMessage {

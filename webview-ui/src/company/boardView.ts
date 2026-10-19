@@ -18,10 +18,20 @@ import type {
   Task,
   VerificationEvidence,
 } from '../../../core/src/company.js';
+import type { WorkItemStatus } from '../../../core/src/messages.js';
 import { type AgentBoardCard, buildAgentCards } from './agentBoard.js';
 import type { CompanyViewState } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
 import { COMPANY_LANE_LABELS, COMPANY_LANE_ORDER } from './constants.js';
+import type { FolderIdentity } from './folderIdentity.js';
+import {
+  assigneeLabel,
+  laneForWorkItem,
+  queuePosition,
+  visibleWorkItems,
+  workItemCardHead,
+  workItemsOf,
+} from './workItemView.js';
 
 /**
  * Where a task status is shown. The seven lanes are the board's vocabulary; a
@@ -123,11 +133,32 @@ export interface BoardCard {
   sentBack: boolean;
 }
 
+/** A work item card: what the card shows, read from the item the server holds. */
+export interface BoardWorkItem {
+  id: string;
+  workspacePath: string;
+  lane: CompanyLaneId;
+  status: WorkItemStatus;
+  /** The first line of the text: the card's heading. */
+  head: string;
+  /** Who holds the item, in words. */
+  assignee: string;
+  /** Why the item waits, needs input, failed or is in review, as the server words it. */
+  reason: string | null;
+  /** 1-based place among the queued items for the same agent; 0 when the item is not queued. */
+  queuePosition: number;
+  updatedAt: string;
+  /** The folder the item is filed under when every folder is shown; null in folder mode. */
+  folder: FolderIdentity | null;
+}
+
 export interface BoardLane {
   id: CompanyLaneId;
   label: string;
   /** Task cards, in the server's order. */
   cards: BoardCard[];
+  /** Work item cards, in the order the folders and the server filed them. */
+  workItems: BoardWorkItem[];
   /** Agents with no task card of their own, drawn after the task cards. */
   agents: AgentBoardCard[];
 }
@@ -170,6 +201,22 @@ export function evidenceForTask(
     },
     records,
   };
+}
+
+/** The work items the board shows, as cards: each one's lane, heading, holder and queue place. */
+function workItemCards(state: CompanyViewState): BoardWorkItem[] {
+  return visibleWorkItems(state).map(({ item, workspacePath, folder }) => ({
+    id: item.id,
+    workspacePath,
+    lane: laneForWorkItem(item.status),
+    status: item.status,
+    head: workItemCardHead(item.text),
+    assignee: assigneeLabel(item.assignee, state, workspacePath),
+    reason: item.reason?.trim() ? item.reason : null,
+    queuePosition: queuePosition(item, workItemsOf(state, workspacePath).items),
+    updatedAt: item.updatedAt,
+    folder,
+  }));
 }
 
 export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
@@ -221,10 +268,12 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
     if (prompt.session !== null) carded.add(prompt.session.id);
   }
   const agents = buildAgentCards(state, carded);
+  const workItems = workItemCards(state);
   return COMPANY_LANE_ORDER.map((id) => ({
     id,
     label: COMPANY_LANE_LABELS[id],
     cards: cards.filter((card) => card.lane === id),
+    workItems: workItems.filter((card) => card.lane === id),
     agents: agents.filter((agent) => agent.lane === id),
   }));
 }

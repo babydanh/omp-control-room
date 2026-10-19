@@ -104,6 +104,7 @@ import {
 import type { OmpRunnerCommand } from './ompRunner.js';
 import { UsageLedger } from './usageService.js';
 import type { PrerequisiteCheck } from './verificationRunner.js';
+import { startWorkItems, type WorkItemHerdr, type WorkItemWiring } from './workItems/workItemWiring.js';
 
 /**
  * The client identity a surface gets when it does not name one: this process's
@@ -176,6 +177,8 @@ export interface WorkspaceCompanyHostOptions {
   readonly workspacePath: string;
   /** Process-level message sink; per-client egress gates run downstream. */
   readonly onMessage: (msg: ServerMessage) => void;
+  /** Process-level herdr link for work items; absent when herdr is not linked. */
+  readonly herdr?: WorkItemHerdr;
   readonly runnerCommand?: OmpRunnerCommand;
   readonly extensionPath?: string;
   readonly helperPath?: string;
@@ -998,7 +1001,9 @@ async function openOwnerCompanyHost(
   let coordinator: WorkspaceCompanyCoordinator | null = null;
   let broker: CompanyBrokerHandle | null = null;
   let disposed = false;
+  let workItemsWiring: WorkItemWiring | null = null;
   const publish = (message: ServerMessage): void => {
+    if (message.type === 'companyStateChanged') workItemsWiring?.service.scheduleReconcile();
     const key = terminalSessionKey(message);
     if (key === null) {
       // Board-wide: every authorized surface renders these already.
@@ -1066,6 +1071,13 @@ async function openOwnerCompanyHost(
       checkPrerequisite: options.checkPrerequisite ?? runtime.checkPrerequisite,
     });
     await coordinator.start();
+    workItemsWiring = await startWorkItems({
+      workspacePath: store.workspacePath,
+      namespaceDir: store.namespaceDir,
+      herdr: options.herdr,
+      coordinator,
+      publish,
+    });
   } catch (error) {
     // Reverse order, and always: a half-composed owner would hold the lock and
     // refuse every command sent to it.
@@ -1082,6 +1094,7 @@ async function openOwnerCompanyHost(
   const ownerCoordinator = coordinator;
   const ownerRuntime = runtime;
   const ownerBroker = broker;
+  const ownerWorkItems = workItemsWiring;
   const services: CompanyCommandServices = {
     coordinator: ownerCoordinator,
     store,
@@ -1093,6 +1106,7 @@ async function openOwnerCompanyHost(
     ),
     modelCatalog: () => ownerRuntime.modelCatalog(),
     sessionInfo: (sessionId) => ownerRuntime.sessionInfo(sessionId),
+    workItems: ownerWorkItems.service,
   };
 
   return {
@@ -1107,6 +1121,7 @@ async function openOwnerCompanyHost(
       // only then hand the lock to whoever asks next.
       disposed = true;
       const steps: { failure?: unknown } = {};
+      await runStep(steps, async () => ownerWorkItems.dispose());
       await runStep(steps, async () => ownerCoordinator.dispose());
       await runStep(steps, async () => ownerBroker.dispose());
       await runStep(steps, async () => ownership.release());

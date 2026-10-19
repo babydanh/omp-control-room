@@ -187,6 +187,14 @@ describe('parseArgs', () => {
     expect(parseArgs([]).rotateToken).toBe(false);
     expect(parseArgs(['--rotate-token']).rotateToken).toBe(true);
   });
+
+  it('prints the token by default and hides it only with --hide-token', () => {
+    expect(parseArgs([]).hideToken).toBe(false);
+    expect(parseArgs(['--hide-token', '--port', '3100'])).toMatchObject({
+      hideToken: true,
+      port: 3100,
+    });
+  });
 });
 
 // The TTY consent prompt is gone: first-run consent is asked in the app, as

@@ -19,6 +19,8 @@ export interface CommandResultView {
   sessionId?: string;
   /** The canonical folder a folder create or name command acted on, as the server reports it. */
   workspacePath?: string;
+  /** The work item a create command filed, when the server names it. */
+  workItemId?: string;
 }
 
 export function viewCommandResult(
@@ -32,6 +34,7 @@ export function viewCommandResult(
     revision: message.revision,
     sessionId: message.sessionId,
     workspacePath: message.workspacePath,
+    workItemId: message.workItemId,
   };
 }
 

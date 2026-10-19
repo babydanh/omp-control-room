@@ -61,6 +61,7 @@ import { DetailDrawer } from './DetailDrawer.js';
 import { PromptComposer } from './PromptComposer.js';
 import { ShortcutsSheet } from './ShortcutsSheet.js';
 import { TerminalPreviewProvider } from './TerminalPreview.js';
+import { WorkDialogHost, type WorkDialogRequest } from './WorkDialogHost.js';
 
 /**
  * The webview's localStorage, or null when the host refuses access to it. A
@@ -119,6 +120,7 @@ export function BoardShell({ client }: BoardShellProps) {
     setMenu((current) => ({ ...request, token: (current?.token ?? 0) + 1 }));
   }, []);
   const closeMenu = useCallback(() => setMenu(null), []);
+  const [workDialog, setWorkDialog] = useState<WorkDialogRequest | null>(null);
   const mode = useLayoutMode();
   const sidebarCollapsed = mode === 'phone' ? !sheetOpen : prefs.collapsed;
   const sidebar = sidebarPresentation(mode, sidebarCollapsed);
@@ -172,6 +174,8 @@ export function BoardShell({ client }: BoardShellProps) {
     subject?.kind === 'session' || subject?.kind === 'task' ? state.selection.sessionId : null;
   const selectedPaneId =
     subject?.kind === 'herdr' || subject?.kind === 'sleeping' ? subject.paneId : null;
+  const selectedWorkItem =
+    subject?.kind === 'workItem' ? { id: subject.id, workspacePath: subject.workspacePath } : null;
 
   // Diagnostics are a live measurement of processes the user owns: asked for
   // once the board is on screen, never polled in the background.
@@ -482,6 +486,8 @@ export function BoardShell({ client }: BoardShellProps) {
               onOpenHerdr={openHerdr}
               selectedPaneId={selectedPaneId}
               selectedSessionId={selectedSessionId}
+              selectedWorkItem={selectedWorkItem}
+              onOpenWorkItem={(ref) => setOpened({ kind: 'workItem', ...ref })}
               onMenu={openMenu}
               identityOf={(id) => folderIdentityOf(state, id)}
             />
@@ -533,8 +539,15 @@ export function BoardShell({ client }: BoardShellProps) {
           onOpenContract={openContract}
           onToggleMaximize={toggleDrawerMaximized}
           onToggleProject={toggleProject}
+          onWorkDialog={setWorkDialog}
         />
       )}
+      <WorkDialogHost
+        client={client}
+        state={state}
+        request={workDialog}
+        onClose={() => setWorkDialog(null)}
+      />
     </div>
   );
 }

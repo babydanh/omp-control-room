@@ -52,7 +52,7 @@ $node = (Get-Command node -ErrorAction Stop).Source
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 Add-Content -Path $log -Value "`n==== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') bật board cổng $Port ===="
 
-$command = "cmd.exe /d /c `"`"$node`" `"$cli`" --port $Port >> `"$log`" 2>&1`""
+$command = "cmd.exe /d /c `"`"$node`" `"$cli`" --port $Port --hide-token >> `"$log`" 2>&1`""
 $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine = $command

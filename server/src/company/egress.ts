@@ -33,6 +33,7 @@ const NO_COMPANY_VIEW: CompanyViewSource = { activePath: () => null };
 const COMPANY_PRIVATE_TYPES: ReadonlySet<string> = new Set([
   'companySnapshot',
   'companyStateChanged',
+  'companyWorkItems',
   'companyCommandResult',
   'companyTextDelta',
   'companySessionLog',

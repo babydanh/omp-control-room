@@ -131,6 +131,7 @@ components:
         - $ref: '#/components/schemas/CompanySnapshotMessage'
         - $ref: '#/components/schemas/CompanyStateChangedMessage'
         - $ref: '#/components/schemas/CompanyCommandResultMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemsMessage'
         - $ref: '#/components/schemas/CompanyFolderBrowseMessage'
         - $ref: '#/components/schemas/CompanyTextDeltaMessage'
         - $ref: '#/components/schemas/CompanySessionLogMessage'
@@ -216,6 +217,13 @@ components:
         - $ref: '#/components/schemas/CompanyFolderCreateMessage'
         - $ref: '#/components/schemas/CompanyFolderNameMessage'
         - $ref: '#/components/schemas/CompanyFolderForgetMessage'
+        # Work items (privileged; manual assignment to herdr panes and omp sessions)
+        - $ref: '#/components/schemas/CompanyWorkItemCreateMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemAssignMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemFollowUpMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemMarkMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemCancelMessage'
+        - $ref: '#/components/schemas/CompanyAgentRoleSetMessage'
         # Ledger (privileged; read-only views and one message command)
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
@@ -3759,6 +3767,277 @@ components:
           minLength: 1
           maxLength: 4096
 
+    WorkItemStatus:
+      type: string
+      enum: [queued, running, needs_input, review, done, failed]
+      description: >-
+        queued waits for its agent to be free. running was sent and the agent is working. needs_input
+        means the agent is blocked on a question. review means the agent stopped after working, so the
+        user should look. done and failed are verdicts: the user's own, or the server's when delivery
+        failed or the agent vanished.
+
+    WorkItemAssigneeKind:
+      type: string
+      enum: [herdr, session, new-session]
+
+    WorkItemAssignee:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      description: >-
+        Who a work item goes to. herdr names a herdr pane by paneId. session names an omp session on
+        the board by sessionId. new-session opens a fresh omp chat in the folder when the item is sent.
+      properties:
+        kind:
+          $ref: '#/components/schemas/WorkItemAssigneeKind'
+        paneId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        sessionId:
+          type: string
+          format: uuid
+
+    WorkItemEventKind:
+      type: string
+      enum: [created, assigned, queued, dispatched, followed_up, status, note]
+
+    WorkItemEvent:
+      type: object
+      additionalProperties: false
+      required: [at, kind]
+      properties:
+        at:
+          type: string
+          format: date-time
+        kind:
+          $ref: '#/components/schemas/WorkItemEventKind'
+        message:
+          type: string
+          maxLength: 2000
+
+    WorkItem:
+      type: object
+      additionalProperties: false
+      required: [id, text, assignee, status, sequence, createdAt, updatedAt, history]
+      properties:
+        id:
+          type: string
+          format: uuid
+        text:
+          type: string
+        assignee:
+          $ref: '#/components/schemas/WorkItemAssignee'
+        status:
+          $ref: '#/components/schemas/WorkItemStatus'
+        sequence:
+          type: integer
+          minimum: 0
+          description: Creation order in this folder. Queued items for one agent are sent in this order.
+        reason:
+          type: string
+          maxLength: 2000
+          description: Why the item waits, needs input, or failed, as one Vietnamese sentence the board shows.
+        result:
+          type: string
+          maxLength: 8192
+          description: The last lines of the agent's screen when it stopped, so the user can check the work.
+        squadRunId:
+          type: string
+          format: uuid
+          description: The squad run that proposed this item. Absent for items the user made by hand.
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        dispatchedAt:
+          type: string
+          format: date-time
+        history:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkItemEvent'
+
+    AgentRole:
+      type: object
+      additionalProperties: false
+      required: [agent, description, updatedAt]
+      description: A user-written note on what one herdr pane or omp session is for. Phase 2 reads these.
+      properties:
+        agent:
+          $ref: '#/components/schemas/WorkItemAssignee'
+        description:
+          type: string
+          maxLength: 1000
+        updatedAt:
+          type: string
+          format: date-time
+
+    CompanyWorkItemsMessage:
+      type: object
+      additionalProperties: false
+      required: [type, workspacePath, revision, items, roles]
+      description: >-
+        One folder's work items and agent role notes, sent in full after every change to them and in
+        answer to a snapshot request. A message replaces the folder's earlier one when its revision is newer.
+      properties:
+        type:
+          const: companyWorkItems
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        revision:
+          type: integer
+          minimum: 0
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WorkItem'
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentRole'
+
+    CompanyWorkItemCreateMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, text, assignee]
+      description: >-
+        Create one work item for an assignee and send it, or queue it while the assignee is busy. The same
+        requestId twice creates nothing new. Refused when the herdr pane is not in the roster.
+      properties:
+        type:
+          const: companyWorkItemCreate
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        text:
+          type: string
+          minLength: 1
+        assignee:
+          $ref: '#/components/schemas/WorkItemAssignee'
+
+    CompanyWorkItemAssignMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id, assignee]
+      description: >-
+        Give an existing work item to another assignee and send it, or queue it there. Refused while the item
+        is running or needs input, because its current assignee is still working on it.
+      properties:
+        type:
+          const: companyWorkItemAssign
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
+        assignee:
+          $ref: '#/components/schemas/WorkItemAssignee'
+
+    CompanyWorkItemFollowUpMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id, text]
+      description: >-
+        Send one more prompt to the item's current assignee, queued when it is busy. Only for items in review or
+        failed; the item runs again.
+      properties:
+        type:
+          const: companyWorkItemFollowUp
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
+        text:
+          type: string
+          minLength: 1
+
+    WorkItemVerdict:
+      type: string
+      enum: [done, failed]
+
+    CompanyWorkItemMarkMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id, verdict]
+      description: 'The user verdict on an item: done (Xong) or failed (Hỏng). Never sends anything to an agent.'
+      properties:
+        type:
+          const: companyWorkItemMark
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
+        verdict:
+          $ref: '#/components/schemas/WorkItemVerdict'
+
+    CompanyWorkItemCancelMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id]
+      description: Remove a queued item that was never sent. Refused for any other status.
+      properties:
+        type:
+          const: companyWorkItemCancel
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
+
+    CompanyAgentRoleSetMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, agent, description]
+      description: >-
+        Save the role note for a herdr pane or an omp session. An empty description clears the note.
+        A new-session assignee is refused.
+      properties:
+        type:
+          const: companyAgentRoleSet
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        agent:
+          $ref: '#/components/schemas/WorkItemAssignee'
+        description:
+          type: string
+          maxLength: 1000
+
     CompanyViewModeMessage:
       type: object
       additionalProperties: false
@@ -4974,6 +5253,10 @@ components:
           type: string
           format: uuid
           description: The session a prompt was delivered to or opened, so the board can make it the current session.
+        workItemId:
+          type: string
+          format: uuid
+          description: The work item a companyWorkItemCreate made.
         workspacePath:
           type: string
           minLength: 1

@@ -16,6 +16,7 @@ import {
   type SessionMenuFacts,
   sessionMenuItems,
   sessionNameProblem,
+  sleepingMenuItems,
   taskCardMenuItems,
 } from '../src/company/agentMenu.js';
 import { copyText } from '../src/company/clipboard.js';
@@ -34,7 +35,12 @@ function dangerIsSuffix(items: readonly AgentMenuItem[]): boolean {
   return firstDanger === -1 || items.slice(firstDanger).every((entry) => entry.danger);
 }
 
-const BUSY_SESSION: SessionMenuFacts = { status: 'busy', cwd: '/work', holdsWork: false };
+const BUSY_SESSION: SessionMenuFacts = {
+  status: 'busy',
+  cwd: '/work',
+  holdsWork: false,
+  work: { folder: '/work', privileged: true },
+};
 
 describe('sessionMenuItems', () => {
   it('lists the session actions, the controls its status allows, then the danger items', () => {
@@ -48,6 +54,8 @@ describe('sessionMenuItems', () => {
       'Mở Hoạt động',
       'Mở Việc',
       'Mở Chi tiết',
+      'Giao việc cho agent này…',
+      'Mô tả vai trò…',
       'Dừng lượt',
       'Tạm dừng',
       'Tắt phiên',
@@ -94,6 +102,7 @@ describe('sessionMenuItems', () => {
 
     expect(items.filter((item) => item.startsGroup).map((item) => item.label)).toEqual([
       'Mở Terminal',
+      'Giao việc cho agent này…',
       'Dừng lượt',
       'Tắt phiên',
     ]);
@@ -249,7 +258,10 @@ describe('menu rules', () => {
     ['task without session', taskCardMenuItems({ code: 'T1', contractId: null }, null, null)],
     ['planning with session', planningMenuItems(true)],
     ['planning without session', planningMenuItems(false)],
-    ['herdr', herdrMenuItems('/repo', { maximized: false })],
+    [
+      'herdr',
+      herdrMenuItems('/repo', { maximized: false }, { folder: '/repo', privileged: true }),
+    ],
     [
       'project',
       projectMenuItems({
@@ -294,7 +306,7 @@ describe('menu rules', () => {
 
 describe('herdr and session actions moved into the menu', () => {
   it('keeps the pane actions that used to sit on the drawer', () => {
-    const labels = herdrMenuItems('/repo', null).map((item) => item.label);
+    const labels = herdrMenuItems('/repo', null, null).map((item) => item.label);
 
     expect(labels).toContain('Mở trong herdr');
     expect(labels).toContain('Đọc lại màn hình');
@@ -303,7 +315,7 @@ describe('herdr and session actions moved into the menu', () => {
 
 describe('herdrMenuItems', () => {
   it('lists the herdr views, the pane actions, then the copies', () => {
-    expect(herdrMenuItems('/repo', null).map((item) => item.label)).toEqual([
+    expect(herdrMenuItems('/repo', null, null).map((item) => item.label)).toEqual([
       'Xem chi tiết',
       'Đổi tên…',
       'Xem màn hình',
@@ -316,7 +328,7 @@ describe('herdrMenuItems', () => {
   });
 
   it('maps the info and screen items to the drawer tabs', () => {
-    const items = herdrMenuItems('/repo', null);
+    const items = herdrMenuItems('/repo', null, null);
 
     expect(items.find((item) => item.id === 'info')?.action).toEqual({
       kind: 'herdrTab',
@@ -329,15 +341,114 @@ describe('herdrMenuItems', () => {
   });
 
   it('omits the folder copy when herdr reports no folder', () => {
-    expect(herdrMenuItems(null, null).some((item) => item.label === 'Sao chép thư mục')).toBe(
+    expect(herdrMenuItems(null, null, null).some((item) => item.label === 'Sao chép thư mục')).toBe(
       false,
     );
   });
 
   it('offers maximize from the drawer header', () => {
     expect(
-      herdrMenuItems('/repo', { maximized: false }).some((item) => item.label === 'Phóng to'),
+      herdrMenuItems('/repo', { maximized: false }, null).some((item) => item.label === 'Phóng to'),
     ).toBe(true);
+  });
+});
+
+describe('work item actions in the agent menu', () => {
+  const WORK = { folder: '/work', privileged: true };
+
+  it('offers assign and describe-role from a session that takes work', () => {
+    const items = sessionMenuItems({ ...BUSY_SESSION, work: WORK }, null);
+
+    expect(items.find((item) => item.id === 'assign-work')).toMatchObject({
+      label: 'Giao việc cho agent này…',
+      danger: false,
+      action: { kind: 'assignWork' },
+    });
+    expect(items.find((item) => item.id === 'describe-role')).toMatchObject({
+      label: 'Mô tả vai trò…',
+      danger: false,
+      action: { kind: 'describeRole' },
+    });
+  });
+
+  it.each(['busy', 'idle', 'parked'])('offers work to a %s session', (status) => {
+    const items = sessionMenuItems({ ...BUSY_SESSION, status, work: WORK }, null);
+
+    expect(items.map((item) => item.id)).toContain('assign-work');
+  });
+
+  it.each(['archived', 'stopped', 'crashed'])('offers no work to a %s session', (status) => {
+    const items = sessionMenuItems({ ...BUSY_SESSION, status, work: WORK }, null);
+
+    expect(items.map((item) => item.id)).not.toContain('assign-work');
+    expect(items.map((item) => item.id)).not.toContain('describe-role');
+  });
+
+  it('offers no work from a read-only browser tab', () => {
+    const items = sessionMenuItems(
+      { ...BUSY_SESSION, work: { folder: '/work', privileged: false } },
+      null,
+    );
+
+    expect(items.map((item) => item.id)).not.toContain('assign-work');
+  });
+
+  it('offers no work to a session whose folder is unknown', () => {
+    const items = sessionMenuItems(
+      { ...BUSY_SESSION, work: { folder: null, privileged: true } },
+      null,
+    );
+
+    expect(items.map((item) => item.id)).not.toContain('assign-work');
+  });
+
+  it('places the work group after the pane actions and before the copies', () => {
+    const labels = herdrMenuItems('/repo', null, { folder: '/repo', privileged: true }).map(
+      (item) => item.label,
+    );
+
+    expect(labels).toEqual([
+      'Xem chi tiết',
+      'Đổi tên…',
+      'Xem màn hình',
+      'Đọc lại màn hình',
+      'Mở trong herdr',
+      'Giao việc cho agent này…',
+      'Mô tả vai trò…',
+      'Sao chép màn hình',
+      'Sao chép thư mục',
+      'Sao chép pane id',
+    ]);
+  });
+
+  it('offers work from a herdr agent only when the server tags it with a folder', () => {
+    const tagged = herdrMenuItems('/repo', null, { folder: '/repo', privileged: true });
+    expect(tagged.find((item) => item.id === 'assign-work')).toMatchObject({ startsGroup: true });
+
+    const untagged = herdrMenuItems(null, null, { folder: null, privileged: true });
+    expect(untagged.map((item) => item.id)).not.toContain('assign-work');
+  });
+
+  it('offers no work from a herdr agent in a read-only tab', () => {
+    const items = herdrMenuItems('/repo', null, { folder: '/repo', privileged: false });
+
+    expect(items.map((item) => item.id)).not.toContain('assign-work');
+  });
+
+  it('offers no work from a sleeping or planning menu', () => {
+    const items = [...sleepingMenuItems(null), ...planningMenuItems(true)];
+
+    expect(items.map((item) => item.id)).not.toContain('assign-work');
+  });
+
+  it("gives a task card its session's work after the group break", () => {
+    const items = taskCardMenuItems(
+      { code: 'T1', contractId: null },
+      { ...BUSY_SESSION, work: WORK },
+      null,
+    );
+
+    expect(items.map((item) => item.id)).toContain('assign-work');
   });
 });
 

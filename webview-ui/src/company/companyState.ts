@@ -44,6 +44,7 @@ import type {
   CompanyFolderBrowseMessage,
   CompanyRemoveChange,
   CompanyStateChangedMessage,
+  CompanyWorkItemsMessage,
   CompanyWorkspaceEntry,
   HerdrSleepingSession,
   OmpSessionEntry,
@@ -82,6 +83,7 @@ import {
   usageCommandFailed,
   type UsageState,
 } from './usage/usageState.js';
+import type { FolderWorkItems } from './workItemView.js';
 
 export type CompanyPutChange = Exclude<
   CompanyStateChangedMessage['changes'][number],
@@ -321,6 +323,11 @@ export interface CompanyViewState extends FolderScope {
   folderBrowseRequest: string | null;
   /** The usage page's data: the latest answer per request, and which requests are waiting. */
   usageSlots: UsageState;
+  /**
+   * Each folder's work items and roles, keyed by the folder path the server tags them with. A
+   * folder's list is replaced only by a newer revision; which folders show is decided on read.
+   */
+  workItems: Record<string, FolderWorkItems>;
 }
 
 export function emptyCompanyState(
@@ -359,6 +366,7 @@ export function emptyCompanyState(
     folderBrowse: null,
     folderBrowseRequest: null,
     usageSlots: emptyUsageState(),
+    workItems: {},
   };
 }
 
@@ -787,6 +795,30 @@ function applyWorkspaces(
   };
 }
 
+/**
+ * One folder's work items. The server sends a folder's whole list after every change, so a
+ * newer revision replaces the one held; an older or repeated revision is dropped.
+ */
+function applyWorkItems(
+  state: CompanyViewState,
+  message: CompanyWorkItemsMessage,
+): CompanyViewState {
+  const key = folderKeyOf(message);
+  const held: FolderWorkItems | undefined = state.workItems[key];
+  if (held !== undefined && message.revision <= held.revision) return state;
+  return {
+    ...state,
+    workItems: {
+      ...state.workItems,
+      [key]: {
+        revision: message.revision,
+        items: [...message.items],
+        roles: [...message.roles],
+      },
+    },
+  };
+}
+
 /** Stores one folder's company data, then re-derives the view the board reads. */
 function withFolderScope(
   state: CompanyViewState,
@@ -1058,6 +1090,8 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
       });
     case 'companyWorkspaces':
       return unchanged(applyWorkspaces(state, message.workspaces));
+    case 'companyWorkItems':
+      return unchanged(applyWorkItems(state, message));
     case 'companyFolderBrowse': {
       // Only the listing that answers the latest browse is held; an older one is a late answer.
       const current = message.requestId === state.folderBrowseRequest;

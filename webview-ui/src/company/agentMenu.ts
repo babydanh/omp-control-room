@@ -17,6 +17,7 @@
 
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 
+import { sessionAcceptsWork } from './assigneeOptions.js';
 import type { CompanyDrawerTab } from './companyState.js';
 import type { HerdrDrawerTab } from './herdrView.js';
 import type { IconName } from './iconNames.js';
@@ -70,6 +71,8 @@ export type AgentMenuAction =
   | { kind: 'openBoardFolder' }
   | { kind: 'renameFolder' }
   | { kind: 'cleanErrored' }
+  | { kind: 'assignWork' }
+  | { kind: 'describeRole' }
   | { kind: 'wake' };
 
 export interface AgentMenuItem {
@@ -91,6 +94,17 @@ export interface AgentMenuItem {
   startsGroup: boolean;
 }
 
+/**
+ * What the work items menu needs to know about an agent: the folder it is tagged with, and
+ * whether this connection may act at all.
+ */
+export interface WorkMenuFacts {
+  /** The folder the agent is tagged with; null when it has none, so no work can go to it. */
+  folder: string | null;
+  /** False on a read-only connection, which offers no item that changes the board. */
+  privileged: boolean;
+}
+
 /** What a session's menu needs to know. */
 export interface SessionMenuFacts {
   status: string;
@@ -98,6 +112,8 @@ export interface SessionMenuFacts {
   cwd: string | null;
   /** Whether the session holds work; delete is refused for it. */
   holdsWork: boolean;
+  /** What the work items menu needs; a session in a status that takes no work offers none. */
+  work: WorkMenuFacts;
 }
 
 export interface TaskMenuFacts {
@@ -168,14 +184,37 @@ function maximizeItems(drawer: DrawerView | null): AgentMenuItem[] {
 }
 
 /**
- * The session items: identity, the drawer tabs, the controls its status allows,
- * then the two danger items. A control the status does not allow is not listed.
+ * The items that give work to an agent. None is offered when the agent has no folder to queue
+ * the work in, or the connection is read-only: the server would refuse the command.
+ */
+function workItemMenuItems(work: WorkMenuFacts | null): AgentMenuItem[] {
+  if (work === null || work.folder === null || !work.privileged) return [];
+  return [
+    item({
+      id: 'assign-work',
+      label: 'Giao việc cho agent này…',
+      icon: 'send',
+      action: { kind: 'assignWork' },
+    }),
+    item({
+      id: 'describe-role',
+      label: 'Mô tả vai trò…',
+      icon: 'file-text',
+      action: { kind: 'describeRole' },
+    }),
+  ];
+}
+
+/**
+ * The session items: identity, the drawer tabs, the work items its folder takes, the controls
+ * its status allows, then the two danger items. A control the status does not allow is not listed.
  */
 export function sessionMenuItems(
   session: SessionMenuFacts,
   drawer: DrawerView | null,
 ): AgentMenuItem[] {
   const controls = sessionControls(session.status);
+  const work = sessionAcceptsWork(session.status) ? session.work : null;
   const allowedControls = CONTROL_ITEMS.filter((control) => controls[control.flag]).map((control) =>
     item({
       id: `control-${control.action}`,
@@ -250,6 +289,7 @@ export function sessionMenuItems(
       }),
       ...maximizeItems(drawer),
     ]),
+    ...withGroupStart(workItemMenuItems(work)),
     ...withGroupStart(allowedControls),
     ...withGroupStart([...killItems, deleteItem]),
   ];
@@ -316,8 +356,15 @@ export function planningMenuItems(hasSession: boolean): AgentMenuItem[] {
   ];
 }
 
-/** The items for a herdr agent: its views, its pane actions, then copies and maximize. */
-export function herdrMenuItems(folder: string | null, drawer: DrawerView | null): AgentMenuItem[] {
+/**
+ * The items for a herdr agent: its views, its pane actions, its work items, then copies and
+ * maximize.
+ */
+export function herdrMenuItems(
+  folder: string | null,
+  drawer: DrawerView | null,
+  work: WorkMenuFacts | null,
+): AgentMenuItem[] {
   return [
     item({
       id: 'info',
@@ -341,6 +388,7 @@ export function herdrMenuItems(folder: string | null, drawer: DrawerView | null)
       }),
       item({ id: 'focus', label: 'Mở trong herdr', icon: 'external', action: { kind: 'focus' } }),
     ]),
+    ...withGroupStart(workItemMenuItems(work)),
     ...withGroupStart([
       item({
         id: 'copyScreen',

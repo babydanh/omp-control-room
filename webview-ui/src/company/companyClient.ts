@@ -19,7 +19,13 @@
 
 import type { QuestionAnswerInput, RoleProfile } from '../../../core/src/company.js';
 import { TRANSPORT_DISCONNECTED_ERROR } from '../../../core/src/messageDelivery.js';
-import type { ClientMessage, HerdrKey, ServerMessage } from '../../../core/src/messages.js';
+import type {
+  ClientMessage,
+  HerdrKey,
+  ServerMessage,
+  WorkItemAssignee,
+  WorkItemVerdict,
+} from '../../../core/src/messages.js';
 import type { MessageTransport } from '../transport/types.js';
 import { decodeBase64ToBytes } from './base64.js';
 import { type CommandResultView, failureNotice } from './commandResults.js';
@@ -476,6 +482,65 @@ export class CompanyClient {
    */
   renameSession(sessionId: string, name: string): CompanyCommandHandle {
     return this.command((requestId) => commands.sessionRename(requestId, sessionId, name));
+  }
+
+  /**
+   * File a new work item for an agent in a folder. The verdict is a companyCommandResult under
+   * the handle's requestId and names the new item in `workItemId`.
+   */
+  createWorkItem(
+    workspacePath: string,
+    text: string,
+    assignee: WorkItemAssignee,
+  ): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.workItemCreate(requestId, workspacePath, text, assignee),
+    );
+  }
+
+  /** Hand an existing work item to another agent. The verdict is a companyCommandResult. */
+  assignWorkItem(
+    workspacePath: string,
+    id: string,
+    assignee: WorkItemAssignee,
+  ): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.workItemAssign(requestId, workspacePath, id, assignee),
+    );
+  }
+
+  /** Send more text to the agent holding a work item. The verdict is a companyCommandResult. */
+  followUpWorkItem(workspacePath: string, id: string, text: string): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.workItemFollowUp(requestId, workspacePath, id, text),
+    );
+  }
+
+  /** Close a work item as done or failed. The verdict is a companyCommandResult. */
+  markWorkItem(
+    workspacePath: string,
+    id: string,
+    verdict: WorkItemVerdict,
+  ): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.workItemMark(requestId, workspacePath, id, verdict),
+    );
+  }
+
+  /** Withdraw a work item that is still queued. The verdict is a companyCommandResult. */
+  cancelWorkItem(workspacePath: string, id: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.workItemCancel(requestId, workspacePath, id));
+  }
+
+  /** Set the description of an agent's role in a folder. The verdict is a companyCommandResult. */
+  setAgentRole(
+    workspacePath: string,
+    agent: WorkItemAssignee,
+    description: string,
+  ): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.agentRoleSet(requestId, workspacePath, agent, description),
+    );
   }
 
   updateRoleProfiles(roleProfiles: Record<string, RoleProfile>): SendOutcome {

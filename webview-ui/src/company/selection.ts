@@ -13,6 +13,7 @@
 import type { Contract } from '../../../core/src/company.js';
 import type { CompanySelection, CompanyViewState } from './companyState.js';
 import type { ContractPlanView } from './contractPlanView.js';
+import { workItemKey } from './workItemView.js';
 
 /** Selection for a task card: its task, and the session running it if any. */
 export function selectionForTask(state: CompanyViewState, taskId: string): CompanySelection {
@@ -86,6 +87,7 @@ export type DrawerSubject =
   | { kind: 'sleeping'; paneId: string }
   | { kind: 'contract'; contractId: string | null }
   | { kind: 'question'; questionId: string }
+  | { kind: 'workItem'; id: string; workspacePath: string }
   | { kind: 'files' };
 
 /** Something the user explicitly opened. A board subject is never opened this way. */
@@ -141,6 +143,8 @@ export function drawerSubjectKey(subject: DrawerSubject): string {
       return `sleeping:${subject.paneId}`;
     case 'question':
       return `question:${subject.questionId}`;
+    case 'workItem':
+      return `workItem:${workItemKey(subject)}`;
     case 'contract':
       return `contract:${subject.contractId ?? 'pending'}`;
     case 'files':

@@ -53,6 +53,7 @@ import {
 import { terminalPolicy } from '../sessionActions.js';
 import { contractStatusLabel, sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
 import { useViewportWidth } from '../useLayoutMode.js';
+import { findWorkItem, statusWordVi, workItemCardHead, workItemKey } from '../workItemView.js';
 import { WrapLinesContext } from '../wrapLines.js';
 import { AttemptRow } from './AttemptRow.js';
 import { ContractPanel } from './ContractPanel.js';
@@ -62,6 +63,7 @@ import { QuestionPanel } from './QuestionPanel.js';
 import { SessionBody } from './SessionBody.js';
 import { SleepingPanel } from './SleepingPanel.js';
 import { TaskReport } from './TaskReport.js';
+import { WorkItemPanel } from './WorkItemPanel.js';
 import { WorkspaceFileBrowser } from './WorkspaceFileBrowser.js';
 
 export interface DetailDrawerProps {
@@ -328,6 +330,16 @@ function DrawerContent(props: ContentProps) {
       return <ContractSubject client={client} state={state} contractId={subject.contractId} />;
     case 'question':
       return <QuestionSubject client={client} state={state} questionId={subject.questionId} />;
+    case 'workItem':
+      return (
+        <WorkItemPanel
+          key={workItemKey(subject)}
+          client={client}
+          state={state}
+          workspacePath={subject.workspacePath}
+          id={subject.id}
+        />
+      );
     case 'files':
       return (
         <WorkspaceFileBrowser
@@ -385,6 +397,12 @@ function headingFor(
     }
     case 'question':
       return { title: 'Câu hỏi chờ trả lời', status: null };
+    case 'workItem': {
+      const item = findWorkItem(state, subject);
+      if (item === undefined) return { title: 'Việc', status: null };
+      const head = workItemCardHead(item.text);
+      return { title: head === '' ? 'Việc' : head, status: statusWordVi(item.status) };
+    }
     case 'files':
       return { title: 'Tệp trong workspace', status: null };
   }
@@ -392,7 +410,7 @@ function headingFor(
 
 /**
  * The menu a drawer header opens: the subject the drawer shows, carrying the
- * drawer's own state. A contract, a question or the files have no menu.
+ * drawer's own state. A contract, a question, the files or a work item have no menu.
  */
 function drawerMenuSubject(
   lanes: readonly BoardLane[],
@@ -417,6 +435,7 @@ function drawerMenuSubject(
     case 'contract':
     case 'question':
     case 'files':
+    case 'workItem':
       return null;
   }
 }

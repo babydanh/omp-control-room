@@ -20,6 +20,8 @@ import { COMPANY_SESSION_NAME_MAX_LENGTH } from '../src/company/companyCoordinat
 import { CompanyError } from '../src/company/companyError.js';
 import type { CompanyStore } from '../src/company/companyStore.js';
 import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
+import { parseWorkItemsFile } from '../src/company/workItems/workItemModel.js';
+import { WorkItemService } from '../src/company/workItems/workItemService.js';
 
 let tempHome: string;
 vi.mock('os', async () => {
@@ -1170,6 +1172,134 @@ describe('company client commands', () => {
       );
       await vi.waitFor(() => expect(results()).toHaveLength(1));
       expect(results()[0]).toMatchObject({ ok: false, errorCode: 'workspace_not_open' });
+    });
+  });
+
+  describe('work item commands', () => {
+    const PANE = 'wA:p1';
+
+    /** Gives the folder a work item service with in-memory ports, and returns it. */
+    async function withWorkItems(): Promise<WorkItemService> {
+      const work = new WorkItemService(workspace, {
+        roster: {
+          panes: () => ({ available: true, panes: [{ paneId: PANE, status: 'idle' }] }),
+          prompt: async () => undefined,
+          screenText: async () => '',
+        },
+        sessions: {
+          list: () => [],
+          submit: async () => undefined,
+          openChat: async () => {
+            throw new Error('no chat in this test');
+          },
+        },
+        persistence: {
+          load: async () => parseWorkItemsFile(null),
+          save: async () => undefined,
+        },
+        publish: (message) => {
+          outbox.push(message);
+        },
+        now: () => Date.now(),
+        newId: () => randomUUID(),
+        schedule: () => () => undefined,
+      });
+      await work.load();
+      services = { ...services, workItems: work };
+      return work;
+    }
+
+    it('creates an item through the dispatcher and replies with its id', async () => {
+      await withWorkItems();
+      handleCompanyCommand(
+        {
+          type: 'companyWorkItemCreate',
+          requestId: randomUUID(),
+          workspacePath: workspace,
+          text: 'Việc',
+          assignee: { kind: 'herdr', paneId: PANE },
+        },
+        send,
+        context(),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: true, workItemId: expect.any(String) });
+      expect(replies('companyWorkItems').at(-1)?.items).toHaveLength(1);
+    });
+
+    it('refuses work item commands the folder cannot serve or cannot accept', async () => {
+      // A folder with no work item service (a follower) cannot change its items.
+      handleCompanyCommand(
+        {
+          type: 'companyWorkItemCreate',
+          requestId: randomUUID(),
+          workspacePath: workspace,
+          text: 'x',
+          assignee: { kind: 'herdr', paneId: PANE },
+        },
+        send,
+        context(),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: false, errorCode: 'company_unavailable' });
+
+      await withWorkItems();
+      outbox = [];
+      handleCompanyCommand(
+        {
+          type: 'companyWorkItemCreate',
+          requestId: randomUUID(),
+          workspacePath: workspace,
+          text: 'x',
+          assignee: { kind: 'queue' },
+        },
+        send,
+        context(),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: false, errorCode: 'assignee_invalid' });
+
+      outbox = [];
+      handleCompanyCommand(
+        {
+          type: 'companyWorkItemMark',
+          requestId: randomUUID(),
+          workspacePath: workspace,
+          id: 'missing',
+          verdict: 'maybe',
+        },
+        send,
+        context(),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: false, errorCode: 'invalid_work_item_verdict' });
+
+      outbox = [];
+      handleCompanyCommand(
+        {
+          type: 'companyWorkItemCancel',
+          requestId: randomUUID(),
+          workspacePath: workspace,
+          id: 'missing',
+        },
+        send,
+        context({ executionAllowed: false }),
+      );
+      await vi.waitFor(() => expect(results()).toHaveLength(1));
+      expect(results()[0]).toMatchObject({ ok: false, errorCode: 'workspace_untrusted' });
+    });
+
+    it('sends the folder work items with its snapshot', async () => {
+      await withWorkItems();
+      handleCompanyCommand(
+        { type: 'companySnapshotRequest', requestId: randomUUID(), workspacePath: workspace },
+        send,
+        context(),
+      );
+      await vi.waitFor(() => expect(replies('companySnapshot')).toHaveLength(1));
+      expect(replies('companyWorkItems')).toEqual([
+        expect.objectContaining({ type: 'companyWorkItems', items: [] }),
+      ]);
     });
   });
 });

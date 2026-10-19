@@ -445,6 +445,25 @@
     outline-offset: -2px;
   }
 
+  /* A work item card wraps its text anywhere: a long line or a path never widens its lane. */
+  .company-work-card {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  /* A work item's result is the agent's own output, kept as written. It scrolls inside its
+     box, so a long result never pushes the actions out of reach. */
+  .company-work-result {
+    max-height: 50vh;
+    overflow: auto;
+  }
+
+  /* The follow-up field starts at a few lines and resizes only vertically. */
+  .company-work-field {
+    min-height: 4.5rem;
+    resize: vertical;
+  }
+
   /* A selected row: a tonal fill with a 2px accent bar on its leading edge. The
      bar is a pseudo-element (::after, so it paints over a role bar) and the row
      keeps no border. */

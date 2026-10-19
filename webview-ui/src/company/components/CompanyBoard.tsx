@@ -63,9 +63,11 @@ import { useElementWidth } from '../useElementWidth.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useNow } from '../useNow.js';
+import { workItemKey,type WorkItemRef } from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
 import { Icon } from './Icon.js';
 import { StatusDot } from './StatusDot.js';
+import { WorkItemCard } from './WorkItemCard.js';
 
 export interface CompanyBoardProps {
   lanes: readonly BoardLane[];
@@ -79,6 +81,10 @@ export interface CompanyBoardProps {
   /** The herdr pane and session the drawer shows, so their agent cards read as pressed. */
   selectedPaneId: string | null;
   selectedSessionId: string | null;
+  /** The work item the drawer shows, so its card reads as pressed. */
+  selectedWorkItem: WorkItemRef | null;
+  /** Opens the drawer on a work item card. */
+  onOpenWorkItem: (ref: WorkItemRef) => void;
   onMenu: (request: AgentMenuRequest) => void;
   /** The folder a card's id belongs to, shown as a tag in all mode; null outside it. */
   identityOf: (id: string) => FolderIdentity | null;
@@ -384,6 +390,8 @@ export function CompanyBoard({
   onOpenHerdr,
   selectedPaneId,
   selectedSessionId,
+  selectedWorkItem,
+  onOpenWorkItem,
   onMenu,
   identityOf,
 }: CompanyBoardProps) {
@@ -399,7 +407,7 @@ export function CompanyBoard({
 
   const views: LaneView[] = lanes.map((lane) => {
     const drafts = lane.id === 'planned' ? planning : [];
-    const count = lane.cards.length + drafts.length + lane.agents.length;
+    const count = lane.cards.length + drafts.length + lane.workItems.length + lane.agents.length;
     return { lane, drafts, count };
   });
   const shownLane =
@@ -488,11 +496,25 @@ export function CompanyBoard({
                 folder={identityOf(card.taskId)}
               />
             ))}
+            {lane.workItems.map((card, index) => (
+              <WorkItemCard
+                key={workItemKey(card)}
+                card={card}
+                index={drafts.length + lane.cards.length + index}
+                now={now}
+                selected={
+                  selectedWorkItem !== null &&
+                  selectedWorkItem.id === card.id &&
+                  selectedWorkItem.workspacePath === card.workspacePath
+                }
+                onOpen={() => onOpenWorkItem({ id: card.id, workspacePath: card.workspacePath })}
+              />
+            ))}
             {lane.agents.map((agent, index) => (
               <AgentCard
                 key={agent.key}
                 card={agent}
-                index={lane.cards.length + drafts.length + index}
+                index={lane.cards.length + lane.workItems.length + drafts.length + index}
                 now={now}
                 selected={
                   agent.subject.kind === 'herdr'
