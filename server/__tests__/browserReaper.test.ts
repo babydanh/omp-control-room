@@ -10,6 +10,7 @@ import {
   devToolsPort,
   isStopTimedOut,
   type OmpCommandOutcome,
+  ompDirArgument,
   parseHeadlessBrowsers,
 } from '../src/company/browserReaper.js';
 import type { OmpRunnerCommand } from '../src/company/ompRunner.js';
@@ -79,6 +80,8 @@ class FakeOmp {
   stopByDefault: StopReply = stopAndSucceed;
   readonly stopArgv: string[][] = [];
   readonly infoArgv: string[][] = [];
+  /** The working directory of every `ps info`/`ps stop` call, in order. */
+  readonly cwds: (string | undefined)[] = [];
   /** Makes `omp ps info` fail, as when omp cannot read the daemon. */
   infoFails = false;
   /** Runs before every OMP request, so a test can change the browser between two steps. */
@@ -116,7 +119,17 @@ class FakeOmp {
     return [...projects, ...this.extras];
   }
 
-  async runOmp(command: OmpRunnerCommand, argv: readonly string[]): Promise<OmpCommandOutcome> {
+  /**
+   * Mirrors real omp: `ps info`/`ps stop` resolve the project from the working
+   * directory, which wins over `--dir` (found live: a board running in another
+   * project silently re-read and stopped nothing). Without a cwd the call lands in
+   * an unrelated project, so a reaper that forgets the cwd stops nothing here too.
+   */
+  async runOmp(
+    command: OmpRunnerCommand,
+    argv: readonly string[],
+    cwd?: string,
+  ): Promise<OmpCommandOutcome> {
     if (command !== COMMAND) throw new Error('reaper ran an unexpected OMP command');
     this.beforeCall(argv);
     if (argv[0] === 'ps' && argv[1] === '--all') {
@@ -126,15 +139,15 @@ class FakeOmp {
       }
       return { stdout: JSON.stringify(this.listing()), stderr: '', exitCode: 0, timedOut: false };
     }
+    const inProject = (candidate: FakeBrowser): boolean =>
+      cwd !== undefined && ompDirArgument(candidate.projectDir) === cwd;
     if (argv[0] === 'ps' && argv[1] === 'info') {
       this.infoArgv.push([...argv]);
+      this.cwds.push(cwd);
       if (this.infoFails) {
         return { stdout: '', stderr: 'omp: not found', exitCode: 1, timedOut: false };
       }
-      const projectDir = argv[argv.indexOf('--dir') + 1];
-      const browser = [...this.browsers.values()].find(
-        (candidate) => candidate.projectDir === projectDir,
-      );
+      const browser = [...this.browsers.values()].find(inProject);
       if (browser === undefined) {
         return { stdout: '', stderr: 'no such daemon', exitCode: 1, timedOut: false };
       }
@@ -143,9 +156,9 @@ class FakeOmp {
     }
     if (argv[0] === 'ps' && argv[1] === 'stop') {
       this.stopArgv.push([...argv]);
-      const projectDir = argv[argv.indexOf('--dir') + 1];
+      this.cwds.push(cwd);
       const browser = [...this.browsers.values()].find(
-        (candidate) => candidate.projectDir === projectDir && candidate.ready,
+        (candidate) => inProject(candidate) && candidate.ready,
       );
       const reply = this.stopReplies.shift() ?? this.stopByDefault;
       if (browser === undefined) {
@@ -212,7 +225,7 @@ function harness(enabled = true) {
     enabled,
     deps: {
       resolveCommand: () => COMMAND,
-      runOmp: (command, argv) => omp.runOmp(command, argv),
+      runOmp: (command, argv, cwd) => omp.runOmp(command, argv, cwd),
       fetchJson: (url) => omp.fetchJson(url),
       treeMemoryBytes: async () => 300 * MB,
       now: () => clock.t,
@@ -780,5 +793,30 @@ describe('browser reaper: re-check before every stop', () => {
 
     expect(h.omp.stopArgv).toEqual([]);
     expect(h.omp.infoArgv).toHaveLength(1);
+  });
+});
+
+describe('browser reaper: which project omp acts on', () => {
+  // Found live: `omp ps info`/`stop` pick the project from the working directory, which
+  // wins over `--dir`, and omp lists a drive-root project as `D:` (a bare drive is the
+  // child's current directory on that drive). The board runs in its workspace, so its
+  // re-reads silently looked at another project and it never reaped anything.
+  it('re-reads and stops from inside the project, using the drive root for a bare drive', async () => {
+    const h = harness();
+    h.omp.add('d', { pid: 401, projectDir: 'D:', port: 9004, pages: 0 });
+    h.omp.add('a', { pid: 101, projectDir: DIR_A, port: 9001, pages: 0 });
+
+    await h.reaper.reapNow();
+
+    expect(h.omp.stopArgv).toEqual([stopCommand('D:\\'), stopCommand(DIR_A)]);
+    expect(h.omp.cwds).toEqual(['D:\\', 'D:\\', DIR_A, DIR_A]);
+  });
+
+  it('turns a bare drive into its root and leaves other paths alone', () => {
+    expect(ompDirArgument('D:')).toBe('D:\\');
+    expect(ompDirArgument('v:')).toBe('v:\\');
+    expect(ompDirArgument('D:\\')).toBe('D:\\');
+    expect(ompDirArgument('V:\\Duancanhan\\Project')).toBe('V:\\Duancanhan\\Project');
+    expect(ompDirArgument('/home/u/project')).toBe('/home/u/project');
   });
 });

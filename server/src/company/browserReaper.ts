@@ -62,8 +62,16 @@ export interface OmpCommandOutcome {
 export interface BrowserReaperDeps {
   /** The resolved OMP command. Throws when OMP is not installed. */
   resolveCommand(): OmpRunnerCommand;
-  /** Runs the command with a literal argv (never a shell) and a deadline. */
-  runOmp(command: OmpRunnerCommand, argv: readonly string[]): Promise<OmpCommandOutcome>;
+  /**
+   * Runs the command with a literal argv (never a shell) and a deadline. `cwd`, when
+   * given, is the working directory for this one call: `omp ps info`/`stop` resolve
+   * their project from the working directory, which wins over `--dir`.
+   */
+  runOmp(
+    command: OmpRunnerCommand,
+    argv: readonly string[],
+    cwd?: string,
+  ): Promise<OmpCommandOutcome>;
   /** GETs a loopback DevTools endpoint and returns its parsed JSON. Rejects on any failure. */
   fetchJson(url: string): Promise<unknown>;
   /** Summed working-set bytes of a process and its descendants; 0 when unreadable. Read-only. */
@@ -445,19 +453,19 @@ class BrowserReaperService implements BrowserReaper {
       'stop',
       BROWSER_REAPER_DAEMON_NAME,
       '--dir',
-      projectDir,
+      ompDirArgument(projectDir),
       '--timeout',
       String(BROWSER_REAPER_STOP_TIMEOUT_SECONDS),
     ];
     try {
       if (!(await this.#stillIdle(command, tracked))) return;
-      let outcome = await this.#deps.runOmp(command, argv);
+      let outcome = await this.#deps.runOmp(command, argv, ompDirArgument(projectDir));
       if (outcome.exitCode === 0 && !isStopTimedOut(outcome)) return;
       if (isStopTimedOut(outcome)) {
         // omp reports a timeout when the daemon is already on its way down. One more
         // request settles it; the next listing confirms whether the daemon is gone.
         if (!(await this.#stillIdle(command, tracked))) return;
-        outcome = await this.#deps.runOmp(command, argv);
+        outcome = await this.#deps.runOmp(command, argv, ompDirArgument(projectDir));
         if (outcome.exitCode === 0 && !isStopTimedOut(outcome)) return;
       }
       this.#warnOnce(
@@ -504,14 +512,11 @@ class BrowserReaperService implements BrowserReaper {
    */
   async #readDaemon(command: OmpRunnerCommand, projectDir: string): Promise<DaemonInfo | null> {
     try {
-      const outcome = await this.#deps.runOmp(command, [
-        'ps',
-        'info',
-        BROWSER_REAPER_DAEMON_NAME,
-        '--dir',
-        projectDir,
-        '--json',
-      ]);
+      const outcome = await this.#deps.runOmp(
+        command,
+        ['ps', 'info', BROWSER_REAPER_DAEMON_NAME, '--dir', ompDirArgument(projectDir), '--json'],
+        ompDirArgument(projectDir),
+      );
       if (outcome.timedOut || outcome.exitCode !== 0) return null;
       const daemon = parseDaemonInfo(JSON.parse(outcome.stdout.replace(/^\uFEFF/, '')));
       this.#warned.delete('guard');
@@ -549,6 +554,15 @@ function parseDaemonInfo(value: unknown): DaemonInfo {
     throw new TypeError('omp ps info did not describe a daemon');
   }
   return { id, pid: typeof pid === 'number' ? pid : null, startedAt, state, readyMatch };
+}
+
+/**
+ * The `--dir` operand for a project. omp lists a drive-root project as `D:`, but a bare
+ * `X:` on Windows means "the current directory on drive X" of the child process, which
+ * is not the drive root when the board runs elsewhere, so it is passed as `X:\`.
+ */
+export function ompDirArgument(projectDir: string): string {
+  return /^[A-Za-z]:$/.test(projectDir) ? `${projectDir}\\` : projectDir;
 }
 
 export function isRecord(value: unknown): value is Record<string, unknown> {

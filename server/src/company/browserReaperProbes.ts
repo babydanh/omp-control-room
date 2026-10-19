@@ -175,11 +175,11 @@ export interface BrowserReaperHostOptions {
 export function createBrowserReaperHostDeps(options: BrowserReaperHostOptions): BrowserReaperDeps {
   return {
     resolveCommand: options.resolveCommand,
-    runOmp: (command, argv) =>
+    runOmp: (command, argv, cwd) =>
       defaultQuotaRunner({
         executable: command.file,
         argv: [...command.args, ...argv],
-        cwd: options.cwd,
+        cwd: cwd ?? options.cwd,
         timeoutMs: BROWSER_REAPER_OMP_TIMEOUT_MS,
       }),
     fetchJson: (url) => fetchLoopbackJson(url, BROWSER_REAPER_PROBE_TIMEOUT_MS),
