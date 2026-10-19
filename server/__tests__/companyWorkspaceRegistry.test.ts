@@ -125,6 +125,8 @@ function createHarness(
     recentsWritable?: boolean;
     /** The fake file system's view of which folders exist. Defaults to the real one. */
     folderExists?: (workspacePath: string) => boolean;
+    /** Receives the open folders' paths whenever the open set changes. */
+    onFoldersChanged?: (openPaths: readonly string[]) => void;
   } = {},
 ): Harness {
   const broadcasts: ServerMessage[] = [];
@@ -179,6 +181,7 @@ function createHarness(
     },
     countDebounceMs: 250,
     folderExists: options.folderExists,
+    onFoldersChanged: options.onFoldersChanged,
   });
   return { registry, broadcasts, hosts, recents, control, names };
 }
@@ -309,6 +312,20 @@ describe('CompanyWorkspaceRegistry', () => {
       }),
     );
     expect(h.recents[0]).toBe(alphaReal);
+  });
+
+  it('reports the open folder paths to the folder hook each time the open set changes', async () => {
+    const reported: string[][] = [];
+    const h = createHarness({
+      onFoldersChanged: (openPaths) => {
+        reported.push([...openPaths]);
+      },
+    });
+    await h.registry.open(alpha);
+    expect(reported.at(-1)).toEqual([alphaReal]);
+
+    await h.registry.open(beta);
+    expect(reported.at(-1)?.slice().sort()).toEqual([alphaReal, betaReal].sort());
   });
 
   it('switching folders keeps the first host running and activates the second', async () => {

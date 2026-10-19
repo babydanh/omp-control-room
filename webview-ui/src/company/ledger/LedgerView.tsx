@@ -4,15 +4,17 @@
  * the detail and the side panels as full-screen sheets instead of a side column.
  */
 
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useState } from 'react';
 
 import { Icon } from '../components/Icon.js';
+import type { FolderFocusInput } from '../folderView.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { ledgerStore } from './ledgerClient.js';
 import { LedgerDetailPanel } from './LedgerDetailPanel.js';
 import { databaseLabel, formatClock, parseLedgerTimestamp } from './ledgerFormat.js';
 import { type PaneInput } from './ledgerManagers.js';
 import type { BoardSessionIndex } from './ledgerMapping.js';
+import { scopeLedgerView } from './ledgerScope.js';
 import { type LedgerSelection, resolveSelection } from './ledgerSelection.js';
 import { LedgerSidePanels } from './LedgerSidePanels.js';
 import { type LedgerState, useLedgerState } from './ledgerStore.js';
@@ -36,10 +38,13 @@ export interface LedgerViewProps {
   onOpenHerdr: (paneId: string) => void;
   onOpenSleeping: (paneId: string) => void;
   onClose: () => void;
+  /** The folder rules' input: the Cây git view shows only the repos and folders in view. */
+  focus: FolderFocusInput;
 }
 
 export function LedgerView({
   boardSessions,
+  focus,
   onOpenBoardSession,
   panes,
   onOpenHerdr,
@@ -51,7 +56,10 @@ export function LedgerView({
   const [tab, setTab] = useState<LedgerTab>('graph');
   const [selection, setSelection] = useState<LedgerSelection | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
-  const view = ledger.view;
+  const view = useMemo(
+    () => (ledger.view === null ? null : scopeLedgerView(ledger.view, focus)),
+    [ledger.view, focus],
+  );
   const resolved = view === null || selection === null ? null : resolveSelection(view, selection);
   const sheetOpen = phone && (resolved !== null || infoOpen);
   const generatedMs = view === null ? null : parseLedgerTimestamp(view.generatedAt);

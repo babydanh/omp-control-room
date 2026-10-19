@@ -188,6 +188,11 @@ export interface HerdrLinkOptions {
   readonly sleepRegistryFile?: string;
   /** Receives problems with the sleep registry, once per distinct problem. Defaults to `console.warn`. */
   readonly warn?: (message: string) => void;
+  /**
+   * Canonical path of the open Company folder that holds a cwd (deepest match), or undefined when
+   * the cwd lies outside every open folder. Never rejects. Defaults to no folder.
+   */
+  readonly workspaceFor?: (cwd: string) => Promise<string | undefined>;
 }
 
 export interface HerdrLink {
@@ -198,6 +203,8 @@ export interface HerdrLink {
   snapshot(): HerdrAgentsMessage;
   onAgents(listener: (message: HerdrAgentsMessage) => void): () => void;
   onScreen(listener: (message: HerdrScreenMessage) => void): () => void;
+  /** Re-tags the roster against the open folders as they now stand, after the folder list changed. */
+  rescope(): Promise<void>;
   read(paneId: string, lines: number): Promise<HerdrScreenMessage>;
   prompt(paneId: string, text: string): Promise<void>;
   keys(paneId: string, keys: readonly HerdrKey[]): Promise<void>;
@@ -337,6 +344,8 @@ interface RosterSnapshot {
   readonly agents: readonly HerdrAgent[];
   readonly labels: ReadonlyMap<string, string>;
   readonly sleeping: readonly SleepingSession[];
+  /** Canonical open folder per cwd, for the cwds that lie inside one. */
+  readonly folders: ReadonlyMap<string, string>;
 }
 
 /** Git facts for the checkout a cwd sits in. `branch` is absent on a detached HEAD. */
@@ -388,7 +397,13 @@ class HerdrLinkImpl implements HerdrLink {
   private events?: HerdrEventStream;
   private eventsKey?: string;
   private readonly runGit: HerdrGitRunner;
-  private roster: RosterSnapshot = { agents: [], labels: new Map<string, string>(), sleeping: [] };
+  private readonly workspaceFor: (cwd: string) => Promise<string | undefined>;
+  private roster: RosterSnapshot = {
+    agents: [],
+    labels: new Map<string, string>(),
+    sleeping: [],
+    folders: new Map<string, string>(),
+  };
   /** Checkout lookups by cwd; `undefined` marks a cwd outside any git checkout. */
   private readonly checkouts = new Map<string, GitCheckout | undefined>();
   private readonly pendingCheckouts = new Set<string>();
@@ -401,6 +416,7 @@ class HerdrLinkImpl implements HerdrLink {
     this.endpoint = herdrEndpoint(options.socketPath ?? resolveHerdrSocketPath(process.env));
     this.scheduler = options.scheduler ?? herdrTimerScheduler;
     this.runGit = options.runGit ?? runGitCommand;
+    this.workspaceFor = options.workspaceFor ?? (async () => undefined);
     this.sleepRegistry = new SleepRegistry({
       file: options.sleepRegistryFile ?? path.join(os.homedir(), '.omp', 'agent', 'omp-ngu.json'),
       warn: options.warn ?? ((message: string) => console.warn(message)),
@@ -440,6 +456,16 @@ class HerdrLinkImpl implements HerdrLink {
   onScreen(listener: (message: HerdrScreenMessage) => void): () => void {
     this.screenListeners.add(listener);
     return () => this.screenListeners.delete(listener);
+  }
+
+  /** Re-tags the roster against the open folders as they now stand, after the folder list changed. */
+  async rescope(): Promise<void> {
+    if (!this.running || !this.message.available) return;
+    const generation = this.generation;
+    const roster = await this.withFolders(this.roster);
+    if (!this.isCurrent(generation)) return;
+    this.roster = roster;
+    this.publishRoster();
   }
 
   async read(paneId: string, lines: number): Promise<HerdrScreenMessage> {
@@ -690,13 +716,36 @@ class HerdrLinkImpl implements HerdrLink {
 
   /** Publishes the last roster with the workspace labels and checkout facts known so far. */
   private publishRoster(): void {
-    const { agents, labels, sleeping } = this.roster;
+    const { agents, labels, sleeping, folders } = this.roster;
     this.publish({
       type: 'herdrAgents',
       available: true,
-      agents: agents.map((agent) => withRosterFields(agent, labels, this.checkouts)),
-      sleeping: sleeping.map((session) => withSleepingFields(session, labels, this.checkouts)),
+      agents: agents.map((agent) =>
+        withFolder(withRosterFields(agent, labels, this.checkouts), agent.cwd, folders),
+      ),
+      sleeping: sleeping.map((session) =>
+        withFolder(withSleepingFields(session, labels, this.checkouts), session.cwd, folders),
+      ),
     });
+  }
+
+  /** Adds the open folder holding each agent's and sleeping pane's cwd; an entry outside every folder gets none. */
+  private async withFolders(roster: Omit<RosterSnapshot, 'folders'>): Promise<RosterSnapshot> {
+    const cwds = new Set<string>();
+    for (const agent of roster.agents) {
+      if (agent.cwd !== undefined) cwds.add(agent.cwd);
+    }
+    for (const session of roster.sleeping) {
+      if (session.cwd !== undefined) cwds.add(session.cwd);
+    }
+    const folders = new Map<string, string>();
+    await Promise.all(
+      [...cwds].map(async (cwd) => {
+        const folder = await this.workspaceFor(cwd);
+        if (folder !== undefined) folders.set(cwd, folder);
+      }),
+    );
+    return { ...roster, folders };
   }
 
   /**
@@ -709,7 +758,7 @@ class HerdrLinkImpl implements HerdrLink {
       this.readWorkspaceLabels(),
       this.readSleeping(),
     ]);
-    return { agents: parseAgentList(agentsReply), labels, sleeping };
+    return this.withFolders({ agents: parseAgentList(agentsReply), labels, sleeping });
   }
 
   private async readWorkspaceLabels(): Promise<ReadonlyMap<string, string>> {
@@ -1089,6 +1138,17 @@ function toHerdrAgent(info: AgentInfo): HerdrAgent | undefined {
   if (typeof info.cwd === 'string' && info.cwd !== '') agent.cwd = info.cwd;
   if (typeof info.focused === 'boolean') agent.focused = info.focused;
   return agent;
+}
+
+/** Tags an entry with the open folder holding its cwd; an entry outside every folder keeps no tag. */
+function withFolder<T extends { workspacePath?: string }>(
+  entry: T,
+  cwd: string | undefined,
+  folders: ReadonlyMap<string, string>,
+): T {
+  const folder = cwd === undefined ? undefined : folders.get(cwd);
+  if (folder !== undefined) entry.workspacePath = folder;
+  return entry;
 }
 
 /** Adds the workspace label and checkout facts known so far; a missing fact leaves its field out. */

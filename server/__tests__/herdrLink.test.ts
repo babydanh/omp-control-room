@@ -1419,3 +1419,105 @@ describe('HerdrLink sleeping sessions and wake', () => {
     expect((await later).sleeping).toHaveLength(1);
   });
 });
+
+describe('HerdrLink workspace tags', () => {
+  const SESSION_FILE = 'C:/omp/sessions/2026-01-01_1f2e3d4c-5b6a-4978-8a9b-000087572576.jsonl';
+  const SESSION_ID = '87572576';
+  const SLEPT_CWD = 'V:\\Duancanhan\\Project_QuanLyGiaiDau';
+  let dir: string;
+  let fake: FakeHerdr;
+  let scheduler: ManualScheduler;
+  /** Open folder per cwd, as the folder scope answers it. */
+  let folders: Map<string, string>;
+  let link: HerdrLink;
+
+  beforeEach(async () => {
+    dir = await fs.mkdtemp(path.join(os.tmpdir(), 'omp-herdr-scope-'));
+    fake = new FakeHerdr();
+    await fake.listen();
+    scheduler = new ManualScheduler();
+    folders = new Map();
+    link = createHerdrLink({
+      socketPath: fake.endpoint,
+      scheduler,
+      runGit: new FakeGit().run,
+      sleepRegistryFile: path.join(dir, 'omp-ngu.json'),
+      workspaceFor: async (cwd) => folders.get(cwd),
+    });
+  });
+
+  afterEach(async () => {
+    link.stop();
+    await fake.close();
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it('tags an agent with the open folder holding its cwd and leaves an outside agent untagged', async () => {
+    folders.set('C:/repo', 'C:/repo');
+    fake.reply('agent.list', () => ({
+      agents: [
+        agentInfo(),
+        agentInfo({ pane_id: 'wB:p1', workspace_id: 'wB', cwd: 'D:/elsewhere' }),
+      ],
+    }));
+    const roster = nextAgents(link, (message) => message.agents.length === 2);
+
+    link.start();
+
+    const [inside, outside] = (await roster).agents;
+    expect(inside).toMatchObject({ paneId: 'wA:p2', workspacePath: 'C:/repo' });
+    expect(outside).toMatchObject({ paneId: 'wB:p1' });
+    expect(outside).not.toHaveProperty('workspacePath');
+  });
+
+  it('tags a sleeping pane with the open folder holding its cwd', async () => {
+    folders.set(SLEPT_CWD, 'V:\\Duancanhan\\Project_QuanLyGiaiDau');
+    await fs.writeFile(
+      path.join(dir, 'omp-ngu.json'),
+      JSON.stringify([
+        {
+          pane: 'wD:p4',
+          terminal: 'term_slept',
+          file: SESSION_FILE,
+          cwd: SLEPT_CWD,
+          phase: 'sleeping',
+          ts: '2026-01-01T00:00:00Z',
+        },
+      ]),
+    );
+    fake.reply('pane.list', () => ({
+      panes: [
+        {
+          pane_id: 'wD:p4',
+          workspace_id: 'wD',
+          terminal_id: 'term_slept',
+          cwd: SLEPT_CWD,
+          label: `zz omp: Refactor modal #${SESSION_ID}`,
+        },
+      ],
+    }));
+    const roster = nextAgents(link, (message) => message.sleeping.length > 0);
+
+    link.start();
+
+    expect((await roster).sleeping).toMatchObject([
+      { paneId: 'wD:p4', workspacePath: 'V:\\Duancanhan\\Project_QuanLyGiaiDau' },
+    ]);
+  });
+
+  it('re-tags the roster on rescope, dropping the tag from a folder that closed', async () => {
+    folders.set('C:/repo', 'C:/repo');
+    fake.reply('agent.list', () => ({ agents: [agentInfo()] }));
+    const first = nextAgents(link, (message) => message.agents.length === 1);
+
+    link.start();
+
+    expect((await first).agents[0]).toMatchObject({ workspacePath: 'C:/repo' });
+
+    folders.delete('C:/repo');
+    const retagged = nextAgents(link, (message) => message.agents.length === 1);
+    await link.rescope();
+
+    expect((await retagged).agents[0]).not.toHaveProperty('workspacePath');
+  });
+});

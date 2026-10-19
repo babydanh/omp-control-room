@@ -22,6 +22,8 @@ import { runProcess, type ScriptRunner } from './processRunner.js';
 export interface LedgerRuntimeOptions {
   /** Extra repo folders to scan, such as the company workspace folders. */
   readonly extraRepoPaths?: () => readonly string[];
+  /** The open Company folder that holds a path (deepest match), or undefined. Never rejects. */
+  readonly workspaceFor?: (path: string) => Promise<string | undefined>;
 }
 
 /** Creates the ledger service for this user. Call `dispose()` on shutdown. */
@@ -38,6 +40,7 @@ export function createLedgerService(options: LedgerRuntimeOptions = {}): LedgerS
     now: Date.now,
     schedule: { setInterval, clearInterval },
     extraRepoPaths: options.extraRepoPaths,
+    workspaceFor: options.workspaceFor,
   });
 }
 

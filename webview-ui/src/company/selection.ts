@@ -99,13 +99,33 @@ export function drawerSubjectFor(
   state: CompanyViewState,
   opened: OpenedSubject | null,
 ): DrawerSubject | null {
-  if (opened !== null) return opened;
+  if (opened !== null) {
+    // A herdr or sleeping pane the folder view hides is not shown, even when the user opened it.
+    const hidden =
+      (opened.kind === 'herdr' || opened.kind === 'sleeping') &&
+      herdrPaneHidden(state, opened.paneId);
+    if (!hidden) return opened;
+  }
   const { taskId, sessionId } = state.selection;
   if (taskId !== null && state.tasks[taskId] !== undefined) return { kind: 'task', taskId };
   if (sessionId !== null && state.sessions[sessionId] !== undefined) {
     return { kind: 'session', sessionId };
   }
   return null;
+}
+
+/**
+ * Whether the server holds a herdr pane that the folder view hides: it is in the roster but not
+ * in the panes the board shows. A pane that is simply gone is not hidden.
+ */
+export function herdrPaneHidden(state: CompanyViewState, paneId: string): boolean {
+  const rostered =
+    state.herdrRoster.agents.some((agent) => agent.paneId === paneId) ||
+    state.herdrRoster.sleeping.some((session) => session.paneId === paneId);
+  const shown =
+    state.herdr.agents.some((agent) => agent.paneId === paneId) ||
+    state.herdr.sleeping.some((session) => session.paneId === paneId);
+  return rostered && !shown;
 }
 
 /** A stable identity for a drawer subject, so a retained subject can be compared. */

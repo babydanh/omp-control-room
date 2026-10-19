@@ -126,6 +126,27 @@ export function foldersInView(input: FolderFocusInput, folderKeys: readonly stri
     .map((entry) => entry.path);
 }
 
+/**
+ * Whether two folder paths name the same folder. Case is ignored, `\` and `/` are one separator,
+ * and trailing separators do not count: `D:\Work\App\` names the same folder as `d:/work/app`.
+ */
+export function samePath(left: string, right: string): boolean {
+  const canonicalLeft = left.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const canonicalRight = right.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  return canonicalLeft === canonicalRight;
+}
+
+/**
+ * Whether an item the server tagged with `workspacePath` belongs in the board's view. `all` mode,
+ * and a board with no folder list yet, show every item. `folder` mode shows only the active
+ * folder's items: an item tagged with no open folder never shows there.
+ */
+export function inFolderView(input: FolderFocusInput, workspacePath: string | undefined): boolean {
+  if (input.viewMode === 'all' || input.workspaces === null) return true;
+  const focus = focusFolder(input);
+  return focus !== null && workspacePath !== undefined && samePath(workspacePath, focus);
+}
+
 /** Shown while the server's folder list has not arrived; folder-scoped commands wait for it. */
 export const FOLDER_LIST_LOADING_MESSAGE = 'Đang tải thư mục…';
 

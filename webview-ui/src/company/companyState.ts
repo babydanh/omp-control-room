@@ -60,9 +60,11 @@ import {
   DEFAULT_VIEW_MODE,
   emptyFolderScope,
   focusFolder,
+  type FolderFocusInput,
   folderKeyOf,
   type FolderScope,
   foldersInView,
+  inFolderView,
   mergeFolderScopes,
   UNTAGGED_FOLDER,
 } from './folderView.js';
@@ -213,8 +215,9 @@ export interface HerdrView {
   loaded: boolean;
   available: boolean;
   reason: string | null;
+  /** Live herdr agents in view: the roster's agents that the folder rules keep. */
   agents: HerdrAgent[];
-  /** Hibernated omp sessions: a pane the herdr server still holds, with no live agent. Replaced whole by each herdrAgents. */
+  /** Hibernated omp sessions in view: a pane the herdr server still holds, with no live agent. */
   sleeping: HerdrSleepingSession[];
   /** Latest screen per pane; a late reply older than the one held is dropped. */
   screens: Record<string, HerdrScreenView>;
@@ -232,6 +235,12 @@ export function emptyHerdrView(): HerdrView {
     screens: {},
     infos: {},
   };
+}
+
+/** The server's herdr roster: every pane the herdr server reports, before the folder rules apply. */
+export interface HerdrRoster {
+  agents: HerdrAgent[];
+  sleeping: HerdrSleepingSession[];
 }
 
 /** The omp sessions the resume picker lists: the latest answer to a request for them. */
@@ -283,6 +292,8 @@ export interface CompanyViewState extends FolderScope {
   /** Latest agent info per session; a late reply older than the one held is dropped. */
   sessionInfos: Record<string, AgentInfo>;
   herdr: HerdrView;
+  /** The server's whole herdr roster; `herdr.agents` and `herdr.sleeping` are its part in view. */
+  herdrRoster: HerdrRoster;
   /** The latest answer to a resume-picker request; null until one has arrived. */
   ompSessions: OmpSessionsView | null;
   /** The folders the server reports; null until the server has sent a list. */
@@ -326,6 +337,7 @@ export function emptyCompanyState(
     sessionLogs: {},
     sessionInfos: {},
     herdr: emptyHerdrView(),
+    herdrRoster: { agents: [], sleeping: [] },
     ompSessions: null,
     workspaces: null,
     pendingWorkspaceOpen: null,
@@ -791,6 +803,7 @@ function project(state: CompanyViewState): CompanyViewState {
     ...state,
     ...scope,
     folderOf,
+    herdr: herdrInView(state.herdr, state.herdrRoster, input),
     sessionLogs: keepLive(
       state.sessionLogs,
       (sessionId) => scope.sessions[sessionId] !== undefined,
@@ -800,6 +813,29 @@ function project(state: CompanyViewState): CompanyViewState {
       (sessionId) => scope.sessions[sessionId] !== undefined,
     ),
   };
+}
+
+/**
+ * The herdr panes in view: the roster's agents and sessions that the folder rules keep. A list
+ * that holds the same panes as before is kept, so an unrelated change re-derives nothing.
+ */
+function herdrInView(herdr: HerdrView, roster: HerdrRoster, input: FolderFocusInput): HerdrView {
+  const agents = keepIfSame(
+    herdr.agents,
+    roster.agents.filter((agent) => inFolderView(input, agent.workspacePath)),
+  );
+  const sleeping = keepIfSame(
+    herdr.sleeping,
+    roster.sleeping.filter((session) => inFolderView(input, session.workspacePath)),
+  );
+  if (agents === herdr.agents && sleeping === herdr.sleeping) return herdr;
+  return { ...herdr, agents, sleeping };
+}
+
+/** The held list when it holds exactly the same items as `next`; otherwise `next`. */
+function keepIfSame<T>(held: T[], next: T[]): T[] {
+  const same = held.length === next.length && next.every((item, index) => item === held[index]);
+  return same ? held : next;
 }
 
 /**
@@ -932,10 +968,17 @@ function settleSelection(result: CompanyResult): CompanyResult {
   }
   if (taskId !== null && state.tasks[taskId] === undefined) taskId = null;
   if (sessionId !== null && state.sessions[sessionId] === undefined) sessionId = null;
+  // A herdr pane the folder view no longer holds is unselected with the rest.
+  const heldPane = state.selection.herdrPaneId;
+  const herdrLeftView =
+    heldPane !== null &&
+    !state.herdr.agents.some((agent) => agent.paneId === heldPane) &&
+    !state.herdr.sleeping.some((session) => session.paneId === heldPane);
   if (
     sessionId === state.selection.sessionId &&
     taskId === state.selection.taskId &&
-    openingSessionId === state.openingSessionId
+    openingSessionId === state.openingSessionId &&
+    !herdrLeftView
   ) {
     return result;
   }
@@ -1086,20 +1129,21 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
         sessionInfos: withNewerInfo(state.sessionInfos, message.sessionId, message.info),
       });
     case 'herdrAgents':
-      return unchanged({
-        ...state,
-        herdr: {
-          ...state.herdr,
-          loaded: true,
-          available: message.available,
-          reason: message.reason ?? null,
-          agents: [...message.agents],
-          sleeping: [...message.sleeping],
-          infos: keepLive(state.herdr.infos, (paneId) =>
-            message.agents.some((agent) => agent.paneId === paneId),
-          ),
-        },
-      });
+      return unchanged(
+        project({
+          ...state,
+          herdrRoster: { agents: [...message.agents], sleeping: [...message.sleeping] },
+          herdr: {
+            ...state.herdr,
+            loaded: true,
+            available: message.available,
+            reason: message.reason ?? null,
+            infos: keepLive(state.herdr.infos, (paneId) =>
+              message.agents.some((agent) => agent.paneId === paneId),
+            ),
+          },
+        }),
+      );
     case 'herdrScreen':
       return unchanged({ ...state, herdr: applyHerdrScreen(state.herdr, message) });
     case 'herdrInfo':

@@ -99,8 +99,8 @@ export function LedgerSidePanels({ view }: { view: LedgerView }) {
         ) : (
           <ul className="flex flex-col gap-0.5">
             {view.unscannedFolders.map((folder) => (
-              <li key={folder} className="truncate font-mono text-2xs text-text-muted">
-                {folder}
+              <li key={folder.path} className="truncate font-mono text-2xs text-text-muted">
+                {folder.path}
               </li>
             ))}
           </ul>

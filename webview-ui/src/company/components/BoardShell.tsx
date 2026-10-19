@@ -20,6 +20,7 @@ import { COMPANY_RAIL_WIDTH_PX } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
 import { folderIdentityOf, foldersWaitingForSnapshot, showsAllFolders } from '../folderIdentity.js';
+import type { FolderFocusInput } from '../folderView.js';
 import type { HerdrDrawerTab } from '../herdrView.js';
 import { sidebarPresentation } from '../layoutMode.js';
 import { ledgerStore } from '../ledger/ledgerClient.js';
@@ -138,6 +139,11 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledgerPanes = useMemo(
     () => panesOf(state.herdr.agents, state.herdr.sleeping),
     [state.herdr.agents, state.herdr.sleeping],
+  );
+  // The folder rules' input for the Cây git view: folder mode scopes it to the folder in view.
+  const ledgerFocus = useMemo<FolderFocusInput>(
+    () => ({ viewMode: state.viewMode, focusPath: state.focusPath, workspaces: state.workspaces }),
+    [state.viewMode, state.focusPath, state.workspaces],
   );
   const pendingQuestions = useMemo(
     () => Object.values(state.questions).filter((question) => question.status === 'pending'),
@@ -454,6 +460,7 @@ export function BoardShell({ client }: BoardShellProps) {
           {ledgerShown ? (
             <LedgerView
               boardSessions={ledgerBoardSessions}
+              focus={ledgerFocus}
               onOpenBoardSession={selectSession}
               panes={ledgerPanes}
               onOpenHerdr={openHerdr}

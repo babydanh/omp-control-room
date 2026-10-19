@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { LedgerOverlapScan, LedgerView } from '../../core/src/messages.js';
 import { LEDGER_NOTICE_CONTENT_MAX, LEDGER_SPAM_RULE } from '../src/ledger/constants.js';
 import type { LedgerWorktreeState } from '../src/ledger/git.js';
-import { ledgerBasename } from '../src/ledger/ledgerPath.js';
+import { ledgerBasename, ledgerPathKey } from '../src/ledger/ledgerPath.js';
 import { formatLedgerTime } from '../src/ledger/ledgerTime.js';
 import {
   buildLedgerView,
@@ -137,8 +137,30 @@ describe('buildLedgerView: checkout mapping', () => {
   it('lists folders that are not git repos as unscanned, not as repos', () => {
     const notRepo: LedgerRepoInput = { repo: 'V:/Duan/Project', scan: { kind: 'not-repo' } };
     const view = buildLedgerView(viewInput({ repos: [notRepo] }));
-    expect(view.unscannedFolders).toEqual(['V:/Duan/Project']);
+    expect(view.unscannedFolders).toEqual([{ path: 'V:/Duan/Project' }]);
     expect(view.repos).toEqual([]);
+  });
+
+  it('tags repos, checkouts and unscanned folders with the open folder that holds them', () => {
+    const view = buildLedgerView(
+      viewInput({
+        repos: [
+          { repo: 'C:/Repo', scan: { kind: 'repo', worktrees: [worktreeState('C:/Repo/wt')] } },
+          { repo: 'D:/Other', scan: { kind: 'repo', worktrees: [worktreeState('D:/Other')] } },
+          { repo: 'V:/Duan/Project', scan: { kind: 'not-repo' } },
+        ],
+        folderOf: new Map([
+          [ledgerPathKey('C:/Repo'), 'C:/Repo'],
+          [ledgerPathKey('C:/Repo/wt'), 'C:/Repo'],
+          [ledgerPathKey('V:/Duan/Project'), 'V:/Duan'],
+        ]),
+      }),
+    );
+    expect(view.repos[0]).toMatchObject({ repo: 'C:/Repo', workspacePath: 'C:/Repo' });
+    expect(view.repos[0].worktrees[0]).toMatchObject({ workspacePath: 'C:/Repo' });
+    expect(view.repos[1]).not.toHaveProperty('workspacePath');
+    expect(view.repos[1].worktrees[0]).not.toHaveProperty('workspacePath');
+    expect(view.unscannedFolders).toEqual([{ path: 'V:/Duan/Project', workspacePath: 'V:/Duan' }]);
   });
 });
 

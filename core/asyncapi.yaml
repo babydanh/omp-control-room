@@ -4132,7 +4132,7 @@ components:
           description: Folders named by recent ledger events that are not git repositories.
           maxItems: 50
           items:
-            type: string
+            $ref: '#/components/schemas/LedgerUnscannedFolder'
         sessions:
           type: array
           maxItems: 400
@@ -4189,6 +4189,20 @@ components:
           maxItems: 40
           items:
             $ref: '#/components/schemas/LedgerWorktree'
+        workspacePath:
+          type: string
+          description: Canonical path of the open Company folder that contains this repo, the deepest match. Absent when the repo is outside every open folder.
+
+    LedgerUnscannedFolder:
+      type: object
+      additionalProperties: false
+      required: [path]
+      properties:
+        path:
+          type: string
+        workspacePath:
+          type: string
+          description: Canonical path of the open Company folder that contains this folder, the deepest match. Absent when the folder is outside every open folder.
 
     LedgerWorktree:
       type: object
@@ -4197,6 +4211,9 @@ components:
       properties:
         path:
           type: string
+        workspacePath:
+          type: string
+          description: Canonical path of the open Company folder that contains this checkout, the deepest match. Absent when the checkout is outside every open folder.
         name:
           type: string
         branch:
@@ -4799,6 +4816,9 @@ components:
           description: Top-level directory of the git worktree the agent works in.
         focused:
           type: boolean
+        workspacePath:
+          type: string
+          description: Canonical path of the open Company folder that contains the agent's cwd, the deepest match. Absent when the cwd is outside every open folder.
 
     HerdrSleepingSession:
       type: object
@@ -4832,6 +4852,9 @@ components:
         worktreeRoot:
           type: string
           description: Top-level directory of the git worktree the session works in.
+        workspacePath:
+          type: string
+          description: Canonical path of the open Company folder that contains the cwd, the deepest match. Absent when the cwd is outside every open folder.
 
     HerdrAgentsMessage:
       type: object

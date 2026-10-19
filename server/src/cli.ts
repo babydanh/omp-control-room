@@ -24,6 +24,7 @@ import {
   COMPANY_OMP_BRIDGE_FILENAME,
   COMPANY_PTY_HOST_FILENAME,
 } from './company/constants.js';
+import { FolderScope } from './company/folderScope.js';
 import { openWorkspaceCompany } from './company/workspaceCompanyHost.js';
 import { CompanyWorkspaceRegistry } from './company/workspaceRegistry.js';
 import {
@@ -258,9 +259,11 @@ async function main(): Promise<void> {
   // ── Create server ──
   const server = new PixelAgentsServer();
   const runtime = new AgentRuntime(store, claudeProvider);
+  // Open Company folders, canonicalised: herdr, sleeping panes and the ledger tag each item with the folder that holds it.
+  const folderScope = new FolderScope();
   // herdr is an optional side channel: when its socket is absent the board
   // shows herdr as unavailable and the rest of the server runs unchanged.
-  const herdr = createHerdrLink();
+  const herdr = createHerdrLink({ workspaceFor: (cwd) => folderScope.folderOf(cwd) });
   herdr.onAgents((message) => store.broadcast(message as unknown as Record<string, unknown>));
   herdr.onScreen((message) => store.broadcast(message as unknown as Record<string, unknown>));
   // Company folders: the initial one opens below; the board can open more and
@@ -278,6 +281,12 @@ async function main(): Promise<void> {
       forget: forgetRecentCompanyWorkspace,
     },
     names: { read: readCompanyFolderNames, set: setCompanyFolderName },
+    onFoldersChanged: (openPaths) => {
+      void folderScope.setFolders(openPaths).then(() => {
+        void herdr.rescope();
+        ledger.rescope();
+      });
+    },
   });
   // Cây git board: scans the repos seen in recent activity plus the open company folders.
   const ledger = createLedgerService({
@@ -286,6 +295,7 @@ async function main(): Promise<void> {
         .entries()
         .filter((entry) => entry.open)
         .map((entry) => entry.path),
+    workspaceFor: (target) => folderScope.folderOf(target),
   });
   // Terminals for agents this server launches. Construction is cheap -- the
   // native module is resolved (and probed) lazily on first use, so a user who

@@ -29,7 +29,7 @@ import { formatLedgerTime } from './ledgerTime.js';
 import { OverlapScanner } from './overlap.js';
 import type { ScriptRunner } from './processRunner.js';
 import { buildTimeline, type TimelineEvent, timelineEventOf } from './timeline.js';
-import { buildLedgerView, viewContentJson } from './view.js';
+import { buildLedgerView, type LedgerRepoInput, viewContentJson } from './view.js';
 
 export type LedgerSnapshotListener = (message: LedgerSnapshotMessage) => void;
 
@@ -52,6 +52,8 @@ export interface LedgerServiceOptions {
   readonly schedule: LedgerScheduler;
   /** Extra repo folders to scan besides the repos seen in recent activity. */
   readonly extraRepoPaths?: () => readonly string[];
+  /** The open Company folder that holds a path (deepest match), or undefined. Never rejects. */
+  readonly workspaceFor?: (path: string) => Promise<string | undefined>;
 }
 
 interface GitEntry {
@@ -113,6 +115,11 @@ export class LedgerService {
       agentName: row.agentName,
     }));
     return buildTimeline({ windowMinutes, nowMs, events, sessions, rule: LEDGER_SPAM_RULE });
+  }
+
+  /** Re-tags the view against the open folders as they now stand; a snapshot goes out only if a tag changed. */
+  rescope(): void {
+    if (this.isActive()) this.refreshInBackground();
   }
 
   async fileDiff(worktree: string, path: string): Promise<commands.FileDiffOutcome> {
@@ -188,7 +195,31 @@ export class LedgerService {
       mainWrites: source.mainWriteRows(dayStart),
       repos,
       overlaps,
+      folderOf: await this.folderTags(repos),
     });
+  }
+
+  /** The open folder of every repo and checkout in view, keyed by ledgerPathKey; empty without a resolver. */
+  private async folderTags(
+    repos: readonly LedgerRepoInput[],
+  ): Promise<ReadonlyMap<string, string>> {
+    const tags = new Map<string, string>();
+    const workspaceFor = this.options.workspaceFor;
+    if (workspaceFor === undefined) return tags;
+    const paths = new Set<string>();
+    for (const repo of repos) {
+      paths.add(repo.repo);
+      if (repo.scan.kind === 'repo') {
+        for (const worktree of repo.scan.worktrees) paths.add(worktree.path);
+      }
+    }
+    await Promise.all(
+      [...paths].map(async (target) => {
+        const folder = await workspaceFor(target);
+        if (folder !== undefined) tags.set(ledgerPathKey(target), folder);
+      }),
+    );
+    return tags;
   }
 
   /** Repos from the last day's events, newest first and capped, then the extra folders. */

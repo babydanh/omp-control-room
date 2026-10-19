@@ -168,6 +168,11 @@ export interface CompanyWorkspaceRegistryOptions {
    * open one is flagged `missing`. Production asks the file system; tests pass a fake.
    */
   readonly folderExists?: (workspacePath: string) => boolean;
+  /**
+   * Called with the open folders' paths whenever the set of open folders changes, before the list is broadcast.
+   * Production uses it to re-tag herdr and ledger items against the folders as they now stand.
+   */
+  readonly onFoldersChanged?: (openPaths: readonly string[]) => void;
 }
 
 interface OpenFolder {
@@ -194,6 +199,7 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
   private readonly folderExists: (workspacePath: string) => boolean;
   /** The folder list last broadcast, serialised, so unchanged lists are not resent. */
   private lastPublished: string | null = null;
+  private lastOpenPaths: string | null = null;
   private disposed = false;
   private disposing: Promise<void> | null = null;
 
@@ -478,6 +484,12 @@ export class CompanyWorkspaceRegistry implements CompanyWorkspaceControl {
   /** Broadcast the folder list only when it differs from the last one sent. */
   private publishWorkspaces(): void {
     const workspaces = this.entries();
+    const openPaths = workspaces.filter((entry) => entry.open).map((entry) => entry.path);
+    const openKey = JSON.stringify(openPaths);
+    if (openKey !== this.lastOpenPaths) {
+      this.lastOpenPaths = openKey;
+      this.options.onFoldersChanged?.(openPaths);
+    }
     const serialized = JSON.stringify(workspaces);
     if (serialized === this.lastPublished) return;
     this.lastPublished = serialized;

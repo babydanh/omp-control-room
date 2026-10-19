@@ -10,6 +10,7 @@ import type {
   LedgerOverlapScan,
   LedgerRepo,
   LedgerSession,
+  LedgerUnscannedFolder,
   LedgerView,
 } from '../../../core/src/messages.js';
 import {
@@ -48,6 +49,8 @@ export interface LedgerViewInput {
   readonly mainWrites: readonly EventRow[];
   readonly repos: readonly LedgerRepoInput[];
   readonly overlaps: readonly LedgerOverlapScan[];
+  /** The open Company folder per repo or checkout path (keyed by ledgerPathKey), for the ones inside one. */
+  readonly folderOf?: ReadonlyMap<string, string>;
 }
 
 export function buildLedgerView(input: LedgerViewInput): LedgerView {
@@ -56,20 +59,24 @@ export function buildLedgerView(input: LedgerViewInput): LedgerView {
     .slice(0, LEDGER_SESSIONS_MAX)
     .map((row) => sessionView(row, eventsBySession.get(row.sessionId) ?? [], input.nowMs));
   const sessionsByCheckout = openSessionsByCheckout(sessions);
+  const folderOf = input.folderOf ?? new Map<string, string>();
 
   const repos: LedgerRepo[] = [];
-  const unscannedFolders: string[] = [];
+  const unscannedFolders: LedgerUnscannedFolder[] = [];
   for (const entry of input.repos) {
     const repo = normalizeLedgerPath(entry.repo);
+    const repoFolder = inFolder(folderOf, repo);
     if (entry.scan.kind === 'not-repo') {
-      unscannedFolders.push(repo);
+      unscannedFolders.push({ path: repo, ...repoFolder });
       continue;
     }
     repos.push({
       repo,
       name: ledgerBasename(repo),
+      ...repoFolder,
       worktrees: entry.scan.worktrees.map((worktree) => ({
         ...worktree,
+        ...inFolder(folderOf, worktree.path),
         sessionIds: sessionsByCheckout.get(ledgerPathKey(worktree.path)) ?? [],
       })),
     });
@@ -105,6 +112,12 @@ export function buildLedgerView(input: LedgerViewInput): LedgerView {
     overlaps: [...input.overlaps],
     spamRule: { ...LEDGER_SPAM_RULE },
   };
+}
+
+/** The open Company folder holding a path, when one does; a path outside every folder gets no tag. */
+function inFolder(folderOf: ReadonlyMap<string, string>, raw: string): { workspacePath?: string } {
+  const workspacePath = folderOf.get(ledgerPathKey(raw));
+  return workspacePath === undefined ? {} : { workspacePath };
 }
 
 /** JSON of the view without its timestamp: equal content means nothing changed. */

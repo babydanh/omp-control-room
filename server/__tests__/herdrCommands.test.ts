@@ -33,6 +33,7 @@ function stubLink(overrides: Partial<HerdrLink> = {}): HerdrLink {
     snapshot: vi.fn((): HerdrAgentsMessage => ROSTER),
     onAgents: vi.fn(() => () => undefined),
     onScreen: vi.fn(() => () => undefined),
+    rescope: vi.fn(async (): Promise<void> => undefined),
     read: vi.fn(async (paneId: string): Promise<HerdrScreenMessage> => ({
       type: 'herdrScreen',
       paneId,

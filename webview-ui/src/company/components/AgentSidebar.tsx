@@ -166,6 +166,11 @@ export function AgentSidebar({
     activeGroups.reduce((sum, group) => sum + group.active.length + group.parked.length, 0) +
     herdrRowCount(tree.herdr);
   const profiles = state.settings?.roleProfiles ?? {};
+  // In folder mode the herdr group holds only this folder's panes, so its empty line says so.
+  const herdrEmptyText =
+    state.viewMode === 'folder'
+      ? 'Không có agent herdr nào trong thư mục này'
+      : 'Không có agent nào trong herdr.';
 
   function changeRole(role: CompanyRole, modelId: string, thinking: string | undefined): void {
     const outcome = client.updateRoleProfiles(withRoleModel(profiles, role, modelId, thinking));
@@ -230,7 +235,7 @@ export function AgentSidebar({
         {boards.map((project) => (
           <ProjectSection key={project.key} project={project} view={view} />
         ))}
-        <HerdrBlock herdr={tree.herdr} repos={repos} view={view} />
+        <HerdrBlock herdr={tree.herdr} repos={repos} view={view} emptyText={herdrEmptyText} />
       </div>
 
       {notice && (
@@ -453,17 +458,19 @@ function HerdrBlock({
   herdr,
   repos,
   view,
+  emptyText,
 }: {
   herdr: HerdrGroup;
   repos: readonly ProjectNode[];
   view: TreeView;
+  emptyText: string;
 }) {
   if (herdr.kind === 'hidden') return null;
   if (herdr.kind === 'unavailable') {
     return <p className="px-2.5 py-2 text-xs text-text-muted">{herdr.message}</p>;
   }
   if (repos.length === 0) {
-    return <p className="px-2.5 py-2 text-xs text-text-muted">Không có agent nào trong herdr.</p>;
+    return <p className="px-2.5 py-2 text-xs text-text-muted">{emptyText}</p>;
   }
   return (
     <div data-testid="agent-group-herdr">

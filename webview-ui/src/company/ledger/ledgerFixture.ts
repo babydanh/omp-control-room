@@ -425,7 +425,10 @@ export function ledgerFixtureView(): LedgerView {
         ],
       },
     ],
-    unscannedFolders: ['V:/Duancanhan/Project_QuanLyGiaiDau', 'D:/Scratch/prototype'],
+    unscannedFolders: [
+      { path: 'V:/Duancanhan/Project_QuanLyGiaiDau' },
+      { path: 'D:/Scratch/prototype' },
+    ],
     sessions: SESSIONS,
     pending: [
       {

@@ -1149,6 +1149,7 @@ export interface HerdrAgent {
   branch?: string;
   worktreeRoot?: string;
   focused?: boolean;
+  workspacePath?: string;
 }
 
 export type AnonymousSchema_617 = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
@@ -1163,6 +1164,7 @@ export interface HerdrSleepingSession {
   repo?: string;
   branch?: string;
   worktreeRoot?: string;
+  workspacePath?: string;
 }
 
 export interface HerdrScreenMessage {
@@ -1189,19 +1191,19 @@ export interface AgentInfo {
   tools?: AgentToolInfo[];
   skills?: AgentSkillInfo[];
   toolUsage?: AgentToolUsage[];
-  collectedFrom: AnonymousSchema_661;
+  collectedFrom: AnonymousSchema_663;
   collectedAt: string;
   note?: string;
 }
 
 export interface AgentToolInfo {
   name: string;
-  source: AnonymousSchema_651;
+  source: AnonymousSchema_653;
   mcpServer?: string;
   active: boolean;
 }
 
-export type AnonymousSchema_651 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
+export type AnonymousSchema_653 = 'builtin' | 'extension' | 'mcp' | 'sdk' | 'other';
 
 export interface AgentSkillInfo {
   name: string;
@@ -1214,7 +1216,7 @@ export interface AgentToolUsage {
   count: number;
 }
 
-export type AnonymousSchema_661 = 'live' | 'transcript' | 'herdr';
+export type AnonymousSchema_663 = 'live' | 'transcript' | 'herdr';
 
 export interface HerdrInfoMessage {
   type: 'herdrInfo';
@@ -1302,12 +1304,12 @@ export interface CompanyFileListMessage {
 export interface CompanyFileEntry {
   name: string;
   path: string;
-  kind: AnonymousSchema_714;
+  kind: AnonymousSchema_716;
   sizeBytes?: number;
   modifiedAt?: string;
 }
 
-export type AnonymousSchema_714 = 'file' | 'directory';
+export type AnonymousSchema_716 = 'file' | 'directory';
 
 export interface CompanyFileReadMessage {
   type: 'companyFileRead';
@@ -1319,14 +1321,14 @@ export interface CompanyFileContent {
   path: string;
   totalBytes: number;
   offset: number;
-  encoding: AnonymousSchema_722;
+  encoding: AnonymousSchema_724;
   text?: string;
   dataBase64?: string;
   mediaType?: string;
   truncated: boolean;
 }
 
-export type AnonymousSchema_722 = 'utf8' | 'base64';
+export type AnonymousSchema_724 = 'utf8' | 'base64';
 
 export interface CompanyAttachmentUploadedMessage {
   type: 'companyAttachmentUploaded';
@@ -1344,7 +1346,7 @@ export interface LedgerView {
   generatedAt: string;
   database: LedgerDatabaseStatus;
   repos: LedgerRepo[];
-  unscannedFolders: string[];
+  unscannedFolders: LedgerUnscannedFolder[];
   sessions: LedgerSession[];
   pending: LedgerPending[];
   notices: LedgerNotice[];
@@ -1354,20 +1356,22 @@ export interface LedgerView {
 }
 
 export interface LedgerDatabaseStatus {
-  state: AnonymousSchema_732;
+  state: AnonymousSchema_734;
   error?: string;
 }
 
-export type AnonymousSchema_732 = 'ok' | 'missing' | 'unreadable';
+export type AnonymousSchema_734 = 'ok' | 'missing' | 'unreadable';
 
 export interface LedgerRepo {
   repo: string;
   name: string;
   worktrees: LedgerWorktree[];
+  workspacePath?: string;
 }
 
 export interface LedgerWorktree {
   path: string;
+  workspacePath?: string;
   name: string;
   branch: string | null;
   head: string;
@@ -1388,6 +1392,11 @@ export interface LedgerWorktree {
 export interface LedgerDirtyFile {
   path: string;
   status: string;
+}
+
+export interface LedgerUnscannedFolder {
+  path: string;
+  workspacePath?: string;
 }
 
 export interface LedgerSession {
@@ -1441,7 +1450,7 @@ export interface LedgerMainWrite {
 
 export interface LedgerOverlapScan {
   repo: string;
-  state: AnonymousSchema_802;
+  state: AnonymousSchema_807;
   startedAt: string | null;
   finishedAt: string | null;
   base: string | null;
@@ -1453,7 +1462,7 @@ export interface LedgerOverlapScan {
   error: string | null;
 }
 
-export type AnonymousSchema_802 = 'idle' | 'running' | 'done' | 'partial' | 'error';
+export type AnonymousSchema_807 = 'idle' | 'running' | 'done' | 'partial' | 'error';
 
 export interface LedgerOverlapPair {
   a: string;
@@ -1744,25 +1753,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_965;
-  mode?: AnonymousSchema_966;
+  delivery: AnonymousSchema_970;
+  mode?: AnonymousSchema_971;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_965 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_970 = 'prompt' | 'steer' | 'follow_up';
 
-export type AnonymousSchema_966 = 'chat' | 'company';
+export type AnonymousSchema_971 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_973;
+  decision: AnonymousSchema_978;
   note?: string;
 }
 
-export type AnonymousSchema_973 = 'approve' | 'reject';
+export type AnonymousSchema_978 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1775,7 +1784,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_985;
+  decision?: AnonymousSchema_990;
 }
 
 export interface QuestionAnswer {
@@ -1784,17 +1793,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_985 = 'approve_once' | 'reject';
+export type AnonymousSchema_990 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_990;
+  action: AnonymousSchema_995;
 }
 
-export type AnonymousSchema_990 =
+export type AnonymousSchema_995 =
   'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
 
 export interface CompanyPromptCancelMessage {
@@ -1898,10 +1907,10 @@ export interface CompanyChatNewMessage {
 export interface CompanyViewModeMessage {
   type: 'companyViewMode';
   requestId: string;
-  mode: AnonymousSchema_1049;
+  mode: AnonymousSchema_1054;
 }
 
-export type AnonymousSchema_1049 = 'all' | 'folder';
+export type AnonymousSchema_1054 = 'all' | 'folder';
 
 export interface CompanyFolderBrowseRequestMessage {
   type: 'companyFolderBrowseRequest';
@@ -1937,10 +1946,10 @@ export interface LedgerViewRequestMessage {
 export interface LedgerTimelineRequestMessage {
   type: 'ledgerTimelineRequest';
   requestId: string;
-  windowMinutes: AnonymousSchema_1068;
+  windowMinutes: AnonymousSchema_1073;
 }
 
-export type AnonymousSchema_1068 = 15 | 60 | 360 | 1440;
+export type AnonymousSchema_1073 = 15 | 60 | 360 | 1440;
 
 export interface LedgerFileDiffRequestMessage {
   type: 'ledgerFileDiffRequest';
