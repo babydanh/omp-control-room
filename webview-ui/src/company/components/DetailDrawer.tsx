@@ -51,6 +51,7 @@ import {
   pendingContract,
 } from '../selection.js';
 import { terminalPolicy } from '../sessionActions.js';
+import { findSquadRun, squadRunKey, squadStatusLabel } from '../squadView.js';
 import { contractStatusLabel, sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
 import { useViewportWidth } from '../useLayoutMode.js';
 import { findWorkItem, statusWordVi, workItemCardHead, workItemKey } from '../workItemView.js';
@@ -62,6 +63,7 @@ import { Icon } from './Icon.js';
 import { QuestionPanel } from './QuestionPanel.js';
 import { SessionBody } from './SessionBody.js';
 import { SleepingPanel } from './SleepingPanel.js';
+import { SquadRunPanel } from './SquadRunPanel.js';
 import { TaskReport } from './TaskReport.js';
 import { WorkItemPanel } from './WorkItemPanel.js';
 import { WorkspaceFileBrowser } from './WorkspaceFileBrowser.js';
@@ -340,6 +342,16 @@ function DrawerContent(props: ContentProps) {
           id={subject.id}
         />
       );
+    case 'squad':
+      return (
+        <SquadRunPanel
+          key={squadRunKey(subject)}
+          client={client}
+          state={state}
+          workspacePath={subject.workspacePath}
+          runId={subject.runId}
+        />
+      );
     case 'files':
       return (
         <WorkspaceFileBrowser
@@ -403,6 +415,12 @@ function headingFor(
       const head = workItemCardHead(item.text);
       return { title: head === '' ? 'Việc' : head, status: statusWordVi(item.status) };
     }
+    case 'squad': {
+      const run = findSquadRun(state, subject);
+      if (run === undefined) return { title: 'Đội', status: null };
+      const head = workItemCardHead(run.request);
+      return { title: head === '' ? 'Đội' : head, status: squadStatusLabel(run.status) };
+    }
     case 'files':
       return { title: 'Tệp trong workspace', status: null };
   }
@@ -436,6 +454,7 @@ function drawerMenuSubject(
     case 'question':
     case 'files':
     case 'workItem':
+    case 'squad':
       return null;
   }
 }

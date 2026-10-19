@@ -78,6 +78,7 @@ import {
   SESSION_LOG_MAX_LIMIT,
   sessionLogDirectory,
 } from './sessionLog.js';
+import type { SquadService } from './squad/squadService.js';
 import type { UsageControl } from './usagePage.js';
 import { isWorkItemAssignee } from './workItems/workItemModel.js';
 import type { WorkItemService } from './workItems/workItemService.js';
@@ -127,6 +128,8 @@ export interface CompanyCommandServices {
   sessionInfo(sessionId: string): Promise<AgentInfo>;
   /** The folder's manual work items; absent on a follower, which cannot change them. */
   workItems?: WorkItemService;
+  /** The folder's squad leader; absent on a follower, which cannot start a squad. */
+  squad?: SquadService;
 }
 
 /**
@@ -280,6 +283,10 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyWorkItemFollowUp',
   'companyWorkItemMark',
   'companyWorkItemCancel',
+  'companySquadRequest',
+  'companySquadApprove',
+  'companySquadDismiss',
+  'companySquadRetry',
   'companyAgentRoleSet',
   ...FOLDER_COMMAND_TYPES,
   ...USAGE_COMMAND_TYPES,
@@ -316,6 +323,10 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companyWorkItemFollowUp: true,
   companyWorkItemMark: true,
   companyWorkItemCancel: true,
+  companySquadRequest: true,
+  companySquadApprove: true,
+  companySquadDismiss: true,
+  companySquadRetry: true,
   companyAgentRoleSet: true,
 };
 
@@ -537,6 +548,12 @@ async function run(
       case 'companyWorkItemCancel':
       case 'companyAgentRoleSet':
         await workItemCommand(msg, requestId, services, send);
+        return;
+      case 'companySquadRequest':
+      case 'companySquadApprove':
+      case 'companySquadDismiss':
+      case 'companySquadRetry':
+        await squadCommand(msg, requestId, services, send);
         return;
       case 'terminalAttach':
         await terminalAttach(msg, requestId, services, send, ctx);
@@ -987,6 +1004,7 @@ async function snapshot(
     workspacePath: services.workspaceRoot,
   });
   if (services.workItems) send(services.workItems.snapshot());
+  if (services.squad) send(services.squad.snapshot());
 }
 
 async function submitPrompt(
@@ -1203,6 +1221,50 @@ async function workItemCommand(
     agent: msg.agent,
     description: stringField(msg, 'description') ?? '',
   });
+  ok(send, requestId);
+}
+
+/**
+ * Squad commands. The folder's squad service applies each one; a resent command gets the same
+ * answer. A request replies with the run it started, so the board can open that run.
+ */
+async function squadCommand(
+  msg: Record<string, unknown>,
+  requestId: string | null,
+  services: CompanyCommandServices,
+  send: Send,
+): Promise<void> {
+  const squad = services.squad;
+  if (!squad) {
+    fail(send, requestId, 'company_unavailable', 'Thư mục này chưa sẵn sàng để giao cho đội.');
+    return;
+  }
+  if (requestId === null) {
+    fail(send, requestId, 'invalid_request', 'Cần có requestId.');
+    return;
+  }
+  if (msg.type === 'companySquadRequest') {
+    const started = await squad.request({ requestId, text: stringField(msg, 'text') ?? '' });
+    send({ type: 'companyCommandResult', requestId, ok: true, squadRunId: started });
+    return;
+  }
+  const runId = stringField(msg, 'runId') ?? '';
+  if (msg.type === 'companySquadApprove') {
+    await squad.approve({
+      requestId,
+      runId,
+      proposalId: stringField(msg, 'proposalId') ?? '',
+      rows: msg.rows,
+    });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companySquadDismiss') {
+    await squad.dismiss({ requestId, runId, proposalId: stringField(msg, 'proposalId') ?? '' });
+    ok(send, requestId);
+    return;
+  }
+  await squad.retry({ requestId, runId });
   ok(send, requestId);
 }
 

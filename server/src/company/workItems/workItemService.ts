@@ -17,6 +17,7 @@ import type {
   AgentRole,
   CompanyWorkItemsMessage,
   HerdrAgent,
+  WorkItem,
   WorkItemAssignee,
   WorkItemVerdict,
 } from '../../../../core/src/messages.js';
@@ -170,6 +171,8 @@ export class WorkItemService {
   /** Whether the newest write failed. Nothing is sent to an agent until its state is on disk. */
   private lastWriteFailed = false;
   private disposed = false;
+  private readonly changeListeners = new Set<() => void>();
+  private readonly reviewListeners = new Set<(item: WorkItem) => void>();
 
   constructor(workspacePath: string, ports: WorkItemPorts) {
     this.workspacePath = workspacePath;
@@ -382,6 +385,24 @@ export class WorkItemService {
     this.disposed = true;
     for (const cancel of this.cancelTimers) cancel();
     this.cancelTimers.clear();
+    this.changeListeners.clear();
+    this.reviewListeners.clear();
+  }
+
+  /** Calls `listener` after every change to the folder's state. Returns the function that removes it. */
+  onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  /** Calls `listener` with each item the moment it reaches review. Returns the function that removes it. */
+  onReview(listener: (item: WorkItem) => void): () => void {
+    this.reviewListeners.add(listener);
+    return () => {
+      this.reviewListeners.delete(listener);
+    };
   }
 
   private replay(requestId: string): string | undefined {
@@ -542,6 +563,7 @@ export class WorkItemService {
     this.prune();
     const file = structuredClone(this.toFile());
     this.ports.publish(this.snapshot());
+    for (const listener of this.changeListeners) listener();
     this.writeChain = this.writeChain
       .then(() => this.ports.persistence.save(file))
       .then(() => {
@@ -707,6 +729,8 @@ export class WorkItemService {
     this.pushEvent(item, makeEvent(at, 'status', 'Agent đã dừng.'));
     this.again = true;
     this.commit();
+    const review = toWorkItem(item);
+    for (const listener of this.reviewListeners) listener(review);
   }
 
   private async readResult(paneId: string): Promise<string | undefined> {

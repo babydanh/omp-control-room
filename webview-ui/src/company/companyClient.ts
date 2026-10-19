@@ -23,6 +23,7 @@ import type {
   ClientMessage,
   HerdrKey,
   ServerMessage,
+  SquadRowInput,
   WorkItemAssignee,
   WorkItemVerdict,
 } from '../../../core/src/messages.js';
@@ -541,6 +542,38 @@ export class CompanyClient {
     return this.command((requestId) =>
       commands.agentRoleSet(requestId, workspacePath, agent, description),
     );
+  }
+
+  /**
+   * Ask a folder's team to plan a request. The verdict is a companyCommandResult under the
+   * handle's requestId and names the run it started in `squadRunId`.
+   */
+  startSquad(workspacePath: string, text: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.squadRequest(requestId, workspacePath, text));
+  }
+
+  /** Approve a proposal with the rows the drawer sends. The verdict is a companyCommandResult. */
+  approveSquad(
+    workspacePath: string,
+    runId: string,
+    proposalId: string,
+    rows: SquadRowInput[],
+  ): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.squadApprove(requestId, workspacePath, runId, proposalId, rows),
+    );
+  }
+
+  /** Dismiss a proposal, closing its run. The verdict is a companyCommandResult. */
+  dismissSquad(workspacePath: string, runId: string, proposalId: string): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.squadDismiss(requestId, workspacePath, runId, proposalId),
+    );
+  }
+
+  /** Retry a failed run. The verdict is a companyCommandResult. */
+  retrySquad(workspacePath: string, runId: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.squadRetry(requestId, workspacePath, runId));
   }
 
   updateRoleProfiles(roleProfiles: Record<string, RoleProfile>): SendOutcome {

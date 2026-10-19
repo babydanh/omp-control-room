@@ -34,6 +34,7 @@ const ALL_IDS: readonly ShortcutId[] = [
   'palette.pageUp',
   'palette.run',
   'composer.company',
+  'composer.squad',
   'composer.newline',
   'composer.send',
   'composer.completeNext',
@@ -187,6 +188,19 @@ const CHORD_CASES: readonly ChordCase[] = [
     ],
   },
   {
+    id: 'composer.squad',
+    yes: [
+      press('Enter', { ctrlKey: true, altKey: true }),
+      press('Enter', { metaKey: true, altKey: true }),
+    ],
+    no: [
+      press('Enter', CTRL),
+      press('Enter', ALT),
+      press('Enter', SHIFT),
+      press('Enter', { ctrlKey: true, altKey: true, shiftKey: true }),
+    ],
+  },
+  {
     id: 'composer.newline',
     yes: [press('Enter', SHIFT)],
     no: [
@@ -269,6 +283,7 @@ describe('SHORTCUTS registry', () => {
 
   it('keeps the composer entries in the order findShortcutId depends on', () => {
     expect(orderOf('composer.company')).toBeLessThan(orderOf('composer.send'));
+    expect(orderOf('composer.squad')).toBeLessThan(orderOf('composer.send'));
   });
 });
 
@@ -294,6 +309,11 @@ describe('findShortcutId', () => {
   it('finds the company route for Ctrl+Shift+Enter, not a plain send', () => {
     const event = press('Enter', { ctrlKey: true, shiftKey: true });
     expect(findShortcutId(event, { typing: true, groups: ['composer'] })).toBe('composer.company');
+  });
+
+  it('finds composer.squad for Ctrl/Cmd+Alt+Enter', () => {
+    const event = press('Enter', { ctrlKey: true, altKey: true });
+    expect(findShortcutId(event, { typing: true, groups: ['composer'] })).toBe('composer.squad');
   });
 
   it('finds composer.send for a bare Enter', () => {

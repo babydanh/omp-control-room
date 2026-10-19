@@ -8,9 +8,9 @@ import { useState } from 'react';
 
 import type { WorkItemAssignee } from '../../../../core/src/messages.js';
 import type { AssigneeOption } from '../assigneeOptions.js';
-import { failureNotice } from '../commandResults.js';
-import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
+import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
+import { useCommandDialog } from '../useCommandDialog.js';
 import { roleDescriptionFor } from '../workItemView.js';
 import { AssignWorkDialog } from './AssignWorkDialog.js';
 import { RoleDescriptionDialog } from './RoleDescriptionDialog.js';
@@ -24,34 +24,6 @@ type RoleRequest = Extract<WorkDialogRequest, { kind: 'role' }>;
 
 const ASSIGN_FALLBACK = 'Chưa giao được việc.';
 const ROLE_FALLBACK = 'Chưa lưu được mô tả vai trò.';
-
-/**
- * Sends a dialog's command and follows it to its verdict: a refusal stays in the dialog as a
- * notice, and an accepted command runs `onAccepted`. `pending` holds while the verdict is awaited.
- */
-function useCommandDialog(client: CompanyClient, onAccepted: () => void) {
-  const [pending, setPending] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-
-  async function run(handle: CompanyCommandHandle, fallback: string): Promise<void> {
-    const refused = failureNotice(handle, fallback);
-    if (refused !== null) {
-      setNotice(refused);
-      return;
-    }
-    setPending(true);
-    setNotice(null);
-    const verdict = await client.waitForCommand(handle);
-    setPending(false);
-    if (verdict.ok) {
-      onAccepted();
-      return;
-    }
-    setNotice(failureNotice(verdict, fallback));
-  }
-
-  return { pending, notice, run };
-}
 
 export interface CreateWorkDialogProps {
   client: CompanyClient;

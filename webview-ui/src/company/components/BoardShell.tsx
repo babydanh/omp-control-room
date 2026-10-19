@@ -176,6 +176,10 @@ export function BoardShell({ client }: BoardShellProps) {
     subject?.kind === 'herdr' || subject?.kind === 'sleeping' ? subject.paneId : null;
   const selectedWorkItem =
     subject?.kind === 'workItem' ? { id: subject.id, workspacePath: subject.workspacePath } : null;
+  const selectedSquad =
+    subject?.kind === 'squad'
+      ? { runId: subject.runId, workspacePath: subject.workspacePath }
+      : null;
 
   // Diagnostics are a live measurement of processes the user owns: asked for
   // once the board is on screen, never polled in the background.
@@ -488,6 +492,9 @@ export function BoardShell({ client }: BoardShellProps) {
               selectedSessionId={selectedSessionId}
               selectedWorkItem={selectedWorkItem}
               onOpenWorkItem={(ref) => setOpened({ kind: 'workItem', ...ref })}
+              selectedSquad={selectedSquad}
+              onOpenSquad={(ref) => setOpened({ kind: 'squad', ...ref })}
+              client={client}
               onMenu={openMenu}
               identityOf={(id) => folderIdentityOf(state, id)}
             />

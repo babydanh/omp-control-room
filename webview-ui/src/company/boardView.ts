@@ -18,12 +18,13 @@ import type {
   Task,
   VerificationEvidence,
 } from '../../../core/src/company.js';
-import type { WorkItemStatus } from '../../../core/src/messages.js';
+import type { SquadRun, WorkItemStatus } from '../../../core/src/messages.js';
 import { type AgentBoardCard, buildAgentCards } from './agentBoard.js';
 import type { CompanyViewState } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
 import { COMPANY_LANE_LABELS, COMPANY_LANE_ORDER } from './constants.js';
 import type { FolderIdentity } from './folderIdentity.js';
+import { squadLaneFor, visibleSquadRuns } from './squadView.js';
 import {
   assigneeLabel,
   laneForWorkItem,
@@ -150,6 +151,23 @@ export interface BoardWorkItem {
   updatedAt: string;
   /** The folder the item is filed under when every folder is shown; null in folder mode. */
   folder: FolderIdentity | null;
+  /** The squad run that filed the item, when a squad made it; null otherwise. */
+  squadRunId: string | null;
+}
+
+/** A squad run card: what the card shows, read from the run the server holds. */
+export interface BoardSquad {
+  runId: string;
+  workspacePath: string;
+  lane: CompanyLaneId;
+  /** The request's first line: the card's heading. */
+  head: string;
+  /** The run as the server holds it: status, progress, proposal, error and history. */
+  run: SquadRun;
+  /** The proposal's rows, each assignee named in words; empty while there is no proposal. */
+  rows: { text: string; assignee: string }[];
+  /** The folder the run is filed under when every folder is shown; null in folder mode. */
+  folder: FolderIdentity | null;
 }
 
 export interface BoardLane {
@@ -159,6 +177,8 @@ export interface BoardLane {
   cards: BoardCard[];
   /** Work item cards, in the order the folders and the server filed them. */
   workItems: BoardWorkItem[];
+  /** Squad run cards, in the order the folders and the server filed them. */
+  squads: BoardSquad[];
   /** Agents with no task card of their own, drawn after the task cards. */
   agents: AgentBoardCard[];
 }
@@ -216,7 +236,31 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
     queuePosition: queuePosition(item, workItemsOf(state, workspacePath).items),
     updatedAt: item.updatedAt,
     folder,
+    squadRunId: item.squadRunId ?? null,
   }));
+}
+
+/** The squad runs the board shows, as cards: each one's lane, heading and proposed rows. */
+function squadCards(state: CompanyViewState): BoardSquad[] {
+  const cards: BoardSquad[] = [];
+  for (const { run, workspacePath, folder } of visibleSquadRuns(state)) {
+    const lane = squadLaneFor(run);
+    if (lane === null) continue;
+    const rows = (run.proposal?.rows ?? []).map((row) => ({
+      text: row.text,
+      assignee: assigneeLabel(row.assignee, state, workspacePath),
+    }));
+    cards.push({
+      runId: run.id,
+      workspacePath,
+      lane,
+      head: workItemCardHead(run.request),
+      run,
+      rows,
+      folder,
+    });
+  }
+  return cards;
 }
 
 export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
@@ -269,11 +313,13 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
   }
   const agents = buildAgentCards(state, carded);
   const workItems = workItemCards(state);
+  const squads = squadCards(state);
   return COMPANY_LANE_ORDER.map((id) => ({
     id,
     label: COMPANY_LANE_LABELS[id],
     cards: cards.filter((card) => card.lane === id),
     workItems: workItems.filter((card) => card.lane === id),
+    squads: squads.filter((card) => card.lane === id),
     agents: agents.filter((agent) => agent.lane === id),
   }));
 }

@@ -40,6 +40,7 @@ import type { AgentMenuRequest } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardCard, BoardFlow, BoardLane, PlanningPrompt } from '../boardView.js';
 import { WAIT_REASON_LABELS } from '../boardView.js';
+import type { CompanyClient } from '../companyClient.js';
 import {
   COMPANY_LANE_ICONS,
   COMPANY_LANE_OWNERS,
@@ -55,6 +56,7 @@ import {
   swipeStep,
 } from '../layoutMode.js';
 import { companyRoleLabel, ROLE_EDGE_CLASS } from '../roleProfiles.js';
+import { type SquadRef, squadRunKey } from '../squadView.js';
 import { taskStatusLabel } from '../statusLabels.js';
 import type { PreviewTarget } from '../terminalPreview.js';
 import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
@@ -66,6 +68,7 @@ import { useNow } from '../useNow.js';
 import { workItemKey,type WorkItemRef } from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
 import { Icon } from './Icon.js';
+import { SquadRunCard } from './SquadRunCard.js';
 import { StatusDot } from './StatusDot.js';
 import { WorkItemCard } from './WorkItemCard.js';
 
@@ -85,6 +88,12 @@ export interface CompanyBoardProps {
   selectedWorkItem: WorkItemRef | null;
   /** Opens the drawer on a work item card. */
   onOpenWorkItem: (ref: WorkItemRef) => void;
+  /** The squad run the drawer shows, so its card reads as pressed. */
+  selectedSquad: SquadRef | null;
+  /** Opens the drawer on a squad run card. */
+  onOpenSquad: (ref: SquadRef) => void;
+  /** The client a squad card sends its approve, dismiss and retry commands through. */
+  client: CompanyClient;
   onMenu: (request: AgentMenuRequest) => void;
   /** The folder a card's id belongs to, shown as a tag in all mode; null outside it. */
   identityOf: (id: string) => FolderIdentity | null;
@@ -392,6 +401,9 @@ export function CompanyBoard({
   selectedSessionId,
   selectedWorkItem,
   onOpenWorkItem,
+  selectedSquad,
+  onOpenSquad,
+  client,
   onMenu,
   identityOf,
 }: CompanyBoardProps) {
@@ -407,7 +419,12 @@ export function CompanyBoard({
 
   const views: LaneView[] = lanes.map((lane) => {
     const drafts = lane.id === 'planned' ? planning : [];
-    const count = lane.cards.length + drafts.length + lane.workItems.length + lane.agents.length;
+    const count =
+      lane.cards.length +
+      drafts.length +
+      lane.workItems.length +
+      lane.squads.length +
+      lane.agents.length;
     return { lane, drafts, count };
   });
   const shownLane =
@@ -510,11 +527,31 @@ export function CompanyBoard({
                 onOpen={() => onOpenWorkItem({ id: card.id, workspacePath: card.workspacePath })}
               />
             ))}
+            {lane.squads.map((card, index) => (
+              <SquadRunCard
+                key={squadRunKey(card)}
+                card={card}
+                index={drafts.length + lane.cards.length + lane.workItems.length + index}
+                selected={
+                  selectedSquad !== null &&
+                  selectedSquad.runId === card.runId &&
+                  selectedSquad.workspacePath === card.workspacePath
+                }
+                client={client}
+                onOpen={() => onOpenSquad({ runId: card.runId, workspacePath: card.workspacePath })}
+              />
+            ))}
             {lane.agents.map((agent, index) => (
               <AgentCard
                 key={agent.key}
                 card={agent}
-                index={lane.cards.length + lane.workItems.length + drafts.length + index}
+                index={
+                  drafts.length +
+                  lane.cards.length +
+                  lane.workItems.length +
+                  lane.squads.length +
+                  index
+                }
                 now={now}
                 selected={
                   agent.subject.kind === 'herdr'

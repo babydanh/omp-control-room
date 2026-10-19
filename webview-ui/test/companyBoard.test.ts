@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Task } from '../../core/src/company.js';
+import type { SquadRun, SquadRunStatus } from '../../core/src/messages.js';
 import {
   boardFlow,
   buildBoardLanes,
@@ -24,6 +25,21 @@ import {
   stateFrom,
   task,
 } from './companyFixtures.js';
+
+function squadRunAt(id: string, status: SquadRunStatus): SquadRun {
+  const at = '2026-01-01T00:00:00.000Z';
+  return {
+    id,
+    request: `Việc ${id}`,
+    status,
+    turns: 1,
+    maxTurns: 3,
+    progress: { done: 0, total: 0 },
+    history: [],
+    createdAt: at,
+    updatedAt: at,
+  };
+}
 
 describe('company board lanes', () => {
   it('shows every lane, including the empty ones', () => {
@@ -153,6 +169,31 @@ describe('company board lanes', () => {
       passed: 1,
       failed: 1,
     });
+  });
+
+  it('places each squad run in the lane its status names, and hides a dismissed run', () => {
+    const workspace = '/work/alpha';
+    const state = {
+      ...stateFrom({}, workspace),
+      squad: {
+        [workspace]: {
+          revision: 1,
+          runs: [
+            squadRunAt('plan', 'planning'),
+            squadRunAt('work', 'working'),
+            squadRunAt('done', 'done'),
+            squadRunAt('gone', 'dismissed'),
+          ],
+        },
+      },
+    };
+    const lanes = buildBoardLanes(state);
+    const runIdsIn = (laneId: string) =>
+      lanes.find((lane) => lane.id === laneId)?.squads.map((squad) => squad.runId);
+    expect(runIdsIn('planned')).toEqual(['plan']);
+    expect(runIdsIn('running')).toEqual(['work']);
+    expect(runIdsIn('done')).toEqual(['done']);
+    expect(lanes.flatMap((lane) => lane.squads.map((squad) => squad.runId))).not.toContain('gone');
   });
 });
 

@@ -24,6 +24,7 @@ import type {
 import type {
   ClientMessage,
   HerdrKey,
+  SquadRowInput,
   WorkItemAssignee,
   WorkItemVerdict,
 } from '../../../core/src/messages.js';
@@ -52,6 +53,7 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   companyOmpSessions: true,
   companyWorkspaces: true,
   companyWorkItems: true,
+  companySquad: true,
   companyFolderBrowse: true,
   herdrAgents: true,
   herdrScreen: true,
@@ -378,6 +380,41 @@ export function agentRoleSet(
   description: string,
 ): ClientMessage {
   return { type: 'companyAgentRoleSet', requestId, workspacePath, agent, description };
+}
+
+/** Ask the folder's team to plan a request. The verdict is a companyCommandResult. */
+export function squadRequest(
+  requestId: string,
+  workspacePath: string,
+  text: string,
+): ClientMessage {
+  return { type: 'companySquadRequest', requestId, workspacePath, text };
+}
+
+/** Approve a proposal with the rows the drawer sends. The verdict is a companyCommandResult. */
+export function squadApprove(
+  requestId: string,
+  workspacePath: string,
+  runId: string,
+  proposalId: string,
+  rows: SquadRowInput[],
+): ClientMessage {
+  return { type: 'companySquadApprove', requestId, workspacePath, runId, proposalId, rows };
+}
+
+/** Dismiss a proposal, closing its run. The verdict is a companyCommandResult. */
+export function squadDismiss(
+  requestId: string,
+  workspacePath: string,
+  runId: string,
+  proposalId: string,
+): ClientMessage {
+  return { type: 'companySquadDismiss', requestId, workspacePath, runId, proposalId };
+}
+
+/** Retry a failed run. The verdict is a companyCommandResult. */
+export function squadRetry(requestId: string, workspacePath: string, runId: string): ClientMessage {
+  return { type: 'companySquadRetry', requestId, workspacePath, runId };
 }
 
 export function sessionInfoRequest(requestId: string, sessionId: string): ClientMessage {

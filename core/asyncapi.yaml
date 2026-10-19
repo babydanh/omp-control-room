@@ -132,6 +132,7 @@ components:
         - $ref: '#/components/schemas/CompanyStateChangedMessage'
         - $ref: '#/components/schemas/CompanyCommandResultMessage'
         - $ref: '#/components/schemas/CompanyWorkItemsMessage'
+        - $ref: '#/components/schemas/CompanySquadMessage'
         - $ref: '#/components/schemas/CompanyFolderBrowseMessage'
         - $ref: '#/components/schemas/CompanyTextDeltaMessage'
         - $ref: '#/components/schemas/CompanySessionLogMessage'
@@ -224,6 +225,11 @@ components:
         - $ref: '#/components/schemas/CompanyWorkItemMarkMessage'
         - $ref: '#/components/schemas/CompanyWorkItemCancelMessage'
         - $ref: '#/components/schemas/CompanyAgentRoleSetMessage'
+        # Squad leader (privileged; one leader turn proposes assignments for the team)
+        - $ref: '#/components/schemas/CompanySquadRequestMessage'
+        - $ref: '#/components/schemas/CompanySquadApproveMessage'
+        - $ref: '#/components/schemas/CompanySquadDismissMessage'
+        - $ref: '#/components/schemas/CompanySquadRetryMessage'
         # Ledger (privileged; read-only views and one message command)
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
@@ -3845,7 +3851,7 @@ components:
         squadRunId:
           type: string
           format: uuid
-          description: The squad run that proposed this item. Absent for items the user made by hand.
+          description: The squad proposal whose approval created this item. Absent for items the user made by hand.
         createdAt:
           type: string
           format: date-time
@@ -4037,6 +4043,270 @@ components:
         description:
           type: string
           maxLength: 1000
+
+    SquadRunStatus:
+      type: string
+      enum: [planning, proposed, working, done, dismissed, failed, stopped]
+      description: >-
+        planning: the leader turn is in flight. proposed: a proposal waits for the user to approve or dismiss it.
+        working: approved items are out and the leader waits for their results. done: the leader says the squad is
+        finished. dismissed: the user dropped the proposal. failed: the last leader turn gave no usable reply, and
+        Thử lại runs it again. stopped: the run reached its turn cap and sends nothing more.
+
+    SquadEventKind:
+      type: string
+      enum: [request, turn, proposal, approved, review, done, dismissed, failed, stopped]
+
+    SquadEvent:
+      type: object
+      additionalProperties: false
+      required: [at, kind]
+      properties:
+        at:
+          type: string
+          format: date-time
+        kind:
+          $ref: '#/components/schemas/SquadEventKind'
+        message:
+          type: string
+          maxLength: 2000
+
+    SquadRowInput:
+      type: object
+      additionalProperties: false
+      required: [text, assignee]
+      description: >-
+        One assignment the user approves: the prompt to send and who gets it. Edited rows are sent as the user
+        left them, not as the leader wrote them.
+      properties:
+        text:
+          type: string
+          minLength: 1
+        assignee:
+          $ref: '#/components/schemas/WorkItemAssignee'
+
+    SquadRow:
+      type: object
+      additionalProperties: false
+      required: [text, assignee]
+      description: One proposed assignment as the leader wrote it. reason says why the leader chose this assignee.
+      properties:
+        text:
+          type: string
+          minLength: 1
+        assignee:
+          $ref: '#/components/schemas/WorkItemAssignee'
+        reason:
+          type: string
+          maxLength: 500
+
+    SquadProposalStatus:
+      type: string
+      enum: [pending, approved, dismissed]
+
+    SquadProposal:
+      type: object
+      additionalProperties: false
+      required: [id, turn, note, rows, status, createdAt]
+      description: >-
+        One leader reply that assigns work. id is the squadRunId that the approved items carry. rows is what the
+        leader proposed, before any edit by the user.
+      properties:
+        id:
+          type: string
+          format: uuid
+        turn:
+          type: integer
+          minimum: 1
+        note:
+          type: string
+          maxLength: 2000
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            $ref: '#/components/schemas/SquadRow'
+        status:
+          $ref: '#/components/schemas/SquadProposalStatus'
+        createdAt:
+          type: string
+          format: date-time
+
+    SquadProgress:
+      type: object
+      additionalProperties: false
+      required: [done, total]
+      description: Work items the run's approved proposals created, and how many of them are done.
+      properties:
+        done:
+          type: integer
+          minimum: 0
+        total:
+          type: integer
+          minimum: 0
+
+    SquadRun:
+      type: object
+      additionalProperties: false
+      required: [id, request, status, turns, maxTurns, progress, history, createdAt, updatedAt]
+      description: >-
+        One Giao cho đội request and the leader turns it caused. proposal is the newest proposal, whatever its
+        status.
+      properties:
+        id:
+          type: string
+          format: uuid
+        request:
+          type: string
+          minLength: 1
+        status:
+          $ref: '#/components/schemas/SquadRunStatus'
+        turns:
+          type: integer
+          minimum: 0
+        maxTurns:
+          type: integer
+          minimum: 1
+        proposal:
+          $ref: '#/components/schemas/SquadProposal'
+        progress:
+          $ref: '#/components/schemas/SquadProgress'
+        note:
+          type: string
+          maxLength: 2000
+          description: The leader's closing note once the squad is done.
+        error:
+          type: string
+          maxLength: 2000
+          description: Why the last leader turn gave no usable reply, shown with Thử lại.
+        history:
+          type: array
+          maxItems: 60
+          items:
+            $ref: '#/components/schemas/SquadEvent'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CompanySquadMessage:
+      type: object
+      additionalProperties: false
+      required: [type, workspacePath, revision, runs]
+      description: >-
+        One folder's squad runs, sent in full after every change to them and in answer to a snapshot request.
+        A message replaces the folder's earlier one when its revision is newer.
+      properties:
+        type:
+          const: companySquad
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        revision:
+          type: integer
+          minimum: 0
+        runs:
+          type: array
+          maxItems: 50
+          items:
+            $ref: '#/components/schemas/SquadRun'
+
+    CompanySquadRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, text]
+      description: >-
+        Start a squad run: one leader turn proposes assignments for the folder's team. Nothing reaches any agent
+        until the user approves a proposal. The same requestId twice starts nothing new.
+      properties:
+        type:
+          const: companySquadRequest
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        text:
+          type: string
+          minLength: 1
+
+    CompanySquadApproveMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, runId, proposalId, rows]
+      description: >-
+        Approve a pending proposal with the rows as the user edited them. Creates one work item per row, each
+        carrying the proposal id as squadRunId, and sends them. A resent requestId, or a second approval of an
+        approved proposal, creates nothing new.
+      properties:
+        type:
+          const: companySquadApprove
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        runId:
+          type: string
+          format: uuid
+        proposalId:
+          type: string
+          format: uuid
+        rows:
+          type: array
+          minItems: 1
+          maxItems: 8
+          items:
+            $ref: '#/components/schemas/SquadRowInput'
+
+    CompanySquadDismissMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, runId, proposalId]
+      description: Drop a pending proposal. Nothing is created or sent, and the run stops asking the leader.
+      properties:
+        type:
+          const: companySquadDismiss
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        runId:
+          type: string
+          format: uuid
+        proposalId:
+          type: string
+          format: uuid
+
+    CompanySquadRetryMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, runId]
+      description: Run a failed leader turn again with the same context.
+      properties:
+        type:
+          const: companySquadRetry
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        runId:
+          type: string
+          format: uuid
 
     CompanyViewModeMessage:
       type: object
@@ -5257,6 +5527,10 @@ components:
           type: string
           format: uuid
           description: The work item a companyWorkItemCreate made.
+        squadRunId:
+          type: string
+          format: uuid
+          description: The squad run a companySquadRequest started.
         workspacePath:
           type: string
           minLength: 1

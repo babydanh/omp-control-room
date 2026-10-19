@@ -43,6 +43,7 @@ import type {
   CompanyFileEntry,
   CompanyFolderBrowseMessage,
   CompanyRemoveChange,
+  CompanySquadMessage,
   CompanyStateChangedMessage,
   CompanyWorkItemsMessage,
   CompanyWorkspaceEntry,
@@ -76,6 +77,7 @@ import {
   type PromptDraftState,
 } from './promptSubmission.js';
 import { selectionForSession } from './selection.js';
+import type { FolderSquad } from './squadView.js';
 import { excerptLine } from './textExcerpt.js';
 import {
   emptyUsageState,
@@ -328,6 +330,11 @@ export interface CompanyViewState extends FolderScope {
    * folder's list is replaced only by a newer revision; which folders show is decided on read.
    */
   workItems: Record<string, FolderWorkItems>;
+  /**
+   * Each folder's squad runs, keyed by the folder path the server tags them with. A folder's list
+   * is replaced only by a newer revision, as its work items are.
+   */
+  squad: Record<string, FolderSquad>;
 }
 
 export function emptyCompanyState(
@@ -367,6 +374,7 @@ export function emptyCompanyState(
     folderBrowseRequest: null,
     usageSlots: emptyUsageState(),
     workItems: {},
+    squad: {},
   };
 }
 
@@ -819,6 +827,23 @@ function applyWorkItems(
   };
 }
 
+/**
+ * One folder's squad runs. The server sends a folder's whole list after every change, so a newer
+ * revision replaces the one held; an older or repeated revision is dropped.
+ */
+function applySquad(state: CompanyViewState, message: CompanySquadMessage): CompanyViewState {
+  const key = folderKeyOf(message);
+  const held: FolderSquad | undefined = state.squad[key];
+  if (held !== undefined && message.revision <= held.revision) return state;
+  return {
+    ...state,
+    squad: {
+      ...state.squad,
+      [key]: { revision: message.revision, runs: [...message.runs] },
+    },
+  };
+}
+
 /** Stores one folder's company data, then re-derives the view the board reads. */
 function withFolderScope(
   state: CompanyViewState,
@@ -1092,6 +1117,8 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
       return unchanged(applyWorkspaces(state, message.workspaces));
     case 'companyWorkItems':
       return unchanged(applyWorkItems(state, message));
+    case 'companySquad':
+      return unchanged(applySquad(state, message));
     case 'companyFolderBrowse': {
       // Only the listing that answers the latest browse is held; an older one is a late answer.
       const current = message.requestId === state.folderBrowseRequest;

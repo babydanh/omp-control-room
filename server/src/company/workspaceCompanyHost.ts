@@ -102,6 +102,8 @@ import {
   readCompanyModelRoles,
 } from './hostModelRoles.js';
 import type { OmpRunnerCommand } from './ompRunner.js';
+import { createOmpLeaderRunner } from './squad/squadRunner.js';
+import { type SquadWiring, startSquad } from './squad/squadWiring.js';
 import { UsageLedger } from './usageService.js';
 import type { PrerequisiteCheck } from './verificationRunner.js';
 import { startWorkItems, type WorkItemHerdr, type WorkItemWiring } from './workItems/workItemWiring.js';
@@ -1002,6 +1004,7 @@ async function openOwnerCompanyHost(
   let broker: CompanyBrokerHandle | null = null;
   let disposed = false;
   let workItemsWiring: WorkItemWiring | null = null;
+  let squadWiring: SquadWiring | null = null;
   const publish = (message: ServerMessage): void => {
     if (message.type === 'companyStateChanged') workItemsWiring?.service.scheduleReconcile();
     const key = terminalSessionKey(message);
@@ -1078,6 +1081,21 @@ async function openOwnerCompanyHost(
       coordinator,
       publish,
     });
+    const director = modelRoles.assignments.director;
+    squadWiring = await startSquad({
+      workspacePath: store.workspacePath,
+      namespaceDir: store.namespaceDir,
+      herdr: options.herdr,
+      coordinator,
+      workItems: workItemsWiring.service,
+      leader: createOmpLeaderRunner({
+        command: hostModelRolesCommand(options),
+        cwd: store.workspacePath,
+        model: director.model,
+        thinking: director.thinking === '' ? null : director.thinking,
+      }),
+      publish,
+    });
   } catch (error) {
     // Reverse order, and always: a half-composed owner would hold the lock and
     // refuse every command sent to it.
@@ -1095,6 +1113,7 @@ async function openOwnerCompanyHost(
   const ownerRuntime = runtime;
   const ownerBroker = broker;
   const ownerWorkItems = workItemsWiring;
+  const ownerSquad = squadWiring;
   const services: CompanyCommandServices = {
     coordinator: ownerCoordinator,
     store,
@@ -1107,6 +1126,7 @@ async function openOwnerCompanyHost(
     modelCatalog: () => ownerRuntime.modelCatalog(),
     sessionInfo: (sessionId) => ownerRuntime.sessionInfo(sessionId),
     workItems: ownerWorkItems.service,
+    squad: ownerSquad.service,
   };
 
   return {
@@ -1121,6 +1141,7 @@ async function openOwnerCompanyHost(
       // only then hand the lock to whoever asks next.
       disposed = true;
       const steps: { failure?: unknown } = {};
+      await runStep(steps, async () => ownerSquad.dispose());
       await runStep(steps, async () => ownerWorkItems.dispose());
       await runStep(steps, async () => ownerCoordinator.dispose());
       await runStep(steps, async () => ownerBroker.dispose());

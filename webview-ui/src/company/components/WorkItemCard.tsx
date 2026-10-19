@@ -44,6 +44,9 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
         <span className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5 text-text">
           {card.assignee}
         </span>
+        {card.squadRunId !== null && (
+          <span className="shrink-0 rounded-full bg-well px-1.5 text-text">Đội</span>
+        )}
         {updated !== null && <span className="shrink-0">{updated}</span>}
       </span>
       {card.reason !== null && (

@@ -14,6 +14,8 @@
  *    (Director, Contract, approval, workers). A selected Company session becomes the
  *    target; a plain omp chat never does.
  *  - "Giao việc…" opens a dialog that gives the text to a chosen agent as a work item.
+ *  - Ctrl/Cmd+Alt+Enter, and the "Giao cho đội" button: the folder's team, as a squad run
+ *    (see `squadView.ts`). It needs no selected session, because a squad is folder-level.
  *  - `/new` opens a new omp chat in this folder, with no prompt. `/resume` opens a
  *    picker over the omp sessions saved here. Neither reaches a terminal.
  *  - Attach. OMP's box carries an image picker that the company bridge cannot
@@ -50,12 +52,14 @@ import { showsAllFolders } from '../folderIdentity.js';
 import { focusFolder, FOLDER_LIST_LOADING_MESSAGE, folderListLoading } from '../folderView.js';
 import { isCompanyChord, promptBlockReason, type PromptRoute } from '../promptSubmission.js';
 import { draftAfterSend, herdrAgentFor, sendPrompt } from '../promptTargets.js';
+import { matchShortcut } from '../shortcuts.js';
 import {
   commandCompletionQuery,
   commandCompletions,
   ompModelMessage,
   type OmpSlashCommand,
 } from '../slashCommands.js';
+import { canStartSquad, type SquadStartVerdict } from '../squadView.js';
 import { useCompanyState } from '../useCompanyState.js';
 import { folderLabel, folderLabelFor } from '../workspaces.js';
 import { CompanyButton } from './CompanyButton.js';
@@ -71,13 +75,18 @@ const TERMINAL_NOT_OPEN_NOTICE =
 
 /** The keys this box answers to, shown in the `?` tooltip beside the target line. */
 const COMPOSER_HINTS =
-  'Enter gõ vào phiên đang chọn · Shift+Enter xuống dòng · Ctrl+Shift+Enter để giao cho công ty · /new mở phiên mới · /resume mở phiên đã lưu';
+  'Enter gõ vào phiên đang chọn · Shift+Enter xuống dòng · Ctrl+Shift+Enter để giao cho công ty · Ctrl+Alt+Enter để giao cho đội · /new mở phiên mới · /resume mở phiên đã lưu';
 
 /** Shown when Ctrl/Cmd+Shift+Enter is pressed while a herdr agent is the target. */
 const HERDR_COMPANY_NOTICE =
   'Chọn một phiên omp để giao cho công ty. Agent herdr không nhận việc giao này.';
 /** The Company button's tooltip while a herdr agent is the target. */
 const HERDR_COMPANY_TOOLTIP = 'Không giao cho công ty khi đang gửi tới agent herdr.';
+
+/** Shown when a squad request cannot be sent. */
+const SQUAD_FALLBACK = 'Chưa giao được cho đội.';
+/** The reason the squad button gives while no folder is in focus. */
+const NO_FOLDER_SQUAD_REASON = 'Chưa có thư mục để lập đội.';
 
 /** A row in the completion popup: an OMP command the first token completes to. */
 interface CompletionRow {
@@ -136,6 +145,8 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const [highlight, setHighlight] = useState(0);
   /** The request of a send from this box to a herdr agent whose verdict is still pending. */
   const [herdrRequest, setHerdrRequest] = useState<string | null>(null);
+  /** The request of a squad send from this box whose verdict is still pending. */
+  const [squadRequest, setSquadRequest] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   /** The height the user dragged the box to, or null when it has never been dragged. */
   const [savedHeight, setSavedHeight] = useState<number | null>(() =>
@@ -156,6 +167,13 @@ export function PromptComposer({ client }: PromptComposerProps) {
     : [];
   // Until the server's folder list arrives, a message with no session has no folder to go to.
   const folderLoading = folderListLoading(state);
+
+  // The team a squad request goes to: the folder's agents and sessions. Without a folder, or
+  // with nobody to hand work to, the squad button stays off and says why.
+  const squadTeam: SquadStartVerdict =
+    focus === null
+      ? { ok: false, reason: folderLoading ? FOLDER_LIST_LOADING_MESSAGE : NO_FOLDER_SQUAD_REASON }
+      : canStartSquad(assigneeOptionsFor(state, focus));
   const newSessionWaits = folderLoading && selectedSession === null;
   const resumeView =
     resumeRequest === null
@@ -229,6 +247,33 @@ export function PromptComposer({ client }: PromptComposerProps) {
       setHerdrRequest((current) => (current === handle.requestId ? null : current));
       if (!verdict.ok) {
         setNotice(failureNotice(verdict, 'Chưa gửi được.'));
+        return;
+      }
+      const current = client.getState().prompt.text;
+      const remaining = draftAfterSend(current, text);
+      if (remaining !== current) client.setDraftText(remaining);
+    });
+  };
+
+  /**
+   * Hand the draft to the folder's team as a squad request. The draft clears only when the
+   * server accepts the request; a refusal keeps the text for another try.
+   */
+  const sendSquad = () => {
+    if (focus === null || blocker !== null || busy || squadRequest !== null) return;
+    if (!squadTeam.ok) return;
+    const text = draft.text;
+    const handle = client.startSquad(focus, text);
+    if (!handle.ok) {
+      setNotice(failureNotice(handle, SQUAD_FALLBACK));
+      return;
+    }
+    setNotice(null);
+    setSquadRequest(handle.requestId);
+    void client.waitForCommand(handle).then((verdict) => {
+      setSquadRequest((current) => (current === handle.requestId ? null : current));
+      if (!verdict.ok) {
+        setNotice(failureNotice(verdict, SQUAD_FALLBACK));
         return;
       }
       const current = client.getState().prompt.text;
@@ -357,6 +402,13 @@ export function PromptComposer({ client }: PromptComposerProps) {
         return;
       }
     }
+    // Ctrl/Cmd+Alt+Enter hands the draft to the folder's team. It is checked before the
+    // plain Enter below, which would otherwise send the line as a chat message.
+    if (matchShortcut('composer.squad', event)) {
+      event.preventDefault();
+      sendSquad();
+      return;
+    }
     // Ctrl/Cmd+Shift+Enter hands the prompt to the Company workflow. It never
     // types into a terminal: the text is sent as the Company prompt.
     if (isCompanyChord(event)) {
@@ -474,7 +526,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
       >
         <span aria-hidden="true" className="h-0.5 w-8 rounded-full bg-border" />
       </div>
-      <div className="flex items-end gap-1.5">
+      <div className="flex flex-wrap items-end gap-1.5">
         <textarea
           ref={inputRef}
           value={draft.text}
@@ -484,7 +536,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           placeholder="Nhập tin nhắn · / để gõ lệnh"
           aria-label="Tin nhắn"
           data-testid="prompt-input"
-          className="min-w-0 flex-1 resize-none rounded-[var(--company-radius-md)] border border-border bg-raised px-3 py-2 text-sm leading-5 text-text"
+          className="min-w-0 flex-1 max-md:basis-full resize-none rounded-[var(--company-radius-md)] border border-border bg-raised px-3 py-2 text-sm leading-5 text-text"
         />
         <CompanyButton
           size="sm"
@@ -510,6 +562,22 @@ export function PromptComposer({ client }: PromptComposerProps) {
           onClick={() => setAssignOpen(true)}
         >
           Giao việc…
+        </CompanyButton>
+        <CompanyButton
+          size="sm"
+          variant="default"
+          className="shrink-0 whitespace-nowrap"
+          disabled={
+            blocker !== null ||
+            busy ||
+            resumeRequest !== null ||
+            squadRequest !== null ||
+            !squadTeam.ok
+          }
+          title={squadTeam.ok ? undefined : squadTeam.reason}
+          onClick={sendSquad}
+        >
+          Giao cho đội
         </CompanyButton>
         <CompanyButton
           size="sm"
@@ -570,6 +638,11 @@ export function PromptComposer({ client }: PromptComposerProps) {
       )}
       {blocker !== null && draft.text.trim().length > 0 && (
         <p className="mt-1 text-2xs text-text-muted">{blocker}</p>
+      )}
+      {!squadTeam.ok && draft.text.trim().length > 0 && (
+        <p className="mt-1 text-2xs text-text-muted" data-testid="prompt-squad-reason">
+          {squadTeam.reason}
+        </p>
       )}
       {assignOpen && focus !== null && (
         <CreateWorkDialog

@@ -34,6 +34,7 @@ const COMPANY_PRIVATE_TYPES: ReadonlySet<string> = new Set([
   'companySnapshot',
   'companyStateChanged',
   'companyWorkItems',
+  'companySquad',
   'companyCommandResult',
   'companyTextDelta',
   'companySessionLog',

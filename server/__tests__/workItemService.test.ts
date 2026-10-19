@@ -220,6 +220,29 @@ describe('WorkItemService: dispatch and status', () => {
     expect(itemOf(f, id).status).toBe('review');
   });
 
+  it('tells listeners of each change, and of each item that reaches review', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    let changes = 0;
+    const reviewed: string[] = [];
+    const stopChanges = f.service.onChange(() => {
+      changes += 1;
+    });
+    const stopReviews = f.service.onReview((item) => reviewed.push(item.id));
+    const id = await f.service.create({ requestId: randomUUID(), text: 'Nhanh', assignee: herdr(PANE_A) });
+    expect(changes).toBeGreaterThan(0);
+
+    await f.service.reconcileNow();
+    await f.elapse(WORK_ITEM_GRACE_MS);
+    expect(reviewed).toEqual([id]);
+
+    stopChanges();
+    stopReviews();
+    const before = changes;
+    await f.service.reconcileNow();
+    expect(changes).toBe(before);
+  });
+
   it('fails every live item of a pane that disappears from herdr', async () => {
     const f = await openFixture();
     f.panes.push({ paneId: PANE_A, status: 'working' });

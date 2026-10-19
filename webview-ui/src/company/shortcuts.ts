@@ -34,6 +34,7 @@ export type ShortcutId =
   | 'palette.pageUp'
   | 'palette.run'
   | 'composer.company'
+  | 'composer.squad'
   | 'composer.newline'
   | 'composer.send'
   | 'composer.completeNext'
@@ -254,6 +255,15 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     allowWhileTyping: true,
     match: (event) =>
       event.key === 'Enter' && (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey,
+  },
+  {
+    id: 'composer.squad',
+    group: 'composer',
+    label: 'Giao cho đội',
+    keys: ['Ctrl', 'Alt', 'Enter'],
+    allowWhileTyping: true,
+    match: (event) =>
+      event.key === 'Enter' && (event.ctrlKey || event.metaKey) && event.altKey && !event.shiftKey,
   },
   {
     id: 'composer.newline',
