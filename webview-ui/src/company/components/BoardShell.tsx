@@ -163,11 +163,11 @@ export function BoardShell({ client }: BoardShellProps) {
     [paletteOpen, state],
   );
   const subject: DrawerSubject | null = drawerSubjectFor(state, opened);
-  // A phone's full-screen drawer that has an input of its own (a herdr pane, a sleeping
-  // pane, a question) takes the place of the board composer, so each screen has one input.
+  // A phone's full-screen drawer that has an input of its own (a sleeping pane, a question)
+  // takes the place of the board composer, so each screen has one input. A herdr pane has
+  // none: the board composer is how a prompt reaches it, on a phone as everywhere else.
   const composerHidden =
-    mode === 'phone' &&
-    (subject?.kind === 'herdr' || subject?.kind === 'sleeping' || subject?.kind === 'question');
+    mode === 'phone' && (subject?.kind === 'sleeping' || subject?.kind === 'question');
   const selectedSessionId =
     subject?.kind === 'session' || subject?.kind === 'task' ? state.selection.sessionId : null;
   const selectedPaneId =
