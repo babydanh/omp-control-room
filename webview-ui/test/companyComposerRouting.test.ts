@@ -87,8 +87,8 @@ describe('Ctrl/Cmd+Shift+Enter and the company button go to the Company workflow
 });
 
 describe('the line above the box says where a plain send goes', () => {
-  it('names a new omp chat when no session is selected', () => {
-    expect(sendTargetLabel(null)).toBe('Gửi tới: phiên omp mới');
+  it('claims no target when no session is selected, since nothing would be sent', () => {
+    expect(sendTargetLabel(null)).not.toMatch(/^Gửi tới/);
   });
 
   it('names the selected session, its code, its name and its role', () => {

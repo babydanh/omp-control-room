@@ -58,7 +58,8 @@ export function sendTargetLabel(
   herdr: Pick<HerdrAgent, 'kind' | 'paneId'> | null = null,
 ): string {
   if (herdr !== null) return `Gửi tới: ${herdr.kind} · ${herdr.paneId} (herdr)`;
-  if (session === null) return 'Gửi tới: phiên omp mới';
+  // Nothing is sent with no session selected (PromptComposer shows why), so name no target.
+  if (session === null) return 'Chưa chọn nơi gửi: chọn một agent, hoặc bấm Phiên mới';
   return `Gửi tới: ${session.code} · ${session.name} · ${companyRoleLabel(session.role)}`;
 }
 
