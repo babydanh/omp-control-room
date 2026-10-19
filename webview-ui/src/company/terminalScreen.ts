@@ -333,6 +333,29 @@ export function parseAnsiScreen(text: string): ScreenLine[] {
   return splitLines(text).map(parseAnsiLine);
 }
 
+/** The parsed rows of one screen, keyed by each row's raw text, so the next read can reuse them. */
+export interface ScreenParseCache {
+  readonly rows: ReadonlyMap<string, ScreenLine>;
+}
+
+/**
+ * parseAnsiScreen with reuse: a row whose raw text was in `previous` keeps its parsed segments,
+ * so a read that changed one row parses one row. Unchanged rows come back as the same objects,
+ * which lets memoised rows skip re-rendering.
+ */
+export function parseAnsiScreenCached(
+  text: string,
+  previous: ScreenParseCache | null,
+): { readonly lines: ScreenLine[]; readonly cache: ScreenParseCache } {
+  const rows = new Map<string, ScreenLine>();
+  const lines = splitLines(text).map((raw) => {
+    const line = previous?.rows.get(raw) ?? rows.get(raw) ?? parseAnsiLine(raw);
+    rows.set(raw, line);
+    return line;
+  });
+  return { lines, cache: { rows } };
+}
+
 /** Split text into lines with no escape processing: each non-empty line is one unstyled segment. */
 export function plainScreen(text: string): ScreenLine[] {
   return splitLines(text).map((line) => (line === '' ? [] : [{ text: line, style: {} }]));

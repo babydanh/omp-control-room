@@ -309,6 +309,7 @@ describe('herdrMenuItems', () => {
       'Xem màn hình',
       'Đọc lại màn hình',
       'Mở trong herdr',
+      'Sao chép màn hình',
       'Sao chép thư mục',
       'Sao chép pane id',
     ]);

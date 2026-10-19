@@ -46,6 +46,7 @@ function stubLink(overrides: Partial<HerdrLink> = {}): HerdrLink {
     rename: vi.fn(async (): Promise<void> => undefined),
     info: vi.fn(async (): Promise<AgentInfo> => INFO),
     wake: vi.fn(async (): Promise<void> => undefined),
+    watch: vi.fn((): void => undefined),
     ...overrides,
   };
 }
@@ -110,6 +111,7 @@ describe('herdr board commands', () => {
       'herdrRename',
       'herdrInfoRequest',
       'herdrWake',
+      'herdrWatch',
     ]) {
       expect(isCompanyCommand({ type })).toBe(true);
     }
@@ -519,5 +521,71 @@ describe('herdr board commands', () => {
 
     expect(herdr.rename).not.toHaveBeenCalled();
     expect(herdr.info).not.toHaveBeenCalled();
+  });
+
+  it('starts and stops a screen watch on a pane and answers ok', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrWatch', requestId: 'w-1', paneId: 'wA:p2', watching: true },
+      rec.send,
+      context({ herdr }),
+    );
+    expect(await rec.next()).toMatchObject({
+      type: 'companyCommandResult',
+      requestId: 'w-1',
+      ok: true,
+    });
+    expect(herdr.watch).toHaveBeenLastCalledWith('wA:p2', true);
+
+    handleCompanyCommand(
+      { type: 'herdrWatch', requestId: 'w-2', paneId: 'wA:p2', watching: false },
+      rec.send,
+      context({ herdr }),
+    );
+    expect(await rec.next()).toMatchObject({
+      type: 'companyCommandResult',
+      requestId: 'w-2',
+      ok: true,
+    });
+    expect(herdr.watch).toHaveBeenLastCalledWith('wA:p2', false);
+  });
+
+  it('watches a pane in an untrusted workspace, since it changes no herdr state', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrWatch', requestId: 'w-3', paneId: 'wA:p2', watching: true },
+      rec.send,
+      context({ executionAllowed: false, herdr }),
+    );
+
+    expect(await rec.next()).toMatchObject({
+      type: 'companyCommandResult',
+      requestId: 'w-3',
+      ok: true,
+    });
+    expect(herdr.watch).toHaveBeenCalledWith('wA:p2', true);
+  });
+
+  it('refuses a screen watch whose watching flag is not a boolean', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrWatch', requestId: 'w-4', paneId: 'wA:p2', watching: 'yes' },
+      rec.send,
+      context({ herdr }),
+    );
+
+    expect(await rec.next()).toMatchObject({
+      type: 'companyCommandResult',
+      requestId: 'w-4',
+      ok: false,
+      errorCode: 'invalid_request',
+    });
+    expect(herdr.watch).not.toHaveBeenCalled();
   });
 });

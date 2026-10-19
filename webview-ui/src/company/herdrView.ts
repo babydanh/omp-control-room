@@ -56,8 +56,3 @@ export const HERDR_CHOICE_KEYS: readonly { key: HerdrKey; label: string }[] = [
   { key: 'esc', label: 'Esc' },
   { key: 'ctrl+c', label: 'Ctrl+C' },
 ];
-
-/** The screen is re-read on a timer only while the agent is working. */
-export function herdrNeedsScreenPolling(status: HerdrAgent['status']): boolean {
-  return status === 'working';
-}

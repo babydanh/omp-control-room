@@ -307,6 +307,11 @@ export function herdrFocus(requestId: string, paneId: string): ClientMessage {
   return { type: 'herdrFocus', requestId, paneId };
 }
 
+/** Starts or renews the push watch on a pane's screen; `watching: false` ends it. */
+export function herdrWatch(requestId: string, paneId: string, watching: boolean): ClientMessage {
+  return { type: 'herdrWatch', requestId, paneId, watching };
+}
+
 /** Wakes a hibernated session. The prompt goes only when the user typed something; a blank one is left out. */
 export function herdrWake(requestId: string, paneId: string, prompt?: string): ClientMessage {
   const text = prompt?.trim() ?? '';

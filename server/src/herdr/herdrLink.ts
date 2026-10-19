@@ -19,6 +19,7 @@ import {
   readOmpTranscript,
 } from './ompTranscript.js';
 import { isHerdrPaneId } from './paneId.js';
+import { screenDigest } from './screenDigest.js';
 import {
   type PaneFact,
   type SleepDropReason,
@@ -73,9 +74,10 @@ const SLEEP_POLL_MS = 10_000;
 const WAKE_PENDING_MS = 20_000;
 /** Longest prompt a wake types into a sleeping pane. */
 const WAKE_PROMPT_MAX_CHARS = 4_000;
-/** A screen watch stays open this long after the most recent read of its pane. */
+/** A screen watch stays open this long after its most recent renewal. */
 const SCREEN_WATCH_MS = 30_000;
-const SCREEN_THROTTLE_MS = 500;
+/** Event-driven reads of one watched pane are spaced at least this far apart. */
+const SCREEN_THROTTLE_MS = 120;
 const MAX_SCREEN_WATCHES = 4;
 const MAX_LINE_BYTES = 16 * 1024 * 1024;
 const LINE_FEED = 0x0a;
@@ -206,6 +208,11 @@ export interface HerdrLink {
   /** Re-tags the roster against the open folders as they now stand, after the folder list changed. */
   rescope(): Promise<void>;
   read(paneId: string, lines: number): Promise<HerdrScreenMessage>;
+  /**
+   * Opens or renews the live screen watch on a pane; `watching` false closes it. An open watch
+   * emits `herdrScreen` as the pane's text changes and lapses 30 s after its last renewal.
+   */
+  watch(paneId: string, watching: boolean): void;
   prompt(paneId: string, text: string): Promise<void>;
   keys(paneId: string, keys: readonly HerdrKey[]): Promise<void>;
   focus(paneId: string): Promise<void>;
@@ -264,9 +271,6 @@ export function createHerdrLink(options: HerdrLinkOptions = {}): HerdrLink {
 interface HerdrSubscription {
   readonly type: string;
   readonly pane_id?: string;
-  readonly source?: 'recent_unwrapped';
-  readonly lines?: number;
-  readonly match?: { readonly type: 'regex'; readonly value: string };
 }
 
 /** One herdr wire line: a reply to a request (`id`) or a pushed subscription event (`event`). */
@@ -327,16 +331,19 @@ interface HerdrEventHandlers {
 
 interface ScreenWatch {
   readonly paneId: string;
-  readonly lines: number;
-  stream?: HerdrEventStream;
+  /** Cancels the lease that closes the watch unless it is renewed. */
   cancelExpiry: () => void;
   cancelThrottle?: () => void;
-  /** An output event arrived while the throttle window was open. */
+  /** Revision of the latest `pane.updated` event seen for this pane. */
+  revision?: number;
+  /** An update arrived while the throttle window was open. */
   dirty: boolean;
   /** Reads sent for this watch, numbered in send order. */
   reads: number;
-  /** Number of the last read whose text was emitted; older replies are dropped. */
+  /** Number of the last read whose text was accepted; older replies are dropped. */
   shown: number;
+  /** Digest of the text last emitted; undefined until the first emission. */
+  digest?: string;
 }
 
 /** The roster as last read from herdr, before workspace labels and checkout facts are added. */
@@ -411,6 +418,8 @@ class HerdrLinkImpl implements HerdrLink {
   /** Cancels the expiry of each pane whose wake is in flight, keyed by pane id. */
   private readonly pendingWakes = new Map<string, () => void>();
   private cancelSleepPoll?: () => void;
+  /** The `pane.updated` stream every screen watch shares; open exactly while a watch exists. */
+  private screenEvents?: HerdrEventStream;
 
   constructor(options: HerdrLinkOptions) {
     this.endpoint = herdrEndpoint(options.socketPath ?? resolveHerdrSocketPath(process.env));
@@ -441,7 +450,7 @@ class HerdrLinkImpl implements HerdrLink {
     for (const cancelExpiry of this.pendingWakes.values()) cancelExpiry();
     this.pendingWakes.clear();
     this.closeEvents();
-    for (const paneId of [...this.watches.keys()]) this.closeWatch(paneId);
+    this.closeAllWatches();
   }
 
   snapshot(): HerdrAgentsMessage {
@@ -471,16 +480,40 @@ class HerdrLinkImpl implements HerdrLink {
   async read(paneId: string, lines: number): Promise<HerdrScreenMessage> {
     assertPaneId(paneId);
     assertLines(lines);
-    // herdr ignores strip_ansi; format 'ansi' is the one that keeps SGR colour.
-    const result = await this.call(
-      'agent.read',
-      { target: paneId, source: 'recent_unwrapped', lines, format: 'ansi' },
-      READ_TIMEOUT_MS,
-    );
-    const text = readText(result);
+    const text = await this.readPaneText(paneId, lines);
     if (text === undefined) throw new HerdrError('herdr_rejected', INVALID_REPLY_MESSAGE);
-    this.watchScreen(paneId, lines);
     return { type: 'herdrScreen', paneId, text, at: new Date().toISOString() };
+  }
+
+  watch(paneId: string, watching: boolean): void {
+    assertPaneId(paneId);
+    if (!watching) {
+      this.closeWatch(paneId);
+      return;
+    }
+    const existing = this.watches.get(paneId);
+    if (existing !== undefined) {
+      this.renewLease(existing);
+      return;
+    }
+    if (this.watches.size >= MAX_SCREEN_WATCHES) {
+      for (const oldest of this.watches.keys()) {
+        this.closeWatch(oldest);
+        break;
+      }
+    }
+    const watch: ScreenWatch = {
+      paneId,
+      cancelExpiry: () => undefined,
+      dirty: false,
+      reads: 0,
+      shown: 0,
+    };
+    this.watches.set(paneId, watch);
+    this.renewLease(watch);
+    this.openScreenEvents();
+    // A new watch has no digest yet, so its first reading is always emitted.
+    void this.readScreen(watch);
   }
 
   async prompt(paneId: string, text: string): Promise<void> {
@@ -815,91 +848,87 @@ class HerdrLinkImpl implements HerdrLink {
     for (const listener of [...this.agentListeners]) listener(next);
   }
 
-  private watchScreen(paneId: string, lines: number): void {
-    const existing = this.watches.get(paneId);
-    if (existing !== undefined && existing.lines === lines) {
-      existing.cancelExpiry();
-      existing.cancelExpiry = this.scheduler.schedule(
-        () => this.closeWatch(paneId),
-        SCREEN_WATCH_MS,
-      );
-      return;
-    }
-    this.closeWatch(paneId);
-    if (this.watches.size >= MAX_SCREEN_WATCHES) {
-      for (const oldest of this.watches.keys()) {
-        this.closeWatch(oldest);
-        break;
-      }
-    }
-    const watch: ScreenWatch = {
-      paneId,
-      lines,
-      cancelExpiry: this.scheduler.schedule(() => this.closeWatch(paneId), SCREEN_WATCH_MS),
-      dirty: false,
-      reads: 0,
-      shown: 0,
-    };
-    this.watches.set(paneId, watch);
-    watch.stream = openEventStream(
-      this.endpoint,
-      [
-        {
-          type: 'pane.output_matched',
-          pane_id: paneId,
-          source: 'recent_unwrapped',
-          lines,
-          match: { type: 'regex', value: '.' },
-        },
-      ],
-      {
-        onStarted: () => {
-          // Output between the read and the subscription would otherwise be missed.
-          if (this.watches.get(paneId) === watch) void this.readScreen(watch);
-        },
-        onEvent: (event) => {
-          // The event only says the pane changed; its text is plain, so the screen is read again.
-          if (event !== 'pane.output_matched' || this.watches.get(paneId) !== watch) return;
-          this.signalScreen(watch);
-        },
-        onFailure: () => {
-          if (this.watches.get(paneId) === watch) this.closeWatch(paneId);
-        },
-      },
+  /** Restarts the watch's lease: it closes after a full lease passes without another renewal. */
+  private renewLease(watch: ScreenWatch): void {
+    watch.cancelExpiry();
+    watch.cancelExpiry = this.scheduler.schedule(
+      () => this.closeWatch(watch.paneId),
+      SCREEN_WATCH_MS,
     );
   }
 
+  /** Opens the one `pane.updated` stream every screen watch shares, unless it is already open. */
+  private openScreenEvents(): void {
+    if (this.screenEvents !== undefined) return;
+    const stream = openEventStream(this.endpoint, [{ type: 'pane.updated' }], {
+      onStarted: () => {
+        // Revisions that moved before the subscription took effect would otherwise be missed.
+        if (this.screenEvents !== stream) return;
+        for (const watch of [...this.watches.values()]) void this.readScreen(watch);
+      },
+      onEvent: (event, data) => {
+        if (this.screenEvents !== stream) return;
+        // herdr sends the event as `pane_updated`; the dotted subscription name is accepted too.
+        if (event === 'pane_updated' || event === 'pane.updated') this.onPaneUpdated(data);
+      },
+      onFailure: () => {
+        // One stream serves every watch, so its failure ends them all.
+        if (this.screenEvents === stream) this.closeAllWatches();
+      },
+    });
+    this.screenEvents = stream;
+  }
+
   /**
-   * Reads the pane now and emits the reply only if its watch is still open and the reply is
-   * newer than the last one emitted, so a late reply cannot move the screen back in time.
+   * Signals the watch of a pane whose revision moved. Other panes and a repeated revision read
+   * nothing.
+   */
+  private onPaneUpdated(data: unknown): void {
+    const pane = jsonField(data, 'pane');
+    const paneId = nonEmptyString(jsonField(pane, 'pane_id'));
+    const revision = jsonField(pane, 'revision');
+    if (paneId === undefined || typeof revision !== 'number') return;
+    const watch = this.watches.get(paneId);
+    if (watch === undefined || watch.revision === revision) return;
+    watch.revision = revision;
+    this.signalScreen(watch);
+  }
+
+  /** The pane's text as herdr renders it, or `undefined` when the reply carries none. */
+  private async readPaneText(paneId: string, lines: number): Promise<string | undefined> {
+    // herdr ignores strip_ansi; format 'ansi' is the one that keeps SGR colour.
+    const result = await this.call(
+      'agent.read',
+      { target: paneId, source: 'recent_unwrapped', lines, format: 'ansi' },
+      READ_TIMEOUT_MS,
+    );
+    return readText(result);
+  }
+
+  /**
+   * Reads the pane now and emits its text only if the watch is still open, the reply is newer
+   * than the last one accepted, and the text differs from the last one emitted.
    */
   private async readScreen(watch: ScreenWatch): Promise<void> {
     const sequence = ++watch.reads;
     try {
-      // herdr ignores strip_ansi; format 'ansi' is the one that keeps SGR colour.
-      const text = readText(
-        await this.call(
-          'agent.read',
-          { target: watch.paneId, source: 'recent_unwrapped', lines: watch.lines, format: 'ansi' },
-          READ_TIMEOUT_MS,
-        ),
-      );
-      if (
-        text !== undefined &&
-        this.watches.get(watch.paneId) === watch &&
-        sequence > watch.shown
-      ) {
-        watch.shown = sequence;
-        this.emitScreen(watch.paneId, text);
-      }
+      const text = await this.readPaneText(watch.paneId, HERDR_DEFAULT_READ_LINES);
+      if (text === undefined || this.watches.get(watch.paneId) !== watch) return;
+      // A late reply must not move the screen back in time, so only the newest reply counts.
+      if (sequence <= watch.shown) return;
+      watch.shown = sequence;
+      const digest = screenDigest(text);
+      if (digest === watch.digest) return;
+      watch.digest = digest;
+      this.emitScreen(watch.paneId, text);
     } catch {
       if (this.watches.get(watch.paneId) === watch) this.closeWatch(watch.paneId);
     }
   }
 
   /**
-   * Leading-plus-trailing throttle over reads: the first output reads at once, and output that
-   * arrives inside the window coalesces into one read when the window ends.
+   * Leading-plus-trailing throttle over pane updates: the first update reads at once, and updates
+   * that arrive inside the window coalesce into one read when the window ends.
    */
   private signalScreen(watch: ScreenWatch): void {
     if (watch.cancelThrottle !== undefined) {
@@ -936,7 +965,16 @@ class HerdrLinkImpl implements HerdrLink {
     this.watches.delete(paneId);
     watch.cancelExpiry();
     watch.cancelThrottle?.();
-    watch.stream?.close();
+    if (this.watches.size === 0) this.closeScreenEvents();
+  }
+
+  private closeAllWatches(): void {
+    for (const paneId of [...this.watches.keys()]) this.closeWatch(paneId);
+  }
+
+  private closeScreenEvents(): void {
+    this.screenEvents?.close();
+    this.screenEvents = undefined;
   }
 
   /** One short-lived connection per request, matching herdr's own client. */

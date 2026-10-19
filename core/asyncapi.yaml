@@ -225,6 +225,7 @@ components:
         - $ref: '#/components/schemas/HerdrRenameMessage'
         - $ref: '#/components/schemas/HerdrInfoRequestMessage'
         - $ref: '#/components/schemas/HerdrWakeMessage'
+        - $ref: '#/components/schemas/HerdrWatchMessage'
         - $ref: '#/components/schemas/BrowserReaperReapNow'
         # Native terminal
         - $ref: '#/components/schemas/TerminalAttachMessage'
@@ -3757,6 +3758,23 @@ components:
         paneId:
           type: string
           maxLength: 64
+
+    HerdrWatchMessage:
+      description: Opens or renews a live screen watch on a pane. Sending watching as false closes it.
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId, watching]
+      properties:
+        type:
+          const: herdrWatch
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+        watching:
+          type: boolean
 
     CompanySessionRenameMessage:
       type: object

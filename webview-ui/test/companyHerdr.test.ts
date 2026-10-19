@@ -7,15 +7,11 @@ import {
   herdrKeys,
   herdrPrompt,
   herdrRead,
+  herdrWatch,
   sessionLogRequest,
 } from '../src/company/companyMessages.js';
 import { applyCompanyMessage, emptyCompanyState } from '../src/company/companyState.js';
-import {
-  HERDR_CHOICE_KEYS,
-  HERDR_TONE_LABELS,
-  herdrNeedsScreenPolling,
-  herdrToneFor,
-} from '../src/company/herdrView.js';
+import { HERDR_CHOICE_KEYS, HERDR_TONE_LABELS, herdrToneFor } from '../src/company/herdrView.js';
 
 function herdrAgent(overrides: Partial<HerdrAgent> = {}): HerdrAgent {
   return {
@@ -103,7 +99,7 @@ describe('herdr reducer', () => {
   });
 });
 
-describe('herdr tones and polling', () => {
+describe('herdr tones and choice keys', () => {
   it('maps every herdr status to one board tone, with the blocked agent needing the user', () => {
     expect(herdrToneFor('working')).toBe('working');
     expect(herdrToneFor('blocked')).toBe('needs');
@@ -111,14 +107,6 @@ describe('herdr tones and polling', () => {
     expect(herdrToneFor('done')).toBe('done');
     expect(herdrToneFor('unknown')).toBe('unknown');
     expect(HERDR_TONE_LABELS.needs).toBe('chờ bạn');
-  });
-
-  it('re-reads a screen on a timer only while the agent is working', () => {
-    expect(herdrNeedsScreenPolling('working')).toBe(true);
-    expect(herdrNeedsScreenPolling('blocked')).toBe(false);
-    expect(herdrNeedsScreenPolling('idle')).toBe(false);
-    expect(herdrNeedsScreenPolling('done')).toBe(false);
-    expect(herdrNeedsScreenPolling('unknown')).toBe(false);
   });
 
   it('offers the choice keys a waiting agent can take, in the order the drawer shows them', () => {
@@ -156,6 +144,12 @@ describe('outgoing herdr and session log messages', () => {
       type: 'herdrFocus',
       requestId: 'r4',
       paneId: 'pane-1',
+    });
+    expect(herdrWatch('r6', 'pane-1', true)).toEqual({
+      type: 'herdrWatch',
+      requestId: 'r6',
+      paneId: 'pane-1',
+      watching: true,
     });
     expect(sessionLogRequest('r5', 'session-1')).toEqual({
       type: 'companySessionLogRequest',

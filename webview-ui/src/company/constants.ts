@@ -102,8 +102,11 @@ export const COMPANY_RAIL_WIDTH_PX = 96;
 /** Herdr screen lines requested per read. */
 export const HERDR_SCREEN_LINES = 200;
 
-/** How often an open herdr screen is re-read while its agent is working. */
-export const HERDR_SCREEN_POLL_MS = 2000;
+/**
+ * How often a live herdr screen renews its server watch. The server ends a watch that goes
+ * unrenewed for 30 seconds, so this renews well inside that window.
+ */
+export const HERDR_WATCH_RENEW_MS = 10_000;
 
 /**
  * Board motion: every duration, stagger, lift, tone and curve the company board

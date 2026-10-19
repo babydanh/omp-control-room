@@ -23,6 +23,18 @@ export function ScreenFrame({ children }: { children: ReactNode }) {
   );
 }
 
+/** Shown while a held or selected screen is frozen: the newest text lands once the reader lets go. */
+export function ScreenFreezeChip() {
+  return (
+    <p
+      role="status"
+      className="self-start rounded-full bg-raised px-2 py-0.5 text-2xs text-warning"
+    >
+      Đang chọn chữ — tạm dừng cập nhật
+    </p>
+  );
+}
+
 /**
  * PinnedScreenFrame: a screen frame that scrolls. It opens on its newest line and stays
  * there until the reader scrolls up. A screen shorter than the frame sits at the bottom.

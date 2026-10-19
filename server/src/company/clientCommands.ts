@@ -204,6 +204,7 @@ const HERDR_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'herdrRename',
   'herdrInfoRequest',
   'herdrWake',
+  'herdrWatch',
 ]);
 const HERDR_NOT_LINKED_MESSAGE = 'Máy chủ này chưa kết nối herdr.';
 const HERDR_NOT_LINKED_ROSTER: HerdrAgentsMessage = {
@@ -271,6 +272,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
 const READ_ONLY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySnapshotRequest',
   'herdrRead',
+  'herdrWatch',
   'herdrInfoRequest',
   'companyModelCatalogRequest',
   'companyArtifactRequest',
@@ -570,6 +572,16 @@ async function herdrCommand(
           return;
         }
         await herdr.wake(paneId, prompt);
+        ok(send, requestId);
+        return;
+      }
+      case 'herdrWatch': {
+        const watching = msg.watching;
+        if (typeof watching !== 'boolean') {
+          fail(send, requestId, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
+          return;
+        }
+        herdr.watch(paneId, watching);
         ok(send, requestId);
         return;
       }

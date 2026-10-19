@@ -51,7 +51,7 @@ export type AgentMenuSubject =
 export type SessionControlAction =
   'interrupt' | 'pause' | 'resume' | 'restart' | 'kill' | 'archive' | 'delete';
 
-export type CopyWhat = 'cwd' | 'sessionCode' | 'paneId' | 'taskCode' | 'path';
+export type CopyWhat = 'cwd' | 'sessionCode' | 'paneId' | 'taskCode' | 'path' | 'screen';
 
 export type AgentMenuAction =
   | { kind: 'sessionTab'; tab: CompanyDrawerTab }
@@ -342,6 +342,12 @@ export function herdrMenuItems(folder: string | null, drawer: DrawerView | null)
       item({ id: 'focus', label: 'Mở trong herdr', icon: 'external', action: { kind: 'focus' } }),
     ]),
     ...withGroupStart([
+      item({
+        id: 'copyScreen',
+        label: 'Sao chép màn hình',
+        icon: 'copy',
+        action: { kind: 'copy', what: 'screen' },
+      }),
       ...(folder === null
         ? []
         : [

@@ -42,6 +42,7 @@ import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
+import { screenPlainText } from '../screenText.js';
 import { DELETE_CONFIRM_DETAIL, REFUSED_NOTICE, sessionHoldsWork } from '../sessionActions.js';
 import { deleteSessionsInOrder, removalNotice } from '../sessionRemoval.js';
 import { sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
@@ -378,6 +379,10 @@ export function AgentContextMenu({
         return task?.code ?? null;
       case 'path':
         return subject.kind === 'project' ? subject.project.path : null;
+      case 'screen': {
+        const screen = paneId === null ? undefined : state.herdr.screens[paneId];
+        return screen === undefined ? null : screenPlainText(screen.text);
+      }
     }
   }
 
@@ -387,7 +392,10 @@ export function AgentContextMenu({
     const copied = await copyText(text);
     setNotice(
       copied
-        ? { text: `Đã sao chép: ${text}`, failed: false }
+        ? {
+            text: what === 'screen' ? 'Đã sao chép màn hình.' : `Đã sao chép: ${text}`,
+            failed: false,
+          }
         : { text: COPY_FAILED_NOTICE, failed: true },
     );
   }

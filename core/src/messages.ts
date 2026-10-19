@@ -137,6 +137,7 @@ export type ClientMessage =
   | HerdrRenameMessage
   | HerdrInfoRequestMessage
   | HerdrWakeMessage
+  | HerdrWatchMessage
   | BrowserReaperReapNow
   | TerminalAttachMessage
   | TerminalInputMessage
@@ -2042,6 +2043,13 @@ export interface HerdrWakeMessage {
   requestId: string;
   paneId: string;
   prompt?: string;
+}
+
+export interface HerdrWatchMessage {
+  type: 'herdrWatch';
+  requestId: string;
+  paneId: string;
+  watching: boolean;
 }
 
 export interface BrowserReaperReapNow {

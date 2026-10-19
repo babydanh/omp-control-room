@@ -5,11 +5,13 @@
  *
  * The segments come from terminalScreen.ts; this only turns them into spans. The
  * background and default text colour are the terminal theme's, so an uncoloured
- * screen looks the same as the terminal it mirrors.
+ * screen looks the same as the terminal it mirrors. Each row is memoised on its
+ * parsed segments, so a read that changed one row repaints that row alone. The text
+ * stays selectable; useScreenSelection cleans a copy of it.
  */
 
-import type { CSSProperties } from 'react';
-import { Fragment, useContext } from 'react';
+import type { CSSProperties, RefObject } from 'react';
+import { memo, useContext } from 'react';
 
 import { TERMINAL_THEME } from '../../constants.js';
 import type { ScreenLine, ScreenStyle } from '../terminalScreen.js';
@@ -24,33 +26,48 @@ export interface ScreenViewProps {
   lines: readonly ScreenLine[];
   className?: string;
   testId?: string;
+  /** Receives the `<pre>`, so a selection inside the screen can be watched and copied. */
+  preRef?: RefObject<HTMLPreElement | null>;
 }
 
-export function ScreenView({ lines, className = '', testId }: ScreenViewProps) {
+export function ScreenView({ lines, className = '', testId, preRef }: ScreenViewProps) {
   const wrap = useContext(WrapLinesContext);
   // Wrapped lines keep the screen whole at the drawer's width; unwrapped lines keep
   // their columns and scroll sideways inside the screen's own frame.
   const wrapClass = wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre';
   return (
     <pre
+      ref={preRef}
       data-testid={testId}
       data-wrap={wrap ? 'on' : 'off'}
-      className={`m-0 min-w-0 max-w-full font-mono text-2xs leading-4 ${wrapClass} ${className}`}
+      className={`m-0 min-w-0 max-w-full select-text font-mono text-2xs leading-4 ${wrapClass} ${className}`}
       style={SCREEN_COLORS}
     >
       {lines.map((line, row) => (
-        <Fragment key={row}>
-          {line.map((segment, index) => (
-            <span key={index} style={segmentStyle(segment.style)}>
-              {segment.text}
-            </span>
-          ))}
-          {row < lines.length - 1 ? '\n' : null}
-        </Fragment>
+        <ScreenRow key={row} line={line} newline={row < lines.length - 1} />
       ))}
     </pre>
   );
 }
+
+interface ScreenRowProps {
+  readonly line: ScreenLine;
+  readonly newline: boolean;
+}
+
+/** One row of the screen. Memoised on its parsed segments: an unchanged row keeps its DOM. */
+const ScreenRow = memo(function ScreenRow({ line, newline }: ScreenRowProps) {
+  return (
+    <>
+      {line.map((segment, index) => (
+        <span key={index} style={segmentStyle(segment.style)}>
+          {segment.text}
+        </span>
+      ))}
+      {newline ? '\n' : null}
+    </>
+  );
+});
 
 function segmentStyle(style: ScreenStyle): CSSProperties {
   const css: CSSProperties = {};

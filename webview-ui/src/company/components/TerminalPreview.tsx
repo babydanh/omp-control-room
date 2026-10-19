@@ -20,8 +20,7 @@ import { createPortal } from 'react-dom';
 import { sleepingName } from '../agentSidebarView.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
-import { HERDR_SCREEN_POLL_MS } from '../constants.js';
-import { HERDR_TONE_LABELS, herdrNeedsScreenPolling, herdrToneFor } from '../herdrView.js';
+import { HERDR_TONE_LABELS, herdrToneFor } from '../herdrView.js';
 import { companyRoleLabel } from '../roleProfiles.js';
 import type { DrawerSubject } from '../selection.js';
 import { terminalPolicy } from '../sessionActions.js';
@@ -41,8 +40,12 @@ import {
 } from '../terminalPreview.js';
 import { type TerminalPreviewActions, TerminalPreviewContext } from '../terminalPreviewActions.js';
 import { parseAnsiScreen, tailScreen } from '../terminalScreen.js';
+import { useCoalescedFrame } from '../useCoalescedFrame.js';
+import { useHerdrScreenWatch } from '../useHerdrScreenWatch.js';
+import { useParsedScreen } from '../useParsedScreen.js';
+import { useScreenSelection } from '../useScreenSelection.js';
 import { PreviewPrompt } from './PreviewPrompt.js';
-import { PinnedScreenFrame } from './ScreenFrame.js';
+import { PinnedScreenFrame, ScreenFreezeChip } from './ScreenFrame.js';
 import { ScreenView } from './ScreenView.js';
 import { TerminalMirror } from './TerminalMirror.js';
 
@@ -253,6 +256,15 @@ function PreviewPanel({
   onPointerLeave: () => void;
   onPinChange: (pinned: boolean) => void;
 }) {
+  const screenRef = useRef<HTMLPreElement>(null);
+  const frozen = useScreenSelection(screenRef);
+  // A pointer that leaves while a selection is held waits; the preview closes once the hold ends.
+  const leftWhileFrozen = useRef(false);
+  useEffect(() => {
+    if (frozen || !leftWhileFrozen.current) return;
+    leftWhileFrozen.current = false;
+    onPointerLeave();
+  }, [frozen, onPointerLeave]);
   const box = placePreview(anchor, bounds);
   return (
     <div
@@ -267,12 +279,24 @@ function PreviewPanel({
         width: box.width,
         height: box.height,
       }}
-      onPointerEnter={onPointerEnter}
-      onPointerLeave={onPointerLeave}
+      onPointerEnter={() => {
+        leftWhileFrozen.current = false;
+        onPointerEnter();
+      }}
+      onPointerLeave={() => {
+        if (frozen) leftWhileFrozen.current = true;
+        else onPointerLeave();
+      }}
     >
       <div className="flex min-h-0 flex-1 flex-col">
         {target.kind === 'herdr' ? (
-          <HerdrPreview client={client} state={state} paneId={target.paneId} />
+          <HerdrPreview
+            client={client}
+            state={state}
+            paneId={target.paneId}
+            screenRef={screenRef}
+            frozen={frozen}
+          />
         ) : (
           <SessionPreview client={client} state={state} sessionId={target.sessionId} />
         )}
@@ -286,31 +310,30 @@ function HerdrPreview({
   client,
   state,
   paneId,
+  screenRef,
+  frozen,
 }: {
   client: CompanyClient;
   state: CompanyViewState;
   paneId: string;
+  screenRef: RefObject<HTMLPreElement | null>;
+  frozen: boolean;
 }) {
   const agent = state.herdr.agents.find((entry) => entry.paneId === paneId);
   const sleeping = state.herdr.sleeping.find((entry) => entry.paneId === paneId);
-  const screen = state.herdr.screens[paneId];
-  const lines = useMemo(
-    () => tailScreen(parseAnsiScreen(screen?.text ?? ''), PREVIEW_HISTORY_ROWS),
-    [screen?.text],
-  );
+  const latest = state.herdr.screens[paneId];
+  const screen = useCoalescedFrame(latest, frozen);
+  const parsed = useParsedScreen(screen?.text ?? '');
+  const lines = useMemo(() => tailScreen(parsed, PREVIEW_HISTORY_ROWS), [parsed]);
 
-  // Read on open and whenever the agent's status moves. As the drawer's screen tab does, poll
-  // at HERDR_SCREEN_POLL_MS only while the agent works.
+  // The screen is read when the preview opens, whenever the agent's status moves, and when a held
+  // selection lets go. The watch keeps it current while the preview is open and not held.
   const status = agent?.status;
+  const live = !frozen;
   useEffect(() => {
-    client.herdrRead(paneId);
-  }, [client, paneId, status]);
-  const polling = status !== undefined && herdrNeedsScreenPolling(status);
-  useEffect(() => {
-    if (!polling) return undefined;
-    const timer = window.setInterval(() => client.herdrRead(paneId), HERDR_SCREEN_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [client, paneId, polling]);
+    if (live) client.herdrRead(paneId);
+  }, [client, paneId, status, live]);
+  useHerdrScreenWatch(client, paneId, live);
 
   // A hibernated session has no live agent: its header names it, and its screen still reads.
   const header =
@@ -326,11 +349,16 @@ function HerdrPreview({
   return (
     <>
       <PreviewHeader title={header.title} note={header.note} />
+      {frozen && (
+        <div className="px-2 pt-1">
+          <ScreenFreezeChip />
+        </div>
+      )}
       {screen === undefined ? (
         <PreviewNotice text="Đang đọc màn hình…" />
       ) : (
         <PinnedScreenFrame>
-          <ScreenView lines={lines} className="shrink-0 p-2" />
+          <ScreenView lines={lines} className="shrink-0 p-2" preRef={screenRef} />
         </PinnedScreenFrame>
       )}
     </>

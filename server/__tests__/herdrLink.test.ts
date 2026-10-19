@@ -21,6 +21,9 @@ import {
 
 type Handler = (params: Record<string, unknown>) => unknown;
 
+/** herdr sends a pushed event under its wire name, which differs from its subscription name. */
+const WIRE_EVENT_NAMES: Readonly<Record<string, string>> = { 'pane.updated': 'pane_updated' };
+
 interface RecordedRequest {
   readonly method: string;
   readonly params: Record<string, unknown>;
@@ -186,7 +189,8 @@ class FakeHerdr {
 
   private write(event: string, line: unknown): void {
     for (const [socket, types] of this.subscribers) {
-      if (types.includes(event)) socket.write(encode(line));
+      const delivered = types.some((type) => type === event || WIRE_EVENT_NAMES[type] === event);
+      if (delivered) socket.write(encode(line));
     }
   }
 
@@ -249,6 +253,7 @@ interface ScheduleObserver {
 class ManualScheduler implements HerdrScheduler {
   private live: ScheduledCallback[] = [];
   private observers: ScheduleObserver[] = [];
+  private idleObservers: ScheduleObserver[] = [];
 
   schedule(callback: () => void, delayMs: number): () => void {
     const entry: ScheduledCallback = { delayMs, callback, cancelled: false };
@@ -258,6 +263,7 @@ class ManualScheduler implements HerdrScheduler {
     for (const observer of matched) observer.resolve();
     return () => {
       entry.cancelled = true;
+      this.settleIdle();
     };
   }
 
@@ -266,6 +272,20 @@ class ManualScheduler implements HerdrScheduler {
     const { promise, resolve } = deferred<void>();
     this.observers.push({ delayMs, resolve });
     return promise;
+  }
+
+  /** Resolves once no callback with this delay is live; event ordering, not elapsed time. */
+  whenIdle(delayMs: number): Promise<void> {
+    const { promise, resolve } = deferred<void>();
+    this.idleObservers.push({ delayMs, resolve });
+    this.settleIdle();
+    return promise;
+  }
+
+  private settleIdle(): void {
+    const idle = this.idleObservers.filter((observer) => this.liveCount(observer.delayMs) === 0);
+    this.idleObservers = this.idleObservers.filter((observer) => !idle.includes(observer));
+    for (const observer of idle) observer.resolve();
   }
 
   liveCount(delayMs: number): number {
@@ -279,6 +299,7 @@ class ManualScheduler implements HerdrScheduler {
     for (const entry of due) {
       if (!entry.cancelled) entry.callback();
     }
+    this.settleIdle();
   }
 }
 
@@ -313,8 +334,9 @@ function paneRead(text: string, format = 'text'): Record<string, unknown> {
   };
 }
 
-function paneOutput(text: string): Record<string, unknown> {
-  return { matched_line: text, pane_id: 'wA:p3', read: { text } };
+/** The payload of a `pane.updated` event: the pane and the revision its screen has reached. */
+function paneUpdated(paneId: string, revision: number): Record<string, unknown> {
+  return { pane: { pane_id: paneId, revision } };
 }
 
 /** A `workspace.list` entry with the fields herdr sends for a workspace. */
@@ -716,77 +738,137 @@ describe('HerdrLink against a herdr socket', () => {
     expect((await herdrFailure(link.focus('wA:p9'))).code).toBe('agent_not_found');
   });
 
-  it('coalesces a burst of output into one trailing read per throttle window', async () => {
+  /** Opens a screen watch and waits for its first frame and the stream's resync read. */
+  async function openScreenWatch(paneId: string): Promise<void> {
+    const frame = nextScreen(link, (message) => message.paneId === paneId);
+    link.watch(paneId, true);
+    await frame;
+    // The first watch re-reads its pane once the shared stream starts, so two reads reach herdr.
+    await fake.until(() => fake.requestsTo('agent.read').length === 2);
+  }
+
+  it('reads a pane without opening a screen watch', async () => {
+    fake.reply('agent.read', () => paneRead('T0'));
+
+    expect((await link.read('wA:p3', 20)).text).toBe('T0');
+    expect(fake.requestsTo('agent.read')).toHaveLength(1);
+    expect(fake.requestsTo('events.subscribe')).toHaveLength(0);
+    expect(scheduler.liveCount(30_000)).toBe(0);
+  });
+
+  it('emits the first frame and shares one pane.updated stream across two panes', async () => {
+    fake.reply('agent.read', () => paneRead('T0'));
+    const first = nextScreen(link, (message) => message.paneId === 'wA:p3');
+    const second = nextScreen(link, (message) => message.paneId === 'wA:p4');
+
+    link.watch('wA:p3', true);
+    link.watch('wA:p4', true);
+
+    expect((await first).text).toBe('T0');
+    expect((await second).text).toBe('T0');
+    await fake.until(() => fake.subscriberCount === 1);
+    const subscribes = fake.requestsTo('events.subscribe');
+    expect(subscribes).toHaveLength(1);
+    expect(subscribes[0]?.params).toEqual({ subscriptions: [{ type: 'pane.updated' }] });
+  });
+
+  it('reads nothing for an update to a pane that is not watched', async () => {
+    fake.reply('agent.read', () => paneRead('T0'));
+    await openScreenWatch('wA:p3');
+    fake.reply('agent.read', () => paneRead('T1'));
+    const changed = nextScreen(link, (message) => message.text === 'T1');
+
+    fake.push('pane_updated', paneUpdated('wA:p9', 5));
+    fake.push('pane_updated', paneUpdated('wA:p3', 2));
+    await changed;
+
+    // The unwatched pane's update is handled before the watched one's read emits, so no third
+    // read can come from it.
+    expect(fake.requestsTo('agent.read')).toHaveLength(3);
+  });
+
+  it('reads once for each new revision and never for a repeated one', async () => {
+    fake.reply('agent.read', () => paneRead('T0'));
+    await openScreenWatch('wA:p3');
+
+    fake.push('pane_updated', paneUpdated('wA:p3', 2));
+    await fake.until(() => fake.requestsTo('agent.read').length === 3);
+
+    // The repeated revision must not mark the open window dirty.
+    fake.push('pane_updated', paneUpdated('wA:p3', 2));
+    // The stream restart is written after that update, so its resync read shows it was handled.
+    fake.startSubscription('pane.updated');
+    await fake.until(() => fake.requestsTo('agent.read').length === 4);
+
+    scheduler.fire(120);
+    expect(scheduler.liveCount(120)).toBe(0);
+  });
+
+  it('emits nothing when a new revision leaves the text unchanged', async () => {
     const updates: string[] = [];
     link.onScreen((message) => updates.push(message.text));
     fake.reply('agent.read', () => paneRead('T0'));
-    const firstUpdate = nextScreen(link);
+    await openScreenWatch('wA:p3');
 
-    await link.read('wA:p3', 20);
-    // The first update is the resync the watch makes once its stream starts.
-    expect((await firstUpdate).text).toBe('T0');
+    // The same text under a new revision reads the pane but emits nothing.
+    fake.push('pane_updated', paneUpdated('wA:p3', 2));
+    await fake.until(() => fake.requestsTo('agent.read').length === 3);
+    scheduler.fire(120);
 
-    // The first output event reads at once and opens the throttle window.
+    fake.reply('agent.read', () => paneRead('T1'));
+    const changed = nextScreen(link, (message) => message.text === 'T1');
+    fake.push('pane_updated', paneUpdated('wA:p3', 3));
+    await changed;
+
+    expect(updates).toEqual(['T0', 'T1']);
+  });
+
+  it('coalesces updates inside one throttle window into a single trailing read', async () => {
+    const updates: string[] = [];
+    link.onScreen((message) => updates.push(message.text));
+    fake.reply('agent.read', () => paneRead('T0'));
+    await openScreenWatch('wA:p3');
+
+    // The first update reads at once and opens the throttle window.
     fake.reply('agent.read', () => paneRead('T1'));
     const leading = nextScreen(link, (message) => message.text === 'T1');
-    fake.push('pane.output_matched', paneOutput('output 1'));
+    fake.push('pane_updated', paneUpdated('wA:p3', 2));
     await leading;
 
-    // Inside the open window these only mark the screen dirty and trigger no read.
+    // Inside the open window these updates only mark the screen dirty and trigger no read.
     fake.reply('agent.read', () => paneRead('T2'));
-    fake.push('pane.output_matched', paneOutput('output 2'));
-    fake.push('pane.output_matched', paneOutput('output 3'));
-    // A second stream start re-reads the pane at once, unthrottled. Its read reaches herdr
-    // only after the burst above was handled, so its emission shows the burst is settled.
+    fake.push('pane_updated', paneUpdated('wA:p3', 3));
+    fake.push('pane_updated', paneUpdated('wA:p3', 4));
+    // The stream restart follows those updates; its resync read is unthrottled.
     const restarted = nextScreen(link, (message) => message.text === 'T2');
-    fake.startSubscription('pane.output_matched');
+    fake.startSubscription('pane.updated');
     await restarted;
     expect(fake.requestsTo('agent.read')).toHaveLength(4);
 
     // The window ends with the screen changed since its last read: one trailing read.
     fake.reply('agent.read', () => paneRead('T3'));
     const trailing = nextScreen(link, (message) => message.text === 'T3');
-    scheduler.fire(500);
-
+    scheduler.fire(120);
     expect((await trailing).text).toBe('T3');
     expect(fake.requestsTo('agent.read')).toHaveLength(5);
     expect(updates).toEqual(['T0', 'T1', 'T2', 'T3']);
-  });
-
-  it('emits only what agent.read returns, never the text of an output event', async () => {
-    const updates: string[] = [];
-    link.onScreen((message) => updates.push(message.text));
-    fake.reply('agent.read', () => paneRead('T0'));
-    const firstUpdate = nextScreen(link);
-    await link.read('wA:p3', 20);
-    await firstUpdate;
-
-    fake.reply('agent.read', () => paneRead('screen'));
-    const read = nextScreen(link, (message) => message.text === 'screen');
-    fake.push('pane.output_matched', paneOutput('plain event text'));
-    await read;
-
-    expect(fake.requestsTo('agent.read')).toHaveLength(3);
-    expect(updates).toEqual(['T0', 'screen']);
   });
 
   it('drops a read reply that arrives after a newer read was emitted', async () => {
     const updates: string[] = [];
     link.onScreen((message) => updates.push(message.text));
     fake.reply('agent.read', () => paneRead('T0'));
-    const firstUpdate = nextScreen(link);
-    await link.read('wA:p3', 20);
-    await firstUpdate;
+    await openScreenWatch('wA:p3');
 
     // The next read is the older one: its reply is held until the newer read has been emitted.
     const held = deferred<Record<string, unknown>>();
     fake.reply('agent.read', () => held.promise);
-    fake.push('pane.output_matched', paneOutput('output'));
+    fake.push('pane_updated', paneUpdated('wA:p3', 2));
     await fake.until(() => fake.requestsTo('agent.read').length === 3);
 
     fake.reply('agent.read', () => paneRead('T2'));
     const newer = nextScreen(link, (message) => message.text === 'T2');
-    fake.startSubscription('pane.output_matched');
+    fake.startSubscription('pane.updated');
     await newer;
 
     // Only the event stream and the held read stay open. Once the older reply's socket closes,
@@ -798,26 +880,79 @@ describe('HerdrLink against a herdr socket', () => {
     expect(updates).toEqual(['T0', 'T2']);
   });
 
-  it('closes a screen watch 30 seconds after its last read', async () => {
+  it('closes a screen watch 30 seconds after it was opened', async () => {
     fake.reply('agent.read', () => paneRead('T0'));
-    const watched = fake.until(() => fake.subscriberCount === 1);
+    await openScreenWatch('wA:p3');
 
-    await link.read('wA:p3', 20);
-    await watched;
     scheduler.fire(30_000);
-
     await fake.until(() => fake.subscriberCount === 0);
   });
 
-  it('releases a screen watch opened before start when stopped', async () => {
+  it('renews a screen watch lease when the pane is watched again', async () => {
     fake.reply('agent.read', () => paneRead('T0'));
-    const watched = fake.until(() => fake.subscriberCount === 1);
+    await openScreenWatch('wA:p3');
 
-    await link.read('wA:p3', 20);
-    await watched;
-    link.stop();
+    const renewed = scheduler.whenScheduled(30_000);
+    link.watch('wA:p3', true);
+    await renewed;
+    // The replaced lease is cancelled, so exactly one 30 s expiry stays live.
+    expect(scheduler.liveCount(30_000)).toBe(1);
 
+    scheduler.fire(30_000);
     await fake.until(() => fake.subscriberCount === 0);
+  });
+
+  it('closes the shared stream once the last watched pane is released', async () => {
+    fake.reply('agent.read', () => paneRead('T0'));
+    await openScreenWatch('wA:p3');
+    const second = nextScreen(link, (message) => message.paneId === 'wA:p4');
+    link.watch('wA:p4', true);
+    await second;
+
+    link.watch('wA:p3', false);
+    // The pane still watched keeps its lease, so the shared stream stays open.
+    expect(scheduler.liveCount(30_000)).toBe(1);
+
+    link.watch('wA:p4', false);
+    await fake.until(() => fake.subscriberCount === 0);
+  });
+
+  it('closes every screen watch when the shared stream fails', async () => {
+    fake.reply('agent.read', () => paneRead('T0'));
+    await openScreenWatch('wA:p3');
+    const second = nextScreen(link, (message) => message.paneId === 'wA:p4');
+    link.watch('wA:p4', true);
+    await second;
+
+    const closed = scheduler.whenIdle(30_000);
+    fake.dropSubscribers();
+    await closed;
+
+    expect(scheduler.liveCount(30_000)).toBe(0);
+  });
+
+  it('releases the screen watch when stopped', async () => {
+    fake.reply('agent.read', () => paneRead('T0'));
+    await openScreenWatch('wA:p3');
+
+    link.stop();
+    await fake.until(() => fake.subscriberCount === 0);
+    expect(scheduler.liveCount(30_000)).toBe(0);
+  });
+
+  it('accepts the dotted pane.updated event name', async () => {
+    fake.reply('agent.read', () => paneRead('T0'));
+    await openScreenWatch('wA:p3');
+    fake.reply('agent.read', () => paneRead('T1'));
+    const changed = nextScreen(link, (message) => message.text === 'T1');
+
+    fake.push('pane.updated', paneUpdated('wA:p3', 2));
+    expect((await changed).text).toBe('T1');
+  });
+
+  it('refuses a malformed pane id for a screen watch', () => {
+    expect(() => link.watch('not-a-pane', true)).toThrow(HerdrError);
+    expect(fake.requests).toHaveLength(0);
   });
 
   it('takes the pane title from terminal_title_stripped and falls back to terminal_title', async () => {

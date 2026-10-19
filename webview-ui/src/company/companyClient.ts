@@ -650,6 +650,11 @@ export class CompanyClient {
     return this.command((requestId) => commands.herdrFocus(requestId, paneId));
   }
 
+  /** Starts, renews, or ends the server's push watch on a pane's screen. */
+  herdrWatch(paneId: string, watching: boolean): CompanyCommandHandle {
+    return this.command((requestId) => commands.herdrWatch(requestId, paneId, watching));
+  }
+
   herdrRename(paneId: string, name: string): CompanyCommandHandle {
     return this.command((requestId) => commands.herdrRename(requestId, paneId, name));
   }

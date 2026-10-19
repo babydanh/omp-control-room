@@ -1,35 +1,38 @@
 /**
  * HerdrPanel: one herdr agent, seen and driven from the board.
  *
- * The screen is the agent's own terminal as herdr shows it. It is read on open,
- * on every status change, and every couple of seconds while the agent works.
- * The screen opens at its newest line and follows it until the reader scrolls up.
- * The choice keys appear only while the agent waits on a choice. The prompt box
- * sends text the agent reads as typed input, and clears only after the server
- * confirms it went through.
+ * The screen is the agent's own terminal as herdr shows it. While the screen tab is open the server
+ * pushes each change to the pane's screen, and the screen is also read on open and on every status
+ * change. Holding or selecting text in the screen freezes it, with a chip that says so, and the newest
+ * screen lands once the selection lets go. The screen opens at its newest line and follows it until
+ * the reader scrolls up. The choice keys appear only while the agent waits on a choice. The prompt box
+ * sends text the agent reads as typed input, and clears only after the server confirms it went through.
  */
 
-import type { FormEvent } from 'react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent, RefObject } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { HerdrKey } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
-import { HERDR_SCREEN_POLL_MS } from '../constants.js';
 import {
   HERDR_CHOICE_KEYS,
   HERDR_DRAWER_TAB_LABELS,
   HERDR_TONE_LABELS,
   type HerdrDrawerTab,
-  herdrNeedsScreenPolling,
   herdrToneFor,
 } from '../herdrView.js';
 import { formatLogTime } from '../sessionLogView.js';
-import { parseAnsiScreen, type ScreenLine } from '../terminalScreen.js';
+import type { ScreenLine } from '../terminalScreen.js';
+import { useCoalescedFrame } from '../useCoalescedFrame.js';
+import { useHerdrScreenWatch } from '../useHerdrScreenWatch.js';
+import { useParsedScreen } from '../useParsedScreen.js';
+import { useScreenSelection } from '../useScreenSelection.js';
 import { useStickToBottom } from '../useStickToBottom.js';
 import { HerdrInfoTab } from './AgentInfoTab.js';
 import { CompanyButton } from './CompanyButton.js';
+import { ScreenFreezeChip } from './ScreenFrame.js';
 import { ScreenView } from './ScreenView.js';
 
 const HERDR_TABS = ['screen', 'info'] as const satisfies readonly HerdrDrawerTab[];
@@ -46,28 +49,26 @@ export interface HerdrPanelProps {
 export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPanelProps) {
   const agent = state.herdr.agents.find((entry) => entry.paneId === paneId);
   const status = agent?.status;
-  const screen = state.herdr.screens[paneId];
+  const latest = state.herdr.screens[paneId];
   const [draft, setDraft] = useState('');
   const [sentPrompt, setSentPrompt] = useState<string | null>(null);
   const [lastRequest, setLastRequest] = useState<string | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
-  const polling = tab === 'screen' && status !== undefined && herdrNeedsScreenPolling(status);
-  const screenLines = useMemo(() => parseAnsiScreen(screen?.text ?? ''), [screen?.text]);
+  const screenRef = useRef<HTMLPreElement>(null);
+  const frozen = useScreenSelection(screenRef);
+  const live = tab === 'screen' && !frozen;
+  const screen = useCoalescedFrame(latest, frozen);
+  const screenLines = useParsedScreen(screen?.text ?? '');
 
-  // Read the screen while the screen tab is open, and whenever the agent's status moves.
+  // Read the screen when it comes into view, whenever the agent's status moves, and when a held
+  // selection lets go. The watch carries the screen on from each of those reads.
   useEffect(() => {
-    if (tab !== 'screen') return undefined;
+    if (!live) return undefined;
     const handle = client.herdrRead(paneId);
     setLocalNotice(failureNotice(handle, 'Không gửi được.'));
-  }, [client, paneId, status, tab]);
-
-  useEffect(() => {
-    if (!polling) return undefined;
-    const timer = window.setInterval(() => {
-      client.herdrRead(paneId);
-    }, HERDR_SCREEN_POLL_MS);
-    return () => window.clearInterval(timer);
-  }, [client, paneId, polling]);
+    return undefined;
+  }, [client, paneId, status, live]);
+  useHerdrScreenWatch(client, paneId, live);
 
   // The draft is cleared only when the server confirms the prompt was sent, so
   // a rejected prompt is still there to be fixed and sent again.
@@ -158,8 +159,9 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
             {screen && (
               <p className="text-2xs text-text-muted">màn hình lúc {formatLogTime(screen.at)}</p>
             )}
+            {frozen && <ScreenFreezeChip />}
             {screen ? (
-              <HerdrScreenView lines={screenLines} />
+              <HerdrScreenView lines={screenLines} preRef={screenRef} />
             ) : (
               <p className="rounded-(--company-radius-sm) bg-well p-2 text-2xs text-text-muted">
                 Chưa đọc màn hình.
@@ -192,7 +194,13 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
 }
 
 /** The herdr screen, pinned to its newest line until the reader scrolls up. */
-function HerdrScreenView({ lines }: { lines: readonly ScreenLine[] }) {
+function HerdrScreenView({
+  lines,
+  preRef,
+}: {
+  lines: readonly ScreenLine[];
+  preRef: RefObject<HTMLPreElement | null>;
+}) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const onScroll = useStickToBottom(scrollRef);
   return (
@@ -201,7 +209,7 @@ function HerdrScreenView({ lines }: { lines: readonly ScreenLine[] }) {
       onScroll={onScroll}
       className="min-h-0 min-w-0 flex-1 overflow-auto rounded-(--company-radius-sm) bg-well p-2"
     >
-      <ScreenView testId="herdr-screen" lines={lines} />
+      <ScreenView testId="herdr-screen" lines={lines} preRef={preRef} />
     </div>
   );
 }
