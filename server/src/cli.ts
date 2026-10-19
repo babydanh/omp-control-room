@@ -45,6 +45,8 @@ import {
 import {
   MAX_PORT,
   MIN_PORT,
+  SERVER_JSON_DIR,
+  STANDALONE_TOKEN_FILE_NAME,
   TERMINAL_DISABLED_BY_FLAG_REASON,
   WILDCARD_HOSTNAMES,
 } from './constants.js';
@@ -54,7 +56,7 @@ import { createLedgerService } from './ledger/ledgerRuntime.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 import { PtySessionManager } from './terminal/ptySessionManager.js';
-import { isLoopbackHost, normalizeHostname } from './wsAuth.js';
+import { isLoopbackHost, normalizeHostname, redactTokenQuery } from './wsAuth.js';
 
 // ── Argument parsing ──────────────────────────────────────────
 
@@ -555,9 +557,14 @@ async function main(): Promise<void> {
     // address; only the consent-bearing toggle needs the token.
     const displayHost =
       args.host === '0.0.0.0' || args.host === '::' || args.host === '' ? '127.0.0.1' : args.host;
-    console.log(
-      `\n  Pixel Agents server running at http://${displayHost}:${config.port}/?token=${config.token}\n`,
-    );
+    // Only a terminal gets the clickable token link. Anything else (a log file, a
+    // supervisor's output buffer) is written to disk, so it gets the redacted URL and
+    // where the persisted token lives, like the request logs (see redactTokenQuery).
+    const url = `http://${displayHost}:${config.port}/?token=${config.token}`;
+    const shownUrl = process.stdout.isTTY
+      ? url
+      : `${redactTokenQuery(url)} (token: ~/${SERVER_JSON_DIR}/${STANDALONE_TOKEN_FILE_NAME})`;
+    console.log(`\n  Pixel Agents server running at ${shownUrl}\n`);
 
     // ── Graceful shutdown ──
     let shuttingDown = false;

@@ -18,6 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 $repo = Split-Path -Parent $PSScriptRoot
 $logDir = Join-Path $env:LOCALAPPDATA 'omp-control-room'
+$cli = Join-Path $repo 'dist\cli.js'
 $log = Join-Path $logDir 'board.log'
 
 function ListenerPid {
@@ -29,10 +30,13 @@ function ListenerPid {
 function StopBoard {
   $owner = ListenerPid
   if (-not $owner) { Write-Host "Không có board nào ở cổng $Port."; return }
-  # Only stop a node process running this repo's CLI: the port may belong to something else.
+  # Only stop the node process running THIS repo's CLI (started below with its absolute
+  # path): the port may belong to another app, even another Node CLI.
   $proc = Get-CimInstance Win32_Process -Filter "ProcessId = $owner"
-  if ($proc.Name -ne 'node.exe' -or $proc.CommandLine -notmatch 'dist[\\/]cli\.js') {
-    throw "Cổng $Port đang thuộc tiến trình khác ($($proc.Name), pid $owner); không tắt."
+  $ownCli = $proc.Name -eq 'node.exe' -and $proc.CommandLine -and
+    $proc.CommandLine.IndexOf("`"$cli`"", [StringComparison]::OrdinalIgnoreCase) -ge 0
+  if (-not $ownCli) {
+    throw "Cổng $Port đang thuộc tiến trình khác ($($proc.Name), pid $owner), không phải board của $repo; không tắt."
   }
   Stop-Process -Id $owner -Force
   for ($i = 0; $i -lt 20 -and (ListenerPid); $i++) { Start-Sleep -Milliseconds 250 }
@@ -43,12 +47,12 @@ if ($Stop) { StopBoard; exit 0 }
 if ($Restart) { StopBoard }
 elseif (ListenerPid) { Write-Host "Board đã chạy ở cổng $Port (pid $(ListenerPid))."; exit 0 }
 
-if (-not (Test-Path (Join-Path $repo 'dist\cli.js'))) { throw "Chưa có dist\cli.js trong $repo. Chạy npm run build trước." }
+if (-not (Test-Path $cli)) { throw "Chưa có $cli. Chạy npm run build trước." }
 $node = (Get-Command node -ErrorAction Stop).Source
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 Add-Content -Path $log -Value "`n==== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') bật board cổng $Port ===="
 
-$command = "cmd.exe /d /c `"`"$node`" dist\cli.js --port $Port >> `"$log`" 2>&1`""
+$command = "cmd.exe /d /c `"`"$node`" `"$cli`" --port $Port >> `"$log`" 2>&1`""
 $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine = $command
