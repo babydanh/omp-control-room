@@ -10,7 +10,7 @@
  *    (`terminalLine`), where OMP reads it as its own TUI does, including its `/` commands.
  *    Ctrl/Cmd+Enter does the same. With no session selected nothing is sent.
  *  - With a herdr agent selected, the plain send goes to that agent's pane instead.
- *  - Ctrl/Cmd+Shift+Enter and the "Giao cho công ty" button: the Company workflow.
+ *  - Ctrl/Cmd+Shift+Enter and the send menu's "Công ty" entry: the Company workflow.
  *    A chat session is never a Company target.
  *  - `/new` opens a new omp chat in the folder and `/resume` lists the saved ones. Those
  *    two are the composer's own; every other `/` line goes to the terminal.

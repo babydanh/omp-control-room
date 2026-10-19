@@ -95,6 +95,8 @@ export interface SquadReview {
 export interface StoredSquadRun {
   readonly id: string;
   readonly request: string;
+  /** The finished work item this run asks the leader about, when it started from one. */
+  readonly fromWorkItemId?: string;
   status: SquadRunStatus;
   turns: number;
   /** Every proposal, oldest first. The newest one is the run's current proposal. */
@@ -530,6 +532,7 @@ function parseStoredRun(value: unknown): StoredSquadRun | null {
   const request = value['request'];
   const status = value['status'];
   const turns = value['turns'];
+  const fromWorkItemId = value['fromWorkItemId'];
   const note = value['note'];
   const error = value['error'];
   if (
@@ -544,7 +547,8 @@ function parseStoredRun(value: unknown): StoredSquadRun | null {
     !isTimestamp(value['createdAt']) ||
     !isTimestamp(value['updatedAt']) ||
     (note !== undefined && typeof note !== 'string') ||
-    (error !== undefined && typeof error !== 'string')
+    (error !== undefined && typeof error !== 'string') ||
+    (fromWorkItemId !== undefined && !isUuid(fromWorkItemId))
   ) {
     return null;
   }
@@ -558,6 +562,7 @@ function parseStoredRun(value: unknown): StoredSquadRun | null {
     history,
     createdAt: value['createdAt'] as string,
     updatedAt: value['updatedAt'] as string,
+    ...(typeof fromWorkItemId === 'string' ? { fromWorkItemId } : {}),
   };
   if (typeof note === 'string') run.note = note;
   if (typeof error === 'string') run.error = error;

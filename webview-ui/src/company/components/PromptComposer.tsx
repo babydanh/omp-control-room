@@ -10,12 +10,12 @@
  *    session's terminal, followed by Enter (`terminalLine`). The terminal must be
  *    open in the drawer; otherwise the box says so and keeps the text.
  *  - With a herdr agent selected, the plain send types into that agent's pane instead.
- *  - Ctrl/Cmd+Shift+Enter, and the "Giao cho công ty" button: the Company workflow
+ *  - Ctrl/Cmd+Shift+Enter, and the "Công ty" entry of the send menu: the Company workflow
  *    (Director, Contract, approval, workers). A selected Company session becomes the
  *    target; a plain omp chat never does.
- *  - "Giao việc…" opens a dialog that gives the text to a chosen agent as a work item.
- *  - Ctrl/Cmd+Alt+Enter, and the "Giao cho đội" button: the folder's team, as a squad run
- *    (see `squadView.ts`). It needs no selected session, because a squad is folder-level.
+ *  - The "Một agent…" entry opens a dialog that gives the text to a chosen agent as a work item.
+ *  - Ctrl/Cmd+Alt+Enter, and the "Đội" entry of the send menu: the folder's team, as a squad
+ *    run (see `squadView.ts`). It needs no selected session, because a squad is folder-level.
  *  - `/new` opens a new omp chat in this folder, with no prompt. `/resume` opens a
  *    picker over the omp sessions saved here. Neither reaches a terminal.
  *  - Attach. OMP's box carries an image picker that the company bridge cannot
@@ -48,6 +48,7 @@ import {
   startNewChat,
   terminalLine,
 } from '../composerRouting.js';
+import { sendMenuEntries, type SendMenuEntryId } from '../composerSendMenu.js';
 import { showsAllFolders } from '../folderIdentity.js';
 import { focusFolder, FOLDER_LIST_LOADING_MESSAGE, folderListLoading } from '../folderView.js';
 import { isCompanyChord, promptBlockReason, type PromptRoute } from '../promptSubmission.js';
@@ -63,7 +64,7 @@ import { canStartSquad, type SquadStartVerdict } from '../squadView.js';
 import { useCompanyState } from '../useCompanyState.js';
 import { workItemsOf } from '../workItemView.js';
 import { folderLabel, folderLabelFor } from '../workspaces.js';
-import { CompanyButton } from './CompanyButton.js';
+import { ComposerSendMenu } from './ComposerSendMenu.js';
 import { OmpSessionPicker } from './OmpSessionPicker.js';
 import { CreateWorkDialog } from './WorkDialogHost.js';
 
@@ -81,8 +82,6 @@ const COMPOSER_HINTS =
 /** Shown when Ctrl/Cmd+Shift+Enter is pressed while a herdr agent is the target. */
 const HERDR_COMPANY_NOTICE =
   'Chọn một phiên omp để giao cho công ty. Agent herdr không nhận việc giao này.';
-/** The Company button's tooltip while a herdr agent is the target. */
-const HERDR_COMPANY_TOOLTIP = 'Không giao cho công ty khi đang gửi tới agent herdr.';
 
 /** Shown when a squad request cannot be sent. */
 const SQUAD_FALLBACK = 'Chưa giao được cho đội.';
@@ -176,6 +175,19 @@ export function PromptComposer({ client }: PromptComposerProps) {
       ? { ok: false, reason: folderLoading ? FOLDER_LIST_LOADING_MESSAGE : NO_FOLDER_SQUAD_REASON }
       : canStartSquad(assigneeOptionsFor(state, focus));
   const newSessionWaits = folderLoading && selectedSession === null;
+  // The send menu's entries, each with the reason it is off, from the state the buttons read.
+  const sendMenu = sendMenuEntries({
+    blocker,
+    busy,
+    resumeOpen: resumeRequest !== null,
+    squadPending: squadRequest !== null,
+    squadTeam,
+    newSessionWaits,
+    herdrTarget: herdrTarget !== null,
+    hasFocus: focus !== null,
+    folderLoading,
+    hasText: draft.text.trim() !== '',
+  });
   const resumeView =
     resumeRequest === null
       ? null
@@ -281,6 +293,13 @@ export function PromptComposer({ client }: PromptComposerProps) {
       const remaining = draftAfterSend(current, text);
       if (remaining !== current) client.setDraftText(remaining);
     });
+  };
+
+  /** Runs one entry of the send menu through the same path its shortcut takes. */
+  const runSendEntry = (id: SendMenuEntryId) => {
+    if (id === 'agent') setAssignOpen(true);
+    else if (id === 'squad') sendSquad();
+    else send(companyRoute(selectedSession));
   };
 
   /**
@@ -539,56 +558,13 @@ export function PromptComposer({ client }: PromptComposerProps) {
           data-testid="prompt-input"
           className="min-w-0 flex-1 max-md:basis-full resize-none rounded-[var(--company-radius-md)] border border-border bg-raised px-3 py-2 text-sm leading-5 text-text"
         />
-        <CompanyButton
-          size="sm"
-          variant="default"
-          className="shrink-0 whitespace-nowrap"
-          disabled={
-            blocker !== null ||
-            busy ||
-            resumeRequest !== null ||
-            herdrTarget !== null ||
-            newSessionWaits
-          }
-          title={herdrTarget === null ? undefined : HERDR_COMPANY_TOOLTIP}
-          onClick={() => send(companyRoute(selectedSession))}
-        >
-          Giao cho công ty
-        </CompanyButton>
-        <CompanyButton
-          size="sm"
-          variant="default"
-          className="shrink-0 whitespace-nowrap"
-          disabled={focus === null || folderLoading || draft.text.trim() === ''}
-          onClick={() => setAssignOpen(true)}
-        >
-          Giao việc…
-        </CompanyButton>
-        <CompanyButton
-          size="sm"
-          variant="default"
-          className="shrink-0 whitespace-nowrap"
-          disabled={
-            blocker !== null ||
-            busy ||
-            resumeRequest !== null ||
-            squadRequest !== null ||
-            !squadTeam.ok
-          }
-          title={squadTeam.ok ? undefined : squadTeam.reason}
-          onClick={sendSquad}
-        >
-          Giao cho đội
-        </CompanyButton>
-        <CompanyButton
-          size="sm"
-          variant="accent"
-          className="shrink-0"
-          disabled={blocker !== null || busy || resumeRequest !== null || newSessionWaits}
-          onClick={onSubmitKey}
-        >
-          {busy ? 'Đang gửi...' : 'Gửi'}
-        </CompanyButton>
+        <ComposerSendMenu
+          sendLabel={busy ? 'Đang gửi...' : 'Gửi'}
+          sendDisabled={blocker !== null || busy || resumeRequest !== null || newSessionWaits}
+          onSend={onSubmitKey}
+          entries={sendMenu}
+          onRun={runSendEntry}
+        />
       </div>
       <p className="mt-1 flex min-w-0 items-center gap-2 text-2xs text-text-muted">
         <span className="min-w-0 truncate" data-testid="prompt-target">

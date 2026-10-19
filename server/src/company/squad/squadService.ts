@@ -188,11 +188,17 @@ export class SquadService {
 
   /**
    * Starts a squad run for a request: typed text, or a finished work item the leader should decide
-   * on. The first leader turn starts once the run is saved.
+   * on. An item that already has an open run answers with that run and starts nothing new. The
+   * first leader turn starts once the run is saved.
    */
   async request(command: SquadRequestCommand): Promise<string> {
     const replayed = this.answers.get(command.requestId);
     if (replayed !== undefined) return replayed;
+    const open = this.openRunFor(command);
+    if (open !== undefined) {
+      this.remember(command.requestId, open.id);
+      return open.id;
+    }
     const request = this.requestText(command);
     if (this.ports.members().length === 0)
       throw new CompanyError('squad_no_members', MESSAGE.noMembers);
@@ -207,6 +213,7 @@ export class SquadService {
       history: [squadEvent(at, 'request')],
       createdAt: at,
       updatedAt: at,
+      ...(command.fromWorkItemId === undefined ? {} : { fromWorkItemId: command.fromWorkItemId }),
     };
     this.runs.set(run.id, run);
     this.remember(command.requestId, run.id);
@@ -231,6 +238,18 @@ export class SquadService {
     if (command.fromWorkItemId !== undefined && command.text === undefined)
       return this.itemRequest(command.fromWorkItemId);
     throw new CompanyError('invalid_request', MESSAGE.requestShape);
+  }
+
+  /**
+   * The open run that already started from this finished item, if there is one. Done, dismissed
+   * and stopped runs are closed, so a new request may start again. Typed requests never match.
+   */
+  private openRunFor(command: SquadRequestCommand): StoredSquadRun | undefined {
+    if (command.fromWorkItemId === undefined || command.text !== undefined) return undefined;
+    return [...this.runs.values()].find(
+      (run) =>
+        run.fromWorkItemId === command.fromWorkItemId && !FINISHED_STATUSES.includes(run.status),
+    );
   }
 
   /** Refuses empty or oversized typed text, and returns it trimmed. */

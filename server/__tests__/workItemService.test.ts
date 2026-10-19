@@ -11,6 +11,7 @@ import type {
 import { CompanyError } from '../src/company/companyError.js';
 import {
   parseWorkItemsFile,
+  WORK_ITEM_FINISHED_KEEP,
   WORK_ITEM_GRACE_MS,
   WORK_ITEM_REASON,
   WORK_ITEM_TEXT_MAX_BYTES,
@@ -754,25 +755,90 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
     expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước']);
   });
 
-  it('keeps the #n of a cancelled dependency on the item that waited for it', async () => {
+  it('refuses to cancel an item that open items wait for, and names every #n that waits', async () => {
     const f = await openFixture();
-    f.panes.push({ paneId: PANE_A, status: 'working' }, { paneId: PANE_B, status: 'idle' });
-    const first = await f.service.create({ requestId: randomUUID(), text: 'Huỷ', assignee: herdr(PANE_A) });
+    f.panes.push({ paneId: PANE_A, status: 'working' }, { paneId: PANE_B, status: 'working' });
+    const first = await f.service.create({ requestId: randomUUID(), text: 'Trước', assignee: herdr(PANE_A) });
     const second = await f.service.create({
       requestId: randomUUID(),
       text: 'Chờ',
       assignee: herdr(PANE_B),
       dependsOn: [first],
     });
-    const sequence = itemOf(f, first).sequence;
+    const third = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Cũng chờ',
+      assignee: herdr(PANE_A),
+      dependsOn: [first],
+    });
+    const secondSequence = itemOf(f, second).sequence;
+    const thirdSequence = itemOf(f, third).sequence;
+
+    await expect(f.service.cancel({ requestId: randomUUID(), id: first })).rejects.toMatchObject({
+      code: 'work_item_awaited',
+      message: `Không huỷ được: #${secondSequence}, #${thirdSequence} đang chờ việc này. Hãy bỏ việc này khỏi danh sách chờ của các việc đó trước.`,
+    });
+    expect(itemOf(f, first).status).toBe('queued');
+
+    // Once nothing open waits for it, the item can go.
+    await f.service.cancel({ requestId: randomUUID(), id: second });
+    await f.service.cancel({ requestId: randomUUID(), id: third });
+    await f.service.cancel({ requestId: randomUUID(), id: first });
+    expect(f.service.snapshot().items).toEqual([]);
+  });
+
+  it('lets an item go once every item that waited for it is finished', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'working' }, { paneId: PANE_B, status: 'working' });
+    const first = await f.service.create({ requestId: randomUUID(), text: 'Trước', assignee: herdr(PANE_A) });
+    const second = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sau',
+      assignee: herdr(PANE_B),
+      dependsOn: [first],
+    });
+    await f.service.mark({ requestId: randomUUID(), id: second, verdict: 'done' });
 
     await f.service.cancel({ requestId: randomUUID(), id: first });
-    expect(itemOf(f, second)).toMatchObject({
-      status: 'queued',
-      blocker: { kind: 'failed', sequence },
+    expect(f.service.snapshot().items.map((item) => item.id)).toEqual([second]);
+  });
+
+  it('never prunes a finished item an open item waits for, and prunes the rest past the keep limit', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'working' }, { paneId: PANE_B, status: 'working' });
+    const finishOne = async (text: string, dependsOn: string[] = []): Promise<string> => {
+      f.now += 1000;
+      const id = await f.service.create({
+        requestId: randomUUID(),
+        text,
+        assignee: herdr(PANE_A),
+        dependsOn,
+      });
+      f.now += 1000;
+      await f.service.mark({ requestId: randomUUID(), id, verdict: 'done' });
+      return id;
+    };
+    const oldest = await finishOne('Cũ nhất');
+    f.now += 1000;
+    const waiter = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Đang chờ việc cũ',
+      assignee: herdr(PANE_B),
+      dependsOn: [oldest],
     });
-    await f.service.reconcileNow();
-    expect(f.prompts).toEqual([]);
+    const second = await finishOne('Thứ hai');
+    for (let n = 0; n < WORK_ITEM_FINISHED_KEEP; n += 1) await finishOne(`Việc ${n}`);
+
+    // The newest finished items are kept; the one just behind them goes. The oldest stays while
+    // the open waiter still names it.
+    const kept = f.service.snapshot().items.map((item) => item.id);
+    expect(kept).toContain(oldest);
+    expect(kept).toContain(waiter);
+    expect(kept).not.toContain(second);
+
+    // Once nothing open waits for it, the next save lets it go.
+    await f.service.cancel({ requestId: randomUUID(), id: waiter });
+    expect(f.service.snapshot().items.map((item) => item.id)).not.toContain(oldest);
   });
 
   it('sends an item at once when everything it waits for is already done', async () => {

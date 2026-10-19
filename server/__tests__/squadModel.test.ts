@@ -617,6 +617,28 @@ describe('parseSquadFile', () => {
       { itemId, at: AT, text: 'Form', result: 'Đã viết', acceptance: 'Có test' },
     ]);
   });
+
+  it('keeps the finished item a run started from, and reads an older run that has none', () => {
+    const itemId = randomUUID();
+    const parsed = parseSquadFile({
+      version: 1,
+      revision: 1,
+      runs: [storedRun({ fromWorkItemId: itemId }), storedRun()],
+    });
+    expect(parsed.dropped).toBe(0);
+    expect(parsed.file.runs[0]?.fromWorkItemId).toBe(itemId);
+    expect(parsed.file.runs[1]?.fromWorkItemId).toBeUndefined();
+  });
+
+  it('drops a run whose origin item id is not an id', () => {
+    const parsed = parseSquadFile({
+      version: 1,
+      revision: 1,
+      runs: [{ ...storedRun({}), fromWorkItemId: 'not-a-uuid' }],
+    });
+    expect(parsed.dropped).toBe(1);
+    expect(parsed.file.runs).toEqual([]);
+  });
 });
 
 describe('squadProgress', () => {

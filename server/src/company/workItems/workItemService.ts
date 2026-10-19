@@ -165,6 +165,12 @@ const DEPENDS_MESSAGE: Record<DependsOnRefusal, string> = {
   cycle: 'Danh sách chờ này tạo thành vòng lặp giữa các việc.',
 };
 
+/** Why a queued item cannot be cancelled: the open items that still wait for it, by #n. */
+function awaitedMessage(sequences: readonly number[]): string {
+  const names = sequences.map((sequence) => `#${sequence}`).join(', ');
+  return `Không huỷ được: ${names} đang chờ việc này. Hãy bỏ việc này khỏi danh sách chờ của các việc đó trước.`;
+}
+
 /** The folder's herdr and session views, read once for a pass or a snapshot. */
 interface FolderView {
   readonly roster: WorkItemRosterView;
@@ -392,10 +398,26 @@ export class WorkItemService {
     if (this.replay(command.requestId) !== undefined) return;
     const item = this.requireItem(command.id);
     if (!canCancel(item.status)) this.refuseStatus(item);
+    const waiters = this.openWaitersOf(item.id);
+    if (waiters.length > 0)
+      throw new CompanyError(
+        'work_item_awaited',
+        awaitedMessage(waiters.map((waiter) => waiter.sequence)),
+      );
     this.items.delete(item.id);
     this.remember(command.requestId, '');
     this.commit();
     await this.flush();
+  }
+
+  /**
+   * The open items (not done or failed) whose wait list names this item, oldest first. Cancelling
+   * the item would leave each of them waiting on an id that no longer exists.
+   */
+  private openWaitersOf(id: string): StoredWorkItem[] {
+    return [...this.items.values()]
+      .filter((item) => !isFinished(item.status) && item.dependsOn.includes(id))
+      .sort((a, b) => a.sequence - b.sequence);
   }
 
   /**

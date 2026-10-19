@@ -608,6 +608,62 @@ describe('SquadService requests from a finished item', () => {
     );
     expect(h.leader.prompts[0]).toContain('Xong khi: Có test form');
   });
+
+  it('answers a second request for the same item with its open run, and starts nothing new', async () => {
+    const h = new Harness();
+    const id = h.workItems.addManual('Viết form đăng nhập', 'Có test form');
+    h.workItems.review(id, h.stamp(), 'Đã viết');
+    h.leader.reply(proposal('Viết test cho form'));
+    const runId = await h.service.request({ requestId: randomUUID(), fromWorkItemId: id });
+    const again = await h.service.request({ requestId: randomUUID(), fromWorkItemId: id });
+    expect(again).toBe(runId);
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    expect(await h.service.request({ requestId: randomUUID(), fromWorkItemId: id })).toBe(runId);
+    expect(h.service.snapshot().runs).toHaveLength(1);
+    expect(h.leader.prompts).toHaveLength(1);
+  });
+
+  it('starts a new run from the same item once its run is done or dismissed', async () => {
+    const h = new Harness();
+    const id = h.workItems.addManual('Viết form đăng nhập');
+    h.workItems.review(id, h.stamp(), 'Đã viết');
+    h.leader.reply(DONE_REPLY);
+    const done = await h.service.request({ requestId: randomUUID(), fromWorkItemId: id });
+    await waitFor(() => h.runOf(done)?.status === 'done');
+
+    h.leader.reply(proposal('Viết lại form'));
+    const second = await h.service.request({ requestId: randomUUID(), fromWorkItemId: id });
+    expect(second).not.toBe(done);
+    await waitFor(() => h.runOf(second)?.status === 'proposed');
+    const proposalId = h.runOf(second)?.proposal?.id;
+    if (proposalId === undefined) throw new Error('no proposal');
+    await h.service.dismiss({ requestId: randomUUID(), runId: second, proposalId });
+    expect(h.runOf(second)?.status).toBe('dismissed');
+
+    h.leader.reply(proposal('Việc khác'));
+    const third = await h.service.request({ requestId: randomUUID(), fromWorkItemId: id });
+    expect(third).not.toBe(second);
+    expect(third).not.toBe(done);
+  });
+
+  it('keeps the item each run started from across a restart, so a second press still answers with that run', async () => {
+    const h = new Harness();
+    const id = h.workItems.addManual('Viết form đăng nhập');
+    h.workItems.review(id, h.stamp(), 'Đã viết');
+    h.leader.reply(proposal('Viết test cho form'));
+    const runId = await h.service.request({ requestId: randomUUID(), fromWorkItemId: id });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    await waitFor(() => h.persistence.saves.at(-1)?.runs[0]?.status === 'proposed');
+    const saved = h.persistence.saves.at(-1);
+    if (saved === undefined) throw new Error('nothing saved');
+    expect(saved.runs[0]?.fromWorkItemId).toBe(id);
+
+    h.persistence.loaded = { file: saved, dropped: 0, corrupt: false };
+    const restarted = h.createService();
+    await restarted.load();
+    expect(await restarted.request({ requestId: randomUUID(), fromWorkItemId: id })).toBe(runId);
+    expect(restarted.snapshot().runs).toHaveLength(1);
+  });
 });
 
 describe('SquadService waits and priorities', () => {
