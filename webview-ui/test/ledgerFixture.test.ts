@@ -6,8 +6,8 @@ import {
   ledgerFixtureView,
 } from '../src/company/ledger/ledgerFixture.js';
 import { LEDGER_WINDOWS } from '../src/company/ledger/ledgerFormat.js';
-import { layoutRepoGraph } from '../src/company/ledger/ledgerGraphLayout.js';
 import { layoutTimeline } from '../src/company/ledger/ledgerTimelineLayout.js';
+import { buildRepoTree } from '../src/company/ledger/ledgerTreeModel.js';
 
 describe('ledger fixture view', () => {
   it('is a board with repos and sessions, stamped with the fixture clock', () => {
@@ -17,13 +17,24 @@ describe('ledger fixture view', () => {
     expect(view.sessions.length).toBeGreaterThan(0);
   });
 
-  it('lays out every repo as one row for main plus one per branch', () => {
+  it('builds one card per checkout: the trunk plus every branch, folded ones included', () => {
     const view = ledgerFixtureView();
     for (const repo of view.repos) {
       const overlap = view.overlaps.find((scan) => scan.repo === repo.repo) ?? null;
-      const layout = layoutRepoGraph({ repo, sessions: view.sessions, overlap }, 800);
+      const tree = buildRepoTree(
+        repo,
+        overlap,
+        {
+          sessions: view.sessions,
+          pending: view.pending,
+          panes: [],
+          boardSessions: {},
+          generatedAt: view.generatedAt,
+        },
+        true,
+      );
       const branches = repo.worktrees.filter((worktree) => !worktree.isMain).length;
-      expect(layout.rows).toHaveLength(1 + branches);
+      expect(tree.nodes).toHaveLength(1 + branches);
     }
   });
 });

@@ -42,6 +42,7 @@
   --color-reset-text: #ecc;
   --color-danger: #d14249;
   --color-warning: #ff8d14;
+  --color-caution: #b8860b;
 
   /* Status */
   --color-status-permission: #cca700;
@@ -105,6 +106,7 @@
   --color-reset-text: var(--color-reset-text);
   --color-danger: var(--color-danger);
   --color-warning: var(--color-warning);
+  --color-caution: var(--color-caution);
   --color-status-permission: var(--color-status-permission);
   --color-status-active: var(--color-status-active);
   --color-status-success: var(--color-status-success);
@@ -211,6 +213,8 @@
     --color-status-success: #5fd38d;
     --color-orchid: #c792ea;
     --color-idle: #9a9aa6;
+    /* Caution: a node or session that needs a look but is not broken. Yellow, apart from the amber accent. */
+    --color-caution: #f6d54a;
     /* Corner radii: 6px for controls and chips, 10px for cards and rows, 14px for lanes. */
     --company-radius-sm: 6px;
     --company-radius-md: 10px;

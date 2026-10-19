@@ -13,6 +13,7 @@ import {
   LEDGER_GIT_PROBLEM_BASE,
   LEDGER_GIT_PROBLEM_LAST_COMMIT,
   LEDGER_GIT_PROBLEM_STATUS,
+  LEDGER_GIT_PROBLEM_UPSTREAM,
   LEDGER_GIT_TIMEOUT_MS,
   LEDGER_OVERLAP_BASE,
   LEDGER_SHORT_SHA_LENGTH,
@@ -40,6 +41,7 @@ export interface LedgerWorktreeState {
   readonly dirtyFiles: LedgerDirtyFile[];
   readonly merged: boolean;
   readonly hasUpstream: boolean;
+  readonly unpushed: number | null;
   readonly lastCommitSubject: string;
   readonly lastCommitAt: string | null;
   readonly gitError?: string;
@@ -143,6 +145,12 @@ export function parseAheadBehind(stdout: string): { behind: number; ahead: numbe
   return { behind: Number(match[1]), ahead: Number(match[2]) };
 }
 
+/** Parses `rev-list --count A..B`: one number, or null when git printed anything else. */
+export function parseCount(stdout: string): number | null {
+  const text = stdout.trim();
+  return /^\d+$/.test(text) ? Number(text) : null;
+}
+
 /** Parses `log -1 --format=%s%x00%cI`; the commit time comes back in ledger local time. */
 export function parseLastCommit(
   stdout: string,
@@ -209,6 +217,13 @@ async function readWorktree(
     ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
     UPSTREAM_OPTIONS,
   );
+  const hasUpstream = upstream.ok && upstream.code === 0;
+  // Commits on HEAD that the upstream lacks: work that exists only on this machine.
+  const unpushedRun = hasUpstream
+    ? await git.run(entry.path, ['rev-list', '--count', '@{u}..HEAD'], READ_OPTIONS)
+    : null;
+  const unpushed = unpushedRun !== null && unpushedRun.ok ? parseCount(unpushedRun.stdout) : null;
+  if (unpushedRun !== null && unpushed === null) problems.push(LEDGER_GIT_PROBLEM_UPSTREAM);
 
   const log = await git.run(entry.path, ['log', '-1', '--format=%s%x00%cI'], READ_OPTIONS);
   const commit = log.ok ? parseLastCommit(log.stdout) : null;
@@ -225,7 +240,8 @@ async function readWorktree(
     dirtyCount: dirtyFiles.length,
     dirtyFiles,
     merged: ancestor.ok && ancestor.code === 0,
-    hasUpstream: upstream.ok && upstream.code === 0,
+    hasUpstream,
+    unpushed,
     lastCommitSubject: commit?.subject ?? '',
     lastCommitAt: commit?.committedAt ?? null,
     ...(problems.length > 0

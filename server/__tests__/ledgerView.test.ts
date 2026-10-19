@@ -38,6 +38,7 @@ function worktreeState(
     dirtyFiles: [],
     merged: false,
     hasUpstream: false,
+    unpushed: null,
     lastCommitSubject: '',
     lastCommitAt: null,
     ...overrides,

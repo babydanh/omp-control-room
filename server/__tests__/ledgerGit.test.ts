@@ -185,7 +185,9 @@ function repoScript(cwd: string, args: readonly string[]): ProcessReply {
   if (key === 'rev-parse --show-prefix') return { stdout: '\n' };
   if (key === 'worktree list --porcelain') return { stdout: WORKTREE_LIST };
   if (args[0] === 'status') return cwd === MAIN ? { stdout: ' M a.ts\u0000' } : { stdout: '' };
-  if (args[0] === 'rev-list') return { stdout: '1\t2\n' };
+  if (args[0] === 'rev-list') {
+    return args.includes('@{u}..HEAD') ? { stdout: '3\n' } : { stdout: '1\t2\n' };
+  }
   if (args[0] === 'merge-base') return { code: cwd === MAIN ? 0 : 1 };
   if (args[0] === 'rev-parse') return { code: cwd === MAIN ? 0 : 128 };
   if (args[0] === 'log') return { stdout: `Subject\u0000${COMMIT_ISO}\n` };
@@ -213,7 +215,7 @@ describe('readRepo', () => {
     });
     const scan = await readRepo(git, MAIN);
     expect(scan.kind === 'repo' && scan.worktrees[0]?.gitError).toBe(
-      'Git không đọc được: so với origin/main.',
+      'Git không đọc được: so với origin/main, commit chưa đẩy.',
     );
   });
 
@@ -234,6 +236,7 @@ describe('readRepo', () => {
       dirtyFiles: [{ status: 'M', path: 'a.ts' }],
       merged: true,
       hasUpstream: true,
+      unpushed: 3,
       lastCommitSubject: 'Subject',
       lastCommitAt: formatLedgerTime(Date.parse(COMMIT_ISO)),
     });
@@ -243,6 +246,7 @@ describe('readRepo', () => {
       isMain: false,
       merged: false,
       hasUpstream: false,
+      unpushed: null,
       dirtyCount: 0,
       dirtyFiles: [],
     });
@@ -252,6 +256,17 @@ describe('readRepo', () => {
     const git = new FakeGitRunner(repoScript);
     await readRepo(git, MAIN);
     expect(git.calls.some((call) => call.cwd === 'C:/Repo-wt/gone')).toBe(false);
+  });
+
+  it('reports an unreadable unpushed count as a gitError and leaves it unknown', async () => {
+    const git = new FakeGitRunner((cwd, args) =>
+      args.includes('@{u}..HEAD')
+        ? { code: 128, stderr: 'fatal: no upstream' }
+        : repoScript(cwd, args),
+    );
+    const trunk = worktreesOf(await readRepo(git, MAIN))[0];
+    expect(trunk.unpushed).toBeNull();
+    expect(trunk.gitError).toContain('commit chưa đẩy');
   });
 
   it('records a checkout whose status fails with a Vietnamese gitError', async () => {

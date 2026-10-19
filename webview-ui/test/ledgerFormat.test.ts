@@ -8,7 +8,6 @@ import {
   fileName,
   formatClock,
   formatRelativeTime,
-  initialsOf,
   LEDGER_MESSAGE_MAX_LENGTH,
   LEDGER_WINDOWS,
   ledgerMessageProblem,
@@ -51,11 +50,6 @@ describe('names and ids', () => {
   it('keeps the last eight characters of a session id', () => {
     expect(shortSessionId('abcdefghijkl')).toBe('efghijkl');
     expect(shortSessionId('abc')).toBe('abc');
-  });
-
-  it('takes up to two initials for an avatar', () => {
-    expect(initialsOf('Thợ Sửa')).toBe('TS');
-    expect(initialsOf('worker')).toBe('WO');
   });
 
   it('reads the last path segment for both separators', () => {

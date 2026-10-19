@@ -67,17 +67,6 @@ export function sessionTitle(session: LedgerSession): string {
     : shortSessionId(session.sessionId);
 }
 
-/** Up to two initials for an avatar: "Thợ Sửa" becomes "TS", "worker" becomes "WO". */
-export function initialsOf(name: string): string {
-  const [first = '', second = ''] = name.trim().split(/\s+/);
-  const letters =
-    second === ''
-      ? Array.from(first).slice(0, 2)
-      : [Array.from(first)[0] ?? '', Array.from(second)[0] ?? ''];
-  const joined = letters.join('').toUpperCase();
-  return joined === '' ? '?' : joined;
-}
-
 /** Last path segment, for both `/` and `\` separators. */
 export function fileName(path: string): string {
   const segments = path.split(/[\\/]/).filter((segment) => segment !== '');

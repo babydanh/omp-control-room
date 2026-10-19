@@ -107,6 +107,7 @@ export const LEDGER_GIT_ERROR_PREFIX = 'Git không đọc được:';
 export const LEDGER_GIT_PROBLEM_STATUS = 'trạng thái';
 export const LEDGER_GIT_PROBLEM_BASE = 'so với origin/main';
 export const LEDGER_GIT_PROBLEM_LAST_COMMIT = 'commit cuối';
+export const LEDGER_GIT_PROBLEM_UPSTREAM = 'commit chưa đẩy';
 export const LEDGER_REASON_OVERLAP_TIMEOUT = 'Quét quá lâu; chưa rõ kết quả.';
 export const LEDGER_REASON_OVERLAP_TOO_LARGE = 'Kết quả quét quá lớn.';
 export const LEDGER_REASON_OVERLAP_UNREADABLE = 'Không đọc được kết quả quét.';

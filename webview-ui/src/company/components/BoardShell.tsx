@@ -23,6 +23,8 @@ import { folderIdentityOf, foldersWaitingForSnapshot, showsAllFolders } from '..
 import type { HerdrDrawerTab } from '../herdrView.js';
 import { sidebarPresentation } from '../layoutMode.js';
 import { ledgerStore } from '../ledger/ledgerClient.js';
+import { panesOf } from '../ledger/ledgerManagers.js';
+import { boardSessionIndex } from '../ledger/ledgerMapping.js';
 import { useLedgerState } from '../ledger/ledgerStore.js';
 import { LedgerView } from '../ledger/LedgerView.js';
 import { startScrollFades } from '../scrollFades.js';
@@ -132,6 +134,11 @@ export function BoardShell({ client }: BoardShellProps) {
   );
 
   const lanes = useMemo(() => buildBoardLanes(state), [state]);
+  const ledgerBoardSessions = useMemo(() => boardSessionIndex(state.sessions), [state.sessions]);
+  const ledgerPanes = useMemo(
+    () => panesOf(state.herdr.agents, state.herdr.sleeping),
+    [state.herdr.agents, state.herdr.sleeping],
+  );
   const pendingQuestions = useMemo(
     () => Object.values(state.questions).filter((question) => question.status === 'pending'),
     [state.questions],
@@ -446,8 +453,11 @@ export function BoardShell({ client }: BoardShellProps) {
           )}
           {ledgerShown ? (
             <LedgerView
-              boardSessions={state.sessions}
+              boardSessions={ledgerBoardSessions}
               onOpenBoardSession={selectSession}
+              panes={ledgerPanes}
+              onOpenHerdr={openHerdr}
+              onOpenSleeping={openSleeping}
               onClose={() => setLedgerOpen(false)}
             />
           ) : (

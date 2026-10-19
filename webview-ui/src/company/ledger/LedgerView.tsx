@@ -1,5 +1,5 @@
 /**
- * LedgerView: the "Cây git" board for the company. It shows the checkout graph and the
+ * LedgerView: the "Cây git" board for the company. It shows each repo's git tree and the
  * session timeline, with a detail panel for the current selection. Phone layouts show
  * the detail and the side panels as full-screen sheets instead of a side column.
  */
@@ -11,12 +11,13 @@ import { useLayoutMode } from '../useLayoutMode.js';
 import { ledgerStore } from './ledgerClient.js';
 import { LedgerDetailPanel } from './LedgerDetailPanel.js';
 import { databaseLabel, formatClock, parseLedgerTimestamp } from './ledgerFormat.js';
-import { LedgerGraphTab } from './LedgerGraphTab.js';
+import { type PaneInput } from './ledgerManagers.js';
 import type { BoardSessionIndex } from './ledgerMapping.js';
 import { type LedgerSelection, resolveSelection } from './ledgerSelection.js';
 import { LedgerSidePanels } from './LedgerSidePanels.js';
 import { type LedgerState, useLedgerState } from './ledgerStore.js';
 import { LedgerTimelineTab } from './LedgerTimelineTab.js';
+import { LedgerTreeTab } from './LedgerTreeTab.js';
 
 type LedgerTab = 'graph' | 'timeline';
 
@@ -27,13 +28,24 @@ const TAB_LABELS: Record<LedgerTab, string> = {
 };
 
 export interface LedgerViewProps {
-  /** The board's sessions, to link a ledger session to its drawer. */
+  /** The board's sessions, to link a ledger session to its drawer, with their labels. */
   boardSessions: BoardSessionIndex;
   onOpenBoardSession: (sessionId: string) => void;
+  /** Herdr panes, live and asleep, listed as managers of a checkout. */
+  panes: readonly PaneInput[];
+  onOpenHerdr: (paneId: string) => void;
+  onOpenSleeping: (paneId: string) => void;
   onClose: () => void;
 }
 
-export function LedgerView({ boardSessions, onOpenBoardSession, onClose }: LedgerViewProps) {
+export function LedgerView({
+  boardSessions,
+  onOpenBoardSession,
+  panes,
+  onOpenHerdr,
+  onOpenSleeping,
+  onClose,
+}: LedgerViewProps) {
   const ledger = useLedgerState(ledgerStore);
   const phone = useLayoutMode() === 'phone';
   const [tab, setTab] = useState<LedgerTab>('graph');
@@ -142,7 +154,17 @@ export function LedgerView({ boardSessions, onOpenBoardSession, onClose }: Ledge
             </div>
             <div role="tabpanel" className="min-h-0 flex-1 overflow-auto px-3 pb-3">
               {tab === 'graph' ? (
-                <LedgerGraphTab view={view} selection={selection} onSelect={choose} />
+                <LedgerTreeTab
+                  view={view}
+                  selection={selection}
+                  onSelect={choose}
+                  boardSessions={boardSessions}
+                  panes={panes}
+                  onOpenBoardSession={onOpenBoardSession}
+                  onOpenHerdr={onOpenHerdr}
+                  onOpenSleeping={onOpenSleeping}
+                  phone={phone}
+                />
               ) : (
                 <LedgerTimelineTab ledger={ledger} selection={selection} onSelect={choose} />
               )}

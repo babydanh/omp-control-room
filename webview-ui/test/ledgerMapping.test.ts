@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { boardSessionFor, type BoardSessionIndex } from '../src/company/ledger/ledgerMapping.js';
+import {
+  boardSessionFor,
+  type BoardSessionIndex,
+  boardSessionIndex,
+} from '../src/company/ledger/ledgerMapping.js';
 
 describe('boardSessionFor', () => {
   it('finds the board session whose native session is the ledger session', () => {
@@ -23,5 +27,14 @@ describe('boardSessionFor', () => {
       'board-2': { nativeSessionId: 'abc' },
     };
     expect(boardSessionFor('abc', sessions)).toBeNull();
+  });
+});
+
+describe('boardSessionIndex', () => {
+  it('labels each board session with its short code and role, and keeps its native session id', () => {
+    const index = boardSessionIndex({
+      'board-1': { code: 'PA-S0002', role: 'director', nativeSessionId: 'abc' },
+    });
+    expect(index).toEqual({ 'board-1': { nativeSessionId: 'abc', label: 'S2 · Giám đốc' } });
   });
 });

@@ -4193,7 +4193,7 @@ components:
     LedgerWorktree:
       type: object
       additionalProperties: false
-      required: [path, name, branch, head, isMain, ahead, behind, dirtyCount, dirtyFiles, merged, hasUpstream, lastCommitSubject, lastCommitAt, sessionIds]
+      required: [path, name, branch, head, isMain, ahead, behind, dirtyCount, dirtyFiles, merged, hasUpstream, unpushed, lastCommitSubject, lastCommitAt, sessionIds]
       properties:
         path:
           type: string
@@ -4227,6 +4227,10 @@ components:
           description: HEAD is an ancestor of origin/main (its work is already in main).
         hasUpstream:
           type: boolean
+        unpushed:
+          type: [integer, 'null']
+          minimum: 0
+          description: Commits on HEAD that the upstream lacks; null with no upstream or when the count failed.
         lastCommitSubject:
           type: string
           maxLength: 200

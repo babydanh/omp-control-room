@@ -27,6 +27,7 @@ function worktree(path: string, isMain: boolean): LedgerWorktree {
     dirtyFiles: [],
     merged: false,
     hasUpstream: true,
+    unpushed: 0,
     lastCommitSubject: '',
     lastCommitAt: null,
     sessionIds: [],

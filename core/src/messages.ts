@@ -1378,6 +1378,7 @@ export interface LedgerWorktree {
   dirtyFiles: LedgerDirtyFile[];
   merged: boolean;
   hasUpstream: boolean;
+  unpushed: number | null;
   lastCommitSubject: string;
   lastCommitAt: string | null;
   sessionIds: string[];
@@ -1440,7 +1441,7 @@ export interface LedgerMainWrite {
 
 export interface LedgerOverlapScan {
   repo: string;
-  state: AnonymousSchema_801;
+  state: AnonymousSchema_802;
   startedAt: string | null;
   finishedAt: string | null;
   base: string | null;
@@ -1452,7 +1453,7 @@ export interface LedgerOverlapScan {
   error: string | null;
 }
 
-export type AnonymousSchema_801 = 'idle' | 'running' | 'done' | 'partial' | 'error';
+export type AnonymousSchema_802 = 'idle' | 'running' | 'done' | 'partial' | 'error';
 
 export interface LedgerOverlapPair {
   a: string;
@@ -1743,25 +1744,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_964;
-  mode?: AnonymousSchema_965;
+  delivery: AnonymousSchema_965;
+  mode?: AnonymousSchema_966;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_964 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_965 = 'prompt' | 'steer' | 'follow_up';
 
-export type AnonymousSchema_965 = 'chat' | 'company';
+export type AnonymousSchema_966 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_972;
+  decision: AnonymousSchema_973;
   note?: string;
 }
 
-export type AnonymousSchema_972 = 'approve' | 'reject';
+export type AnonymousSchema_973 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -1774,7 +1775,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_984;
+  decision?: AnonymousSchema_985;
 }
 
 export interface QuestionAnswer {
@@ -1783,17 +1784,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_984 = 'approve_once' | 'reject';
+export type AnonymousSchema_985 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_989;
+  action: AnonymousSchema_990;
 }
 
-export type AnonymousSchema_989 =
+export type AnonymousSchema_990 =
   'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
 
 export interface CompanyPromptCancelMessage {
@@ -1897,10 +1898,10 @@ export interface CompanyChatNewMessage {
 export interface CompanyViewModeMessage {
   type: 'companyViewMode';
   requestId: string;
-  mode: AnonymousSchema_1048;
+  mode: AnonymousSchema_1049;
 }
 
-export type AnonymousSchema_1048 = 'all' | 'folder';
+export type AnonymousSchema_1049 = 'all' | 'folder';
 
 export interface CompanyFolderBrowseRequestMessage {
   type: 'companyFolderBrowseRequest';
@@ -1936,10 +1937,10 @@ export interface LedgerViewRequestMessage {
 export interface LedgerTimelineRequestMessage {
   type: 'ledgerTimelineRequest';
   requestId: string;
-  windowMinutes: AnonymousSchema_1067;
+  windowMinutes: AnonymousSchema_1068;
 }
 
-export type AnonymousSchema_1067 = 15 | 60 | 360 | 1440;
+export type AnonymousSchema_1068 = 15 | 60 | 360 | 1440;
 
 export interface LedgerFileDiffRequestMessage {
   type: 'ledgerFileDiffRequest';
