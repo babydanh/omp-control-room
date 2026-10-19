@@ -5,8 +5,10 @@ import type {
   SquadProposal,
   SquadRun,
   SquadRunStatus,
+  WorkItem,
   WorkItemAssignee,
 } from '../../core/src/messages.js';
+import { WORK_ITEM_DEPENDS_MAX } from '../../core/src/workItemGraph.js';
 import type { AssigneeOption } from '../src/company/assigneeOptions.js';
 import {
   isCompanyServerMessage,
@@ -19,17 +21,24 @@ import type { CompanyLaneId } from '../src/company/constants.js';
 import {
   blankDraftRow,
   canStartSquad,
+  epicChildren,
   findSquadRun,
+  openSequencesOf,
   progressLabel,
+  proposalRowDepsOptions,
+  removeDraftRow,
   rowsFromProposal,
   SQUAD_MAX_ROWS,
   type SquadDraftRow,
   squadEventLabel,
   squadLaneFor,
+  squadProgressView,
   squadRunKey,
   squadStatusLabel,
+  toggleRowDependency,
   validateRows,
   visibleSquadRuns,
+  waitItemLabel,
 } from '../src/company/squadView.js';
 import { stateFrom } from './companyFixtures.js';
 
@@ -58,8 +67,8 @@ function proposal(overrides: Partial<SquadProposal> = {}): SquadProposal {
     turn: 1,
     note: 'Chia việc',
     rows: [
-      { text: 'Dựng form', assignee: SESSION },
-      { text: 'Viết API', assignee: SESSION },
+      { text: 'Dựng form', assignee: SESSION, priority: 2, dependsOn: [] },
+      { text: 'Viết API', assignee: SESSION, priority: 2, dependsOn: [] },
     ],
     status: 'pending',
     createdAt: AT,
@@ -68,7 +77,21 @@ function proposal(overrides: Partial<SquadProposal> = {}): SquadProposal {
 }
 
 function draft(text: string, assignee: WorkItemAssignee | null = SESSION): SquadDraftRow {
-  return { key: `key-${text}`, text, assignee };
+  return { key: `key-${text}`, text, assignee, priority: 2, acceptance: '', dependsOn: [] };
+}
+
+function workItem(overrides: Partial<WorkItem> & Pick<WorkItem, 'id' | 'sequence'>): WorkItem {
+  return {
+    text: `Việc ${overrides.sequence}`,
+    assignee: SESSION,
+    status: 'queued',
+    priority: 2,
+    dependsOn: [],
+    createdAt: AT,
+    updatedAt: AT,
+    history: [],
+    ...overrides,
+  };
 }
 
 function squadMessage(revision: number, runs: SquadRun[]): CompanySquadMessage {
@@ -117,8 +140,22 @@ describe('squad labels', () => {
 describe('proposal rows', () => {
   it('keeps each proposed row under a key of its own, so edits keep focus', () => {
     expect(rowsFromProposal(proposal())).toEqual([
-      { key: 'prop-1:0', text: 'Dựng form', assignee: SESSION },
-      { key: 'prop-1:1', text: 'Viết API', assignee: SESSION },
+      {
+        key: 'prop-1:0',
+        text: 'Dựng form',
+        assignee: SESSION,
+        priority: 2,
+        acceptance: '',
+        dependsOn: [],
+      },
+      {
+        key: 'prop-1:1',
+        text: 'Viết API',
+        assignee: SESSION,
+        priority: 2,
+        acceptance: '',
+        dependsOn: [],
+      },
     ]);
   });
 
@@ -127,6 +164,9 @@ describe('proposal rows', () => {
       key: 'prop-1:new:1',
       text: '',
       assignee: null,
+      priority: 2,
+      acceptance: '',
+      dependsOn: [],
     });
   });
 });
@@ -135,7 +175,7 @@ describe('validateRows', () => {
   it('sends the rows with their text trimmed', () => {
     expect(validateRows([draft('  Dựng form  ')])).toEqual({
       ok: true,
-      rows: [{ text: 'Dựng form', assignee: SESSION }],
+      rows: [{ text: 'Dựng form', assignee: SESSION, priority: 2, dependsOn: [] }],
     });
   });
 
@@ -260,5 +300,266 @@ describe('squad client messages', () => {
     expect(squadApprove('req-3', WORKSPACE, 'run-1', 'prop-1', rows).type).toBe(
       'companySquadApprove',
     );
+  });
+});
+
+describe('squad progress view', () => {
+  it('reads the bar and the label from the counts', () => {
+    expect(squadProgressView({ done: 2, total: 5 })).toEqual({
+      done: 2,
+      total: 5,
+      fraction: 0.4,
+      label: '2/5',
+    });
+  });
+
+  it('keeps the bar within 0 to 1 when the counts disagree', () => {
+    expect(squadProgressView({ done: 7, total: 5 })).toEqual({
+      done: 5,
+      total: 5,
+      fraction: 1,
+      label: '5/5',
+    });
+    expect(squadProgressView({ done: -1, total: 4 })).toEqual({
+      done: 0,
+      total: 4,
+      fraction: 0,
+      label: '0/4',
+    });
+    expect(squadProgressView({ done: 3, total: -2 })).toEqual({
+      done: 0,
+      total: 0,
+      fraction: 0,
+      label: '0/0',
+    });
+  });
+});
+
+describe('row priority, acceptance and waits', () => {
+  it('sends each row with its priority, its wait list, and acceptance when it has one', () => {
+    const rows: SquadDraftRow[] = [
+      { ...draft('Dựng form'), priority: 0, acceptance: '  Form gửi được  ' },
+      { ...draft('Viết API'), dependsOn: [{ kind: 'row', row: 0 }] },
+    ];
+    expect(validateRows(rows)).toEqual({
+      ok: true,
+      rows: [
+        {
+          text: 'Dựng form',
+          assignee: SESSION,
+          priority: 0,
+          dependsOn: [],
+          acceptance: 'Form gửi được',
+        },
+        { text: 'Viết API', assignee: SESSION, priority: 2, dependsOn: [{ kind: 'row', row: 0 }] },
+      ],
+    });
+  });
+
+  it('names the row whose priority is outside P0 to P3', () => {
+    expect(validateRows([{ ...draft('việc'), priority: 4 }])).toEqual({
+      ok: false,
+      reason: 'Dòng 1 có độ ưu tiên không hợp lệ.',
+    });
+  });
+
+  it('refuses acceptance over its limit, counted in characters', () => {
+    expect(validateRows([{ ...draft('việc'), acceptance: 'x'.repeat(1001) }])).toEqual({
+      ok: false,
+      reason: 'Dòng 1: phần "Xong khi" dài quá 1000 ký tự.',
+    });
+    expect(validateRows([{ ...draft('việc'), acceptance: 'x'.repeat(1000) }]).ok).toBe(true);
+  });
+
+  it('refuses a wait for the row itself, for a row not in the proposal, and a repeated wait', () => {
+    expect(validateRows([{ ...draft('việc'), dependsOn: [{ kind: 'row', row: 0 }] }])).toEqual({
+      ok: false,
+      reason: 'Dòng 1: Không thể chờ chính dòng này.',
+    });
+    expect(validateRows([{ ...draft('việc'), dependsOn: [{ kind: 'row', row: 3 }] }])).toEqual({
+      ok: false,
+      reason: 'Dòng 1: Chờ một dòng không có trong đề xuất này.',
+    });
+    expect(
+      validateRows([
+        draft('việc'),
+        {
+          ...draft('việc 2'),
+          dependsOn: [
+            { kind: 'row', row: 0 },
+            { kind: 'row', row: 0 },
+          ],
+        },
+      ]),
+    ).toEqual({ ok: false, reason: 'Dòng 2: Mỗi việc chỉ được chờ một lần.' });
+  });
+
+  it('refuses a wait list longer than the server takes', () => {
+    const dependsOn = Array.from({ length: WORK_ITEM_DEPENDS_MAX + 1 }, (_, index) => ({
+      kind: 'item' as const,
+      sequence: index + 1,
+    }));
+    expect(validateRows([{ ...draft('việc'), dependsOn }])).toEqual({
+      ok: false,
+      reason: `Dòng 1: Chờ tối đa ${WORK_ITEM_DEPENDS_MAX} việc.`,
+    });
+  });
+
+  it('refuses a wait for an item no longer open, and keeps it when no set is given', () => {
+    const waiting: SquadDraftRow[] = [
+      { ...draft('việc'), dependsOn: [{ kind: 'item', sequence: 7 }] },
+    ];
+    expect(validateRows(waiting, new Set([3]))).toEqual({
+      ok: false,
+      reason: 'Dòng 1: Việc #7 không còn mở.',
+    });
+    expect(validateRows(waiting).ok).toBe(true);
+  });
+
+  it('names a wait loop between rows', () => {
+    const rows: SquadDraftRow[] = [
+      { ...draft('A'), dependsOn: [{ kind: 'row', row: 1 }] },
+      { ...draft('B'), dependsOn: [{ kind: 'row', row: 0 }] },
+    ];
+    expect(validateRows(rows)).toEqual({
+      ok: false,
+      reason: 'Dòng 1: Các dòng chờ nhau thành vòng lặp.',
+    });
+  });
+});
+
+describe('wait options and draft edits', () => {
+  it('offers the other rows, then the open items by #n, and keeps a held wait no option offers', () => {
+    const rows: SquadDraftRow[] = [
+      draft('Dựng form'),
+      { ...draft('Viết API'), dependsOn: [{ kind: 'item', sequence: 9 }] },
+      draft('Chạy thử'),
+    ];
+    const open = [
+      workItem({ id: 'i6', sequence: 6, text: 'Viết tài liệu', status: 'review' }),
+      workItem({ id: 'i2', sequence: 2, text: 'Đã xong', status: 'done' }),
+      workItem({ id: 'i4', sequence: 4, text: 'Chờ duyệt', status: 'queued' }),
+    ];
+    expect(
+      proposalRowDepsOptions(rows, 1, open).map((option) => [
+        option.key,
+        option.label,
+        option.selected,
+      ]),
+    ).toEqual([
+      ['row:0', 'Việc 1 · Dựng form', false],
+      ['row:2', 'Việc 3 · Chạy thử', false],
+      ['item:4', '#4 · Chờ duyệt', false],
+      ['item:6', '#6 · Viết tài liệu', false],
+      ['item:9', '#9 · không còn mở', true],
+    ]);
+  });
+
+  it('lists a row that waits for itself so the drawer can clear it', () => {
+    const rows: SquadDraftRow[] = [{ ...draft('Dựng form'), dependsOn: [{ kind: 'row', row: 0 }] }];
+    expect(proposalRowDepsOptions(rows, 0, [])).toEqual([
+      {
+        key: 'row:0',
+        label: 'Việc 1 · chính dòng này',
+        dependency: { kind: 'row', row: 0 },
+        selected: true,
+      },
+    ]);
+  });
+
+  it('drops the waits on a removed row and moves later waits up by one', () => {
+    const rows: SquadDraftRow[] = [
+      { ...draft('A'), key: 'a' },
+      { ...draft('B'), key: 'b', dependsOn: [{ kind: 'row', row: 0 }] },
+      { ...draft('C'), key: 'c', dependsOn: [{ kind: 'row', row: 1 }] },
+      {
+        ...draft('D'),
+        key: 'd',
+        dependsOn: [
+          { kind: 'row', row: 0 },
+          { kind: 'row', row: 2 },
+        ],
+      },
+    ];
+    expect(removeDraftRow(rows, 'b').map((row) => [row.key, row.dependsOn])).toEqual([
+      ['a', []],
+      ['c', []],
+      [
+        'd',
+        [
+          { kind: 'row', row: 0 },
+          { kind: 'row', row: 1 },
+        ],
+      ],
+    ]);
+  });
+
+  it('adds a wait once and takes it back on the second toggle', () => {
+    const rows: SquadDraftRow[] = [draft('A'), draft('B')];
+    const once = toggleRowDependency(rows, 1, { kind: 'row', row: 0 });
+    expect(once[1]?.dependsOn).toEqual([{ kind: 'row', row: 0 }]);
+    expect(rows[1]?.dependsOn).toEqual([]);
+    expect(toggleRowDependency(once, 1, { kind: 'row', row: 0 })[1]?.dependsOn).toEqual([]);
+  });
+
+  it('gives a wait label its heading, or just its number when the text is blank', () => {
+    expect(waitItemLabel(workItem({ id: 'x', sequence: 4, text: 'Viết API' }))).toBe(
+      '#4 · Viết API',
+    );
+    expect(waitItemLabel(workItem({ id: 'x', sequence: 4, text: '   ' }))).toBe('#4');
+  });
+});
+
+describe('epic children', () => {
+  const items: WorkItem[] = [
+    workItem({ id: 'i3', sequence: 3, text: 'Dựng form', status: 'running', squadRunId: 'run-1' }),
+    workItem({
+      id: 'i5',
+      sequence: 5,
+      text: 'Viết API',
+      status: 'queued',
+      squadRunId: 'run-1',
+      dependsOn: ['i2', 'i3', 'gone'],
+    }),
+    workItem({ id: 'i2', sequence: 2, text: 'Thiết kế', status: 'done', squadRunId: 'run-1' }),
+    workItem({ id: 'i1', sequence: 1, text: 'Khảo sát', status: 'failed', squadRunId: 'run-1' }),
+    workItem({
+      id: 'i6',
+      sequence: 6,
+      text: 'Kiểm thử',
+      status: 'queued',
+      squadRunId: 'run-1',
+      dependsOn: ['i1'],
+    }),
+    workItem({ id: 'i4', sequence: 4, text: 'Việc khác', status: 'review', squadRunId: 'run-2' }),
+    workItem({ id: 'i7', sequence: 7, text: 'Việc lẻ', status: 'queued' }),
+  ];
+
+  it('lists a run’s children in #n order, leaving out other runs and loose items', () => {
+    const children = epicChildren(run({ id: 'run-1' }), items);
+    expect(children.map((child) => child.sequence)).toEqual([1, 2, 3, 5, 6]);
+    expect(children.map((child) => child.statusLabel)).toEqual([
+      'Lỗi',
+      'Xong',
+      'Đang làm',
+      'Xếp hàng',
+      'Xếp hàng',
+    ]);
+  });
+
+  it('words each wait by the state of what it waits for', () => {
+    const children = epicChildren(run({ id: 'run-1' }), items);
+    expect(children.find((child) => child.sequence === 5)?.waits.map((wait) => wait.text)).toEqual([
+      '#2 xong',
+      'Chờ #3',
+      'Chờ việc đã gỡ',
+    ]);
+    expect(children.find((child) => child.sequence === 6)?.waits.map((wait) => wait.text)).toEqual([
+      '#1 bị lỗi',
+    ]);
+  });
+
+  it('counts only open items as open sequences across the folder', () => {
+    expect(openSequencesOf(items)).toEqual(new Set([3, 4, 5, 6, 7]));
   });
 });

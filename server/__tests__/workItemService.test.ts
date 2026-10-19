@@ -605,3 +605,284 @@ describe('WorkItemService: commands', () => {
     expect(f.saves.at(-1)?.items).toHaveLength(1);
   });
 });
+
+describe('WorkItemService: priority, waits, and acceptance', () => {
+  it('sends the acceptance after the text and keeps the item text plain', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa lỗi đăng nhập',
+      assignee: herdr(PANE_A),
+      acceptance: 'Đăng nhập được bằng mật khẩu mới',
+    });
+    expect(f.prompts).toEqual([
+      { paneId: PANE_A, text: 'Sửa lỗi đăng nhập\n\nXong khi: Đăng nhập được bằng mật khẩu mới' },
+    ]);
+    expect(itemOf(f, id)).toMatchObject({
+      text: 'Sửa lỗi đăng nhập',
+      acceptance: 'Đăng nhập được bằng mật khẩu mới',
+      priority: 2,
+    });
+  });
+
+  it('refuses a priority outside P0 to P3 and sends nothing', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    await expect(
+      f.service.create({ requestId: randomUUID(), text: 'Việc', assignee: herdr(PANE_A), priority: 4 }),
+    ).rejects.toMatchObject({ code: 'priority_invalid' });
+    expect(f.prompts).toEqual([]);
+    expect(f.service.snapshot().items).toEqual([]);
+  });
+
+  it('takes the queue by priority, then by creation, as the agent frees up', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'working' });
+    await f.service.create({ requestId: randomUUID(), text: 'Thường một', assignee: herdr(PANE_A), priority: 1 });
+    await f.service.create({ requestId: randomUUID(), text: 'Thường hai', assignee: herdr(PANE_A), priority: 1 });
+    const urgent = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Gấp',
+      assignee: herdr(PANE_A),
+      priority: 0,
+    });
+    expect(f.prompts).toEqual([]);
+    expect(itemOf(f, urgent)).toMatchObject({
+      status: 'queued',
+      blocker: { kind: 'agent' },
+      reason: 'Chờ agent rảnh để nhận việc.',
+    });
+
+    f.setPane(PANE_A, 'idle');
+    await f.service.reconcileNow();
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Gấp']);
+    await f.service.mark({ requestId: randomUUID(), id: urgent, verdict: 'done' });
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Gấp', 'Thường một']);
+  });
+
+  it('passes over a blocked item for a ready one, and sends the blocked one once its wait ends', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' }, { paneId: PANE_B, status: 'idle' });
+    const wait = await f.service.create({ requestId: randomUUID(), text: 'Nền', assignee: herdr(PANE_B) });
+    const current = await f.service.create({ requestId: randomUUID(), text: 'Đang làm', assignee: herdr(PANE_A) });
+    const blocked = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Gấp chờ nền',
+      assignee: herdr(PANE_A),
+      priority: 0,
+      dependsOn: [wait],
+    });
+    await f.service.create({ requestId: randomUUID(), text: 'Thường', assignee: herdr(PANE_A), priority: 3 });
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Nền', 'Đang làm']);
+    expect(itemOf(f, blocked)).toMatchObject({
+      status: 'queued',
+      blocker: { kind: 'dependency', sequence: itemOf(f, wait).sequence },
+    });
+
+    // The current item finishes: the blocked item still waits, so the ready one goes first.
+    await f.service.mark({ requestId: randomUUID(), id: current, verdict: 'done' });
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Nền', 'Đang làm', 'Thường']);
+    expect(itemOf(f, blocked).status).toBe('queued');
+
+    // The agent must be seen working before its finished item counts as done.
+    f.setPane(PANE_A, 'working');
+    await f.service.reconcileNow();
+    f.setPane(PANE_A, 'idle');
+
+    // The wait finishes; the next pass reads the freed agent's finished item, then sends the blocked one.
+    await f.service.mark({ requestId: randomUUID(), id: wait, verdict: 'done' });
+    await f.service.reconcileNow();
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual([
+      'Nền',
+      'Đang làm',
+      'Thường',
+      'Gấp chờ nền',
+    ]);
+  });
+
+  it('sends a dependent only after its dependency is done, not while it is in review', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' }, { paneId: PANE_B, status: 'idle' });
+    const first = await f.service.create({ requestId: randomUUID(), text: 'Trước', assignee: herdr(PANE_A) });
+    const second = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sau',
+      assignee: herdr(PANE_B),
+      dependsOn: [first],
+    });
+    const sequence = itemOf(f, first).sequence;
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước']);
+    expect(itemOf(f, second)).toMatchObject({
+      status: 'queued',
+      reason: `Chờ việc #${sequence} xong.`,
+      blocker: { kind: 'dependency', sequence },
+    });
+
+    f.setPane(PANE_A, 'working');
+    await f.service.reconcileNow();
+    f.setPane(PANE_A, 'idle');
+    f.screen = 'Xong';
+    await f.service.reconcileNow();
+    expect(itemOf(f, first).status).toBe('review');
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước']);
+
+    await f.service.mark({ requestId: randomUUID(), id: first, verdict: 'done' });
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước', 'Sau']);
+    expect(itemOf(f, second).status).toBe('running');
+  });
+
+  it('leaves a dependent waiting on a failed dependency and names the failed #n', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' }, { paneId: PANE_B, status: 'idle' });
+    const first = await f.service.create({ requestId: randomUUID(), text: 'Trước', assignee: herdr(PANE_A) });
+    const second = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sau',
+      assignee: herdr(PANE_B),
+      dependsOn: [first],
+    });
+    const sequence = itemOf(f, first).sequence;
+
+    await f.service.mark({ requestId: randomUUID(), id: first, verdict: 'failed' });
+    expect(itemOf(f, second)).toMatchObject({
+      status: 'queued',
+      reason: `Việc #${sequence} bị lỗi, gỡ chờ hoặc giao lại.`,
+      blocker: { kind: 'failed', sequence },
+    });
+    await f.service.reconcileNow();
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước']);
+  });
+
+  it('keeps the #n of a cancelled dependency on the item that waited for it', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'working' }, { paneId: PANE_B, status: 'idle' });
+    const first = await f.service.create({ requestId: randomUUID(), text: 'Huỷ', assignee: herdr(PANE_A) });
+    const second = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Chờ',
+      assignee: herdr(PANE_B),
+      dependsOn: [first],
+    });
+    const sequence = itemOf(f, first).sequence;
+
+    await f.service.cancel({ requestId: randomUUID(), id: first });
+    expect(itemOf(f, second)).toMatchObject({
+      status: 'queued',
+      blocker: { kind: 'failed', sequence },
+    });
+    await f.service.reconcileNow();
+    expect(f.prompts).toEqual([]);
+  });
+
+  it('sends an item at once when everything it waits for is already done', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' }, { paneId: PANE_B, status: 'idle' });
+    const first = await f.service.create({ requestId: randomUUID(), text: 'Trước', assignee: herdr(PANE_A) });
+    await f.service.mark({ requestId: randomUUID(), id: first, verdict: 'done' });
+    const second = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sau',
+      assignee: herdr(PANE_B),
+      dependsOn: [first],
+    });
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Trước', 'Sau']);
+    expect(itemOf(f, second).status).toBe('running');
+  });
+
+  it('refuses a wait that would close a loop or wait on itself, and keeps the old list', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'working' });
+    const first = await f.service.create({ requestId: randomUUID(), text: 'Một', assignee: herdr(PANE_A) });
+    const second = await f.service.create({ requestId: randomUUID(), text: 'Hai', assignee: herdr(PANE_A) });
+    await f.service.setDependencies({ requestId: randomUUID(), id: first, dependsOn: [second] });
+
+    await expect(
+      f.service.setDependencies({ requestId: randomUUID(), id: second, dependsOn: [first] }),
+    ).rejects.toMatchObject({ code: 'dependency_invalid' });
+    await expect(
+      f.service.setDependencies({ requestId: randomUUID(), id: second, dependsOn: [second] }),
+    ).rejects.toMatchObject({ code: 'dependency_invalid' });
+    expect(itemOf(f, second).dependsOn).toEqual([]);
+    expect(itemOf(f, first).dependsOn).toEqual([second]);
+  });
+
+  it('refuses more than ten waits and a wait on an item that is no longer on the board', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'working' });
+    const id = await f.service.create({ requestId: randomUUID(), text: 'Một', assignee: herdr(PANE_A) });
+    const eleven = Array.from({ length: 11 }, () => randomUUID());
+    await expect(
+      f.service.setDependencies({ requestId: randomUUID(), id, dependsOn: eleven }),
+    ).rejects.toMatchObject({ code: 'dependency_invalid' });
+    await expect(
+      f.service.setDependencies({ requestId: randomUUID(), id, dependsOn: [randomUUID()] }),
+    ).rejects.toMatchObject({ code: 'dependency_invalid' });
+    expect(itemOf(f, id).dependsOn).toEqual([]);
+  });
+
+  it('restores the old wait list when a dependency edit fails to save, and sends nothing', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' }, { paneId: PANE_B, status: 'idle' });
+    const wait = await f.service.create({ requestId: randomUUID(), text: 'Nền', assignee: herdr(PANE_B) });
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sau',
+      assignee: herdr(PANE_A),
+      dependsOn: [wait],
+    });
+    const sequence = itemOf(f, wait).sequence;
+
+    f.saveError = new Error('disk full');
+    await expect(
+      f.service.setDependencies({ requestId: randomUUID(), id, dependsOn: [] }),
+    ).rejects.toMatchObject({ code: 'company_command_failed' });
+    f.saveError = null;
+    await f.service.reconcileNow();
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Nền']);
+    expect(itemOf(f, id)).toMatchObject({
+      dependsOn: [wait],
+      blocker: { kind: 'dependency', sequence },
+    });
+
+    await f.service.setDependencies({ requestId: randomUUID(), id, dependsOn: [] });
+    expect(f.prompts.map((prompt) => prompt.text)).toEqual(['Nền', 'Sau']);
+  });
+
+  it('links squad rows by batch position and refuses a loop inside the batch', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'working' }, { paneId: PANE_B, status: 'working' });
+    const ids = await f.service.createWorkItems(
+      [
+        { text: 'Bước một', assignee: herdr(PANE_A) },
+        { text: 'Bước hai', assignee: herdr(PANE_B), dependsOnDrafts: [0] },
+      ],
+      { squadRunId: randomUUID() },
+    );
+    const [first, second] = ids;
+    if (first === undefined || second === undefined) throw new Error('expected two items');
+    expect(itemOf(f, second).dependsOn).toEqual([first]);
+
+    await expect(
+      f.service.createWorkItems(
+        [
+          { text: 'Vòng một', assignee: herdr(PANE_A), dependsOnDrafts: [1] },
+          { text: 'Vòng hai', assignee: herdr(PANE_B), dependsOnDrafts: [0] },
+        ],
+        { squadRunId: randomUUID() },
+      ),
+    ).rejects.toMatchObject({ code: 'dependency_invalid' });
+    expect(f.service.snapshot().items).toHaveLength(2);
+  });
+
+  it('finds an open item by its #n and forgets it once it is finished', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    const id = await f.service.create({ requestId: randomUUID(), text: 'Mở', assignee: herdr(PANE_A) });
+    const sequence = itemOf(f, id).sequence;
+    expect(f.service.findOpen(sequence)?.id).toBe(id);
+
+    await f.service.mark({ requestId: randomUUID(), id, verdict: 'done' });
+    expect(f.service.findOpen(sequence)).toBeUndefined();
+  });
+});

@@ -8,7 +8,8 @@
 
 import { type FormEvent, useEffect, useState } from 'react';
 
-import type { WorkItemEvent } from '../../../../core/src/messages.js';
+import type { WorkItem, WorkItemEvent } from '../../../../core/src/messages.js';
+import { blockerReason, priorityLabel } from '../../../../core/src/workItemGraph.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import { assigneeOptionsFor } from '../assigneeOptions.js';
 import { failureNotice } from '../commandResults.js';
@@ -17,10 +18,16 @@ import type { CompanyViewState } from '../companyState.js';
 import { useNow } from '../useNow.js';
 import {
   assigneeLabel,
+  dependencyChoices,
+  dependencyRefusal,
+  dependencyRefusalText,
   findWorkItem,
   queuePosition,
   queueWaitText,
   statusWordVi,
+  type WaitingOn,
+  waitingOn,
+  waitingOnLabel,
   workItemEventLabelVi,
   workItemFolderIdentity,
   workItemsOf,
@@ -30,13 +37,15 @@ import { CompanyButton } from './CompanyButton.js';
 import { FolderTag } from './FolderTag.js';
 
 /** The commands a panel sends. Each one falls back to its own notice when the server gives none. */
-type PanelAction = 'verdict' | 'cancel' | 'followUp' | 'assign';
+type PanelAction = 'verdict' | 'cancel' | 'followUp' | 'assign' | 'dependencies' | 'squad';
 
 const FALLBACK_NOTICE: Readonly<Record<PanelAction, string>> = {
   verdict: 'Không đánh dấu được việc này.',
   cancel: 'Không huỷ được việc này.',
   followUp: 'Không gửi tiếp được.',
   assign: 'Không giao lại được việc này.',
+  dependencies: 'Không lưu được việc chờ.',
+  squad: 'Không hỏi được đội trưởng.',
 };
 
 /** A command the panel sent and is waiting on, by the requestId the client minted. */
@@ -100,12 +109,29 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
     send('followUp', client.followUpWorkItem(workspacePath, id, followUpText));
   }
 
+  function saveDependencies(dependsOn: string[]): void {
+    send('dependencies', client.setWorkItemDependencies(workspacePath, id, dependsOn));
+  }
+
+  function askLeader(): void {
+    send('squad', client.requestSquadFromWorkItem(workspacePath, id));
+  }
+
   const status = item.status;
   const holder = assigneeLabel(item.assignee, state, workspacePath);
-  const position = queuePosition(item, workItemsOf(state, workspacePath).items);
+  const folderItems = workItemsOf(state, workspacePath).items;
+  const position = queuePosition(item, folderItems);
+  const waits = waitingOn(item, folderItems);
+  // A queued item held by another item says so in the server's words; an agent wait keeps its place.
+  const blocker = item.blocker;
+  const waitText =
+    blocker !== undefined && blocker.kind !== 'agent'
+      ? blockerReason(blocker)
+      : queueWaitText(holder, position);
   const folder = workItemFolderIdentity(state, workspacePath);
   const updated = relativeTimeVi(item.updatedAt, now);
   const reason = item.reason?.trim() ? item.reason : null;
+  const acceptance = item.acceptance?.trim() || null;
   const needsAttention = status === 'needs_input' || status === 'failed';
 
   // The actions a status allows. The server still decides; these only hide refused moves.
@@ -115,7 +141,8 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
   const canCancel = status === 'queued';
   const canFollowUp = status === 'review' || status === 'failed';
   const canReassign = status === 'queued' || status === 'review' || status === 'failed';
-  const hasActions = canFinish || canFail || canCancel || canReassign;
+  const canAskLeader = status === 'review' && item.squadRunId === undefined;
+  const hasActions = canFinish || canFail || canCancel || canReassign || canAskLeader;
 
   return (
     <div
@@ -126,6 +153,8 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
       <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-2.5 text-2xs">
         <dt className="text-text-muted">Trạng thái</dt>
         <dd className="text-text">{statusWordVi(status)}</dd>
+        <dt className="text-text-muted">Ưu tiên</dt>
+        <dd className="text-text">{priorityLabel(item.priority)}</dd>
         <dt className="text-text-muted">Giao cho</dt>
         <dd className="min-w-0 truncate text-text" data-testid="work-item-assignee">
           {holder}
@@ -140,10 +169,16 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
             <dd className={needsAttention ? 'text-warning' : 'text-text'}>{reason}</dd>
           </>
         )}
+        {acceptance !== null && (
+          <>
+            <dt className="text-text-muted">Xong khi</dt>
+            <dd className="whitespace-pre-wrap break-words text-text">{acceptance}</dd>
+          </>
+        )}
         {status === 'queued' && (
           <>
             <dt className="text-text-muted">Đang chờ</dt>
-            <dd className="text-text">{queueWaitText(holder, position)}</dd>
+            <dd className="text-text">{waitText}</dd>
           </>
         )}
         <dt className="text-text-muted">Cập nhật</dt>
@@ -156,6 +191,30 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
       >
         {item.text}
       </p>
+
+      {status === 'queued' && (
+        <DependencyEditor
+          key={item.dependsOn.join('|')}
+          item={item}
+          choices={dependencyChoices(item, folderItems)}
+          items={folderItems}
+          busy={busy}
+          onSave={saveDependencies}
+        />
+      )}
+
+      {status !== 'queued' && waits.length > 0 && (
+        <section aria-label="Chờ việc" className="flex flex-col gap-1.5 px-2.5">
+          <p className="text-2xs text-text-muted">Chờ việc</p>
+          <ul className="flex flex-col gap-1">
+            {waits.map((entry) => (
+              <li key={entry.id} className="min-w-0 break-words text-2xs text-text">
+                {waitingOnLabel(entry)}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {item.result !== undefined && item.result.trim() !== '' && (
         <section aria-label="Kết quả" className="flex flex-col gap-1 px-2.5">
@@ -204,6 +263,11 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
           {canReassign && (
             <CompanyButton size="sm" disabled={busy} onClick={openReassign}>
               Giao lại
+            </CompanyButton>
+          )}
+          {canAskLeader && (
+            <CompanyButton size="sm" disabled={busy} onClick={askLeader}>
+              Hỏi đội trưởng bước tiếp
             </CompanyButton>
           )}
         </div>
@@ -280,5 +344,67 @@ function HistoryRow({ event, now }: { event: WorkItemEvent; now: number }) {
         )}
       </span>
     </li>
+  );
+}
+
+interface DependencyEditorProps {
+  item: WorkItem;
+  /** The open items the list may name, plus any this item already waits for. */
+  choices: readonly WaitingOn[];
+  /** The folder's items; the refusal check reads each one's wait list from them. */
+  items: readonly WorkItem[];
+  busy: boolean;
+  onSave: (dependsOn: string[]) => void;
+}
+
+/**
+ * The wait-list editor a queued item shows. Picks stay put while the server answers; the panel
+ * keys the editor by the stored list, so a saved list replaces the picks it started from.
+ */
+function DependencyEditor({ item, choices, items, busy, onSave }: DependencyEditorProps) {
+  const [picked, setPicked] = useState<string[]>(item.dependsOn);
+  const refusal = dependencyRefusal(item, picked, items);
+  const unchanged =
+    picked.length === item.dependsOn.length && picked.every((id) => item.dependsOn.includes(id));
+  const saveDisabled = busy || unchanged || refusal !== null;
+
+  function toggle(id: string, on: boolean): void {
+    setPicked((current) =>
+      on
+        ? [...current.filter((entry) => entry !== id), id]
+        : current.filter((entry) => entry !== id),
+    );
+  }
+
+  return (
+    <section aria-label="Chờ việc" className="flex flex-col gap-1.5 px-2.5">
+      <p className="text-2xs text-text-muted">Chờ việc</p>
+      {choices.length === 0 ? (
+        <p className="text-2xs text-text-muted">Thư mục chưa có việc nào khác đang mở.</p>
+      ) : (
+        <fieldset className="flex flex-col gap-1">
+          <legend className="sr-only">Việc này chờ</legend>
+          {choices.map((choice) => (
+            <label key={choice.id} className="flex min-w-0 items-start gap-1.5 text-2xs text-text">
+              <input
+                type="checkbox"
+                checked={picked.includes(choice.id)}
+                onChange={(event) => toggle(choice.id, event.target.checked)}
+                className="mt-0.5 shrink-0"
+              />
+              <span className="min-w-0 break-words">{waitingOnLabel(choice)}</span>
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {refusal !== null && (
+        <p className="text-2xs text-warning">{dependencyRefusalText(refusal)}</p>
+      )}
+      <div className="flex justify-end">
+        <CompanyButton size="sm" disabled={saveDisabled} onClick={() => onSave(picked)}>
+          Lưu việc chờ
+        </CompanyButton>
+      </div>
+    </section>
   );
 }

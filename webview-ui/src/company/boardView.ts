@@ -18,7 +18,12 @@ import type {
   Task,
   VerificationEvidence,
 } from '../../../core/src/company.js';
-import type { SquadRun, WorkItemStatus } from '../../../core/src/messages.js';
+import type {
+  SquadRun,
+  WorkItem,
+  WorkItemBlocker,
+  WorkItemStatus,
+} from '../../../core/src/messages.js';
 import { type AgentBoardCard, buildAgentCards } from './agentBoard.js';
 import type { CompanyViewState } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
@@ -28,7 +33,6 @@ import { squadLaneFor, visibleSquadRuns } from './squadView.js';
 import {
   assigneeLabel,
   laneForWorkItem,
-  queuePosition,
   visibleWorkItems,
   workItemCardHead,
   workItemsOf,
@@ -146,8 +150,12 @@ export interface BoardWorkItem {
   assignee: string;
   /** Why the item waits, needs input, failed or is in review, as the server words it. */
   reason: string | null;
-  /** 1-based place among the queued items for the same agent; 0 when the item is not queued. */
-  queuePosition: number;
+  /** The item's #n in its folder: the number the card names it by. */
+  sequence: number;
+  /** 0 is the most urgent (P0), 3 the least (P3). */
+  priority: number;
+  /** Why a queued item is not sent yet; null when nothing holds it. */
+  blocker: WorkItemBlocker | null;
   updatedAt: string;
   /** The folder the item is filed under when every folder is shown; null in folder mode. */
   folder: FolderIdentity | null;
@@ -166,6 +174,8 @@ export interface BoardSquad {
   run: SquadRun;
   /** The proposal's rows, each assignee named in words; empty while there is no proposal. */
   rows: { text: string; assignee: string }[];
+  /** The folder's work items as the server sent them; a squad card picks its own children out. */
+  items: readonly WorkItem[];
   /** The folder the run is filed under when every folder is shown; null in folder mode. */
   folder: FolderIdentity | null;
 }
@@ -223,7 +233,7 @@ export function evidenceForTask(
   };
 }
 
-/** The work items the board shows, as cards: each one's lane, heading, holder and queue place. */
+/** The work items the board shows, as cards: each one's lane, heading, holder, priority and hold. */
 function workItemCards(state: CompanyViewState): BoardWorkItem[] {
   return visibleWorkItems(state).map(({ item, workspacePath, folder }) => ({
     id: item.id,
@@ -233,7 +243,9 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
     head: workItemCardHead(item.text),
     assignee: assigneeLabel(item.assignee, state, workspacePath),
     reason: item.reason?.trim() ? item.reason : null,
-    queuePosition: queuePosition(item, workItemsOf(state, workspacePath).items),
+    sequence: item.sequence,
+    priority: item.priority,
+    blocker: item.blocker ?? null,
     updatedAt: item.updatedAt,
     folder,
     squadRunId: item.squadRunId ?? null,
@@ -257,6 +269,7 @@ function squadCards(state: CompanyViewState): BoardSquad[] {
       head: workItemCardHead(run.request),
       run,
       rows,
+      items: workItemsOf(state, workspacePath).items,
       folder,
     });
   }

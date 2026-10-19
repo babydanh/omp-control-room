@@ -61,6 +61,7 @@ import {
 } from '../slashCommands.js';
 import { canStartSquad, type SquadStartVerdict } from '../squadView.js';
 import { useCompanyState } from '../useCompanyState.js';
+import { workItemsOf } from '../workItemView.js';
 import { folderLabel, folderLabelFor } from '../workspaces.js';
 import { CompanyButton } from './CompanyButton.js';
 import { OmpSessionPicker } from './OmpSessionPicker.js';
@@ -652,6 +653,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           initialText={draft.text}
           textEditable
           options={assigneeOptionsFor(state, focus)}
+          items={workItemsOf(state, focus).items}
           onAccepted={() => {
             setAssignOpen(false);
             client.setDraftText('');

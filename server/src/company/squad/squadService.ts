@@ -24,11 +24,13 @@ import {
   appendEvent,
   assigneeRef,
   buildLeaderPrompt,
+  isOpenItemStatus,
   type LeaderItemView,
   type LeaderReply,
   type ParsedSquadFile,
   parseLeaderReply,
   parseSquadRows,
+  requestFromItem,
   reviewKey,
   rowsOf,
   SQUAD_CONTEXT_ITEMS_MAX,
@@ -36,6 +38,7 @@ import {
   SQUAD_CONTEXT_TEXT_MAX_CHARS,
   SQUAD_MAX_TURNS,
   SQUAD_RUNS_KEEP,
+  type SquadApproval,
   squadEvent,
   type SquadFile,
   type SquadMember,
@@ -61,6 +64,10 @@ export interface SquadWorkItems {
   ): Promise<string[]>;
   onChange(listener: () => void): () => void;
   onReview(listener: (item: WorkItem) => void): () => void;
+  /** The work item with this id, if the service has it. */
+  get(id: string): WorkItem | undefined;
+  /** The open item (queued, running, waiting for input, or in review) with this #n, if any. */
+  findOpen(sequence: number): WorkItem | undefined;
 }
 
 /** Where the squad file lives. */
@@ -92,6 +99,12 @@ export interface SquadCommand {
   readonly requestId: string;
 }
 
+/** A request the board sent: typed text, or a finished work item to ask the leader about. */
+export interface SquadRequestCommand extends SquadCommand {
+  readonly text?: string;
+  readonly fromWorkItemId?: string;
+}
+
 /** Vietnamese refusals and notices the board shows. */
 const MESSAGE = {
   noMembers: 'Chưa có thành viên nào trong thư mục này để đội trưởng giao việc.',
@@ -106,6 +119,11 @@ const MESSAGE = {
   retried: 'Thử lại.',
   doneDefault: 'Đội đã xong.',
   unknownError: 'lỗi không rõ',
+  requestShape:
+    'Yêu cầu đội cần đúng một trong hai: nội dung, hoặc việc đã xong để hỏi đội trưởng bước tiếp.',
+  itemNotFound: 'Không tìm thấy việc đó.',
+  itemNotReviewable:
+    'Chỉ hỏi đội trưởng bước tiếp từ việc đã xong (đang chờ duyệt) và không thuộc đội nào.',
 } as const;
 
 /** One folder's squad runs, their proposals, and the leader turns that produce them. */
@@ -168,21 +186,20 @@ export class SquadService {
     };
   }
 
-  /** Starts a squad run for a request. The first leader turn starts once the run is saved. */
-  async request(command: SquadCommand & { text: string }): Promise<string> {
+  /**
+   * Starts a squad run for a request: typed text, or a finished work item the leader should decide
+   * on. The first leader turn starts once the run is saved.
+   */
+  async request(command: SquadRequestCommand): Promise<string> {
     const replayed = this.answers.get(command.requestId);
     if (replayed !== undefined) return replayed;
-    const refusal = refuseText(command.text);
-    if (refusal === 'empty_text')
-      throw new CompanyError('empty_text', 'Nội dung yêu cầu không được để trống.');
-    if (refusal === 'prompt_too_large')
-      throw new CompanyError('prompt_too_large', 'Nội dung yêu cầu vượt quá giới hạn.');
+    const request = this.requestText(command);
     if (this.ports.members().length === 0)
       throw new CompanyError('squad_no_members', MESSAGE.noMembers);
     const at = this.iso();
     const run: StoredSquadRun = {
       id: this.ports.newId(),
-      request: command.text.trim(),
+      request,
       status: 'planning',
       turns: 0,
       proposals: [],
@@ -207,6 +224,34 @@ export class SquadService {
     return run.id;
   }
 
+  /** The request's text: typed text or a finished work item, never both and never neither. */
+  private requestText(command: SquadRequestCommand): string {
+    if (command.text !== undefined && command.fromWorkItemId === undefined)
+      return this.typedRequest(command.text);
+    if (command.fromWorkItemId !== undefined && command.text === undefined)
+      return this.itemRequest(command.fromWorkItemId);
+    throw new CompanyError('invalid_request', MESSAGE.requestShape);
+  }
+
+  /** Refuses empty or oversized typed text, and returns it trimmed. */
+  private typedRequest(text: string): string {
+    const refusal = refuseText(text);
+    if (refusal === 'empty_text')
+      throw new CompanyError('empty_text', 'Nội dung yêu cầu không được để trống.');
+    if (refusal === 'prompt_too_large')
+      throw new CompanyError('prompt_too_large', 'Nội dung yêu cầu vượt quá giới hạn.');
+    return text.trim();
+  }
+
+  /** The request a finished manual item starts: the item, its criteria, and its result. */
+  private itemRequest(id: string): string {
+    const item = this.ports.workItems.get(id);
+    if (item === undefined) throw new CompanyError('work_item_not_found', MESSAGE.itemNotFound);
+    if (item.status !== 'review' || item.squadRunId !== undefined)
+      throw new CompanyError('work_item_status', MESSAGE.itemNotReviewable);
+    return this.typedRequest(requestFromItem(item));
+  }
+
   /**
    * Approves a proposal with the rows the user kept: creates one work item per row. Idempotent by
    * proposal: the work item service answers a repeated create with the same items.
@@ -219,13 +264,17 @@ export class SquadService {
     const proposal = this.requireProposal(run, command.proposalId);
     if (proposal.status === 'dismissed')
       throw new CompanyError('squad_status', MESSAGE.proposalDismissed);
-    const checked = parseSquadRows(command.rows);
-    if (!checked.ok) throw new CompanyError('squad_rows_invalid', checked.message);
+    // An approved proposal answers a resend before its rows are read: a wait may be done by now.
     if (proposal.status === 'approved') {
       this.remember(command.requestId, run.id);
       this.scheduleTurnIfReviewed(run);
       return;
     }
+    const checked = parseSquadRows(
+      command.rows,
+      (sequence) => this.ports.workItems.findOpen(sequence)?.id,
+    );
+    if (!checked.ok) throw new CompanyError('squad_rows_invalid', checked.message);
     const inFlight = this.approvals.get(proposal.id);
     if (inFlight !== undefined) {
       await inFlight;
@@ -302,20 +351,20 @@ export class SquadService {
   private async performApprove(
     run: StoredSquadRun,
     proposalId: string,
-    drafts: readonly WorkItemDraft[],
+    approval: SquadApproval,
     requestId: string,
   ): Promise<void> {
     // Idempotent by proposal: a retry after a failed save gets the same items back.
-    await this.ports.workItems.createWorkItems(drafts, { squadRunId: proposalId });
+    await this.ports.workItems.createWorkItems(approval.drafts, { squadRunId: proposalId });
     const proposal = run.proposals.find((entry) => entry.id === proposalId);
     if (proposal === undefined)
       throw new CompanyError('squad_proposal_not_found', MESSAGE.proposalNotFound);
     const at = this.iso();
     proposal.status = 'approved';
-    proposal.rows = drafts.map((draft) => ({ text: draft.text, assignee: draft.assignee }));
+    proposal.rows = approval.rows;
     run.status = 'working';
     delete run.error;
-    appendEvent(run, squadEvent(at, 'approved', `Đã giao ${drafts.length} việc.`));
+    appendEvent(run, squadEvent(at, 'approved', `Đã giao ${approval.drafts.length} việc.`));
     this.remember(requestId, run.id);
     this.commit();
     await this.flush();
@@ -351,19 +400,23 @@ export class SquadService {
     try {
       const reviews = run.pendingReviews.slice();
       const members = this.ports.members();
+      const items = this.itemViews(run);
+      const openSequences = new Set(
+        items.filter((item) => isOpenItemStatus(item.status)).map((item) => item.sequence),
+      );
       const output = await this.ports.leader.run(
         buildLeaderPrompt({
           folderName: this.folderName,
           request: run.request,
           members,
-          items: this.itemViews(run),
+          items,
           reviews,
           history: run.history,
           turn: run.turns + 1,
         }),
         controller.signal,
       );
-      const checked = parseLeaderReply(output, members);
+      const checked = parseLeaderReply(output, members, openSequences);
       if (!checked.ok) throw new SquadLeaderError(checked.message);
       if (this.disposed) return;
       this.applyReply(run, checked.value, reviews);
@@ -443,6 +496,7 @@ export class SquadService {
       itemId: item.id,
       at: item.updatedAt,
       text: clip(item.text, SQUAD_CONTEXT_TEXT_MAX_CHARS),
+      ...(item.acceptance === undefined ? {} : { acceptance: item.acceptance }),
       ...(item.result === undefined
         ? {}
         : { result: clip(item.result, SQUAD_CONTEXT_RESULT_MAX_CHARS) }),
@@ -477,14 +531,21 @@ export class SquadService {
         .filter((proposal) => proposal.status === 'approved')
         .map((proposal) => proposal.id),
     );
-    return this.ports.workItems
-      .snapshot()
-      .items.filter((item) => item.squadRunId !== undefined && approved.has(item.squadRunId))
+    const all = this.ports.workItems.snapshot().items;
+    const sequenceById = new Map(all.map((item): [string, number] => [item.id, item.sequence]));
+    return all
+      .filter((item) => item.squadRunId !== undefined && approved.has(item.squadRunId))
       .slice(-SQUAD_CONTEXT_ITEMS_MAX)
       .map((item) => ({
+        sequence: item.sequence,
         text: item.text,
         status: item.status,
         assignee: assigneeRef(item.assignee),
+        priority: item.priority,
+        ...(item.acceptance === undefined ? {} : { acceptance: item.acceptance }),
+        dependsOn: item.dependsOn
+          .map((id) => sequenceById.get(id))
+          .filter((sequence): sequence is number => sequence !== undefined),
         ...(item.result === undefined
           ? {}
           : { result: clip(item.result, SQUAD_CONTEXT_RESULT_MAX_CHARS) }),

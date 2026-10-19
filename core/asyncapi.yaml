@@ -224,6 +224,7 @@ components:
         - $ref: '#/components/schemas/CompanyWorkItemFollowUpMessage'
         - $ref: '#/components/schemas/CompanyWorkItemMarkMessage'
         - $ref: '#/components/schemas/CompanyWorkItemCancelMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemDependenciesMessage'
         - $ref: '#/components/schemas/CompanyAgentRoleSetMessage'
         # Squad leader (privileged; one leader turn proposes assignments for the team)
         - $ref: '#/components/schemas/CompanySquadRequestMessage'
@@ -3822,10 +3823,31 @@ components:
           type: string
           maxLength: 2000
 
+    WorkItemPriority:
+      type: integer
+      minimum: 0
+      maximum: 3
+      description: >-
+        P0 is the most urgent, P3 the least. A queued item for one agent is sent by priority first, then by creation order.
+
+    WorkItemBlocker:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      description: >-
+        Why a queued item is not sent yet, shown as a chip. agent: its agent is busy. dependency: a dependency is not
+        done yet. failed: a dependency failed or was removed. sequence is the #n of that dependency.
+      properties:
+        kind:
+          type: string
+          enum: [agent, dependency, failed]
+        sequence:
+          type: integer
+          minimum: 0
     WorkItem:
       type: object
       additionalProperties: false
-      required: [id, text, assignee, status, sequence, createdAt, updatedAt, history]
+      required: [id, text, assignee, status, sequence, createdAt, updatedAt, history, priority, dependsOn]
       properties:
         id:
           type: string
@@ -3848,6 +3870,23 @@ components:
           type: string
           maxLength: 8192
           description: The last lines of the agent's screen when it stopped, so the user can check the work.
+        priority:
+          $ref: '#/components/schemas/WorkItemPriority'
+        acceptance:
+          type: string
+          maxLength: 1000
+          description: >-
+            What done looks like. The agent gets it after the text, as a last line starting with "Xong khi", and
+            the card shows it apart from the text.
+        dependsOn:
+          type: array
+          maxItems: 10
+          description: Items this one waits for, by id in this folder. It is sent only once every one of them is done.
+          items:
+            type: string
+            format: uuid
+        blocker:
+          $ref: '#/components/schemas/WorkItemBlocker'
         squadRunId:
           type: string
           format: uuid
@@ -3929,6 +3968,17 @@ components:
           minLength: 1
         assignee:
           $ref: '#/components/schemas/WorkItemAssignee'
+        priority:
+          $ref: '#/components/schemas/WorkItemPriority'
+        acceptance:
+          type: string
+          maxLength: 1000
+        dependsOn:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
 
     CompanyWorkItemAssignMessage:
       type: object
@@ -4021,6 +4071,34 @@ components:
           type: string
           format: uuid
 
+    CompanyWorkItemDependenciesMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id, dependsOn]
+      description: >-
+        Replace the list of items a queued item waits for. An empty list clears it. Refused for any other status, for
+        an item that would wait on itself or close a loop, and for more than 10 items.
+      properties:
+        type:
+          const: companyWorkItemDependencies
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
+        dependsOn:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            format: uuid
+
+
     CompanyAgentRoleSetMessage:
       type: object
       additionalProperties: false
@@ -4071,6 +4149,25 @@ components:
           type: string
           maxLength: 2000
 
+    SquadDependency:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      description: >-
+        One thing a row waits for. kind row names another row of the same proposal by its 0-based index in rows; kind
+        item names an open work item of the folder by its sequence (#n).
+      properties:
+        kind:
+          type: string
+          enum: [row, item]
+        row:
+          type: integer
+          minimum: 0
+          maximum: 7
+        sequence:
+          type: integer
+          minimum: 0
+
     SquadRowInput:
       type: object
       additionalProperties: false
@@ -4084,11 +4181,21 @@ components:
           minLength: 1
         assignee:
           $ref: '#/components/schemas/WorkItemAssignee'
+        priority:
+          $ref: '#/components/schemas/WorkItemPriority'
+        acceptance:
+          type: string
+          maxLength: 1000
+        dependsOn:
+          type: array
+          maxItems: 10
+          items:
+            $ref: '#/components/schemas/SquadDependency'
 
     SquadRow:
       type: object
       additionalProperties: false
-      required: [text, assignee]
+      required: [text, assignee, priority, dependsOn]
       description: One proposed assignment as the leader wrote it. reason says why the leader chose this assignee.
       properties:
         text:
@@ -4099,6 +4206,18 @@ components:
         reason:
           type: string
           maxLength: 500
+        priority:
+          $ref: '#/components/schemas/WorkItemPriority'
+        acceptance:
+          type: string
+          maxLength: 1000
+        dependsOn:
+          type: array
+          maxItems: 10
+          description: >-
+            What this row waits for. Row indexes are 0-based positions in this proposal. Items are their #n.
+          items:
+            $ref: '#/components/schemas/SquadDependency'
 
     SquadProposalStatus:
       type: string
@@ -4218,7 +4337,7 @@ components:
     CompanySquadRequestMessage:
       type: object
       additionalProperties: false
-      required: [type, requestId, workspacePath, text]
+      required: [type, requestId, workspacePath]
       description: >-
         Start a squad run: one leader turn proposes assignments for the folder's team. Nothing reaches any agent
         until the user approves a proposal. The same requestId twice starts nothing new.
@@ -4235,6 +4354,10 @@ components:
         text:
           type: string
           minLength: 1
+        fromWorkItemId:
+          type: string
+          format: uuid
+          description: A review item of this folder, for "Hỏi đội trưởng bước tiếp". The leader reads its text, acceptance and result, so text is not sent with it.
 
     CompanySquadApproveMessage:
       type: object

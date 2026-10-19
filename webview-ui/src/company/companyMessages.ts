@@ -323,14 +323,25 @@ export function sessionRename(requestId: string, sessionId: string, name: string
   return { type: 'companySessionRename', requestId, sessionId, name };
 }
 
+/**
+ * The optional fields of a new work item: its priority, its acceptance, and the items it waits
+ * for (real ids). A field left out is not sent, so the server applies its default.
+ */
+export interface WorkItemCreateOptions {
+  priority?: number;
+  acceptance?: string;
+  dependsOn?: string[];
+}
+
 /** File a new work item and hand it to `assignee`. The verdict names the item in `workItemId`. */
 export function workItemCreate(
   requestId: string,
   workspacePath: string,
   text: string,
   assignee: WorkItemAssignee,
+  options: WorkItemCreateOptions = {},
 ): ClientMessage {
-  return { type: 'companyWorkItemCreate', requestId, workspacePath, text, assignee };
+  return { type: 'companyWorkItemCreate', requestId, workspacePath, text, assignee, ...options };
 }
 
 /** Hand an existing work item to another agent. The verdict is a companyCommandResult. */
@@ -372,6 +383,16 @@ export function workItemCancel(
   return { type: 'companyWorkItemCancel', requestId, workspacePath, id };
 }
 
+/** Replace the items a queued work item waits for; an empty list clears them. The verdict is a companyCommandResult. */
+export function workItemDependencies(
+  requestId: string,
+  workspacePath: string,
+  id: string,
+  dependsOn: string[],
+): ClientMessage {
+  return { type: 'companyWorkItemDependencies', requestId, workspacePath, id, dependsOn };
+}
+
 /** Set the description of an agent's role in a folder. The verdict is a companyCommandResult. */
 export function agentRoleSet(
   requestId: string,
@@ -389,6 +410,15 @@ export function squadRequest(
   text: string,
 ): ClientMessage {
   return { type: 'companySquadRequest', requestId, workspacePath, text };
+}
+
+/** Ask the folder's team to plan the next step after a review item. The verdict is a companyCommandResult. */
+export function squadRequestFromWorkItem(
+  requestId: string,
+  workspacePath: string,
+  workItemId: string,
+): ClientMessage {
+  return { type: 'companySquadRequest', requestId, workspacePath, fromWorkItemId: workItemId };
 }
 
 /** Approve a proposal with the rows the drawer sends. The verdict is a companyCommandResult. */

@@ -40,6 +40,7 @@ import type {
   HerdrAgentsMessage,
   ServerMessage,
 } from '../../../core/src/messages.js';
+import { isWorkItemPriority } from '../../../core/src/workItemGraph.js';
 import {
   HERDR_DEFAULT_READ_LINES,
   HerdrError,
@@ -80,7 +81,7 @@ import {
 } from './sessionLog.js';
 import type { SquadService } from './squad/squadService.js';
 import type { UsageControl } from './usagePage.js';
-import { isWorkItemAssignee } from './workItems/workItemModel.js';
+import { isWorkItemAssignee, type WorkItemDraft } from './workItems/workItemModel.js';
 import type { WorkItemService } from './workItems/workItemService.js';
 import { listWorkspaceFiles, readWorkspaceFile } from './workspaceFiles.js';
 
@@ -283,6 +284,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyWorkItemFollowUp',
   'companyWorkItemMark',
   'companyWorkItemCancel',
+  'companyWorkItemDependencies',
   'companySquadRequest',
   'companySquadApprove',
   'companySquadDismiss',
@@ -323,6 +325,7 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companyWorkItemFollowUp: true,
   companyWorkItemMark: true,
   companyWorkItemCancel: true,
+  companyWorkItemDependencies: true,
   companySquadRequest: true,
   companySquadApprove: true,
   companySquadDismiss: true,
@@ -546,6 +549,7 @@ async function run(
       case 'companyWorkItemFollowUp':
       case 'companyWorkItemMark':
       case 'companyWorkItemCancel':
+      case 'companyWorkItemDependencies':
       case 'companyAgentRoleSet':
         await workItemCommand(msg, requestId, services, send);
         return;
@@ -1150,6 +1154,26 @@ async function cancelPrompt(
   ok(send, requestId);
 }
 
+/** The optional fields a create carries. Null when one of them is present but malformed. */
+function createFields(
+  msg: Record<string, unknown>,
+): Pick<WorkItemDraft, 'priority' | 'acceptance' | 'dependsOn'> | null {
+  const { priority, acceptance, dependsOn } = msg;
+  if (priority !== undefined && !isWorkItemPriority(priority)) return null;
+  if (acceptance !== undefined && typeof acceptance !== 'string') return null;
+  if (dependsOn !== undefined && !isStringArray(dependsOn)) return null;
+  return {
+    ...(priority === undefined ? {} : { priority }),
+    ...(acceptance === undefined ? {} : { acceptance }),
+    ...(dependsOn === undefined ? {} : { dependsOn }),
+  };
+}
+
+/** Whether a value is a list of strings, such as a wait list of ids. */
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
+}
+
 /**
  * Work item commands. The folder's work item service applies each one, and a reply carries the id
  * of the item a create made. A resent command gets the same answer: the service remembers request ids.
@@ -1175,10 +1199,16 @@ async function workItemCommand(
       fail(send, requestId, 'assignee_invalid', 'Người nhận việc không hợp lệ.');
       return;
     }
+    const fields = createFields(msg);
+    if (fields === null) {
+      fail(send, requestId, 'invalid_request', 'Thông tin việc không hợp lệ.');
+      return;
+    }
     const workItemId = await work.create({
       requestId,
       text: stringField(msg, 'text') ?? '',
       assignee: msg.assignee,
+      ...fields,
     });
     ok(send, requestId, undefined, undefined, workItemId);
     return;
@@ -1209,6 +1239,16 @@ async function workItemCommand(
   }
   if (msg.type === 'companyWorkItemCancel') {
     await work.cancel({ requestId, id });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemDependencies') {
+    const dependsOn = msg.dependsOn;
+    if (!isStringArray(dependsOn)) {
+      fail(send, requestId, 'invalid_request', 'Danh sách việc chờ không hợp lệ.');
+      return;
+    }
+    await work.setDependencies({ requestId, id, dependsOn });
     ok(send, requestId);
     return;
   }
@@ -1244,7 +1284,12 @@ async function squadCommand(
     return;
   }
   if (msg.type === 'companySquadRequest') {
-    const started = await squad.request({ requestId, text: stringField(msg, 'text') ?? '' });
+    const fromWorkItemId = stringField(msg, 'fromWorkItemId') ?? undefined;
+    const started = await squad.request(
+      fromWorkItemId === undefined
+        ? { requestId, text: stringField(msg, 'text') ?? '' }
+        : { requestId, fromWorkItemId },
+    );
     send({ type: 'companyCommandResult', requestId, ok: true, squadRunId: started });
     return;
   }

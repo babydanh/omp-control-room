@@ -7,7 +7,8 @@
 
 import { useRef, useState } from 'react';
 
-import type { SquadEvent, SquadProposal } from '../../../../core/src/messages.js';
+import type { SquadDependency, SquadEvent, SquadProposal } from '../../../../core/src/messages.js';
+import { priorityLabel } from '../../../../core/src/workItemGraph.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { AssigneeOption } from '../assigneeOptions.js';
 import { assigneeKeyOf, assigneeOptionsFor } from '../assigneeOptions.js';
@@ -16,17 +17,22 @@ import type { CompanyViewState } from '../companyState.js';
 import {
   blankDraftRow,
   findSquadRun,
+  openSequencesOf,
+  PRIORITY_CHOICES,
   progressLabel,
+  proposalRowDepsOptions,
+  removeDraftRow,
   rowsFromProposal,
   SQUAD_MAX_ROWS,
   type SquadDraftRow,
   squadEventLabel,
   squadStatusLabel,
+  toggleRowDependency,
   validateRows,
 } from '../squadView.js';
 import { useCommandDialog } from '../useCommandDialog.js';
 import { useNow } from '../useNow.js';
-import { assigneeLabel } from '../workItemView.js';
+import { assigneeLabel, workItemsOf } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 
 const APPROVE_FALLBACK = 'Chưa duyệt được đề xuất này.';
@@ -116,15 +122,23 @@ function ProposalEditor({ client, state, workspacePath, runId, proposal }: Propo
   const added = useRef(0);
   const command = useCommandDialog(client);
   const options = assigneeOptionsFor(state, workspacePath);
-  const verdict = validateRows(rows);
+  const openItems = workItemsOf(state, workspacePath).items;
+  const verdict = validateRows(rows, openSequencesOf(openItems));
   const note = proposal.note.trim();
 
-  function editRow(key: string, change: Partial<Pick<SquadDraftRow, 'text' | 'assignee'>>): void {
+  function editRow(
+    key: string,
+    change: Partial<Pick<SquadDraftRow, 'text' | 'assignee' | 'priority' | 'acceptance'>>,
+  ): void {
     setRows((current) => current.map((row) => (row.key === key ? { ...row, ...change } : row)));
   }
 
   function removeRow(key: string): void {
-    setRows((current) => current.filter((row) => row.key !== key));
+    setRows((current) => removeDraftRow(current, key));
+  }
+
+  function toggleWait(rowIndex: number, dependency: SquadDependency): void {
+    setRows((current) => toggleRowDependency(current, rowIndex, dependency));
   }
 
   function addRow(): void {
@@ -149,33 +163,80 @@ function ProposalEditor({ client, state, workspacePath, runId, proposal }: Propo
     <section aria-label="Đề xuất" className="flex flex-col gap-2">
       {note !== '' && <p className="whitespace-pre-wrap break-words text-text-muted">{note}</p>}
       <ul className="flex flex-col gap-2">
-        {rows.map((row, index) => (
-          <li
-            key={row.key}
-            className="flex min-w-0 flex-col gap-1.5 rounded-(--company-radius-sm) bg-raised p-2"
-          >
-            <textarea
-              aria-label={`Nội dung dòng ${index + 1}`}
-              rows={2}
-              value={row.text}
-              onChange={(event) => editRow(row.key, { text: event.target.value })}
-              className="w-full min-w-0 resize-y rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text"
-            />
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <AssigneeSelect
-                label={`Giao dòng ${index + 1}`}
-                assignee={row.assignee}
-                options={options}
-                state={state}
-                workspacePath={workspacePath}
-                onChange={(assignee) => editRow(row.key, { assignee })}
+        {rows.map((row, index) => {
+          const waits = proposalRowDepsOptions(rows, index, openItems);
+          return (
+            <li
+              key={row.key}
+              className="flex min-w-0 flex-col gap-1.5 rounded-(--company-radius-sm) bg-raised p-2"
+            >
+              <textarea
+                aria-label={`Nội dung dòng ${index + 1}`}
+                rows={2}
+                value={row.text}
+                onChange={(event) => editRow(row.key, { text: event.target.value })}
+                className="w-full min-w-0 resize-y rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text"
               />
-              <CompanyButton size="sm" onClick={() => removeRow(row.key)}>
-                Bỏ dòng
-              </CompanyButton>
-            </div>
-          </li>
-        ))}
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <AssigneeSelect
+                  label={`Giao dòng ${index + 1}`}
+                  assignee={row.assignee}
+                  options={options}
+                  state={state}
+                  workspacePath={workspacePath}
+                  onChange={(assignee) => editRow(row.key, { assignee })}
+                />
+                <select
+                  aria-label={`Độ ưu tiên dòng ${index + 1}`}
+                  value={String(row.priority)}
+                  disabled={command.pending}
+                  onChange={(event) => editRow(row.key, { priority: Number(event.target.value) })}
+                  className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text disabled:text-text-muted"
+                >
+                  {PRIORITY_CHOICES.map((choice) => (
+                    <option key={choice} value={String(choice)}>
+                      {priorityLabel(choice)}
+                    </option>
+                  ))}
+                </select>
+                <CompanyButton size="sm" onClick={() => removeRow(row.key)}>
+                  Bỏ dòng
+                </CompanyButton>
+              </div>
+              <input
+                type="text"
+                aria-label={`Xong khi dòng ${index + 1}`}
+                placeholder="Xong khi… (không bắt buộc)"
+                value={row.acceptance}
+                disabled={command.pending}
+                onChange={(event) => editRow(row.key, { acceptance: event.target.value })}
+                className="w-full min-w-0 rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted"
+              />
+              <div
+                role="group"
+                aria-label={`Chờ việc, dòng ${index + 1}`}
+                className="flex min-w-0 flex-wrap gap-1"
+              >
+                {waits.length === 0 ? (
+                  <p className="text-2xs text-text-muted">Không có việc nào để chờ.</p>
+                ) : (
+                  waits.map((option) => (
+                    <button
+                      key={option.key}
+                      type="button"
+                      aria-pressed={option.selected}
+                      disabled={command.pending}
+                      onClick={() => toggleWait(index, option.dependency)}
+                      className={`touch-target max-w-full truncate rounded-(--company-radius-sm) px-2 py-1 text-left text-2xs disabled:cursor-default ${option.selected ? 'company-selected text-text' : 'bg-well text-text-muted hover:bg-hover'}`}
+                    >
+                      {option.label}
+                    </button>
+                  ))
+                )}
+              </div>
+            </li>
+          );
+        })}
       </ul>
       <div className="flex flex-wrap gap-1.5">
         <CompanyButton

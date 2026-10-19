@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import { describe, expect, it } from 'vitest';
 
+import { WORK_ITEM_ACCEPTANCE_MAX_CHARS } from '../../core/src/workItemGraph.js';
 import {
   assigneeKey,
   canCancel,
@@ -164,5 +165,96 @@ describe('work item wire shape', () => {
     if (stored === undefined) return;
     expect(stored.pendingPrompt).toBe('Việc');
     expect(toWorkItem(stored)).not.toHaveProperty('pendingPrompt');
+  });
+});
+
+describe('work item priority, waits, and acceptance in stored files', () => {
+  it('reads an item saved before priorities and waits as P2 with no waits or criteria', () => {
+    const parsed = parseWorkItemsFile({
+      version: 1,
+      items: [storedRaw({ text: 'Cũ' })],
+      roles: [],
+    });
+    expect(parsed.dropped).toBe(0);
+    expect(parsed.file.items[0]).toMatchObject({ priority: 2, dependsOn: [], pendingPrompt: 'Cũ' });
+    expect(parsed.file.items[0]?.acceptance).toBeUndefined();
+  });
+
+  it('drops an item whose priority is outside P0 to P3', () => {
+    const parsed = parseWorkItemsFile({
+      version: 1,
+      items: [storedRaw({ priority: 4 })],
+      roles: [],
+    });
+    expect(parsed.file.items).toEqual([]);
+    expect(parsed.dropped).toBe(1);
+  });
+
+  it('drops an item that waits on itself, or lists one wait twice', () => {
+    const self = randomUUID();
+    const other = randomUUID();
+    const parsed = parseWorkItemsFile({
+      version: 1,
+      items: [
+        storedRaw({ id: self, dependsOn: [self] }),
+        storedRaw({ id: other, dependsOn: [self, self] }),
+      ],
+      roles: [],
+    });
+    expect(parsed.file.items).toEqual([]);
+    expect(parsed.dropped).toBe(2);
+  });
+
+  it('clears the first wait of a loop left by an older build, so the items can be sent', () => {
+    const a = randomUUID();
+    const b = randomUUID();
+    const parsed = parseWorkItemsFile({
+      version: 1,
+      items: [
+        storedRaw({ id: a, sequence: 1, dependsOn: [b] }),
+        storedRaw({ id: b, sequence: 2, dependsOn: [a] }),
+      ],
+      roles: [],
+    });
+    expect(parsed.file.items[0]?.dependsOn).toEqual([]);
+    expect(parsed.file.items[1]?.dependsOn).toEqual([a]);
+    expect(parsed.dropped).toBe(0);
+  });
+
+  it('keeps a wait on an item no longer on the board, with the #n it had', () => {
+    const gone = randomUUID();
+    const parsed = parseWorkItemsFile({
+      version: 1,
+      items: [storedRaw({ dependsOn: [gone], waitSequences: { [gone]: 4 } })],
+      roles: [],
+    });
+    expect(parsed.file.items[0]).toMatchObject({ dependsOn: [gone], waitSequences: { [gone]: 4 } });
+  });
+
+  it('clips criteria over the length limit and drops blank criteria', () => {
+    const parsed = parseWorkItemsFile({
+      version: 1,
+      items: [
+        storedRaw({ acceptance: 'x'.repeat(WORK_ITEM_ACCEPTANCE_MAX_CHARS + 50) }),
+        storedRaw({ acceptance: '   ' }),
+      ],
+      roles: [],
+    });
+    expect(parsed.file.items[0]?.acceptance?.length).toBe(WORK_ITEM_ACCEPTANCE_MAX_CHARS);
+    expect(parsed.file.items[1]?.acceptance).toBeUndefined();
+  });
+
+  it('sends the wire shape without the owed prompt or the wait #n map', () => {
+    const parsed = parseWorkItemsFile({
+      version: 1,
+      items: [storedRaw({ priority: 0 })],
+      roles: [],
+    });
+    const stored = parsed.file.items[0];
+    if (stored === undefined) throw new Error('expected one item');
+    const wire = toWorkItem(stored);
+    expect(wire).toMatchObject({ priority: 0, dependsOn: [] });
+    expect(wire).not.toHaveProperty('pendingPrompt');
+    expect(wire).not.toHaveProperty('waitSequences');
   });
 });

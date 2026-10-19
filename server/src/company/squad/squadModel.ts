@@ -5,6 +5,7 @@
  */
 
 import type {
+  SquadDependency,
   SquadEvent,
   SquadEventKind,
   SquadProgress,
@@ -15,6 +16,15 @@ import type {
   SquadRunStatus,
   WorkItemAssignee,
 } from '../../../../core/src/messages.js';
+import {
+  graphHasCycle,
+  isWorkItemPriority,
+  priorityLabel,
+  WORK_ITEM_ACCEPTANCE_MAX_CHARS,
+  WORK_ITEM_DEPENDS_MAX,
+  WORK_ITEM_PRIORITY_DEFAULT,
+  WORK_ITEM_PRIORITY_MAX,
+} from '../../../../core/src/workItemGraph.js';
 import { isRecord } from '../typeGuards.js';
 import {
   assigneeKey,
@@ -23,7 +33,6 @@ import {
   isWorkItemAssignee,
   normalizeAssignee,
   refuseText,
-  type WorkItemDraft,
 } from '../workItems/workItemModel.js';
 
 /** Most assignments one leader reply may propose. */
@@ -78,6 +87,8 @@ export interface SquadReview {
   readonly at: string;
   readonly text: string;
   readonly result?: string;
+  /** The item's "done when" text, which the leader judges the result against. */
+  readonly acceptance?: string;
 }
 
 /** One squad run as it is stored. The wire shape is {@link toWireRun}. */
@@ -116,11 +127,22 @@ export interface ParsedSquadFile {
 export type Checked<T> =
   { readonly ok: true; readonly value: T } | { readonly ok: false; readonly message: string };
 
+/**
+ * A dependency as the leader or the board writes it: another row of the same proposal by its
+ * 0-based index, or an open work item by its `#n`.
+ */
+export type DependencyRef =
+  | { readonly kind: 'row'; readonly row: number }
+  | { readonly kind: 'item'; readonly sequence: number };
+
 /** One assignment the leader proposed, after validation. */
 export interface LeaderAssignment {
   readonly assignee: WorkItemAssignee;
   readonly text: string;
   readonly reason?: string;
+  readonly priority: number;
+  readonly acceptance?: string;
+  readonly dependsOn: readonly DependencyRef[];
 }
 
 /** The leader's reply, after validation. */
@@ -130,12 +152,37 @@ export interface LeaderReply {
   readonly done: boolean;
 }
 
+/**
+ * One row ready for `WorkItemService.createWorkItems`. `dependsOn` names existing items by id;
+ * `dependsOnDrafts` names rows of the same batch by their index in it.
+ */
+export interface SquadDraft {
+  readonly text: string;
+  readonly assignee: WorkItemAssignee;
+  readonly priority: number;
+  readonly acceptance?: string;
+  readonly dependsOn: string[];
+  readonly dependsOnDrafts: number[];
+}
+
+/** The approved rows, checked: the drafts to create, and the rows the proposal keeps. */
+export interface SquadApproval {
+  readonly drafts: SquadDraft[];
+  readonly rows: SquadRow[];
+}
+
 /** One item of the run as the leader reads it. */
 export interface LeaderItemView {
+  /** The item's #n: how the leader waits for it. */
+  readonly sequence: number;
   readonly text: string;
   readonly status: string;
   /** The assignee's ref, as the leader wrote it: `herdr:<paneId>`, `session:<id>` or `new-session`. */
   readonly assignee: string;
+  readonly priority: number;
+  readonly acceptance?: string;
+  /** The #n of the items this one waits for. */
+  readonly dependsOn: readonly number[];
   readonly result?: string;
 }
 
@@ -172,8 +219,23 @@ const EVENT_KINDS: readonly SquadEventKind[] = [
   'stopped',
 ];
 const REPLY_KEYS: readonly string[] = ['assignments', 'note', 'done'];
-const ASSIGNMENT_KEYS: readonly string[] = ['assignee', 'text', 'reason'];
+const ASSIGNMENT_KEYS: readonly string[] = [
+  'assignee',
+  'text',
+  'reason',
+  'priority',
+  'acceptance',
+  'dependsOn',
+];
 const NEW_SESSION_REF = 'new-session';
+const OPEN_ITEM_STATUSES: Record<string, true> = {
+  queued: true,
+  running: true,
+  needs_input: true,
+  review: true,
+};
+/** A `#n` the leader writes to name an open work item. */
+const SEQUENCE_REF = /^#([1-9]\d*)$/;
 
 /** A squad file with no runs. */
 export function emptySquadFile(): SquadFile {
@@ -204,6 +266,28 @@ export function reviewKey(review: Pick<SquadReview, 'itemId' | 'at'>): string {
 /** The assignee's id as the leader writes it: `herdr:<paneId>`, `session:<id>` or `new-session`. */
 export function assigneeRef(assignee: WorkItemAssignee): string {
   return assigneeKey(assignee);
+}
+
+/** Whether a work item status still waits for or holds work, so the leader may wait for it. */
+export function isOpenItemStatus(status: string): boolean {
+  return OPEN_ITEM_STATUSES[status] === true;
+}
+
+/**
+ * The request a squad run starts with when it starts from a finished item: the item's text, its
+ * "done when" line, then its result, trimmed to the leader's result limit.
+ */
+export function requestFromItem(item: {
+  readonly text: string;
+  readonly acceptance?: string;
+  readonly result?: string;
+}): string {
+  const parts = [item.text.trim()];
+  const acceptance = item.acceptance?.trim() ?? '';
+  if (acceptance !== '') parts.push(`Xong khi: ${acceptance}`);
+  const result = item.result?.trim() ?? '';
+  if (result !== '') parts.push(`Kết quả:\n${clip(result, SQUAD_CONTEXT_RESULT_MAX_CHARS)}`);
+  return parts.join('\n\n');
 }
 
 /** Counts the items the run's approved proposals created, and how many of them are done. */
@@ -272,10 +356,13 @@ export function parseSquadFile(raw: unknown): ParsedSquadFile {
 /**
  * Parses the leader's final text. Accepts one JSON object with exactly the keys the prompt asks
  * for, optionally inside one code fence. Anything else is refused and nothing is assigned.
+ * `openSequences` holds the #n of the open work items the leader was shown: only those may be
+ * waited for.
  */
 export function parseLeaderReply(
   output: string,
   members: readonly SquadMember[],
+  openSequences: ReadonlySet<number>,
 ): Checked<LeaderReply> {
   let value: unknown;
   try {
@@ -310,10 +397,12 @@ export function parseLeaderReply(
   }
   const assignments: LeaderAssignment[] = [];
   for (const [index, entry] of rawAssignments.entries()) {
-    const checked = parseAssignment(entry, index + 1, members);
+    const checked = parseAssignment(entry, index, rawAssignments.length, members, openSequences);
     if (!checked.ok) return checked;
     assignments.push(checked.value);
   }
+  const loop = refuseLoop(assignments.map((assignment) => assignment.dependsOn));
+  if (loop !== null) return { ok: false, message: loop };
   if (done && assignments.length > 0) {
     return { ok: false, message: 'Đội trưởng vừa báo xong vừa giao việc. Chỉ một trong hai.' };
   }
@@ -325,28 +414,61 @@ export function parseLeaderReply(
 
 /**
  * Checks the rows the board sends back on approval: 1 to {@link SQUAD_MAX_ROWS} rows, each with
- * non-empty text and a valid assignee. Text is trimmed; the drafts returned are ready to create.
+ * non-empty text, a valid assignee, and optional priority, acceptance and dependsOn. A row waits for
+ * another row by its 0-based index in this list, and for an open item by its `#n`, which
+ * `openItemId` resolves to the item's id. Returns the drafts to create and the rows to keep.
  */
-export function parseSquadRows(value: unknown): Checked<WorkItemDraft[]> {
+export function parseSquadRows(
+  value: unknown,
+  openItemId: (sequence: number) => string | undefined,
+): Checked<SquadApproval> {
   if (!Array.isArray(value) || value.length === 0 || value.length > SQUAD_MAX_ROWS) {
     return { ok: false, message: `Cần từ 1 đến ${SQUAD_MAX_ROWS} việc.` };
   }
-  const drafts: WorkItemDraft[] = [];
-  for (const [index, entry] of value.entries()) {
-    const position = index + 1;
-    if (!isRecord(entry)) return { ok: false, message: `Việc ${position} không hợp lệ.` };
-    const text = typeof entry['text'] === 'string' ? entry['text'].trim() : '';
-    const refusal = refuseText(text);
-    if (refusal === 'empty_text')
-      return { ok: false, message: `Việc ${position} không có nội dung.` };
-    if (refusal === 'prompt_too_large') return { ok: false, message: `Việc ${position} quá dài.` };
-    const assignee = entry['assignee'];
-    if (!isWorkItemAssignee(assignee)) {
-      return { ok: false, message: `Việc ${position} có người nhận không hợp lệ.` };
-    }
-    drafts.push({ text, assignee: normalizeAssignee(assignee) });
+  const entries: readonly unknown[] = value;
+  const checkedRows: CheckedRow[] = [];
+  for (const [index, entry] of entries.entries()) {
+    const checked = parseSquadRow(entry, index);
+    if (!checked.ok) return checked;
+    const refusal = refuseRefs(
+      checked.value.dependsOn,
+      index + 1,
+      index,
+      entries.length,
+      (sequence) => openItemId(sequence) !== undefined,
+    );
+    if (refusal !== null) return { ok: false, message: refusal };
+    checkedRows.push(checked.value);
   }
-  return { ok: true, value: drafts };
+  const loop = refuseLoop(checkedRows.map((row) => row.dependsOn));
+  if (loop !== null) return { ok: false, message: loop };
+  const drafts: SquadDraft[] = [];
+  const rows: SquadRow[] = [];
+  for (const row of checkedRows) {
+    const dependsOnDrafts = row.dependsOn.flatMap((ref) => (ref.kind === 'row' ? [ref.row] : []));
+    const dependsOn = row.dependsOn.flatMap((ref): string[] => {
+      if (ref.kind === 'row') return [];
+      const id = openItemId(ref.sequence);
+      return id === undefined ? [] : [id];
+    });
+    const acceptance = row.acceptance === undefined ? {} : { acceptance: row.acceptance };
+    drafts.push({
+      text: row.text,
+      assignee: row.assignee,
+      priority: row.priority,
+      ...acceptance,
+      dependsOn,
+      dependsOnDrafts,
+    });
+    rows.push({
+      text: row.text,
+      assignee: row.assignee,
+      priority: row.priority,
+      ...acceptance,
+      dependsOn: row.dependsOn.map(toDependency),
+    });
+  }
+  return { ok: true, value: { drafts, rows } };
 }
 
 /** Builds the proposal rows a leader reply becomes, with the reason kept for the user to read. */
@@ -355,6 +477,9 @@ export function rowsOf(assignments: readonly LeaderAssignment[]): SquadRow[] {
     text: assignment.text,
     assignee: normalizeAssignee(assignment.assignee),
     ...(assignment.reason === undefined ? {} : { reason: assignment.reason }),
+    priority: assignment.priority,
+    ...(assignment.acceptance === undefined ? {} : { acceptance: assignment.acceptance }),
+    dependsOn: assignment.dependsOn.map(toDependency),
   }));
 }
 
@@ -367,8 +492,10 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
     '- You run no tools and do no work yourself. Each assignment is a prompt its assignee will run.',
     '- Assign only to ids listed under "Team", or to "new-session" to open a fresh omp chat in the folder. Never invent an id.',
     '- Give each assignee a self-contained prompt that says what to do and what to report back.',
+    '- Optional per assignment: "priority" from 0 (most urgent) to 3 (least), default 2; "acceptance", a short "done when" the result must meet; "dependsOn", the 0-based positions of OTHER assignments in this reply that must finish first, plus "#n" for open work items listed below. Leave out what you do not need.',
+    '- Judge each finished result against its "done when" line when it has one.',
     `- Propose at most ${SQUAD_MAX_ROWS} assignments per reply.`,
-    '- Write "text", "reason" and "note" in the language of the request.',
+    '- Write "text", "reason", "acceptance" and "note" in the language of the request.',
     '',
     'Reply with ONLY one JSON object: no text before or after it, no code fence.',
     '{"assignments":[{"assignee":"<id>","text":"<prompt>","reason":"<one short sentence>"}],"note":"<one short sentence for the user>","done":false}',
@@ -472,11 +599,25 @@ function parseRow(value: unknown): SquadRow | null {
   const text = value['text'];
   const assignee = value['assignee'];
   const reason = value['reason'];
+  const priority = value['priority'];
+  const acceptance = value['acceptance'];
+  const dependsOn = value['dependsOn'];
   if (typeof text !== 'string' || text.trim() === '') return null;
   if (!isWorkItemAssignee(assignee)) return null;
   if (reason !== undefined && typeof reason !== 'string') return null;
-  const row: SquadRow = { text, assignee: normalizeAssignee(assignee) };
+  if (priority !== undefined && !isWorkItemPriority(priority)) return null;
+  if (acceptance !== undefined && typeof acceptance !== 'string') return null;
+  const refs: DependencyRef[] | null =
+    dependsOn === undefined ? [] : parseAll(dependsOn, parseDependencyRef);
+  if (refs === null) return null;
+  const row: SquadRow = {
+    text,
+    assignee: normalizeAssignee(assignee),
+    priority: isWorkItemPriority(priority) ? priority : WORK_ITEM_PRIORITY_DEFAULT,
+    dependsOn: refs.map(toDependency),
+  };
   if (typeof reason === 'string') row.reason = reason;
+  if (typeof acceptance === 'string') row.acceptance = acceptance;
   return row;
 }
 
@@ -486,11 +627,45 @@ function parseReview(value: unknown): SquadReview | null {
   const at = value['at'];
   const text = value['text'];
   const result = value['result'];
+  const acceptance = value['acceptance'];
   if (!isUuid(itemId) || !isTimestamp(at) || typeof text !== 'string') return null;
   if (result !== undefined && typeof result !== 'string') return null;
-  const review: SquadReview = { itemId, at, text };
-  if (typeof result === 'string') return { ...review, result };
-  return review;
+  if (acceptance !== undefined && typeof acceptance !== 'string') return null;
+  return {
+    itemId,
+    at,
+    text,
+    ...(typeof result === 'string' ? { result } : {}),
+    ...(typeof acceptance === 'string' ? { acceptance } : {}),
+  };
+}
+
+function isInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value);
+}
+
+/**
+ * A dependency as the saved file or the board holds it: `{kind:'row', row}` or
+ * `{kind:'item', sequence}`.
+ */
+function parseDependencyRef(value: unknown): DependencyRef | null {
+  if (!isRecord(value)) return null;
+  const row = value['row'];
+  const sequence = value['sequence'];
+  if (value['kind'] === 'row' && isInteger(row) && sequence === undefined) {
+    return { kind: 'row', row };
+  }
+  if (value['kind'] === 'item' && isInteger(sequence) && row === undefined) {
+    return { kind: 'item', sequence };
+  }
+  return null;
+}
+
+/** The wire form of a dependency, as a proposal row keeps it. */
+function toDependency(ref: DependencyRef): SquadDependency {
+  return ref.kind === 'row'
+    ? { kind: 'row', row: ref.row }
+    : { kind: 'item', sequence: ref.sequence };
 }
 
 function parseEvent(value: unknown): SquadEvent | null {
@@ -505,7 +680,10 @@ function parseEvent(value: unknown): SquadEvent | null {
   return event;
 }
 
-/** Parses every entry of an array with `parse`; null when the value is not an array or any entry fails. */
+/**
+ * Parses every entry of an array with `parse`; null when the value is not an array or any entry
+ * fails.
+ */
 function parseAll<T>(values: unknown, parse: (value: unknown) => T | null): T[] | null {
   if (!Array.isArray(values)) return null;
   const out: T[] = [];
@@ -517,11 +695,19 @@ function parseAll<T>(values: unknown, parse: (value: unknown) => T | null): T[] 
   return out;
 }
 
+/**
+ * Checks one leader row: its assignee must be a listed member, its text non-empty, and its optional
+ * priority, acceptance, dependsOn and reason valid. Dependencies are also checked against the rest
+ * of the reply by the caller.
+ */
 function parseAssignment(
   entry: unknown,
-  position: number,
+  index: number,
+  count: number,
   members: readonly SquadMember[],
+  openSequences: ReadonlySet<number>,
 ): Checked<LeaderAssignment> {
+  const position = index + 1;
   if (!isRecord(entry)) {
     return { ok: false, message: `Việc ${position} không phải một đối tượng.` };
   }
@@ -552,13 +738,200 @@ function parseAssignment(
   if (refusal === 'prompt_too_large') {
     return { ok: false, message: `Việc ${position} quá dài.` };
   }
+  const rawPriority = entry['priority'];
+  if (rawPriority !== undefined && !isWorkItemPriority(rawPriority)) {
+    return {
+      ok: false,
+      message: `Việc ${position} có độ ưu tiên không hợp lệ, cần từ 0 đến ${WORK_ITEM_PRIORITY_MAX}.`,
+    };
+  }
+  const acceptance = checkAcceptance(entry['acceptance'], position);
+  if (!acceptance.ok) return acceptance;
+  const dependsOn = parseLeaderDependsOn(entry['dependsOn'], position, index, count, openSequences);
+  if (!dependsOn.ok) return dependsOn;
   const rawReason = entry['reason'];
   if (rawReason !== undefined && typeof rawReason !== 'string') {
     return { ok: false, message: `Việc ${position} có lý do không phải chữ.` };
   }
   const reason =
     typeof rawReason === 'string' ? clip(rawReason.trim(), SQUAD_REASON_MAX_CHARS) : '';
-  return { ok: true, value: reason === '' ? { assignee, text } : { assignee, text, reason } };
+  return {
+    ok: true,
+    value: {
+      assignee,
+      text,
+      priority: isWorkItemPriority(rawPriority) ? rawPriority : WORK_ITEM_PRIORITY_DEFAULT,
+      dependsOn: dependsOn.value,
+      ...(acceptance.value === undefined ? {} : { acceptance: acceptance.value }),
+      ...(reason === '' ? {} : { reason }),
+    },
+  };
+}
+
+/** Checks an optional "done when" text: absent or blank means none, and it may not pass the limit. */
+function checkAcceptance(raw: unknown, position: number): Checked<string | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (typeof raw !== 'string') {
+    return { ok: false, message: `Việc ${position} có tiêu chí xong không phải chữ.` };
+  }
+  const text = raw.trim();
+  if (text.length > WORK_ITEM_ACCEPTANCE_MAX_CHARS) {
+    return {
+      ok: false,
+      message: `Việc ${position} có tiêu chí xong dài quá ${WORK_ITEM_ACCEPTANCE_MAX_CHARS} ký tự.`,
+    };
+  }
+  return { ok: true, value: text === '' ? undefined : text };
+}
+
+/**
+ * Reads a leader row's "dependsOn": an integer is another row's 0-based index, and "#n" is an open
+ * work item the leader was shown. Absent means none.
+ */
+function parseLeaderDependsOn(
+  raw: unknown,
+  position: number,
+  index: number,
+  count: number,
+  openSequences: ReadonlySet<number>,
+): Checked<DependencyRef[]> {
+  if (raw === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, message: `Việc ${position} có "dependsOn" không phải danh sách.` };
+  }
+  const entries: readonly unknown[] = raw;
+  const refs: DependencyRef[] = [];
+  for (const entry of entries) {
+    const ref = leaderDependencyRef(entry);
+    if (ref === null) {
+      return {
+        ok: false,
+        message: `Việc ${position} có mục "dependsOn" không hợp lệ: dùng số thứ tự một việc khác trong đề xuất, hoặc "#n" của việc đang mở.`,
+      };
+    }
+    refs.push(ref);
+  }
+  const refusal = refuseRefs(refs, position, index, count, (sequence) =>
+    openSequences.has(sequence),
+  );
+  return refusal === null ? { ok: true, value: refs } : { ok: false, message: refusal };
+}
+
+/** One entry of a leader's "dependsOn": an integer row index, or "#n" for an open item. */
+function leaderDependencyRef(entry: unknown): DependencyRef | null {
+  if (typeof entry === 'number' && Number.isInteger(entry)) return { kind: 'row', row: entry };
+  if (typeof entry !== 'string') return null;
+  const match = SEQUENCE_REF.exec(entry);
+  return match === null ? null : { kind: 'item', sequence: Number(match[1]) };
+}
+
+/** A board row's "dependsOn": `{kind:'row', row}` or `{kind:'item', sequence}` entries. */
+function parseRowDependsOn(raw: unknown, position: number): Checked<DependencyRef[]> {
+  if (raw === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(raw)) {
+    return { ok: false, message: `Việc ${position} có "dependsOn" không phải danh sách.` };
+  }
+  const entries: readonly unknown[] = raw;
+  const refs: DependencyRef[] = [];
+  for (const entry of entries) {
+    const ref = parseDependencyRef(entry);
+    if (ref === null) {
+      return { ok: false, message: `Việc ${position} có mục phụ thuộc không hợp lệ.` };
+    }
+    refs.push(ref);
+  }
+  return { ok: true, value: refs };
+}
+
+/** A row the board sent back, after its own checks. Its dependencies are checked against the rest. */
+interface CheckedRow {
+  readonly text: string;
+  readonly assignee: WorkItemAssignee;
+  readonly priority: number;
+  readonly acceptance?: string;
+  readonly dependsOn: readonly DependencyRef[];
+}
+
+function parseSquadRow(entry: unknown, index: number): Checked<CheckedRow> {
+  const position = index + 1;
+  if (!isRecord(entry)) return { ok: false, message: `Việc ${position} không hợp lệ.` };
+  const text = typeof entry['text'] === 'string' ? entry['text'].trim() : '';
+  const refusal = refuseText(text);
+  if (refusal === 'empty_text') {
+    return { ok: false, message: `Việc ${position} không có nội dung.` };
+  }
+  if (refusal === 'prompt_too_large') {
+    return { ok: false, message: `Việc ${position} quá dài.` };
+  }
+  const assignee = entry['assignee'];
+  if (!isWorkItemAssignee(assignee)) {
+    return { ok: false, message: `Việc ${position} có người nhận không hợp lệ.` };
+  }
+  const rawPriority = entry['priority'];
+  if (rawPriority !== undefined && !isWorkItemPriority(rawPriority)) {
+    return {
+      ok: false,
+      message: `Việc ${position} có độ ưu tiên không hợp lệ, cần từ 0 đến ${WORK_ITEM_PRIORITY_MAX}.`,
+    };
+  }
+  const acceptance = checkAcceptance(entry['acceptance'], position);
+  if (!acceptance.ok) return acceptance;
+  const dependsOn = parseRowDependsOn(entry['dependsOn'], position);
+  if (!dependsOn.ok) return dependsOn;
+  return {
+    ok: true,
+    value: {
+      text,
+      assignee: normalizeAssignee(assignee),
+      priority: isWorkItemPriority(rawPriority) ? rawPriority : WORK_ITEM_PRIORITY_DEFAULT,
+      ...(acceptance.value === undefined ? {} : { acceptance: acceptance.value }),
+      dependsOn: dependsOn.value,
+    },
+  };
+}
+
+/**
+ * Checks one row's dependencies against its proposal: at most {@link WORK_ITEM_DEPENDS_MAX}, no
+ * repeats, no row outside the proposal or the row itself, and only items `isOpen` accepts. `index`
+ * is the row's 0-based position and `count` the rows in the proposal. Returns the refusal, or null.
+ */
+function refuseRefs(
+  refs: readonly DependencyRef[],
+  position: number,
+  index: number,
+  count: number,
+  isOpen: (sequence: number) => boolean,
+): string | null {
+  if (refs.length > WORK_ITEM_DEPENDS_MAX) {
+    return `Việc ${position} chờ quá ${WORK_ITEM_DEPENDS_MAX} việc, tối đa ${WORK_ITEM_DEPENDS_MAX}.`;
+  }
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    if (ref.kind === 'row') {
+      if (ref.row < 0 || ref.row >= count) {
+        return `Việc ${position} chờ việc ${ref.row + 1}, nhưng đề xuất chỉ có ${count} việc.`;
+      }
+      if (ref.row === index) return `Việc ${position} không thể chờ chính nó.`;
+    } else if (!isOpen(ref.sequence)) {
+      return `Việc ${position} chờ "#${ref.sequence}", nhưng đó không phải việc đang mở.`;
+    }
+    const key = ref.kind === 'row' ? `row:${ref.row}` : `item:${ref.sequence}`;
+    if (seen.has(key)) return `Việc ${position} chờ cùng một việc hai lần.`;
+    seen.add(key);
+  }
+  return null;
+}
+
+/**
+ * The loop message when rows wait for each other in a cycle, or null. `dependencies[i]` is what
+ * row i waits for.
+ */
+function refuseLoop(dependencies: readonly (readonly DependencyRef[])[]): string | null {
+  const rows = dependencies.map((_, index) => index);
+  const cyclic = graphHasCycle(rows, (index) =>
+    (dependencies[index] ?? []).flatMap((ref) => (ref.kind === 'row' ? [ref.row] : [])),
+  );
+  return cyclic ? 'Các việc trong đề xuất chờ nhau thành vòng lặp.' : null;
 }
 
 function resolveAssignee(
@@ -599,16 +972,28 @@ function teamLines(members: readonly SquadMember[]): string[] {
 function itemLines(items: readonly LeaderItemView[]): string[] {
   if (items.length === 0) return ['(none yet)'];
   return items.flatMap((item) => {
-    const head = `- [${item.status}] ${clip(item.text, SQUAD_CONTEXT_TEXT_MAX_CHARS)} · assigned to ${item.assignee}`;
-    return item.result === undefined ? [head] : [head, `  result: ${item.result}`];
+    const lines = [
+      `- #${item.sequence} [${item.status}] ${clip(item.text, SQUAD_CONTEXT_TEXT_MAX_CHARS)} · assigned to ${item.assignee}`,
+    ];
+    if (isOpenItemStatus(item.status)) {
+      lines.push(`  priority ${priorityLabel(item.priority)}`);
+      if (item.acceptance !== undefined) lines.push(`  done when: ${item.acceptance}`);
+      if (item.dependsOn.length > 0) {
+        lines.push(`  waits for: ${item.dependsOn.map((sequence) => `#${sequence}`).join(', ')}`);
+      }
+    }
+    if (item.result !== undefined) lines.push(`  result: ${item.result}`);
+    return lines;
   });
 }
 
 function reviewLines(reviews: readonly SquadReview[]): string[] {
   if (reviews.length === 0) return ['(none)'];
   return reviews.flatMap((review) => {
-    const head = `- ${clip(review.text, SQUAD_CONTEXT_TEXT_MAX_CHARS)}`;
-    return review.result === undefined ? [head] : [head, `  result: ${review.result}`];
+    const lines = [`- ${clip(review.text, SQUAD_CONTEXT_TEXT_MAX_CHARS)}`];
+    if (review.acceptance !== undefined) lines.push(`  done when: ${review.acceptance}`);
+    if (review.result !== undefined) lines.push(`  result: ${review.result}`);
+    return lines;
   });
 }
 

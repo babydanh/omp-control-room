@@ -6,7 +6,7 @@
 
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardWorkItem } from '../boardView.js';
-import { queueWaitText, statusWordVi, workItemKey } from '../workItemView.js';
+import { blockerChip, priorityBadge, statusWordVi, workItemKey } from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
 
 export interface WorkItemCardProps {
@@ -20,8 +20,8 @@ export interface WorkItemCardProps {
 
 export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCardProps) {
   const updated = relativeTimeVi(card.updatedAt, now);
-  const waiting =
-    card.status === 'queued' ? queueWaitText(card.assignee, card.queuePosition) : null;
+  const badge = priorityBadge(card.priority);
+  const chip = blockerChip(card);
   const needsAttention = card.status === 'needs_input' || card.status === 'failed';
   return (
     <button
@@ -36,6 +36,19 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
       data-index={index}
       className="company-card company-work-card w-full cursor-pointer p-2 text-left"
     >
+      <span className="flex min-w-0 items-center gap-1.5 text-2xs text-text-muted">
+        <span className="shrink-0 tabular-nums" data-testid="work-item-sequence">
+          #{card.sequence}
+        </span>
+        {badge !== null && (
+          <span
+            data-testid="work-item-priority"
+            className={`shrink-0 rounded-full bg-well px-1.5 font-medium ${badge === 'P0' ? 'text-danger' : 'text-warning'}`}
+          >
+            {badge}
+          </span>
+        )}
+      </span>
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         {card.head === '' ? 'Việc chưa có nội dung' : card.head}
       </span>
@@ -44,6 +57,14 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
         <span className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5 text-text">
           {card.assignee}
         </span>
+        {chip !== null && (
+          <span
+            data-testid="work-item-blocker"
+            className={`min-w-0 max-w-full truncate rounded-full bg-well px-1.5 ${chip.tone === 'danger' ? 'text-danger' : 'text-text-muted'}`}
+          >
+            {chip.text}
+          </span>
+        )}
         {card.squadRunId !== null && (
           <span className="shrink-0 rounded-full bg-well px-1.5 text-text">Đội</span>
         )}
@@ -56,7 +77,6 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
           {card.reason}
         </span>
       )}
-      {waiting !== null && <span className="line-clamp-1 text-2xs text-text-muted">{waiting}</span>}
     </button>
   );
 }

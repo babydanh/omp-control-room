@@ -4,11 +4,14 @@
  * are commands the server answers; the card moves only when the server says so.
  */
 
+import type { WorkItemStatus } from '../../../../core/src/messages.js';
 import type { BoardSquad } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
 import {
-  progressLabel,
+  epicChildren,
+  openSequencesOf,
   rowsFromProposal,
+  squadProgressView,
   squadRunKey,
   squadStatusLabel,
   validateRows,
@@ -21,6 +24,16 @@ const APPROVE_FALLBACK = 'Chưa duyệt được đề xuất này.';
 const DISMISS_FALLBACK = 'Chưa bỏ được đề xuất này.';
 const RETRY_FALLBACK = 'Chưa thử lại được việc này.';
 const CARD_HEAD_FALLBACK = 'Đội chưa có nội dung';
+
+/** The tone of each work item status on a child row; the status word is the label. */
+const CHILD_STATUS_TONE: Readonly<Record<WorkItemStatus, string>> = {
+  queued: 'text-text',
+  running: 'text-text',
+  needs_input: 'text-warning',
+  review: 'text-text',
+  done: 'text-text-muted',
+  failed: 'text-danger',
+};
 
 export interface SquadRunCardProps {
   card: BoardSquad;
@@ -37,8 +50,12 @@ export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRun
   const command = useCommandDialog(client);
   const busy = command.pending;
   const proposal = run.status === 'proposed' ? run.proposal : undefined;
-  const verdict = proposal === undefined ? null : validateRows(rowsFromProposal(proposal));
-  const progress = progressLabel(run.progress);
+  const verdict =
+    proposal === undefined
+      ? null
+      : validateRows(rowsFromProposal(proposal), openSequencesOf(card.items));
+  const progress = squadProgressView(run.progress);
+  const children = epicChildren(run, card.items);
   const head = card.head === '' ? CARD_HEAD_FALLBACK : card.head;
   const note = (proposal?.note ?? run.note ?? '').trim();
   const error = run.status === 'failed' ? run.error?.trim() || 'Đội gặp lỗi.' : null;
@@ -81,13 +98,59 @@ export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRun
         <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-2xs text-text-muted">
           <span className="rounded-full bg-well px-1.5 text-text">Đội</span>
           <span className="shrink-0">{squadStatusLabel(run.status)}</span>
-          {progress !== null && <span className="shrink-0 tabular-nums">{progress}</span>}
         </span>
         <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
           {head}
         </span>
       </button>
       {card.folder !== null && <FolderTag identity={card.folder} />}
+      {progress.total > 0 && (
+        <div className="flex min-w-0 items-center gap-2 text-2xs tabular-nums text-text-muted">
+          <span
+            role="progressbar"
+            aria-label="Tiến độ đội"
+            aria-valuemin={0}
+            aria-valuemax={progress.total}
+            aria-valuenow={progress.done}
+            aria-valuetext={`${progress.label} xong`}
+            className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-well"
+          >
+            <span
+              className="block h-full rounded-full bg-accent transition-[width] duration-300 ease-out motion-reduce:transition-none"
+              style={{ width: `${Math.round(progress.fraction * 100)}%` }}
+            />
+          </span>
+          <span className="shrink-0">{progress.label}</span>
+        </div>
+      )}
+      {children.length > 0 && (
+        <ul aria-label="Việc của đội" className="flex flex-col gap-1.5">
+          {children.map((child) => (
+            <li
+              key={child.id}
+              data-testid="squad-child"
+              className="flex min-w-0 flex-col gap-0.5 text-2xs"
+            >
+              <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                <span className="shrink-0 tabular-nums text-text-muted">#{child.sequence}</span>
+                <span
+                  className={`shrink-0 rounded-full bg-well px-1.5 ${CHILD_STATUS_TONE[child.status]}`}
+                >
+                  {child.statusLabel}
+                </span>
+                {child.waits.map((wait, waitIndex) => (
+                  <span key={`${child.id}:${waitIndex}`} className="shrink-0 text-text-muted">
+                    {wait.text}
+                  </span>
+                ))}
+              </span>
+              {child.head !== '' && (
+                <span className="line-clamp-2 break-words text-text">{child.head}</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
       {run.status === 'planning' && (
         <p className="text-2xs text-text-muted motion-safe:animate-pulse">
           Đội trưởng đang xem xét…

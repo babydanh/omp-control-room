@@ -493,9 +493,10 @@ export class CompanyClient {
     workspacePath: string,
     text: string,
     assignee: WorkItemAssignee,
+    options: commands.WorkItemCreateOptions = {},
   ): CompanyCommandHandle {
     return this.command((requestId) =>
-      commands.workItemCreate(requestId, workspacePath, text, assignee),
+      commands.workItemCreate(requestId, workspacePath, text, assignee, options),
     );
   }
 
@@ -533,6 +534,20 @@ export class CompanyClient {
     return this.command((requestId) => commands.workItemCancel(requestId, workspacePath, id));
   }
 
+  /**
+   * Replace the items a queued work item waits for; an empty list clears them. The verdict is a
+   * companyCommandResult.
+   */
+  setWorkItemDependencies(
+    workspacePath: string,
+    id: string,
+    dependsOn: string[],
+  ): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.workItemDependencies(requestId, workspacePath, id, dependsOn),
+    );
+  }
+
   /** Set the description of an agent's role in a folder. The verdict is a companyCommandResult. */
   setAgentRole(
     workspacePath: string,
@@ -550,6 +565,16 @@ export class CompanyClient {
    */
   startSquad(workspacePath: string, text: string): CompanyCommandHandle {
     return this.command((requestId) => commands.squadRequest(requestId, workspacePath, text));
+  }
+
+  /**
+   * Ask a folder's team to plan the next step after a review item. The verdict is a
+   * companyCommandResult under the handle's requestId and names the run in `squadRunId`.
+   */
+  requestSquadFromWorkItem(workspacePath: string, workItemId: string): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.squadRequestFromWorkItem(requestId, workspacePath, workItemId),
+    );
   }
 
   /** Approve a proposal with the rows the drawer sends. The verdict is a companyCommandResult. */

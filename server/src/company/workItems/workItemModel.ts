@@ -17,6 +17,14 @@ import type {
   WorkItemStatus,
   WorkItemVerdict,
 } from '../../../../core/src/messages.js';
+import {
+  closesLoop,
+  composePrompt,
+  isWorkItemPriority,
+  WORK_ITEM_ACCEPTANCE_MAX_CHARS,
+  WORK_ITEM_DEPENDS_MAX,
+  WORK_ITEM_PRIORITY_DEFAULT,
+} from '../../../../core/src/workItemGraph.js';
 import { isHerdrPaneId } from '../../herdr/paneId.js';
 import { isRecord } from '../typeGuards.js';
 
@@ -57,16 +65,26 @@ export const WORK_ITEM_REASON = {
 } as const;
 
 /**
- * A stored item: the wire shape plus the prompt still owed to the agent. The prompt is
- * `item.text` for a fresh or reassigned item, and the follow-up text after "Gửi tiếp".
- * It never leaves the server.
+ * A stored item: the wire shape without the server-computed blocker, plus the prompt still owed to
+ * the agent and the #n of each item it waits for. `waitSequences` keeps the #n of a dependency
+ * that was cancelled, so its dependents can still name it. It never leaves the server as is.
  */
-export type StoredWorkItem = WorkItem & { pendingPrompt: string };
+export type StoredWorkItem = Omit<WorkItem, 'blocker'> & {
+  pendingPrompt: string;
+  waitSequences: Record<string, number>;
+};
 
 /** One work item to create, as the service API takes it. */
 export interface WorkItemDraft {
   text: string;
   assignee: WorkItemAssignee;
+  /** 0–3; absent means P2. */
+  priority?: number;
+  acceptance?: string;
+  /** Ids of existing items this one waits for. */
+  dependsOn?: readonly string[];
+  /** Indexes into the same batch of drafts that this one waits for (squad rows). */
+  dependsOnDrafts?: readonly number[];
 }
 
 /** Where a folder's work items and role notes sit on disk. */
@@ -234,8 +252,13 @@ export function makeEvent(at: string, kind: WorkItemEventKind, message?: string)
 
 /** The wire shape of a stored item: the same fields without the server-only prompt. */
 export function toWorkItem(stored: StoredWorkItem): WorkItem {
-  const wire: Partial<StoredWorkItem> = { ...stored, history: [...stored.history] };
+  const wire: Partial<StoredWorkItem> = {
+    ...stored,
+    history: [...stored.history],
+    dependsOn: [...stored.dependsOn],
+  };
   delete wire.pendingPrompt;
+  delete wire.waitSequences;
   return wire as WorkItem;
 }
 
@@ -266,6 +289,16 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
   if (value.reason !== undefined && typeof value.reason !== 'string') return null;
   if (value.result !== undefined && typeof value.result !== 'string') return null;
   if (value.squadRunId !== undefined && !isUuid(value.squadRunId)) return null;
+  if (value.acceptance !== undefined && typeof value.acceptance !== 'string') return null;
+  // Files from before priorities, waits and criteria read as P2, no waits, no criteria.
+  const priority = value.priority === undefined ? WORK_ITEM_PRIORITY_DEFAULT : value.priority;
+  if (!isWorkItemPriority(priority)) return null;
+  const dependsOn = parseDependsOn(value.dependsOn, value.id);
+  if (dependsOn === null) return null;
+  const acceptance =
+    typeof value.acceptance === 'string'
+      ? clip(value.acceptance.trim(), WORK_ITEM_ACCEPTANCE_MAX_CHARS)
+      : '';
   const history = Array.isArray(value.history)
     ? value.history.map(parseEvent).filter((event): event is WorkItemEvent => event !== null)
     : [];
@@ -275,15 +308,45 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     assignee: normalizeAssignee(value.assignee),
     status: value.status,
     sequence,
+    priority,
+    dependsOn,
+    waitSequences: parseWaitSequences(value.waitSequences, dependsOn),
     createdAt: value.createdAt,
     updatedAt: value.updatedAt,
     history: history.slice(-WORK_ITEM_HISTORY_MAX),
-    pendingPrompt: typeof value.pendingPrompt === 'string' ? value.pendingPrompt : value.text,
+    pendingPrompt:
+      typeof value.pendingPrompt === 'string'
+        ? value.pendingPrompt
+        : composePrompt(value.text, acceptance),
+    ...(acceptance === '' ? {} : { acceptance }),
     ...(typeof value.dispatchedAt === 'string' ? { dispatchedAt: value.dispatchedAt } : {}),
     ...(typeof value.reason === 'string' ? { reason: value.reason } : {}),
     ...(typeof value.result === 'string' ? { result: value.result } : {}),
     ...(typeof value.squadRunId === 'string' ? { squadRunId: value.squadRunId } : {}),
   };
+}
+
+/** Validates a stored dependency list: uuids, no duplicates, no self, at most the cap. */
+function parseDependsOn(value: unknown, selfId: string): string[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > WORK_ITEM_DEPENDS_MAX) return null;
+  const ids: string[] = [];
+  for (const entry of value) {
+    if (!isUuid(entry) || entry === selfId || ids.includes(entry)) return null;
+    ids.push(entry);
+  }
+  return ids;
+}
+
+/** Keeps the stored #n of each listed dependency; a missing one stays unknown and reads as 0. */
+function parseWaitSequences(value: unknown, dependsOn: readonly string[]): Record<string, number> {
+  const waits: Record<string, number> = {};
+  if (!isRecord(value)) return waits;
+  for (const id of dependsOn) {
+    const sequence = nonNegativeInt(value[id]);
+    if (sequence !== null) waits[id] = sequence;
+  }
+  return waits;
 }
 
 /** Validates one stored role note. */
@@ -339,6 +402,13 @@ export function parseWorkItemsFile(raw: unknown): ParsedWorkItems {
       continue;
     }
     roles.push(role);
+  }
+  // A loop from an older build could never be sent: its items would wait on each other forever.
+  const byId = new Map(items.map((item) => [item.id, item]));
+  for (const item of items) {
+    if (!closesLoop(item.id, item.dependsOn, (id) => byId.get(id)?.dependsOn)) continue;
+    item.dependsOn = [];
+    item.waitSequences = {};
   }
   const highest = items.reduce((max, item) => Math.max(max, item.sequence), -1);
   const revision = nonNegativeInt(raw.revision) ?? 0;

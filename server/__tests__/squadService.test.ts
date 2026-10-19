@@ -10,9 +10,11 @@ import type {
   WorkItem,
   WorkItemStatus,
 } from '../../core/src/messages.js';
+import { WORK_ITEM_PRIORITY_DEFAULT } from '../../core/src/workItemGraph.js';
 import { CompanyError } from '../src/company/companyError.js';
 import {
   emptySquadFile,
+  isOpenItemStatus,
   type ParsedSquadFile,
   SQUAD_MAX_TURNS,
   type SquadFile,
@@ -70,29 +72,70 @@ class FakeWorkItems implements SquadWorkItems {
     };
   }
 
+  get(id: string): WorkItem | undefined {
+    const item = this.items.find((entry) => entry.id === id);
+    return item === undefined ? undefined : structuredClone(item);
+  }
+
+  findOpen(sequence: number): WorkItem | undefined {
+    const item = this.items.find(
+      (entry) => entry.sequence === sequence && isOpenItemStatus(entry.status),
+    );
+    return item === undefined ? undefined : structuredClone(item);
+  }
+
+  /** Creates a batch as the work item service does: every id is minted before any wait is mapped. */
   async createWorkItems(
     drafts: readonly WorkItemDraft[],
     options: { squadRunId: string },
   ): Promise<string[]> {
     this.creates.push({ drafts: [...drafts], squadRunId: options.squadRunId });
-    const ids = drafts.map((draft) => {
+    const ids = drafts.map(() => randomUUID());
+    const idOf = (position: number): string => {
+      const id = ids[position];
+      if (id === undefined) throw new Error(`no draft ${position}`);
+      return id;
+    };
+    drafts.forEach((draft, index) => {
       this.sequence += 1;
-      const id = randomUUID();
       this.items.push({
-        id,
+        id: idOf(index),
         text: draft.text,
         assignee: draft.assignee,
         status: 'queued',
         sequence: this.sequence,
+        priority: draft.priority ?? WORK_ITEM_PRIORITY_DEFAULT,
+        ...(draft.acceptance === undefined ? {} : { acceptance: draft.acceptance }),
+        dependsOn: [...(draft.dependsOn ?? []), ...(draft.dependsOnDrafts ?? []).map(idOf)],
         squadRunId: options.squadRunId,
         createdAt: AT,
         updatedAt: AT,
         history: [],
       });
-      return id;
     });
     this.notifyChange();
     return ids;
+  }
+
+  /** A manual item, as the board makes one: queued, with no squad run. */
+  addManual(text: string, acceptance?: string): string {
+    this.sequence += 1;
+    const id = randomUUID();
+    this.items.push({
+      id,
+      text,
+      assignee: { kind: 'new-session' },
+      status: 'queued',
+      sequence: this.sequence,
+      priority: WORK_ITEM_PRIORITY_DEFAULT,
+      ...(acceptance === undefined ? {} : { acceptance }),
+      dependsOn: [],
+      createdAt: AT,
+      updatedAt: AT,
+      history: [],
+    });
+    this.notifyChange();
+    return id;
   }
 
   onChange(listener: () => void): () => void {
@@ -283,6 +326,8 @@ describe('SquadService requests', () => {
         text: 'Viết form đăng nhập',
         assignee: { kind: 'herdr', paneId: 'wA:p1' },
         reason: 'Lý do',
+        priority: WORK_ITEM_PRIORITY_DEFAULT,
+        dependsOn: [],
       },
     ]);
     expect(run?.proposal?.status).toBe('pending');
@@ -506,5 +551,243 @@ describe('SquadService restart', () => {
     const restarted = h.createService();
     await restarted.load();
     expect(restarted.snapshot().runs[0]?.status).toBe('working');
+  });
+});
+
+describe('SquadService requests from a finished item', () => {
+  it('refuses a request that has both text and an item, or neither', async () => {
+    const h = new Harness();
+    const id = h.workItems.addManual('Việc');
+    h.workItems.review(id, h.stamp(), 'Xong');
+    const both = await rejectionOf(
+      h.service.request({ requestId: randomUUID(), text: 'Làm', fromWorkItemId: id }),
+    );
+    expect((both as CompanyError).code).toBe('invalid_request');
+    const neither = await rejectionOf(h.service.request({ requestId: randomUUID() }));
+    expect((neither as CompanyError).code).toBe('invalid_request');
+    expect(h.service.snapshot().runs).toHaveLength(0);
+  });
+
+  it('refuses an item the board does not have', async () => {
+    const h = new Harness();
+    const refused = await rejectionOf(
+      h.service.request({ requestId: randomUUID(), fromWorkItemId: randomUUID() }),
+    );
+    expect((refused as CompanyError).code).toBe('work_item_not_found');
+  });
+
+  it('refuses an item that is not in review, or that a squad already made', async () => {
+    const h = new Harness();
+    const queued = h.workItems.addManual('Việc chưa xong');
+    const notReview = await rejectionOf(
+      h.service.request({ requestId: randomUUID(), fromWorkItemId: queued }),
+    );
+    expect((notReview as CompanyError).code).toBe('work_item_status');
+
+    const { runId, proposalId } = await approvedRun(h, 'Viết form');
+    h.leader.reply(DONE_REPLY);
+    const [squadItem] = h.itemsOf(proposalId);
+    if (squadItem === undefined) throw new Error('no item');
+    h.workItems.review(squadItem.id, h.stamp(), 'Xong');
+    await waitFor(() => h.runOf(runId)?.status === 'done');
+    const fromSquad = await rejectionOf(
+      h.service.request({ requestId: randomUUID(), fromWorkItemId: squadItem.id }),
+    );
+    expect((fromSquad as CompanyError).code).toBe('work_item_status');
+  });
+
+  it('starts a run from a finished item: its text, done-when line, and result', async () => {
+    const h = new Harness();
+    const id = h.workItems.addManual('Viết form đăng nhập', 'Có test form');
+    h.workItems.review(id, h.stamp(), 'Đã viết');
+    h.leader.reply(proposal('Viết test cho form'));
+    const runId = await h.service.request({ requestId: randomUUID(), fromWorkItemId: id });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    expect(h.runOf(runId)?.request).toBe(
+      'Viết form đăng nhập\n\nXong khi: Có test form\n\nKết quả:\nĐã viết',
+    );
+    expect(h.leader.prompts[0]).toContain('Xong khi: Có test form');
+  });
+});
+
+describe('SquadService waits and priorities', () => {
+  it('creates a row that waits for an open item by its id and a later row by its position', async () => {
+    const h = new Harness();
+    const openId = h.workItems.addManual('Việc đang mở');
+    h.leader.reply(proposal('Việc mới'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    const current = h.runOf(runId)?.proposal;
+    if (current === undefined) throw new Error('no proposal');
+    await h.service.approve({
+      requestId: randomUUID(),
+      runId,
+      proposalId: current.id,
+      rows: [
+        {
+          text: 'Việc một',
+          assignee: { kind: 'new-session' },
+          priority: 0,
+          acceptance: 'Có test',
+          dependsOn: [{ kind: 'item', sequence: 1 }],
+        },
+        {
+          text: 'Việc hai',
+          assignee: { kind: 'new-session' },
+          dependsOn: [{ kind: 'row', row: 0 }],
+        },
+      ],
+    });
+    const [first, second] = h.itemsOf(current.id);
+    expect(first?.priority).toBe(0);
+    expect(first?.acceptance).toBe('Có test');
+    expect(first?.dependsOn).toEqual([openId]);
+    expect(second?.priority).toBe(WORK_ITEM_PRIORITY_DEFAULT);
+    expect(second?.dependsOn).toEqual([first?.id]);
+    expect(h.runOf(runId)?.proposal?.rows).toEqual([
+      {
+        text: 'Việc một',
+        assignee: { kind: 'new-session' },
+        priority: 0,
+        acceptance: 'Có test',
+        dependsOn: [{ kind: 'item', sequence: 1 }],
+      },
+      {
+        text: 'Việc hai',
+        assignee: { kind: 'new-session' },
+        priority: WORK_ITEM_PRIORITY_DEFAULT,
+        dependsOn: [{ kind: 'row', row: 0 }],
+      },
+    ]);
+  });
+
+  it('refuses an approval that waits for an item that is not open, or for a loop', async () => {
+    const h = new Harness();
+    h.leader.reply(proposal('Việc'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    const proposalId = h.runOf(runId)?.proposal?.id ?? '';
+    const unknown = await rejectionOf(
+      h.service.approve({
+        requestId: randomUUID(),
+        runId,
+        proposalId,
+        rows: [
+          {
+            text: 'Việc',
+            assignee: { kind: 'new-session' },
+            dependsOn: [{ kind: 'item', sequence: 9 }],
+          },
+        ],
+      }),
+    );
+    expect((unknown as CompanyError).code).toBe('squad_rows_invalid');
+    expect((unknown as CompanyError).message).toContain('#9');
+    const loop = await rejectionOf(
+      h.service.approve({
+        requestId: randomUUID(),
+        runId,
+        proposalId,
+        rows: [
+          { text: 'A', assignee: { kind: 'new-session' }, dependsOn: [{ kind: 'row', row: 1 }] },
+          { text: 'B', assignee: { kind: 'new-session' }, dependsOn: [{ kind: 'row', row: 0 }] },
+        ],
+      }),
+    );
+    expect((loop as CompanyError).code).toBe('squad_rows_invalid');
+    expect(h.workItems.creates).toHaveLength(0);
+  });
+
+  it('answers a resent approval whose wait is no longer open, without creating again', async () => {
+    const h = new Harness();
+    const openId = h.workItems.addManual('Việc đang mở');
+    h.leader.reply(proposal('Việc'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    const current = h.runOf(runId)?.proposal;
+    if (current === undefined) throw new Error('no proposal');
+    const rows = [
+      {
+        text: 'Việc',
+        assignee: { kind: 'new-session' },
+        dependsOn: [{ kind: 'item', sequence: 1 }],
+      },
+    ];
+    await h.service.approve({ requestId: randomUUID(), runId, proposalId: current.id, rows });
+    h.workItems.setStatus(openId, 'done');
+    await h.service.approve({ requestId: randomUUID(), runId, proposalId: current.id, rows });
+    expect(h.workItems.creates).toHaveLength(1);
+  });
+
+  it('fails the turn when the leader waits for an item that is not open, or sets a bad priority', async () => {
+    const h = new Harness();
+    h.leader.reply(
+      JSON.stringify({
+        assignments: [{ assignee: 'herdr:wA:p1', text: 'Làm', dependsOn: ['#9'] }],
+        note: '',
+        done: false,
+      }),
+    );
+    const first = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(first)?.status === 'failed');
+    expect(h.runOf(first)?.error).toContain('#9');
+
+    h.leader.reply(
+      JSON.stringify({
+        assignments: [{ assignee: 'herdr:wA:p1', text: 'Làm', priority: 4 }],
+        note: '',
+        done: false,
+      }),
+    );
+    const second = await h.service.request({ requestId: randomUUID(), text: 'Làm khác' });
+    await waitFor(() => h.runOf(second)?.status === 'failed');
+    expect(h.runOf(second)?.error).toContain('độ ưu tiên');
+  });
+
+  it('lets the leader wait for an open item of this run in a later turn', async () => {
+    const h = new Harness();
+    const { runId, proposalId } = await approvedRun(h, 'Viết form đăng nhập');
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    expect(item.sequence).toBe(1);
+    h.leader.reply(
+      JSON.stringify({
+        assignments: [{ assignee: 'herdr:wA:p1', text: 'Viết test', dependsOn: ['#1'] }],
+        note: '',
+        done: false,
+      }),
+    );
+    h.workItems.review(item.id, h.stamp(), 'Form đã xong');
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    expect(h.runOf(runId)?.proposal?.rows[0]?.dependsOn).toEqual([{ kind: 'item', sequence: 1 }]);
+  });
+
+  it('shows the done-when text of a finished item to the leader with its result', async () => {
+    const h = new Harness();
+    h.leader.reply(proposal('Viết form'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    const current = h.runOf(runId)?.proposal;
+    if (current === undefined) throw new Error('no proposal');
+    await h.service.approve({
+      requestId: randomUUID(),
+      runId,
+      proposalId: current.id,
+      rows: [
+        {
+          text: 'Viết form',
+          assignee: { kind: 'herdr', paneId: 'wA:p1' },
+          acceptance: 'Có test form',
+          dependsOn: [],
+        },
+      ],
+    });
+    const [item] = h.itemsOf(current.id);
+    if (item === undefined) throw new Error('no item');
+    h.leader.reply(DONE_REPLY);
+    h.workItems.review(item.id, h.stamp(), 'Form đã xong');
+    await waitFor(() => h.runOf(runId)?.status === 'done');
+    expect(h.leader.prompts[1]).toContain('done when: Có test form');
+    expect(h.leader.prompts[1]).toContain('result: Form đã xong');
   });
 });

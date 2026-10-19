@@ -65,7 +65,7 @@ import { useElementWidth } from '../useElementWidth.js';
 import { useFlightLayout } from '../useFlightLayout.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useNow } from '../useNow.js';
-import { workItemKey,type WorkItemRef } from '../workItemView.js';
+import { queueOrder, workItemKey, type WorkItemRef } from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
 import { Icon } from './Icon.js';
 import { SquadRunCard } from './SquadRunCard.js';
@@ -469,6 +469,7 @@ export function CompanyBoard({
 
   function renderLane(view: LaneView, fill: boolean, style?: CSSProperties) {
     const { lane, drafts, count } = view;
+    const workItemCards = lane.id === 'ready' ? queueOrder(lane.workItems) : lane.workItems;
     return (
       <section
         key={lane.id}
@@ -513,7 +514,7 @@ export function CompanyBoard({
                 folder={identityOf(card.taskId)}
               />
             ))}
-            {lane.workItems.map((card, index) => (
+            {workItemCards.map((card, index) => (
               <WorkItemCard
                 key={workItemKey(card)}
                 card={card}

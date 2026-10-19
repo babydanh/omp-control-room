@@ -14,9 +14,16 @@ import type {
   AgentRole,
   WorkItem,
   WorkItemAssignee,
+  WorkItemBlocker,
   WorkItemEventKind,
   WorkItemStatus,
 } from '../../../core/src/messages.js';
+import {
+  checkDependsOn,
+  compareQueue,
+  type DependsOnRefusal,
+  WORK_ITEM_DEPENDS_MAX,
+} from '../../../core/src/workItemGraph.js';
 import type { CompanyViewState, SessionView } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
 import { FOLDER_TONE_COUNT, type FolderIdentity, showsAllFolders } from './folderIdentity.js';
@@ -160,6 +167,156 @@ export function queuePosition(item: WorkItem, items: readonly WorkItem[]): numbe
 export function queueWaitText(assigneeName: string, position: number): string {
   const wait = `Chờ ${assigneeName} rảnh`;
   return position > 1 ? `${wait} · thứ ${position} trong hàng` : wait;
+}
+
+const OPEN_STATUSES: readonly WorkItemStatus[] = ['queued', 'running', 'needs_input', 'review'];
+
+/** Whether a status leaves an item open: queued, running, waiting for the user, or in review. */
+export function isOpenWorkItem(status: WorkItemStatus): boolean {
+  return OPEN_STATUSES.includes(status);
+}
+
+/** The badge a card shows for a priority: P0 and P1 only. P2 and P3 are left plain. */
+export function priorityBadge(priority: number): 'P0' | 'P1' | null {
+  if (priority === 0) return 'P0';
+  if (priority === 1) return 'P1';
+  return null;
+}
+
+/** A chip a card shows: its words and how loud they are. */
+export interface WorkItemChip {
+  text: string;
+  tone: 'muted' | 'danger';
+}
+
+/**
+ * The chip for why a queued item is held: `Chờ agent rảnh`, `Chờ việc #n xong`, or `Việc #n bị
+ * lỗi`. Null when nothing holds the item.
+ */
+export function blockerChip(item: {
+  readonly blocker?: WorkItemBlocker | null;
+}): WorkItemChip | null {
+  const blocker = item.blocker;
+  if (blocker === undefined || blocker === null) return null;
+  if (blocker.kind === 'agent') return { text: 'Chờ agent rảnh', tone: 'muted' };
+  if (blocker.kind === 'dependency') {
+    const text =
+      blocker.sequence === undefined ? 'Chờ việc khác xong' : `Chờ việc #${blocker.sequence} xong`;
+    return { text, tone: 'muted' };
+  }
+  const text =
+    blocker.sequence === undefined ? 'Có việc bị lỗi' : `Việc #${blocker.sequence} bị lỗi`;
+  return { text, tone: 'danger' };
+}
+
+/**
+ * The queued items in the order they run: higher priority first, then creation order. The
+ * Sẵn sàng lane shows them this way. Returns a new array; the input keeps its order.
+ */
+export function queueOrder<
+  T extends {
+    readonly status: WorkItemStatus;
+    readonly priority: number;
+    readonly sequence: number;
+  },
+>(items: readonly T[]): T[] {
+  return items.filter((entry) => entry.status === 'queued').sort(compareQueue);
+}
+
+/** One item a work item waits for, as the drawer and the editor show it. */
+export interface WaitingOn {
+  id: string;
+  /** The dependency's #n; null when the folder no longer holds it. */
+  sequence: number | null;
+  /** The dependency's heading; empty when the folder no longer holds it. */
+  text: string;
+  /** The dependency's status; `removed` when the folder no longer holds it. */
+  status: WorkItemStatus | 'removed';
+}
+
+/** Orders by #n, with an item the folder no longer holds (no #n) last. */
+function bySequence(
+  left: { readonly sequence: number | null },
+  right: { readonly sequence: number | null },
+): number {
+  return (left.sequence ?? Number.MAX_SAFE_INTEGER) - (right.sequence ?? Number.MAX_SAFE_INTEGER);
+}
+
+/**
+ * The items a work item waits for, in #n order. A dependency the folder no longer holds stays in
+ * the list as `removed`, so the editor can clear it; the server treats it as failed.
+ */
+export function waitingOn(
+  item: { readonly dependsOn: readonly string[] },
+  items: readonly WorkItem[],
+): WaitingOn[] {
+  const byId = new Map(items.map((entry) => [entry.id, entry] as const));
+  return item.dependsOn
+    .map((id): WaitingOn => {
+      const dependency = byId.get(id);
+      if (dependency === undefined) return { id, sequence: null, text: '', status: 'removed' };
+      return {
+        id,
+        sequence: dependency.sequence,
+        text: workItemCardHead(dependency.text),
+        status: dependency.status,
+      };
+    })
+    .sort(bySequence);
+}
+
+/** A dependency as one line: `#2 Dựng khung · Xong`, or `Việc đã bị gỡ` when the folder lost it. */
+export function waitingOnLabel(entry: WaitingOn): string {
+  if (entry.sequence === null || entry.status === 'removed') return 'Việc đã bị gỡ';
+  const head = entry.text === '' ? 'Việc chưa có nội dung' : entry.text;
+  return `#${entry.sequence} ${head} · ${statusWordVi(entry.status)}`;
+}
+
+/**
+ * The rows a wait-list editor offers a queued item: every other open item in the folder, plus each
+ * item it already waits for, even a closed or removed one, so saving never drops one silently.
+ */
+export function dependencyChoices(item: WorkItem, items: readonly WorkItem[]): WaitingOn[] {
+  const current = waitingOn(item, items);
+  const held = new Set(current.map((entry) => entry.id));
+  const offered: WaitingOn[] = items
+    .filter((entry) => entry.id !== item.id && !held.has(entry.id) && isOpenWorkItem(entry.status))
+    .map((entry) => ({
+      id: entry.id,
+      sequence: entry.sequence,
+      text: workItemCardHead(entry.text),
+      status: entry.status,
+    }));
+  return [...current, ...offered].sort(bySequence);
+}
+
+/**
+ * The refusal for a wait list the editor is about to save, or null when it is acceptable. It runs
+ * the server's own check, so the editor says why before it asks.
+ */
+export function dependencyRefusal(
+  item: { readonly id: string },
+  nextIds: readonly string[],
+  items: readonly WorkItem[],
+): DependsOnRefusal | null {
+  const dependsOnById = new Map(items.map((entry) => [entry.id, entry.dependsOn] as const));
+  return checkDependsOn(item.id, nextIds, (id) => dependsOnById.get(id));
+}
+
+/** The sentence the editor shows for a refused wait list. */
+export function dependencyRefusalText(refusal: DependsOnRefusal): string {
+  switch (refusal) {
+    case 'too_many':
+      return `Một việc chỉ có thể chờ tối đa ${WORK_ITEM_DEPENDS_MAX} việc.`;
+    case 'duplicate':
+      return 'Có việc được chọn hai lần.';
+    case 'self':
+      return 'Việc không thể chờ chính nó.';
+    case 'unknown':
+      return 'Có việc chờ không còn trong thư mục này. Hãy bỏ chọn việc đó.';
+    case 'cycle':
+      return 'Việc được chọn đang chờ lại việc này, tạo thành vòng chờ.';
+  }
 }
 
 /**

@@ -1,8 +1,9 @@
 /**
  * AssignWorkDialog: gives a piece of work to an agent. The parent sends the command and reads its
- * verdict; this dialog only gathers the text and the assignee. A fixed assignee is named rather
+ * verdict; this dialog only gathers the text, the assignee and, when new work is filed, its
+ * schedule: priority, acceptance and the open items it waits for. A fixed assignee is named rather
  * than picked, and a text that may not change is shown read-only (reassigning a work item keeps
- * its text). Escape closes the dialog; Ctrl/Cmd+Enter submits it.
+ * its text and schedule). Escape closes the dialog; Ctrl/Cmd+Enter submits it.
  */
 
 import {
@@ -14,9 +15,23 @@ import {
 } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { WorkItemAssignee } from '../../../../core/src/messages.js';
+import type { WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
+import {
+  priorityLabel,
+  WORK_ITEM_ACCEPTANCE_MAX_CHARS,
+  WORK_ITEM_DEPENDS_MAX,
+  WORK_ITEM_PRIORITY_DEFAULT,
+} from '../../../../core/src/workItemGraph.js';
 import { assigneeKeyOf, type AssigneeOption } from '../assigneeOptions.js';
+import type { WorkItemCreateOptions } from '../companyMessages.js';
+import { openItemsOf, PRIORITY_CHOICES, waitItemLabel } from '../squadView.js';
 import { CompanyButton } from './CompanyButton.js';
+
+/** What new work carries beyond its assignee and text. */
+export interface AssignScheduling {
+  /** Every item of the folder; the wait list offers the open ones, by #n. */
+  openItems: readonly WorkItem[];
+}
 
 export interface AssignWorkDialogProps {
   title: string;
@@ -29,11 +44,17 @@ export interface AssignWorkDialogProps {
   /** Preselected in the picker when it is among the options. */
   currentAssignee?: WorkItemAssignee;
   options: AssigneeOption[];
+  /**
+   * Set when new work is filed: the dialog then offers priority, acceptance and a wait list. A
+   * reassignment leaves it unset, so the item keeps its own schedule.
+   */
+  scheduling?: AssignScheduling;
   /** True while the parent waits for the server's verdict; the submit is then disabled. */
   pending?: boolean;
   /** The reason the last submit was refused, shown in the dialog; null when there is none. */
   notice?: string | null;
-  onSubmit(assignee: WorkItemAssignee, text: string): void;
+  /** Sends the assignee and text, and the schedule when the dialog offered one. */
+  onSubmit(assignee: WorkItemAssignee, text: string, options?: WorkItemCreateOptions): void;
   onClose(): void;
 }
 
@@ -47,6 +68,7 @@ export function AssignWorkDialog({
   fixedAssignee,
   currentAssignee,
   options,
+  scheduling,
   pending = false,
   notice = null,
   onSubmit,
@@ -56,6 +78,9 @@ export function AssignWorkDialog({
   const [selectedKey, setSelectedKey] = useState<string | null>(() =>
     currentAssignee === undefined ? null : assigneeKeyOf(currentAssignee),
   );
+  const [priority, setPriority] = useState<number>(WORK_ITEM_PRIORITY_DEFAULT);
+  const [acceptance, setAcceptance] = useState('');
+  const [waitIds, setWaitIds] = useState<string[]>([]);
   const [opener] = useState<Element | null>(() => document.activeElement);
   const dialogRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLTextAreaElement>(null);
@@ -63,7 +88,12 @@ export function AssignWorkDialog({
   const trimmed = text.trim();
   const picked = options.find((option) => option.key === selectedKey) ?? null;
   const assignee: WorkItemAssignee | null = fixedAssignee ?? picked?.assignee ?? null;
-  const canSubmit = trimmed !== '' && assignee !== null && !pending;
+  const waitItems: WorkItem[] = scheduling === undefined ? [] : openItemsOf(scheduling.openItems);
+  // Only ids the folder still holds as open items can be waited for; a closed one is dropped.
+  const dependsOn = waitIds.filter((id) => waitItems.some((item) => item.id === id));
+  const acceptanceText = acceptance.trim();
+  const acceptanceTooLong = Array.from(acceptanceText).length > WORK_ITEM_ACCEPTANCE_MAX_CHARS;
+  const canSubmit = trimmed !== '' && assignee !== null && !pending && !acceptanceTooLong;
 
   // The text takes the focus when it can change; otherwise the dialog does, so Escape reaches it.
   useEffect(() => {
@@ -83,7 +113,22 @@ export function AssignWorkDialog({
 
   function submit(): void {
     if (assignee === null || !canSubmit) return;
-    onSubmit(assignee, trimmed);
+    if (scheduling === undefined) {
+      onSubmit(assignee, trimmed);
+      return;
+    }
+    onSubmit(assignee, trimmed, {
+      priority,
+      acceptance: acceptanceText === '' ? undefined : acceptanceText,
+      dependsOn,
+    });
+  }
+
+  function toggleWait(id: string): void {
+    setWaitIds((current) => {
+      if (current.includes(id)) return current.filter((entry) => entry !== id);
+      return current.length >= WORK_ITEM_DEPENDS_MAX ? current : [...current, id];
+    });
   }
 
   function onKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
@@ -153,52 +198,136 @@ export function AssignWorkDialog({
             {title}
           </h2>
           <form onSubmit={onFormSubmit} className="flex min-h-0 flex-col gap-3">
-            {textEditable ? (
-              <label className="flex flex-col gap-1 text-text-muted">
-                Nội dung việc
-                <textarea
-                  ref={textRef}
-                  value={text}
-                  rows={4}
-                  disabled={pending}
-                  onChange={(event) => setText(event.target.value)}
-                  className="resize-y rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted"
-                />
-              </label>
-            ) : (
-              <div className="flex flex-col gap-1 text-text-muted">
-                Nội dung việc
-                <p className="max-h-40 overflow-y-auto rounded-(--company-radius-sm) bg-well px-2 py-1.5 whitespace-pre-wrap break-words text-text">
-                  {text}
-                </p>
-              </div>
-            )}
-            {fixedAssignee === undefined ? (
-              <div className="flex min-h-0 flex-col gap-1">
-                <p id="assign-work-picker" className="text-text-muted">
-                  Giao cho
-                </p>
-                <div
-                  role="group"
-                  aria-labelledby="assign-work-picker"
-                  className="flex max-h-56 flex-col gap-2 overflow-y-auto"
-                >
-                  {hasAgents ? null : <p className="px-2 text-text-muted">{NO_AGENT_TEXT}</p>}
-                  {groups.map((group) => (
-                    <div key={group.heading} className="flex flex-col gap-0.5">
-                      <p className="px-2 text-2xs text-text-muted">{group.heading}</p>
-                      {group.rows.map(renderRow)}
-                    </div>
-                  ))}
-                  <div className="flex flex-col gap-0.5">{newRows.map(renderRow)}</div>
+            <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+              {textEditable ? (
+                <label className="flex flex-col gap-1 text-text-muted">
+                  Nội dung việc
+                  <textarea
+                    ref={textRef}
+                    value={text}
+                    rows={4}
+                    disabled={pending}
+                    onChange={(event) => setText(event.target.value)}
+                    className="resize-y rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted"
+                  />
+                </label>
+              ) : (
+                <div className="flex flex-col gap-1 text-text-muted">
+                  Nội dung việc
+                  <p className="max-h-40 overflow-y-auto rounded-(--company-radius-sm) bg-well px-2 py-1.5 whitespace-pre-wrap break-words text-text">
+                    {text}
+                  </p>
                 </div>
-              </div>
-            ) : null}
-            {notice ? (
-              <p role="alert" className="text-danger">
-                {notice}
-              </p>
-            ) : null}
+              )}
+              {fixedAssignee === undefined ? (
+                <div className="flex min-h-0 flex-col gap-1">
+                  <p id="assign-work-picker" className="text-text-muted">
+                    Giao cho
+                  </p>
+                  <div
+                    role="group"
+                    aria-labelledby="assign-work-picker"
+                    className="flex max-h-56 flex-col gap-2 overflow-y-auto"
+                  >
+                    {hasAgents ? null : <p className="px-2 text-text-muted">{NO_AGENT_TEXT}</p>}
+                    {groups.map((group) => (
+                      <div key={group.heading} className="flex flex-col gap-0.5">
+                        <p className="px-2 text-2xs text-text-muted">{group.heading}</p>
+                        {group.rows.map(renderRow)}
+                      </div>
+                    ))}
+                    <div className="flex flex-col gap-0.5">{newRows.map(renderRow)}</div>
+                  </div>
+                </div>
+              ) : null}
+              {scheduling === undefined ? null : (
+                <>
+                  <div className="flex flex-col gap-1">
+                    <p id="assign-work-priority" className="text-text-muted">
+                      Độ ưu tiên
+                    </p>
+                    <div
+                      role="group"
+                      aria-labelledby="assign-work-priority"
+                      className="flex flex-wrap gap-1.5"
+                    >
+                      {PRIORITY_CHOICES.map((choice) => {
+                        const selected = priority === choice;
+                        return (
+                          <button
+                            key={choice}
+                            type="button"
+                            aria-pressed={selected}
+                            disabled={pending}
+                            onClick={() => setPriority(choice)}
+                            className={`touch-target min-w-12 rounded-(--company-radius-sm) px-2 py-1 text-xs disabled:cursor-default ${selected ? 'company-selected text-text' : 'bg-well text-text-muted hover:bg-hover'}`}
+                          >
+                            {priorityLabel(choice)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-2xs text-text-muted">P0 làm trước. Mặc định P2.</p>
+                  </div>
+                  <label className="flex flex-col gap-1 text-text-muted">
+                    Xong khi…
+                    <textarea
+                      value={acceptance}
+                      rows={2}
+                      disabled={pending}
+                      placeholder="Không bắt buộc"
+                      onChange={(event) => setAcceptance(event.target.value)}
+                      className="resize-y rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted"
+                    />
+                  </label>
+                  {acceptanceTooLong ? (
+                    <p role="alert" className="text-danger">
+                      Xong khi dài quá {WORK_ITEM_ACCEPTANCE_MAX_CHARS} ký tự.
+                    </p>
+                  ) : null}
+                  <div className="flex min-h-0 flex-col gap-1">
+                    <p id="assign-work-waits" className="text-text-muted">
+                      Chờ việc…
+                    </p>
+                    <div
+                      role="group"
+                      aria-labelledby="assign-work-waits"
+                      className="flex max-h-40 flex-wrap gap-1.5 overflow-y-auto"
+                    >
+                      {waitItems.length === 0 ? (
+                        <p className="px-2 text-text-muted">Chưa có việc nào đang mở để chờ.</p>
+                      ) : null}
+                      {waitItems.map((item) => {
+                        const selected = dependsOn.includes(item.id);
+                        const full = !selected && dependsOn.length >= WORK_ITEM_DEPENDS_MAX;
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            aria-pressed={selected}
+                            disabled={pending || full}
+                            onClick={() => toggleWait(item.id)}
+                            className={`touch-target max-w-full truncate rounded-(--company-radius-sm) px-2 py-1 text-left text-2xs disabled:cursor-default ${selected ? 'company-selected text-text' : 'bg-well text-text-muted hover:bg-hover'}`}
+                          >
+                            {waitItemLabel(item)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {dependsOn.length >= WORK_ITEM_DEPENDS_MAX ? (
+                      <p className="text-2xs text-text-muted">
+                        Chờ tối đa {WORK_ITEM_DEPENDS_MAX} việc.
+                      </p>
+                    ) : null}
+                  </div>
+                </>
+              )}
+              {notice ? (
+                <p role="alert" className="text-danger">
+                  {notice}
+                </p>
+              ) : null}
+            </div>
             <div className="flex justify-end gap-1">
               <CompanyButton type="button" size="sm" onClick={onClose}>
                 Huỷ

@@ -7,6 +7,9 @@
  * status as herdr and the session report back. Every change is published as a full
  * `companyWorkItems` message and saved to disk.
  *
+ * An item may wait for other items: it is sent only once every one of them is done, and its
+ * priority decides its place in its agent's queue.
+ *
  * The status rules live in `workItemModel.ts`. This module applies them and performs the side
  * effects through the injected ports, so tests run with fakes and no clock or socket.
  *
@@ -21,6 +24,19 @@ import type {
   WorkItemAssignee,
   WorkItemVerdict,
 } from '../../../../core/src/messages.js';
+import {
+  blockerOf,
+  blockerReason,
+  checkDependsOn,
+  compareQueue,
+  composePrompt,
+  dependenciesDone,
+  type DependencyState,
+  type DependsOnRefusal,
+  isWorkItemPriority,
+  WORK_ITEM_ACCEPTANCE_MAX_CHARS,
+  WORK_ITEM_PRIORITY_DEFAULT,
+} from '../../../../core/src/workItemGraph.js';
 import { CompanyError } from '../companyError.js';
 import {
   type AgentObservation,
@@ -63,9 +79,15 @@ export interface WorkItemPaneView {
   readonly status: HerdrAgent['status'];
 }
 
+/** What the roster answers about herdr panes at one moment. */
+export interface WorkItemRosterView {
+  readonly available: boolean;
+  readonly panes: readonly WorkItemPaneView[];
+}
+
 /** herdr, as work items see it. `available` false means herdr cannot answer, so nothing is decided. */
 export interface WorkItemRoster {
-  panes(): { available: boolean; panes: readonly WorkItemPaneView[] };
+  panes(): WorkItemRosterView;
   /** Types `text` into the pane as a prompt. Rejects when herdr refuses it. */
   prompt(paneId: string, text: string): Promise<void>;
   /** The pane's recent screen text, for a result. Rejects when herdr cannot read it. */
@@ -129,7 +151,25 @@ const MESSAGE = {
   emptyText: 'Nội dung việc không được để trống.',
   promptTooLarge: 'Nội dung việc vượt quá giới hạn.',
   done: 'Việc đã xong.',
+  priorityInvalid: 'Độ ưu tiên phải từ P0 đến P3.',
+  acceptanceTooLong: 'Tiêu chí xong quá dài.',
+  badRow: 'Việc chờ trong đề xuất không hợp lệ.',
 } as const;
+
+/** Vietnamese refusals for a wait list, by the reason the core check gives. */
+const DEPENDS_MESSAGE: Record<DependsOnRefusal, string> = {
+  too_many: 'Việc chỉ chờ tối đa 10 việc khác.',
+  duplicate: 'Danh sách chờ có việc bị lặp.',
+  self: 'Việc không thể chờ chính nó.',
+  unknown: 'Có việc trong danh sách chờ không còn trên bảng.',
+  cycle: 'Danh sách chờ này tạo thành vòng lặp giữa các việc.',
+};
+
+/** The folder's herdr and session views, read once for a pass or a snapshot. */
+interface FolderView {
+  readonly roster: WorkItemRosterView;
+  readonly sessions: readonly WorkItemSessionView[];
+}
 
 /** Keeps a short text of an error for a reason line. */
 function describe(error: unknown): string {
@@ -193,9 +233,8 @@ export class WorkItemService {
 
   /** The folder's full state, as the board receives it. */
   snapshot(): CompanyWorkItemsMessage {
-    const items = [...this.items.values()]
-      .sort((a, b) => a.sequence - b.sequence)
-      .map((item) => toWorkItem(item));
+    const view = this.view();
+    const items = this.sortedItems().map((item) => this.wire(item, view));
     return {
       type: 'companyWorkItems',
       workspacePath: this.workspacePath,
@@ -205,15 +244,29 @@ export class WorkItemService {
     };
   }
 
+  /** One item by id, as the board receives it. */
+  get(id: string): WorkItem | undefined {
+    const item = this.items.get(id);
+    return item === undefined ? undefined : this.wire(item, this.view());
+  }
+
+  /** The item with this #n, while it is still open: queued, running, waiting on input, or in review. */
+  findOpen(sequence: number): WorkItem | undefined {
+    const item = this.sortedItems().find(
+      (entry) => entry.sequence === sequence && !isFinished(entry.status),
+    );
+    return item === undefined ? undefined : this.wire(item, this.view());
+  }
+
   /**
    * Creates one item for an assignee and sends it, or queues it while the assignee is busy. The
    * same request id twice creates nothing new and answers with the first item's id.
    */
-  async create(command: WorkItemCommand & WorkItemDraft): Promise<string> {
+  async create(command: WorkItemCommand & Omit<WorkItemDraft, 'dependsOnDrafts'>): Promise<string> {
     const replayed = this.replay(command.requestId);
     if (replayed !== undefined) return replayed;
     this.validateDraft(command);
-    const item = this.addItem(command);
+    const item = this.addItem(command, this.ports.newId(), command.dependsOn ?? []);
     this.remember(command.requestId, item.id);
     await this.commitOrDiscard([item.id], command.requestId);
     await this.reconcileAfterSave();
@@ -237,7 +290,14 @@ export class WorkItemService {
       .map((item) => item.id);
     if (existing.length > 0) return existing;
     for (const draft of drafts) this.validateDraft(draft);
-    const ids = drafts.map((draft) => this.addItem(draft, options.squadRunId).id);
+    const plans = drafts.map((draft) => ({ draft, id: this.ports.newId() }));
+    const waits = this.resolveBatchDependencies(plans);
+    const created = plans.map((plan, index) =>
+      this.addItem(plan.draft, plan.id, waits[index] ?? [], options.squadRunId),
+    );
+    // Waits on items of this batch can only be named once all of them exist.
+    for (const item of created) item.waitSequences = this.sequencesOf(item.dependsOn);
+    const ids = created.map((item) => item.id);
     await this.commitOrDiscard(ids, null);
     await this.reconcileAfterSave();
     return ids;
@@ -256,7 +316,12 @@ export class WorkItemService {
     this.assertReachable(command.assignee);
     const before = structuredClone(item);
     item.assignee = normalizeAssignee(command.assignee);
-    this.requeue(item, item.text, 'assigned', 'Giao lại cho agent khác.');
+    this.requeue(
+      item,
+      composePrompt(item.text, item.acceptance),
+      'assigned',
+      'Giao lại cho agent khác.',
+    );
     this.remember(command.requestId, '');
     await this.commitOrRestore(before, command.requestId);
     await this.reconcileAfterSave();
@@ -272,7 +337,12 @@ export class WorkItemService {
     const text = command.text.trim();
     this.assertReachable(item.assignee);
     const before = structuredClone(item);
-    this.requeue(item, text, 'followed_up', clip(text, WORK_ITEM_REASON_MAX_CHARS));
+    this.requeue(
+      item,
+      composePrompt(text, item.acceptance),
+      'followed_up',
+      clip(text, WORK_ITEM_REASON_MAX_CHARS),
+    );
     this.remember(command.requestId, '');
     await this.commitOrRestore(before, command.requestId);
     await this.reconcileAfterSave();
@@ -313,6 +383,8 @@ export class WorkItemService {
     this.remember(command.requestId, '');
     this.commit();
     await this.flush();
+    // A verdict of done may free the items that waited for this one.
+    if (command.verdict === 'done') await this.reconcileAfterSave();
   }
 
   /** Removes a queued item that was never sent. */
@@ -324,6 +396,27 @@ export class WorkItemService {
     this.remember(command.requestId, '');
     this.commit();
     await this.flush();
+  }
+
+  /**
+   * Replaces the wait list of a queued item. Only a queued item can change it. A save that fails
+   * puts the item back as it was, so the new list is never used.
+   */
+  async setDependencies(
+    command: WorkItemCommand & { id: string; dependsOn: readonly string[] },
+  ): Promise<void> {
+    if (this.replay(command.requestId) !== undefined) return;
+    const item = this.requireItem(command.id);
+    if (item.status !== 'queued') this.refuseStatus(item);
+    this.refuseDependsOn(item.id, command.dependsOn);
+    const before = structuredClone(item);
+    item.dependsOn = [...command.dependsOn];
+    item.waitSequences = this.sequencesOf(item.dependsOn);
+    item.updatedAt = this.iso();
+    this.pushEvent(item, makeEvent(item.updatedAt, 'note', this.waitNote(item.dependsOn)));
+    this.remember(command.requestId, '');
+    await this.commitOrRestore(before, command.requestId);
+    await this.reconcileAfterSave();
   }
 
   /** Saves the role note for a herdr pane or an omp session. An empty description clears it. */
@@ -428,7 +521,7 @@ export class WorkItemService {
     } catch (error) {
       for (const id of ids) this.items.delete(id);
       if (requestId !== null) this.answers.delete(requestId);
-      this.commit();
+      await this.settleRollback();
       throw error;
     }
   }
@@ -444,7 +537,7 @@ export class WorkItemService {
     } catch (error) {
       this.items.set(before.id, before);
       this.answers.delete(requestId);
-      this.commit();
+      await this.settleRollback();
       throw error;
     }
   }
@@ -453,6 +546,16 @@ export class WorkItemService {
   private async writesLanded(): Promise<boolean> {
     await this.writeChain;
     return !this.lastWriteFailed;
+  }
+
+  /**
+   * Saves a rollback, then drops its error: the command that asked for the change already reports
+   * its own failure, and a later command must not inherit this one.
+   */
+  private async settleRollback(): Promise<void> {
+    this.commit();
+    await this.writeChain;
+    this.saveError = null;
   }
 
   private requireItem(id: string): StoredWorkItem {
@@ -474,6 +577,58 @@ export class WorkItemService {
       throw new CompanyError('assignee_invalid', MESSAGE.assigneeInvalid);
     }
     this.assertReachable(draft.assignee);
+    this.validateExtras(draft);
+  }
+
+  /** Checks the priority, criteria, and wait list a draft carries. */
+  private validateExtras(
+    draft: Pick<WorkItemDraft, 'priority' | 'acceptance' | 'dependsOn'>,
+  ): void {
+    if (draft.priority !== undefined && !isWorkItemPriority(draft.priority)) {
+      throw new CompanyError('priority_invalid', MESSAGE.priorityInvalid);
+    }
+    const acceptance = draft.acceptance?.trim() ?? '';
+    if (Array.from(acceptance).length > WORK_ITEM_ACCEPTANCE_MAX_CHARS) {
+      throw new CompanyError('acceptance_too_long', MESSAGE.acceptanceTooLong);
+    }
+    this.refuseDependsOn(null, draft.dependsOn ?? []);
+  }
+
+  /** Refuses a wait list the core check rejects. `dependencyOf` sees the items the list may name. */
+  private refuseDependsOn(
+    selfId: string | null,
+    dependsOn: readonly string[],
+    dependencyOf: (id: string) => readonly string[] | undefined = (id) =>
+      this.items.get(id)?.dependsOn,
+  ): void {
+    const refusal = checkDependsOn(selfId, dependsOn, dependencyOf);
+    if (refusal !== null) throw new CompanyError('dependency_invalid', DEPENDS_MESSAGE[refusal]);
+  }
+
+  /**
+   * Maps each draft's wait list to real ids: ids named outright, and batch positions to the ids
+   * minted for them. Refuses a position outside the batch or on the draft itself, and any loop.
+   */
+  private resolveBatchDependencies(
+    plans: readonly { readonly draft: WorkItemDraft; readonly id: string }[],
+  ): string[][] {
+    const waits = plans.map((plan, index) => {
+      const fromBatch = (plan.draft.dependsOnDrafts ?? []).map((position) => {
+        const target = plans[position];
+        if (target === undefined || position === index) {
+          throw new CompanyError('dependency_invalid', MESSAGE.badRow);
+        }
+        return target.id;
+      });
+      return [...(plan.draft.dependsOn ?? []), ...fromBatch];
+    });
+    const batchWaits = new Map(plans.map((plan, index) => [plan.id, waits[index] ?? []]));
+    const dependencyOf = (id: string): readonly string[] | undefined =>
+      batchWaits.get(id) ?? this.items.get(id)?.dependsOn;
+    plans.forEach((plan, index) => {
+      this.refuseDependsOn(plan.id, waits[index] ?? [], dependencyOf);
+    });
+    return waits;
   }
 
   /** Refuses an assignee the board cannot reach right now. New sessions are always reachable. */
@@ -514,21 +669,31 @@ export class WorkItemService {
     item.history = [...item.history, event].slice(-WORK_ITEM_HISTORY_MAX);
   }
 
-  /** Adds a new queued item. Nothing is sent here; the pass decides when. */
-  private addItem(draft: WorkItemDraft, squadRunId?: string): StoredWorkItem {
+  /** Adds a new queued item under `id`. Nothing is sent here; the pass decides when. */
+  private addItem(
+    draft: WorkItemDraft,
+    id: string,
+    dependsOn: readonly string[],
+    squadRunId?: string,
+  ): StoredWorkItem {
     const at = this.iso();
     const text = draft.text.trim();
+    const acceptance = draft.acceptance?.trim() ?? '';
     const item: StoredWorkItem = {
-      id: this.ports.newId(),
+      id,
       text,
       assignee: normalizeAssignee(draft.assignee),
       status: 'queued',
       sequence: this.nextSequence,
+      priority: draft.priority ?? WORK_ITEM_PRIORITY_DEFAULT,
+      dependsOn: [...dependsOn],
+      waitSequences: this.sequencesOf(dependsOn),
       reason: WORK_ITEM_REASON.queued,
       createdAt: at,
       updatedAt: at,
       history: [makeEvent(at, 'created'), makeEvent(at, 'queued')],
-      pendingPrompt: text,
+      pendingPrompt: composePrompt(text, acceptance),
+      ...(acceptance === '' ? {} : { acceptance }),
       ...(squadRunId === undefined ? {} : { squadRunId }),
     };
     this.nextSequence += 1;
@@ -597,34 +762,37 @@ export class WorkItemService {
     };
   }
 
-  /** Keeps the newest finished items; live items are never pruned. */
+  /**
+   * Keeps the newest finished items. Live items are never pruned, and neither is a finished item
+   * that a live one still waits for, so that wait can still be read.
+   */
   private prune(): void {
+    const awaited = new Set<string>();
+    for (const item of this.items.values()) {
+      if (!isFinished(item.status)) for (const id of item.dependsOn) awaited.add(id);
+    }
     const finished = [...this.items.values()]
       .filter((item) => isFinished(item.status))
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-    for (const item of finished.slice(WORK_ITEM_FINISHED_KEEP)) this.items.delete(item.id);
+    let kept = 0;
+    for (const item of finished) {
+      if (kept < WORK_ITEM_FINISHED_KEEP || awaited.has(item.id)) {
+        kept += 1;
+        continue;
+      }
+      this.items.delete(item.id);
+    }
   }
 
-  /** One status pass over every agent that has live items. */
+  /** One status pass over every agent that has live items, and over new-session items. */
   private async pass(): Promise<void> {
-    const roster = this.ports.roster.panes();
-    const sessions = this.ports.sessions.list();
-    const observe = (assignee: WorkItemAssignee): AgentObservation => {
-      if (assignee.kind === 'new-session') return 'free';
-      if (assignee.kind === 'herdr') {
-        if (!roster.available) return 'unknown';
-        const pane = roster.panes.find((entry) => entry.paneId === assignee.paneId);
-        return pane === undefined ? 'gone' : observeHerdrStatus(pane.status);
-      }
-      const session = sessions.find((entry) => entry.id === assignee.sessionId);
-      return session === undefined ? 'gone' : observeSessionStatus(session.status);
-    };
+    const view = this.view();
     // Read the keys before dispatching new-session items below: a chat opened there is not in
     // this pass's session list, so it is judged on the next pass.
     const keys = this.liveAgentKeys();
-    // A new-session item has no agent to wait for: its chat opens as soon as it is queued.
-    for (const item of this.sortedItems()) {
-      if (item.status === 'queued' && item.assignee.kind === 'new-session') {
+    // A new-session item has no agent to wait for: its chat opens as soon as it is ready.
+    for (const item of this.queueOrder()) {
+      if (item.status === 'queued' && item.assignee.kind === 'new-session' && this.isReady(item)) {
         await this.dispatch(item);
       }
     }
@@ -632,7 +800,7 @@ export class WorkItemService {
       const items = this.liveItemsFor(key);
       const first = items[0];
       if (first === undefined) continue;
-      const observation = observe(first.assignee);
+      const observation = this.observeAssignee(first.assignee, view);
       if (observation === 'unknown') continue;
       if (observation === 'gone') {
         const reason =
@@ -647,7 +815,8 @@ export class WorkItemService {
         await this.advance(active, observation);
         continue;
       }
-      const next = items.find((item) => item.status === 'queued');
+      // A queued item waiting on another item is passed over: the next ready one goes instead.
+      const next = items.find((item) => item.status === 'queued' && this.isReady(item));
       if (observation === 'free' && next !== undefined) await this.dispatch(next);
     }
   }
@@ -663,12 +832,94 @@ export class WorkItemService {
     return [...keys.keys()];
   }
 
+  /** Live items of one agent, in queue order: priority first, then creation order. */
   private liveItemsFor(key: string): StoredWorkItem[] {
-    return this.sortedItems().filter((item) => isLive(item) && assigneeKey(item.assignee) === key);
+    return this.queueOrder().filter((item) => isLive(item) && assigneeKey(item.assignee) === key);
+  }
+
+  /** Every item in queue order: priority first, then creation order. */
+  private queueOrder(): StoredWorkItem[] {
+    return [...this.items.values()].sort(compareQueue);
   }
 
   private sortedItems(): StoredWorkItem[] {
     return [...this.items.values()].sort((a, b) => a.sequence - b.sequence);
+  }
+
+  /** The folder's herdr and session views as they stand now. */
+  private view(): FolderView {
+    return { roster: this.ports.roster.panes(), sessions: this.ports.sessions.list() };
+  }
+
+  /** One item as the board receives it: a queued item carries what it waits on and why. */
+  private wire(item: StoredWorkItem, view: FolderView): WorkItem {
+    const wire = toWorkItem(item);
+    if (item.status !== 'queued') return wire;
+    const blocker = blockerOf(
+      item.dependsOn,
+      (id) => this.dependencyState(item, id),
+      this.agentBusy(item, view),
+    );
+    if (blocker === null) return wire;
+    return { ...wire, blocker, reason: blockerReason(blocker) };
+  }
+
+  /** What the queue knows about one dependency: its status, or failed at its last #n once it is gone. */
+  private dependencyState(item: StoredWorkItem, id: string): DependencyState {
+    const dependency = this.items.get(id);
+    if (dependency !== undefined)
+      return { status: dependency.status, sequence: dependency.sequence };
+    return { status: 'failed', sequence: item.waitSequences[id] ?? 0 };
+  }
+
+  /** Whether every item the queued item waits for is done, so the pass may send it. */
+  private isReady(item: StoredWorkItem): boolean {
+    return dependenciesDone(item.dependsOn, (id) => this.dependencyState(item, id));
+  }
+
+  /** Whether the item's agent cannot take it now: another item holds the agent, or it is not free. */
+  private agentBusy(item: StoredWorkItem, view: FolderView): boolean {
+    if (item.assignee.kind === 'new-session') return false;
+    const key = assigneeKey(item.assignee);
+    for (const other of this.items.values()) {
+      if (
+        other.id !== item.id &&
+        occupiesAgent(other.status) &&
+        assigneeKey(other.assignee) === key
+      ) {
+        return true;
+      }
+    }
+    return this.observeAssignee(item.assignee, view) !== 'free';
+  }
+
+  /** How one assignee reads this pass: its herdr pane or omp session, as the views report it. */
+  private observeAssignee(assignee: WorkItemAssignee, view: FolderView): AgentObservation {
+    if (assignee.kind === 'new-session') return 'free';
+    if (assignee.kind === 'herdr') {
+      if (!view.roster.available) return 'unknown';
+      const pane = view.roster.panes.find((entry) => entry.paneId === assignee.paneId);
+      return pane === undefined ? 'gone' : observeHerdrStatus(pane.status);
+    }
+    const session = view.sessions.find((entry) => entry.id === assignee.sessionId);
+    return session === undefined ? 'gone' : observeSessionStatus(session.status);
+  }
+
+  /** The #n of each listed item, kept on the waiting item so a removed dependency can still be named. */
+  private sequencesOf(ids: readonly string[]): Record<string, number> {
+    const waits: Record<string, number> = {};
+    for (const id of ids) {
+      const dependency = this.items.get(id);
+      if (dependency !== undefined) waits[id] = dependency.sequence;
+    }
+    return waits;
+  }
+
+  /** The history line for a changed wait list, naming the waited-for items by #n. */
+  private waitNote(dependsOn: readonly string[]): string {
+    if (dependsOn.length === 0) return 'Bỏ hết việc chờ.';
+    const sequences = dependsOn.map((id) => `#${this.items.get(id)?.sequence ?? 0}`);
+    return `Chờ việc ${sequences.join(', ')}.`;
   }
 
   /** Moves a running or waiting item along, given what its agent is doing now. */

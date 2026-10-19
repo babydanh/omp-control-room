@@ -38,6 +38,8 @@ function item(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {
     assignee: { kind: 'herdr', paneId: 'p1' },
     status: 'queued',
     sequence: 1,
+    priority: 2,
+    dependsOn: [],
     createdAt: '2026-05-01T10:00:00.000Z',
     updatedAt: '2026-05-01T10:00:00.000Z',
     history: [],
@@ -295,7 +297,9 @@ describe('buildBoardLanes and work items', () => {
       status: 'queued',
       head: 'Viết trang bảng xếp hạng',
       reason: 'Chờ Dev A rảnh',
-      queuePosition: 1,
+      sequence: 1,
+      priority: 2,
+      blocker: null,
     });
     expect(ready?.workItems[0]?.assignee).toBe('Dev A');
     expect(done?.workItems.map((card) => card.id)).toEqual(['d']);

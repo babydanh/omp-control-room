@@ -6,12 +6,12 @@
 
 import { useState } from 'react';
 
-import type { WorkItemAssignee } from '../../../../core/src/messages.js';
+import type { WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
 import type { AssigneeOption } from '../assigneeOptions.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { useCommandDialog } from '../useCommandDialog.js';
-import { roleDescriptionFor } from '../workItemView.js';
+import { isOpenWorkItem, roleDescriptionFor, workItemsOf } from '../workItemView.js';
 import { AssignWorkDialog } from './AssignWorkDialog.js';
 import { RoleDescriptionDialog } from './RoleDescriptionDialog.js';
 
@@ -34,6 +34,8 @@ export interface CreateWorkDialogProps {
   textEditable: boolean;
   fixedAssignee?: WorkItemAssignee;
   options: AssigneeOption[];
+  /** The folder's work items; the create dialog offers the open ones to wait for. */
+  items: readonly WorkItem[];
   /** Runs once the server accepts the work item. */
   onAccepted(): void;
   onClose(): void;
@@ -48,6 +50,7 @@ export function CreateWorkDialog({
   textEditable,
   fixedAssignee,
   options,
+  items,
   onAccepted,
   onClose,
 }: CreateWorkDialogProps) {
@@ -62,8 +65,9 @@ export function CreateWorkDialog({
       options={options}
       pending={pending}
       notice={notice}
-      onSubmit={(assignee, text) =>
-        void run(client.createWorkItem(workspacePath, text, assignee), ASSIGN_FALLBACK)
+      scheduling={{ openItems: items.filter((item) => isOpenWorkItem(item.status)) }}
+      onSubmit={(assignee, text, schedule) =>
+        void run(client.createWorkItem(workspacePath, text, assignee, schedule), ASSIGN_FALLBACK)
       }
       onClose={onClose}
     />
@@ -122,6 +126,7 @@ export function WorkDialogHost({ client, state, request, onClose }: WorkDialogHo
         textEditable
         fixedAssignee={request.assignee}
         options={[]}
+        items={workItemsOf(state, request.workspacePath).items}
         onAccepted={onClose}
         onClose={onClose}
       />
