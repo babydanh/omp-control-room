@@ -13,6 +13,7 @@ export type IconName =
   | 'info'
   | 'eye'
   | 'check'
+  | 'plus'
   | 'x-circle'
   | 'power'
   | 'moon'

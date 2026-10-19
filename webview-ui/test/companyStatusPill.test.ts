@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   TRANSPORT_STATE_CONNECTED,
+  TRANSPORT_STATE_DISCONNECTED,
   TRANSPORT_STATE_RECONNECTING,
 } from '../../core/src/constants.js';
 import { type StatusPillView, statusPillView } from '../src/company/statusPillView.js';
@@ -29,7 +30,7 @@ describe('statusPillView', () => {
     const view = statusPillView(TRANSPORT_STATE_CONNECTED, stateFrom({ diagnostics: DIAGNOSTICS }));
 
     expect(view.tone).toBe('calm');
-    expect(view.summary).toBe('đang chạy 1/2 · xếp hàng 3 · giữ lại 4');
+    expect(view.summary).toBe('Sẵn sàng');
     expect(row(view, 'Kết nối')).toEqual({
       label: 'Kết nối',
       value: 'đã kết nối',
@@ -42,7 +43,7 @@ describe('statusPillView', () => {
     const view = statusPillView(TRANSPORT_STATE_CONNECTED, stateFrom());
 
     expect(row(view, 'omp')?.value).toBe('chưa có số liệu');
-    expect(view.summary).toBe('omp');
+    expect(view.summary).toBe('Sẵn sàng');
   });
 
   it('shows the model catalog as loading until the server has answered', () => {
@@ -55,8 +56,15 @@ describe('statusPillView', () => {
     const view = statusPillView(TRANSPORT_STATE_RECONNECTING, stateFrom());
 
     expect(view.tone).toBe('attention');
-    expect(view.summary).toBe('đang kết nối lại…');
+    expect(view.summary).toBe('Đang kết nối lại…');
     expect(row(view, 'Kết nối')?.attention).toBe(true);
+  });
+
+  it('says the link is lost when the board is disconnected', () => {
+    const view = statusPillView(TRANSPORT_STATE_DISCONNECTED, stateFrom());
+
+    expect(view.tone).toBe('attention');
+    expect(view.summary).toBe('Mất kết nối');
   });
 
   it('draws the pill in attention when a quota window is spent', () => {

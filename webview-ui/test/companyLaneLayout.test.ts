@@ -7,7 +7,7 @@ import {
   COMPANY_LANE_WIDTH_PX,
   COMPANY_MOTION,
 } from '../src/company/constants.js';
-import { isLaneCollapsed, packLanes } from '../src/company/laneLayout.js';
+import { isLaneCollapsed, keepOpenEmptyLanes, packLanes } from '../src/company/laneLayout.js';
 
 describe('isLaneCollapsed', () => {
   it('folds an empty lane its reader has not opened', () => {
@@ -111,5 +111,31 @@ describe('lane motion timing', () => {
 
   it('keeps the body fade shorter than the width ease it follows or precedes', () => {
     expect(COMPANY_MOTION.laneContentMs).toBeLessThan(COMPANY_MOTION.laneWidthMs);
+  });
+});
+
+describe('keepOpenEmptyLanes', () => {
+  it('keeps an opened lane while it is still empty', () => {
+    const opened = new Set(['ready']);
+    expect(keepOpenEmptyLanes(opened, new Map([['ready', 0]]))).toBe(opened);
+  });
+
+  it('drops the opened mark of a lane that has filled, so it folds once it empties', () => {
+    const kept = keepOpenEmptyLanes(new Set(['ready']), new Map([['ready', 2]]));
+    expect(kept.has('ready')).toBe(false);
+    expect(isLaneCollapsed(0, kept.has('ready'))).toBe(true);
+  });
+
+  it('returns the same set when no opened lane has filled', () => {
+    const opened = new Set(['ready', 'done']);
+    expect(
+      keepOpenEmptyLanes(
+        opened,
+        new Map([
+          ['ready', 0],
+          ['done', 0],
+        ]),
+      ),
+    ).toBe(opened);
   });
 });

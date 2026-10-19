@@ -25,6 +25,7 @@ import { sidebarPresentation } from '../layoutMode.js';
 import { ledgerStore } from '../ledger/ledgerClient.js';
 import { useLedgerState } from '../ledger/ledgerStore.js';
 import { LedgerView } from '../ledger/LedgerView.js';
+import { startScrollFades } from '../scrollFades.js';
 import {
   type DrawerSubject,
   drawerSubjectFor,
@@ -94,6 +95,7 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledger = useLedgerState(ledgerStore);
   const [ledgerOpen, setLedgerOpen] = useState(false);
   const ledgerShown = ledgerOpen && ledger.privileged === true;
+  const ledgerAvailable = ledger.privileged === true;
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<SidebarPrefs>(() => readSidebarPrefs(browserStorage()));
@@ -163,6 +165,9 @@ export function BoardShell({ client }: BoardShellProps) {
     client.requestDiagnostics();
   }, [client]);
 
+  // Scroll areas draw no scrollbar; an edge with more content beyond it fades instead.
+  useEffect(() => startScrollFades(), []);
+
   // The sidebar's and the drawer's shapes are remembered across reloads, so each
   // is written whenever it changes. A refused store only means it is not remembered.
   useEffect(() => {
@@ -192,11 +197,17 @@ export function BoardShell({ client }: BoardShellProps) {
       } else if (id === 'board.help') {
         event.preventDefault();
         setShortcutsOpen(true);
+      } else if (id === 'board.files') {
+        event.preventDefault();
+        setOpened((current) => (current?.kind === 'files' ? null : { kind: 'files' }));
+      } else if (id === 'board.ledger' && ledgerAvailable) {
+        event.preventDefault();
+        setLedgerOpen((open) => !open);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [ledgerAvailable]);
 
   function toggleSidebar(): void {
     if (mode === 'phone') {
@@ -352,7 +363,7 @@ export function BoardShell({ client }: BoardShellProps) {
         onToggleSidebar={toggleSidebar}
         filesOpen={opened?.kind === 'files'}
         onToggleFiles={toggleFiles}
-        ledgerAvailable={ledger.privileged === true}
+        ledgerAvailable={ledgerAvailable}
         ledgerOpen={ledgerShown}
         onToggleLedger={() => setLedgerOpen((open) => !open)}
         isMac={IS_MAC}

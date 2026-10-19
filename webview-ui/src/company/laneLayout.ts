@@ -19,6 +19,22 @@ export function isLaneCollapsed(count: number, opened: boolean): boolean {
   return count === 0 && !opened;
 }
 
+/**
+ * The opened lanes that still hold no cards. A lane that fills is open anyway, so its opened
+ * mark is dropped: when it empties again it folds to its strip, as a lane never opened does.
+ * Returns the same set when nothing is dropped, so the caller can compare by reference.
+ */
+export function keepOpenEmptyLanes<Id extends string>(
+  opened: ReadonlySet<Id>,
+  counts: ReadonlyMap<Id, number>,
+): ReadonlySet<Id> {
+  const kept = new Set<Id>();
+  for (const id of opened) {
+    if ((counts.get(id) ?? 0) === 0) kept.add(id);
+  }
+  return kept.size === opened.size ? opened : kept;
+}
+
 /** One lane as the packer sees it. */
 export interface LaneSlot {
   collapsed: boolean;

@@ -47,7 +47,7 @@ import {
   type CompanyLaneId,
 } from '../constants.js';
 import type { FolderIdentity } from '../folderIdentity.js';
-import { isLaneCollapsed, packLanes } from '../laneLayout.js';
+import { isLaneCollapsed, keepOpenEmptyLanes, packLanes } from '../laneLayout.js';
 import {
   defaultActiveLane,
   LANE_SWIPE_THRESHOLD_PX,
@@ -443,6 +443,12 @@ export function CompanyBoard({
     const collapsed = mode !== 'phone' && isLaneCollapsed(count, openedLanes.has(lane.id));
     return { lane, drafts, count, collapsed };
   });
+  // An opened lane that fills is open anyway; once it empties again it folds, as an unopened lane does.
+  const keptOpen = keepOpenEmptyLanes(
+    openedLanes,
+    new Map(views.map(({ lane, count }) => [lane.id, count] as const)),
+  );
+  if (keptOpen !== openedLanes) setOpenedLanes(keptOpen);
   const shownLane =
     pickedLane ??
     defaultActiveLane(

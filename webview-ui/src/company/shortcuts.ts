@@ -18,6 +18,8 @@ export type ShortcutId =
   | 'board.palette'
   | 'board.help'
   | 'board.sidebar'
+  | 'board.files'
+  | 'board.ledger'
   | 'board.sidebarWiden'
   | 'board.sidebarNarrow'
   | 'board.menu'
@@ -79,6 +81,11 @@ function primary(event: ShortcutEvent): boolean {
   return (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey;
 }
 
+/** Ctrl or Cmd with Shift, and no Alt: a second chord that stays clear of the browser's own keys. */
+function primaryShift(event: ShortcutEvent): boolean {
+  return (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey;
+}
+
 /**
  * A key that a resize grip answers, with Shift allowed: the grips take Shift as
  * a larger step, or ignore it. Ctrl, Cmd and Alt chords are not the grip's.
@@ -116,6 +123,22 @@ export const SHORTCUTS: readonly ShortcutDef[] = [
     keys: ['Ctrl', 'B'],
     allowWhileTyping: false,
     match: (event) => primary(event) && event.key.toLowerCase() === 'b',
+  },
+  {
+    id: 'board.files',
+    group: 'board',
+    label: 'Mở hoặc đóng tệp',
+    keys: ['Ctrl', 'Shift', 'F'],
+    allowWhileTyping: false,
+    match: (event) => primaryShift(event) && event.key.toLowerCase() === 'f',
+  },
+  {
+    id: 'board.ledger',
+    group: 'board',
+    label: 'Mở hoặc đóng cây git',
+    keys: ['Ctrl', 'Shift', 'L'],
+    allowWhileTyping: false,
+    match: (event) => primaryShift(event) && event.key.toLowerCase() === 'l',
   },
   // The agent sidebar's resize edge takes the arrows while it has focus.
   {

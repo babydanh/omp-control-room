@@ -4,12 +4,15 @@
 
 ### Features
 
-- **Folder browser** — 📁 and "Chọn thư mục…" open one browser: quick places (recent folders by their names, drives, home and roots), a path field that takes a typed path, arrow keys to move, Backspace to go up, and Ctrl+Enter to choose the folder in view. The inline path box is gone.
+- **Folder browser** — "Mở thư mục…" in the folder menu and the palette, and the "+ Phiên mới" picker when no folder is open, share one browser: quick places (recent folders by their names, drives, home and roots), a path field that takes a typed path, arrow keys to move, Backspace to go up, and Ctrl+Enter to choose the folder in view. The inline path box is gone.
 
 ### Changes
 
 - Folders whose directory has gone are no longer listed in the tree, the switcher or the rail. An open folder that disappears stays once as "Thư mục không còn" with a "Gỡ khỏi danh sách" action; the recent list drops missing folders and keeps their display names.
 - Cards that move between lanes glide along a slow arc instead of snapping, and opening or collapsing a lane eases its width. Reduced motion keeps the instant layout.
+- The board's header is one row: the title, the folder switcher, "+ Phiên mới", the status pill, search, and a "⋯" menu holding Đàn agent, Tệp (Ctrl+Shift+F), Cây git (Ctrl+Shift+L) and Phím tắt, each labelled. The duplicate "Duyệt thư mục" and "Chọn thư mục…" buttons are gone; the status pill reads as one word, and its runner and quota counts stay in its popover. On a phone the title is hidden from view to make room.
+- Empty lanes fold to narrow strips until you open them, and a lane that empties again folds back.
+- The board's scroll areas no longer draw scrollbars. An edge with more content beyond it fades out instead; scrolling works as before.
 
 ## v1.5.0
 

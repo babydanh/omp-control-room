@@ -697,6 +697,38 @@
     box-shadow 240ms ease-out;
 }
 
+/* Scroll areas draw no scrollbar: wheel, touch, trackpad and keyboard still scroll them.
+   Unlayered, so these beat the layered pixel-scrollbar utility. */
+.company-ui * {
+  scrollbar-width: none;
+}
+.company-ui *::-webkit-scrollbar,
+.company-ui .xterm-viewport::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+.company-ui .xterm-viewport {
+  scrollbar-width: none;
+}
+
+/* An edge with more content beyond it fades out over 16px; scrollFades.ts sets the flags. */
+.company-ui [data-fade-top] {
+  mask-image: linear-gradient(to bottom, transparent, #000 16px);
+}
+.company-ui [data-fade-bottom] {
+  mask-image: linear-gradient(to top, transparent, #000 16px);
+}
+.company-ui [data-fade-top][data-fade-bottom] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    #000 16px,
+    #000 calc(100% - 16px),
+    transparent
+  );
+}
+
 /* Reduced motion switches off every company animation and transition, the lane
    width and its body and strip fades included, so the board stays readable and
    still. The FLIP flights check the same preference in script (flip.ts). */

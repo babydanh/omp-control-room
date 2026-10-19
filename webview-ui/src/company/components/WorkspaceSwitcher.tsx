@@ -1,10 +1,10 @@
 /**
  * WorkspaceSwitcher: what the board shows. The menu lists the folders the server knows,
  * with a first row that stands for all of them together; a folder row opens that folder,
- * and right-click or its pencil names it. Beside the menu: a button that opens the folder
- * browser. Switching is a server command: while it is in flight the controls wait, and a
- * refusal stays visible beside them. A folder whose directory is gone shows once, with a
- * way to take it off the list.
+ * and right-click or its pencil names it. The menu's last row opens the folder browser,
+ * and with no folder open the trigger opens it directly. Switching is a server command:
+ * while it is in flight the trigger says so, and a refusal shows as a notice under it.
+ * A folder whose directory is gone shows once, with a way to take it off the list.
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -13,6 +13,7 @@ import type { CompanyWorkspaceEntry } from '../../../../core/src/messages.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { activeWorkspace, folderLabel, workspaceActivity } from '../workspaces.js';
+import { FloatingNotice } from './FloatingNotice.js';
 import { FolderBrowserDialog } from './FolderBrowserDialog.js';
 import { FolderNameDialog } from './FolderNameDialog.js';
 import { Icon } from './Icon.js';
@@ -38,10 +39,12 @@ interface NamingTarget {
 }
 
 export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: WorkspaceSwitcherProps) {
-  /** A refusal of the request itself, shown until the next attempt. */
+  /** A refusal of the request itself, shown until it is closed or the next attempt. */
   const [refusal, setRefusal] = useState<string | null>(null);
   /** requestId of the last switch sent, so its verdict can be shown if it failed. */
   const [lastOpen, setLastOpen] = useState<string | null>(null);
+  /** The request whose verdict the reader closed; its notice is not shown again. */
+  const [closedRequest, setClosedRequest] = useState<string | null>(null);
   /** The last palette request this switcher answered; a new value opens the folder browser. */
   const [seenRequest, setSeenRequest] = useState(browseRequest);
   /** Whether the folder menu is open. */
@@ -81,7 +84,8 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
   const active = activeWorkspace(workspaces);
   const allMode = state.viewMode === 'all';
   const opening = state.pendingWorkspaceOpen !== null;
-  const verdict = lastOpen === null ? undefined : state.commandResults[lastOpen];
+  const verdict =
+    lastOpen === null || lastOpen === closedRequest ? undefined : state.commandResults[lastOpen];
   const message =
     refusal ?? (verdict !== undefined && !verdict.ok ? (verdict.message ?? null) : null);
   /** Every folder's counts added together, in the shape the activity text reads. */
@@ -93,6 +97,7 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
     }),
     { path: '', active: false, open: true, working: 0, waiting: 0 },
   );
+  const noFolders = workspaces !== null && workspaces.length === 0;
   let triggerText = 'Chưa có thư mục';
   if (allMode) {
     triggerText = `Tất cả thư mục · ${workspaceActivity(everything)}`;
@@ -129,12 +134,38 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
     if (!handle.ok) setRefusal(handle.message ?? 'Không gửi được yêu cầu gỡ thư mục.');
   }
 
+  function openBrowser(): void {
+    setMenuOpen(false);
+    setRefusal(null);
+    setBrowsing(true);
+  }
+
+  function closeNotice(): void {
+    setRefusal(null);
+    setClosedRequest(lastOpen);
+  }
+
   return (
-    <div
-      className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5"
-      data-testid="board-workspace"
-    >
-      {workspaces !== null && workspaces.length > 0 ? (
+    <div className="relative flex min-w-0 max-w-full items-center" data-testid="board-workspace">
+      {workspaces === null ? (
+        <span
+          className="min-w-0 max-w-[260px] truncate text-2xs text-text"
+          title={state.settings?.workspacePath ?? undefined}
+        >
+          {state.settings?.workspacePath ?? 'đang chờ máy chủ…'}
+        </span>
+      ) : noFolders ? (
+        <button
+          type="button"
+          disabled={opening}
+          onClick={openBrowser}
+          data-testid="folder-browser-open"
+          className={`${CONTROL_CLASS} inline-flex items-center gap-1.5`}
+        >
+          <Icon name="folder" className="shrink-0" />
+          <span>Mở thư mục…</span>
+        </button>
+      ) : (
         <div ref={menuRef} className="relative min-w-0 max-w-[min(300px,100%)]">
           <button
             type="button"
@@ -146,7 +177,9 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
             data-testid="folder-menu-trigger"
             className="flex w-full min-w-0 cursor-pointer items-center gap-1 rounded-(--company-radius-sm) bg-transparent px-2 py-1 text-left text-2xs text-text hover:bg-hover disabled:cursor-default disabled:opacity-50"
           >
-            <span className="min-w-0 flex-1 truncate">{triggerText}</span>
+            <span className="min-w-0 flex-1 truncate">
+              {opening ? 'Đang mở thư mục…' : triggerText}
+            </span>
             <Icon name="chevron-down" className="shrink-0" />
           </button>
           {menuOpen && (
@@ -168,7 +201,7 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
                   <span className="shrink-0 text-text-muted">{workspaceActivity(everything)}</span>
                 </button>
               </li>
-              {workspaces.map((entry) => (
+              {(workspaces ?? []).map((entry) => (
                 <li key={entry.path} className="flex items-center">
                   <button
                     type="button"
@@ -210,36 +243,27 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
                   )}
                 </li>
               ))}
+              <li aria-hidden="true" className="my-1 border-t border-hairline" />
+              <li>
+                <button
+                  type="button"
+                  data-testid="folder-browser-open"
+                  disabled={opening}
+                  onClick={openBrowser}
+                  className={MENU_ROW_CLASS}
+                >
+                  <Icon name="folder" className="shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">Mở thư mục…</span>
+                </button>
+              </li>
             </ul>
           )}
         </div>
-      ) : (
-        <span
-          className="min-w-0 max-w-[260px] truncate text-2xs text-text"
-          title={state.settings?.workspacePath ?? undefined}
-        >
-          {state.settings?.workspacePath ?? 'đang chờ máy chủ…'}
-        </span>
       )}
-      <button
-        type="button"
-        disabled={opening}
-        aria-label="Duyệt thư mục"
-        title="Duyệt thư mục"
-        data-testid="folder-browser-open"
-        onClick={() => {
-          setMenuOpen(false);
-          setBrowsing(true);
-        }}
-        className="company-icon-btn touch-target shrink-0 px-2 text-sm"
-      >
-        <Icon name="folder" />
-      </button>
-      {opening && <span className="text-2xs text-text-muted">Đang mở thư mục…</span>}
       {message !== null && (
-        <span role="alert" className="break-all text-2xs text-warning">
+        <FloatingNotice align="left" testId="board-workspace-notice" onClose={closeNotice}>
           {message}
-        </span>
+        </FloatingNotice>
       )}
       {browsing && (
         <FolderBrowserDialog

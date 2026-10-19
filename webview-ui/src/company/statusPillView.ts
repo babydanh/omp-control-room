@@ -86,6 +86,23 @@ function revisionText(state: CompanyViewState): string {
   return revisions.length === 0 ? '-' : revisions.join(' · ');
 }
 
+/**
+ * The pill's one word or phrase: whether the company is ready, needs attention, or the board
+ * is cut off. The runner counts stay in the popover, where there is room to read them.
+ */
+function pillSummary(connection: TransportState, spent: boolean): string {
+  switch (connection) {
+    case TRANSPORT_STATE_CONNECTED:
+      return spent ? 'Cần chú ý' : 'Sẵn sàng';
+    case TRANSPORT_STATE_CONNECTING:
+      return 'Đang kết nối…';
+    case TRANSPORT_STATE_RECONNECTING:
+      return 'Đang kết nối lại…';
+    case TRANSPORT_STATE_DISCONNECTED:
+      return 'Mất kết nối';
+  }
+}
+
 export function statusPillView(
   connection: TransportState,
   state: CompanyViewState,
@@ -113,7 +130,7 @@ export function statusPillView(
   const spent = windows.some((entry) => entry.spent);
   return {
     tone: !connected || spent ? 'attention' : 'calm',
-    summary: connected ? (runner ?? 'omp') : connectionLabel(connection),
+    summary: pillSummary(connection, spent),
     rows,
   };
 }

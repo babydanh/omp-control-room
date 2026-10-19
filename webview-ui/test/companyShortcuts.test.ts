@@ -22,6 +22,8 @@ const ALL_IDS: readonly ShortcutId[] = [
   'board.sidebarNarrow',
   'board.menu',
   'board.escape',
+  'board.files',
+  'board.ledger',
   'drawer.widen',
   'drawer.narrow',
   'drawer.min',
@@ -49,6 +51,9 @@ const CTRL = { ctrlKey: true };
 const META = { metaKey: true };
 const SHIFT = { shiftKey: true };
 const ALT = { altKey: true };
+const CTRL_SHIFT = { ctrlKey: true, shiftKey: true };
+const META_SHIFT = { metaKey: true, shiftKey: true };
+const CTRL_ALT_SHIFT = { ctrlKey: true, altKey: true, shiftKey: true };
 
 function definition(id: ShortcutId): ShortcutDef {
   const found = SHORTCUTS.find((def) => def.id === id);
@@ -113,6 +118,16 @@ const CHORD_CASES: readonly ChordCase[] = [
     id: 'board.escape',
     yes: [press('Escape')],
     no: [press('Escape', CTRL), press('Escape', SHIFT), press('Esc'), press('Enter')],
+  },
+  {
+    id: 'board.files',
+    yes: [press('f', CTRL_SHIFT), press('F', CTRL_SHIFT), press('f', META_SHIFT)],
+    no: [press('f', CTRL), press('f', SHIFT), press('f', CTRL_ALT_SHIFT)],
+  },
+  {
+    id: 'board.ledger',
+    yes: [press('l', CTRL_SHIFT), press('L', CTRL_SHIFT), press('l', META_SHIFT)],
+    no: [press('l', CTRL), press('l', SHIFT), press('l', CTRL_ALT_SHIFT)],
   },
   {
     id: 'drawer.widen',
@@ -243,6 +258,8 @@ describe('SHORTCUTS registry', () => {
     expect(definition('board.help').allowWhileTyping).toBe(false);
     expect(definition('board.sidebar').allowWhileTyping).toBe(false);
     expect(definition('board.sidebarWiden').allowWhileTyping).toBe(false);
+    expect(definition('board.files').allowWhileTyping).toBe(false);
+    expect(definition('board.ledger').allowWhileTyping).toBe(false);
     expect(definition('drawer.min').allowWhileTyping).toBe(false);
     expect(definition('composer.command').allowWhileTyping).toBe(false);
     expect(definition('board.palette').allowWhileTyping).toBe(true);
