@@ -114,16 +114,16 @@ function SquadSettingsForm({ client, workspacePath, settings }: SquadSettingsFor
       />
       <ToggleSetting
         id="squad-setting-auto-judge"
-        label="Tự chấm việc"
-        hint="Trọng tài tự chấm việc khi việc xong."
+        label="Tự chấm kết quả"
+        hint="Trọng tài tự chấm kết quả khi việc xong."
         checked={draft.autoJudge}
         disabled={command.pending}
         onChange={(checked) => setDraft((current) => ({ ...current, autoJudge: checked }))}
       />
       <ToggleSetting
         id="squad-setting-auto-approve"
-        label="Tự duyệt bước kế tiếp"
-        hint="Đội tự chạy bước kế tiếp, không chờ bạn duyệt."
+        label="Tự duyệt đề xuất bước tiếp"
+        hint="Đề xuất bước tiếp không có cảnh báo thì tự được duyệt, không chờ bạn."
         checked={draft.autoApproveNext}
         disabled={command.pending}
         onChange={(checked) => setDraft((current) => ({ ...current, autoApproveNext: checked }))}

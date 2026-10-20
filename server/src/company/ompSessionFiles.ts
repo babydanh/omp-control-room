@@ -123,17 +123,15 @@ function titleOfLine(line: string): string | undefined {
 }
 
 /**
- * The human title of one session file, read from its head only. omp writes it as
- * a `title` line or in the `session` header. A file that cannot be read has none.
+ * The first lines of a session file, read from its head only. A file that cannot be read has none.
  */
-export async function readOmpSessionTitle(file: string): Promise<string | undefined> {
+async function readHead(file: string): Promise<string[] | undefined> {
   let handle: FileHandle | undefined;
   try {
     handle = await fs.promises.open(file, 'r');
     const buffer = Buffer.alloc(HEAD_BYTES);
     const { bytesRead } = await handle.read(buffer, 0, HEAD_BYTES, 0);
-    const [first = '', second = ''] = buffer.subarray(0, bytesRead).toString('utf8').split('\n', 2);
-    return titleOfLine(first) ?? titleOfLine(second);
+    return buffer.subarray(0, bytesRead).toString('utf8').split('\n', 2);
   } catch {
     return undefined;
   } finally {
@@ -142,14 +140,50 @@ export async function readOmpSessionTitle(file: string): Promise<string | undefi
 }
 
 /**
- * List one folder's session files, newest first, capped at
- * {@link OMP_SESSION_LIST_LIMIT}. `boardSessionByFile` maps comparable paths to
- * the board session already holding that file. A missing directory lists nothing.
+ * The human title of one session file, read from its head only. omp writes it as
+ * a `title` line or in the `session` header. A file that cannot be read has none.
  */
-export async function listOmpSessionFiles(
-  dir: string,
-  boardSessionByFile: ReadonlyMap<string, string>,
-): Promise<OmpSessionEntry[]> {
+export async function readOmpSessionTitle(file: string): Promise<string | undefined> {
+  const head = await readHead(file);
+  if (head === undefined) return undefined;
+  const [first = '', second = ''] = head;
+  return titleOfLine(first) ?? titleOfLine(second);
+}
+
+/** The `cwd` a `session` header line names, when it names a non-empty one. */
+function cwdOfLine(line: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (typeof parsed !== 'object' || parsed === null || !('type' in parsed)) return undefined;
+  if (parsed.type !== 'session' || !('cwd' in parsed) || typeof parsed.cwd !== 'string') {
+    return undefined;
+  }
+  return parsed.cwd === '' ? undefined : parsed.cwd;
+}
+
+/**
+ * The working directory a session file's header records: the `cwd` of its first line, the omp
+ * `session` header. Undefined when the file has none or cannot be read.
+ */
+export async function readOmpSessionCwd(file: string): Promise<string | undefined> {
+  const head = await readHead(file);
+  if (head === undefined) return undefined;
+  const [first = ''] = head;
+  return cwdOfLine(first);
+}
+
+/** A session file of one directory with its stat, as the listing sees it. */
+interface SessionFileStat {
+  readonly file: string;
+  readonly stat: fs.Stats;
+}
+
+/** The `.jsonl` files one directory holds, with their stats. A missing directory holds none. */
+async function statSessionFilesIn(dir: string): Promise<SessionFileStat[]> {
   let names: string[];
   try {
     names = await fs.promises.readdir(dir);
@@ -172,8 +206,22 @@ export async function listOmpSessionFiles(
         }
       }),
   );
-  const newest = stats
-    .filter((entry): entry is { file: string; stat: fs.Stats } => entry !== undefined)
+  return stats.filter((entry): entry is SessionFileStat => entry !== undefined);
+}
+
+/**
+ * List the session files of several folder directories, newest first, capped at
+ * {@link OMP_SESSION_LIST_LIMIT}. `boardSessionByFile` maps comparable paths to
+ * the board session already holding that file. A missing directory lists nothing,
+ * and a directory named twice by two spellings lists once.
+ */
+export async function listOmpSessionFiles(
+  dirs: readonly string[],
+  boardSessionByFile: ReadonlyMap<string, string>,
+): Promise<OmpSessionEntry[]> {
+  const unique = new Map(dirs.map((dir): [string, string] => [comparableOmpPath(dir), dir]));
+  const found = (await Promise.all([...unique.values()].map(statSessionFilesIn))).flat();
+  const newest = found
     .sort((left, right) => right.stat.mtimeMs - left.stat.mtimeMs)
     .slice(0, OMP_SESSION_LIST_LIMIT);
   return Promise.all(
@@ -192,11 +240,14 @@ export async function listOmpSessionFiles(
 }
 
 /**
- * Prove `file` is an existing `.jsonl` file inside `dir` and return its resolved
- * path. The check runs on realpaths, so a symlink or `..` that leaves `dir` is
- * refused. Failures are `CompanyError`s a client can read.
+ * Prove `file` is an existing `.jsonl` file inside one of `dirs` and return its resolved path.
+ * The check runs on realpaths, so a symlink or `..` that leaves every directory is refused.
+ * Failures are `CompanyError`s a client can read.
  */
-export async function assertOmpSessionFileIn(file: string, dir: string): Promise<string> {
+export async function assertOmpSessionFileIn(
+  file: string,
+  dirs: readonly string[],
+): Promise<string> {
   if (!path.isAbsolute(file) || !file.toLowerCase().endsWith(SESSION_FILE_EXTENSION)) {
     throw new CompanyError(
       'omp_session_invalid',
@@ -205,10 +256,10 @@ export async function assertOmpSessionFileIn(file: string, dir: string): Promise
   }
   const resolved = path.resolve(file);
   const realFile = await realpathOrUndefined(resolved);
-  const realDir = await realpathOrUndefined(dir);
+  const realDirs = await Promise.all(dirs.map(realpathOrUndefined));
   // A file that does not exist has no links to follow, so its lexical path decides.
   const location = realFile ?? resolved;
-  if (realDir === undefined || !isStrictlyInside(location, realDir)) {
+  if (!realDirs.some((realDir) => realDir !== undefined && isStrictlyInside(location, realDir))) {
     throw new CompanyError(
       'omp_session_outside_folder',
       'Phiên OMP này không nằm trong thư mục phiên của workspace hiện tại.',

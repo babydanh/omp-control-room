@@ -9,12 +9,20 @@
  *   parallel limit, read-only items included.
  * - An editing item takes its areas and its checkout (the member's working folder). Two running
  *   editing items may not share an area, nor a checkout. A read-only item takes neither.
+ * - A member busy with work the board did not send (a herdr pane working on its own, an omp session
+ *   mid-turn) locks its checkout for editing items, as a running item does. Read-only items ignore it.
  * - An explicit assignee (herdr pane, omp session) runs only when it is free and not held. A new
  *   session for an explicit item opens in the item's repo.
- * - An auto item picks a free member inside its repo, preferring a role note that names its role,
- *   then a session the squad opened in that repo with its role, then any other compatible member.
- *   With none free, it opens a new session when the squad session cap and the free-RAM threshold
- *   allow. Otherwise it waits with the reason.
+ * - An auto item picks a free member that serves its repo: one inside the repo, or a session the
+ *   squad opened for it. It prefers a role note that names its role, then a session the squad opened
+ *   for this repo with its role, then any other compatible member. With none free, it opens a new
+ *   session when the squad session cap and the free-RAM threshold allow. Otherwise it waits with the
+ *   reason.
+ *   A subagent other than task (e.g. scout, reviewer) runs only in an omp session, which the dispatch
+ *   asks to call its task tool with it. An auto item with such an agent never picks a herdr pane.
+ * - A new session for an editing item is isolated: it runs in its own worktree, which the service
+ *   creates in the item's repo, so it never shares a checkout with another agent. A read-only item
+ *   opens in the repo itself.
  */
 
 import type {
@@ -24,6 +32,7 @@ import type {
   WorkItemBlocker,
 } from '../../../../core/src/messages.js';
 import { blockerReason } from '../../../../core/src/workItemGraph.js';
+import { DEFAULT_AGENT } from './dispatchPrompt.js';
 import { GIB } from './squadSettings.js';
 
 /** One queued or running item, as the scheduler reads it. */
@@ -37,6 +46,8 @@ export interface SchedulerItem {
   readonly role: CompanyRole | undefined;
   readonly areas: readonly string[];
   readonly readOnly: boolean;
+  /** Omp subagent the item runs under. Undefined and the default worker (`task`) take any member. */
+  readonly agent?: string;
 }
 
 /** One herdr pane or omp session the squad could send an item to. */
@@ -52,8 +63,10 @@ export interface SchedulerMember {
   readonly note: string | undefined;
   /** Whether the member reads as idle this pass. */
   readonly free: boolean;
-  /** Whether the squad opened this session. */
-  readonly squadOpened: boolean;
+  /** Whether the member is known to be working or waiting on input this pass. Unknown reads as neither. */
+  readonly busy: boolean;
+  /** The repo the squad opened this session for; undefined when the board did not open it. */
+  readonly squadRepo: string | undefined;
 }
 
 /** An item that holds a member right now. */
@@ -81,14 +94,17 @@ export interface SchedulerContext {
 /** What the service should do with a ready item. */
 export type SchedulerDecision =
   | { readonly kind: 'use'; readonly member: SchedulerMember }
-  | { readonly kind: 'open'; readonly cwd: string; readonly role: CompanyRole }
+  /**
+   * Open a new session with `role` in `cwd`. When `isolate` is set the service first creates a
+   * worktree of `cwd`'s repo and opens the session there instead.
+   */
+  | {
+      readonly kind: 'open';
+      readonly cwd: string;
+      readonly role: CompanyRole;
+      readonly isolate: boolean;
+    }
   | { readonly kind: 'wait'; readonly blocker: WorkItemBlocker; readonly reason: string };
-
-/** A running item that blocks this one, and the area this one needs that it holds. */
-interface Conflict {
-  readonly hold: SchedulerHold;
-  readonly area: string;
-}
 
 /** Lowercase path key: forward slashes, no trailing slash. Windows paths compare case-insensitively. */
 export function checkoutKey(path: string): string {
@@ -128,21 +144,32 @@ function decideNamed(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecis
     return waitWith({ kind: 'agent' });
   }
   if (ctx.holds.length >= ctx.maxParallel) return capacityWait(ctx);
-  const conflict = conflictWith(item, member.cwd, ctx.holds);
-  if (conflict !== undefined) return areaWait(conflict);
+  const blocker = conflictWith(item, member.cwd, ctx);
+  if (blocker !== undefined) return waitWith(blocker);
   return { kind: 'use', member };
 }
 
 function decideOpen(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecision {
-  const conflict = conflictWith(item, item.repo, ctx.holds);
-  if (conflict !== undefined) return areaWait(conflict);
-  return { kind: 'open', cwd: item.repo, role: item.role ?? 'chat' };
+  // An editing item runs in its own worktree, so no checkout is shared; its areas still apply.
+  const blocker = conflictWith(item, undefined, ctx);
+  if (blocker !== undefined) return waitWith(blocker);
+  return {
+    kind: 'open',
+    cwd: item.repo,
+    role: item.role ?? 'chat',
+    isolate: !item.readOnly,
+  };
 }
 
 function decideAuto(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecision {
   const held = new Set(ctx.holds.map((hold) => hold.memberKey));
-  const inRepo = ctx.members.filter((member) => isInsideRepo(member.cwd, item.repo));
-  const idle = inRepo.filter(
+  // A subagent runs only in an omp session, where the dispatch asks for its task tool; a pane cannot.
+  const subagent = item.agent !== undefined && item.agent !== DEFAULT_AGENT;
+  const serving = ctx.members.filter(
+    (member) =>
+      servesRepo(member, item.repo) && (!subagent || member.assignee.kind === 'session'),
+  );
+  const idle = serving.filter(
     (member) =>
       member.free &&
       !held.has(member.key) &&
@@ -154,14 +181,14 @@ function decideAuto(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecisi
   const ordered = [...idle].sort(
     (a, b) => tierOf(a, item) - tierOf(b, item) || a.key.localeCompare(b.key),
   );
-  let blocked: Conflict | undefined;
+  let blocked: WorkItemBlocker | undefined;
   for (const member of ordered) {
-    const conflict = conflictWith(item, member.cwd, ctx.holds);
-    if (conflict === undefined) return { kind: 'use', member };
-    blocked ??= conflict;
+    const blocker = conflictWith(item, member.cwd, ctx);
+    if (blocker === undefined) return { kind: 'use', member };
+    blocked ??= blocker;
   }
-  if (blocked !== undefined) return areaWait(blocked);
-  const busy = inRepo.filter((member) => !member.free || held.has(member.key)).length;
+  if (blocked !== undefined) return waitWith(blocked);
+  const busy = serving.filter((member) => !member.free || held.has(member.key)).length;
   return openOrRefuse(item, ctx, busy);
 }
 
@@ -188,38 +215,68 @@ function openOrRefuse(item: SchedulerItem, ctx: SchedulerContext, busy: number):
   };
 }
 
+/**
+ * Whether a member serves a repo: it works inside the repo, or the squad opened it for the repo.
+ * A squad worktree may sit outside the repo folder, so the second test is what keeps it in reach.
+ */
+function servesRepo(member: SchedulerMember, repo: string): boolean {
+  if (isInsideRepo(member.cwd, repo)) return true;
+  return member.squadRepo !== undefined && checkoutKey(member.squadRepo) === checkoutKey(repo);
+}
+
 /** Lower tier is preferred: a role note naming the role, then the squad's own session, then the rest. */
 function tierOf(member: SchedulerMember, item: SchedulerItem): number {
   if (item.role !== undefined && member.note?.toLowerCase().includes(item.role)) return 0;
-  const sameRepo = member.cwd !== undefined && checkoutKey(member.cwd) === checkoutKey(item.repo);
-  if (member.squadOpened && sameRepo && (item.role === undefined || member.role === item.role)) {
-    return 1;
-  }
+  const ownSession =
+    member.squadRepo !== undefined && checkoutKey(member.squadRepo) === checkoutKey(item.repo);
+  if (ownSession && (item.role === undefined || member.role === item.role)) return 1;
   return 2;
 }
 
-/** The first running editing item that holds this checkout or an overlapping area, or undefined. */
+/**
+ * Why an editing item may not run in this checkout now, or undefined. A running editing item holds
+ * the checkout or an overlapping area; a busy member outside the work items locks its checkout.
+ * Read-only items are never blocked.
+ */
 function conflictWith(
   item: SchedulerItem,
   checkout: string | undefined,
-  holds: readonly SchedulerHold[],
-): Conflict | undefined {
+  ctx: SchedulerContext,
+): WorkItemBlocker | undefined {
   if (item.readOnly) return undefined;
-  for (const hold of holds) {
+  for (const hold of ctx.holds) {
     if (hold.readOnly) continue;
     if (
       checkout !== undefined &&
       hold.checkout !== undefined &&
       checkoutKey(checkout) === checkoutKey(hold.checkout)
     ) {
-      return { hold, area: checkoutName(checkout) };
+      return { kind: 'area', sequence: hold.sequence, area: checkoutName(checkout) };
     }
     const area = item.areas.find((mine) =>
       hold.areas.some((theirs) => areasOverlap(mine, theirs)),
     );
-    if (area !== undefined) return { hold, area };
+    if (area !== undefined) return { kind: 'area', sequence: hold.sequence, area };
+  }
+  if (checkout !== undefined && isLockedByBusyMember(checkout, ctx)) {
+    return { kind: 'busy_checkout', area: checkoutName(checkout) };
   }
   return undefined;
+}
+
+/**
+ * Whether a member busy in this checkout runs no work item the board holds. A member with a hold is
+ * judged by that hold alone, so a read-only item leaves its checkout open.
+ */
+function isLockedByBusyMember(checkout: string, ctx: SchedulerContext): boolean {
+  const key = checkoutKey(checkout);
+  return ctx.members.some(
+    (member) =>
+      member.busy &&
+      member.cwd !== undefined &&
+      checkoutKey(member.cwd) === key &&
+      !ctx.holds.some((hold) => hold.memberKey === member.key),
+  );
 }
 
 function waitWith(blocker: WorkItemBlocker): SchedulerDecision {
@@ -228,8 +285,4 @@ function waitWith(blocker: WorkItemBlocker): SchedulerDecision {
 
 function capacityWait(ctx: SchedulerContext): SchedulerDecision {
   return waitWith({ kind: 'capacity', running: ctx.holds.length, limit: ctx.maxParallel });
-}
-
-function areaWait(conflict: Conflict): SchedulerDecision {
-  return waitWith({ kind: 'area', sequence: conflict.hold.sequence, area: conflict.area });
 }

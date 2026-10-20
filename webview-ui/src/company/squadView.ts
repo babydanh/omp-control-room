@@ -7,6 +7,8 @@
  */
 
 import type {
+  CompanyRole,
+  OmpAgentInfo,
   SquadDependency,
   SquadEventKind,
   SquadProgress,
@@ -16,8 +18,10 @@ import type {
   SquadRunStatus,
   WorkItem,
   WorkItemAssignee,
+  WorkItemBlocker,
   WorkItemStatus,
 } from '../../../core/src/messages.js';
+import { SQUAD_DEFAULT_AGENT } from '../../../core/src/squadCompleteness.js';
 import {
   graphHasCycle,
   isWorkItemPriority,
@@ -33,7 +37,13 @@ import type { CompanyLaneId } from './constants.js';
 import type { FolderIdentity } from './folderIdentity.js';
 import { showsAllFolders } from './folderIdentity.js';
 import { foldersInView } from './folderView.js';
-import { statusWordVi, workItemCardHead, workItemFolderIdentity } from './workItemView.js';
+import { areasFromText } from './squadPlanCheck.js';
+import {
+  statusWordVi,
+  WORK_ITEM_AREAS_MAX,
+  workItemCardHead,
+  workItemFolderIdentity,
+} from './workItemView.js';
 
 /** A folder's squad runs as the server last sent them, with the revision that sent them. */
 export interface FolderSquad {
@@ -59,6 +69,14 @@ export interface VisibleSquadRun {
 export interface SquadDraftRow {
   key: string;
   text: string;
+  /** The repo the row runs in, by its path; null for the folder root. */
+  repo: string | null;
+  /** The role the row is filed under; null for none. */
+  role: CompanyRole | null;
+  /** The omp subagent by catalog name; empty for the default worker. */
+  agent: string;
+  /** The code areas as typed, comma-separated; parsed when the row is checked or sent. */
+  areas: string;
   /** Null while the row has no assignee; the drawer's select sets it. */
   assignee: WorkItemAssignee | null;
   priority: number;
@@ -66,6 +84,12 @@ export interface SquadDraftRow {
   acceptance: string;
   /** The wait list: other rows of this proposal by index, and open work items by #n. */
   dependsOn: SquadDependency[];
+}
+
+/** The folder's repos and subagent catalog: the values a proposal row may name. */
+export interface SquadCatalog {
+  repos: readonly string[];
+  agents: readonly OmpAgentInfo[];
 }
 
 export type SquadRowsVerdict = { ok: true; rows: SquadRowInput[] } | { ok: false; reason: string };
@@ -156,11 +180,18 @@ export const PRIORITY_CHOICES: readonly number[] = Array.from(
   (_, index) => WORK_ITEM_PRIORITY_MIN + index,
 );
 
-/** A proposal's rows as editable drafts. A row keeps the key it was proposed with. */
+/**
+ * A proposal's rows as editable drafts. A row keeps the key it was proposed with. A row that names
+ * the default worker holds an empty agent, which the approval sends as none: the same agent.
+ */
 export function rowsFromProposal(proposal: SquadProposal): SquadDraftRow[] {
   return proposal.rows.map((row, index) => ({
     key: `${proposal.id}:${index}`,
     text: row.text,
+    repo: row.repo ?? null,
+    role: row.role ?? null,
+    agent: row.agent === undefined || row.agent === SQUAD_DEFAULT_AGENT ? '' : row.agent,
+    areas: (row.areas ?? []).join(', '),
     assignee: row.assignee,
     priority: row.priority,
     acceptance: row.acceptance ?? '',
@@ -173,6 +204,10 @@ export function blankDraftRow(key: string): SquadDraftRow {
   return {
     key,
     text: '',
+    repo: null,
+    role: null,
+    agent: '',
+    areas: '',
     assignee: null,
     priority: WORK_ITEM_PRIORITY_DEFAULT,
     acceptance: '',
@@ -183,13 +218,16 @@ export function blankDraftRow(key: string): SquadDraftRow {
 /**
  * Whether a draft can be sent as an approval, and the rows as the server takes them: one to
  * SQUAD_MAX_ROWS rows, each with trimmed text that fits the server's limit, an assignee, a valid
- * priority, acceptance within its limit, and a wait list that holds. `openSequences` is the set of
- * #n a wait list may name; without it the wait list's items are not checked. The reason names the
- * first row that fails, in words the drawer can show.
+ * priority, acceptance within its limit, at most WORK_ITEM_AREAS_MAX areas, and a wait list that
+ * holds. `openSequences` is the set of #n a wait list may name; without it the wait list's items
+ * are not checked. `catalog` holds the folder's repos and subagents; without it a row's repo and
+ * subagent are not checked against the folder. The reason names the first row that fails, in
+ * words the drawer can show. Completeness warnings never refuse a draft.
  */
 export function validateRows(
   rows: readonly SquadDraftRow[],
   openSequences?: ReadonlySet<number>,
+  catalog?: SquadCatalog,
 ): SquadRowsVerdict {
   if (rows.length === 0) return { ok: false, reason: 'Cần ít nhất 1 dòng việc.' };
   if (rows.length > SQUAD_MAX_ROWS) {
@@ -216,6 +254,19 @@ export function validateRows(
         reason: `${label}: phần "Xong khi" dài quá ${WORK_ITEM_ACCEPTANCE_MAX_CHARS} ký tự.`,
       };
     }
+    if (catalog !== undefined && row.repo !== null && !catalog.repos.includes(row.repo)) {
+      return { ok: false, reason: `${label}: repo không còn trong thư mục.` };
+    }
+    if (catalog !== undefined && row.agent !== '') {
+      const agent = row.agent;
+      if (!catalog.agents.some((entry) => entry.name === agent)) {
+        return { ok: false, reason: `${label}: subagent không còn trong thư mục.` };
+      }
+    }
+    const areas = areasFromText(row.areas);
+    if (areas.length > WORK_ITEM_AREAS_MAX) {
+      return { ok: false, reason: `${label}: tối đa ${WORK_ITEM_AREAS_MAX} vùng.` };
+    }
     const waitRefusal = validateRowDependsOn(rows, index, row.dependsOn, openSequences);
     if (waitRefusal !== null) return { ok: false, reason: `${label}: ${waitRefusal}` };
     const sent: SquadRowInput = {
@@ -225,6 +276,10 @@ export function validateRows(
       dependsOn: [...row.dependsOn],
     };
     if (acceptance !== '') sent.acceptance = acceptance;
+    if (row.repo !== null) sent.repo = row.repo;
+    if (row.role !== null) sent.role = row.role;
+    if (row.agent !== '') sent.agent = row.agent;
+    if (areas.length > 0) sent.areas = areas;
     out.push(sent);
   }
   return { ok: true, rows: out };
@@ -420,6 +475,8 @@ export interface EpicChild {
   head: string;
   status: WorkItemStatus;
   statusLabel: string;
+  /** What holds the item while it waits, as the server reports it; undefined when nothing does. */
+  blocker: WorkItemBlocker | undefined;
   waits: EpicWait[];
 }
 
@@ -447,6 +504,7 @@ export function epicChildren(run: Pick<SquadRun, 'id'>, items: readonly WorkItem
       head: workItemCardHead(item.text),
       status: item.status,
       statusLabel: statusWordVi(item.status),
+      blocker: item.blocker,
       waits: item.dependsOn.map((id) => waitOn(byId.get(id))),
     }));
 }

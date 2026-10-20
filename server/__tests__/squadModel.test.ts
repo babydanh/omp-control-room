@@ -15,17 +15,19 @@ import {
   type LeaderItemView,
   parseLeaderReply,
   parseSquadFile,
-  parseSquadRows,
+  parseSquadRows as checkSquadRows,
   requestFromItem,
   rowsOf,
   SQUAD_CONTEXT_RESULT_MAX_CHARS,
   SQUAD_HISTORY_MAX,
   SQUAD_MAX_ROWS,
+  type SquadCatalog,
   squadEvent,
   type SquadMember,
   squadProgress,
   type StoredSquadRun,
   toWireRun,
+  warningsOf,
 } from '../src/company/squad/squadModel.js';
 
 const AT = '2026-05-01T08:00:00.000Z';
@@ -51,6 +53,18 @@ const SESSION_MEMBER: SquadMember = {
 };
 const MEMBERS: SquadMember[] = [HERDR_MEMBER, SESSION_MEMBER];
 
+const REPO = '/work/folder/app';
+/** The folder's repos and omp agents the leader may name. */
+const CATALOG: SquadCatalog = {
+  repos: [REPO],
+  agents: [
+    { name: 'task', description: 'Làm việc', readOnly: false, source: 'bundled' },
+    { name: 'sonic', description: 'Việc cơ học', readOnly: false, source: 'bundled' },
+    { name: 'scout', description: 'Tìm thông tin', readOnly: true, source: 'bundled' },
+    { name: 'reviewer', description: 'Review code', readOnly: true, source: 'bundled' },
+  ],
+};
+
 /** No open work items: the leader may not wait for any `#n`. */
 const NO_OPEN: ReadonlySet<number> = new Set<number>();
 /** Work item #1 is open. */
@@ -66,7 +80,12 @@ function reply(value: unknown): string {
 }
 
 function parseReply(value: unknown, open: ReadonlySet<number> = NO_OPEN) {
-  return parseLeaderReply(reply(value), MEMBERS, open);
+  return parseLeaderReply(reply(value), MEMBERS, CATALOG, open);
+}
+
+/** Checks board rows against the test catalog and the open items of {@link openItemId}. */
+function parseSquadRows(value: unknown, openItemId: (sequence: number) => string | undefined) {
+  return checkSquadRows(value, CATALOG, openItemId);
 }
 
 function storedRun(overrides: Partial<StoredSquadRun> = {}): StoredSquadRun {
@@ -124,7 +143,7 @@ describe('parseLeaderReply', () => {
       note: '',
       done: false,
     });
-    const checked = parseLeaderReply('```json\n' + body + '\n```', MEMBERS, NO_OPEN);
+    const checked = parseLeaderReply('```json\n' + body + '\n```', MEMBERS, CATALOG, NO_OPEN);
     expect(checked.ok).toBe(true);
   });
 
@@ -134,7 +153,7 @@ describe('parseLeaderReply', () => {
   });
 
   it('refuses text that is not JSON', () => {
-    const checked = parseLeaderReply('Tôi nghĩ nên làm vậy', MEMBERS, NO_OPEN);
+    const checked = parseLeaderReply('Tôi nghĩ nên làm vậy', MEMBERS, CATALOG, NO_OPEN);
     expect(checked).toMatchObject({ ok: false });
     if (!checked.ok) expect(checked.message).toContain('JSON');
   });
@@ -610,11 +629,20 @@ describe('parseSquadFile', () => {
   it('keeps the done-when text of a saved review', () => {
     const itemId = randomUUID();
     const run = storedRun({
-      pendingReviews: [{ itemId, at: AT, text: 'Form', result: 'Đã viết', acceptance: 'Có test' }],
+      pendingReviews: [
+        {
+          itemId,
+          at: AT,
+          outcome: 'review',
+          text: 'Form',
+          result: 'Đã viết',
+          acceptance: 'Có test',
+        },
+      ],
     });
     const parsed = parseSquadFile({ version: 1, revision: 1, runs: [run] });
     expect(parsed.file.runs[0]?.pendingReviews).toEqual([
-      { itemId, at: AT, text: 'Form', result: 'Đã viết', acceptance: 'Có test' },
+      { itemId, at: AT, outcome: 'review', text: 'Form', result: 'Đã viết', acceptance: 'Có test' },
     ]);
   });
 
@@ -648,6 +676,7 @@ describe('squadProgress', () => {
       turn: 1,
       note: '',
       rows: [],
+      warnings: [],
       status: 'approved' as const,
       createdAt: AT,
     };
@@ -656,6 +685,7 @@ describe('squadProgress', () => {
       turn: 2,
       note: '',
       rows: [],
+      warnings: [],
       status: 'pending' as const,
       createdAt: AT,
     };
@@ -675,6 +705,9 @@ describe('buildLeaderPrompt', () => {
     const prompt = buildLeaderPrompt({
       folderName: 'app',
       request: 'Làm trang đăng nhập',
+      repos: CATALOG.repos,
+      agents: CATALOG.agents,
+      autoJudge: false,
       members: MEMBERS,
       items: [],
       reviews: [],
@@ -715,6 +748,9 @@ describe('buildLeaderPrompt', () => {
     const prompt = buildLeaderPrompt({
       folderName: 'app',
       request: 'Làm',
+      repos: CATALOG.repos,
+      agents: CATALOG.agents,
+      autoJudge: false,
       members: MEMBERS,
       items,
       reviews: [],
@@ -733,12 +769,16 @@ describe('buildLeaderPrompt', () => {
     const prompt = buildLeaderPrompt({
       folderName: 'app',
       request: 'Làm',
+      repos: CATALOG.repos,
+      agents: CATALOG.agents,
+      autoJudge: false,
       members: MEMBERS,
       items: [],
       reviews: [
         {
           itemId: randomUUID(),
           at: AT,
+          outcome: 'review',
           text: 'Form đăng nhập',
           result: 'Đã viết',
           acceptance: 'Có test form',
@@ -747,7 +787,7 @@ describe('buildLeaderPrompt', () => {
       history: [],
       turn: 1,
     });
-    expect(prompt).toContain('- Form đăng nhập');
+    expect(prompt).toContain('- [waiting for judgment] Form đăng nhập');
     expect(prompt).toContain('  done when: Có test form');
     expect(prompt).toContain('  result: Đã viết');
   });
@@ -820,6 +860,7 @@ describe('appendEvent and toWireRun', () => {
       turn: 1,
       note: 'cũ',
       rows: [],
+      warnings: [],
       status: 'approved' as const,
       createdAt: AT,
     };
@@ -828,6 +869,7 @@ describe('appendEvent and toWireRun', () => {
       turn: 2,
       note: 'mới',
       rows: [],
+      warnings: [],
       status: 'pending' as const,
       createdAt: AT,
     };
@@ -838,5 +880,204 @@ describe('appendEvent and toWireRun', () => {
     expect(wire.proposal?.id).toBe(newer.id);
     expect(wire.maxTurns).toBe(10);
     expect(wire.progress).toEqual({ done: 0, total: 0 });
+  });
+});
+
+describe('parseLeaderReply repo, role, agent and areas', () => {
+  it('keeps a repo of the folder, a role, a catalog agent and areas', () => {
+    const checked = parseReply({
+      assignments: [
+        {
+          assignee: 'session:s1',
+          text: 'Làm',
+          repo: REPO,
+          role: 'qa',
+          agent: 'sonic',
+          areas: ['web:src/app'],
+        },
+      ],
+      note: '',
+      done: false,
+    });
+    expect(checked).toMatchObject({
+      ok: true,
+      value: {
+        assignments: [{ repo: REPO, role: 'qa', agent: 'sonic', areas: ['web:src/app'] }],
+      },
+    });
+  });
+
+  it('defaults a row with no assignee to the scheduler pick', () => {
+    const checked = parseReply({ assignments: [{ text: 'Làm' }], note: '', done: false });
+    expect(checked).toMatchObject({
+      ok: true,
+      value: { assignments: [{ assignee: { kind: 'auto' } }] },
+    });
+  });
+
+  it('refuses a repo the folder does not have, an unknown role, and an unknown agent', () => {
+    const repo = parseReply({
+      assignments: [{ assignee: 'session:s1', text: 'Làm', repo: '/work/other' }],
+      note: '',
+      done: false,
+    });
+    expect(repo.ok).toBe(false);
+    if (!repo.ok) expect(repo.message).toContain('không phải thư mục repo');
+
+    const role = parseReply({
+      assignments: [{ assignee: 'session:s1', text: 'Làm', role: 'director' }],
+      note: '',
+      done: false,
+    });
+    expect(role.ok).toBe(false);
+    if (!role.ok) expect(role.message).toContain('vai trò không hợp lệ');
+
+    const agent = parseReply({
+      assignments: [{ assignee: 'session:s1', text: 'Làm', agent: 'ghost' }],
+      note: '',
+      done: false,
+    });
+    expect(agent.ok).toBe(false);
+    if (!agent.ok) expect(agent.message).toContain('không có trong danh sách agent');
+  });
+
+  it('refuses code areas on a read-only agent, and more areas than the limit', () => {
+    const readOnly = parseReply({
+      assignments: [{ assignee: 'session:s1', text: 'Tìm', agent: 'scout', areas: ['web:src'] }],
+      note: '',
+      done: false,
+    });
+    expect(readOnly.ok).toBe(false);
+    if (!readOnly.ok) expect(readOnly.message).toContain('agent chỉ đọc');
+
+    const tooMany = parseReply({
+      assignments: [
+        {
+          assignee: 'session:s1',
+          text: 'Làm',
+          areas: Array.from({ length: 9 }, (_, index) => `web:${index}`),
+        },
+      ],
+      note: '',
+      done: false,
+    });
+    expect(tooMany.ok).toBe(false);
+    if (!tooMany.ok) expect(tooMany.message).toContain('tối đa 8');
+  });
+});
+
+describe('warningsOf', () => {
+  it('reports a code change with no reviewer and no done-when line, and a subagent hint on herdr', () => {
+    const rows = rowsOf([
+      {
+        assignee: { kind: 'herdr', paneId: 'wA:p1' },
+        text: 'Viết trang',
+        priority: WORK_ITEM_PRIORITY_DEFAULT,
+        dependsOn: [],
+      },
+    ]);
+    expect(warningsOf(rows, CATALOG)).toEqual([
+      'Thiếu bước review cho #1',
+      'Thiếu tiêu chí nghiệm thu cho #1',
+    ]);
+  });
+
+  it('reports nothing for a code change that a reviewer waits for, with a done-when line', () => {
+    const assignments: LeaderAssignment[] = [
+      {
+        assignee: { kind: 'herdr', paneId: 'wA:p1' },
+        text: 'Viết trang',
+        priority: WORK_ITEM_PRIORITY_DEFAULT,
+        acceptance: 'Có test',
+        dependsOn: [],
+      },
+      {
+        assignee: { kind: 'session', sessionId: 's1' },
+        text: 'Review trang',
+        agent: 'reviewer',
+        priority: WORK_ITEM_PRIORITY_DEFAULT,
+        acceptance: 'Không lỗi',
+        dependsOn: [{ kind: 'row', row: 0 }],
+      },
+    ];
+    expect(warningsOf(rowsOf(assignments), CATALOG)).toEqual([]);
+  });
+
+  it('names a risky row with no security reviewer, and a herdr row that names a subagent', () => {
+    const assignments: LeaderAssignment[] = [
+      {
+        assignee: { kind: 'herdr', paneId: 'wA:p1' },
+        text: 'Sửa form đăng nhập',
+        agent: 'scout',
+        priority: WORK_ITEM_PRIORITY_DEFAULT,
+        acceptance: 'Có test',
+        dependsOn: [],
+      },
+    ];
+    expect(warningsOf(rowsOf(assignments), CATALOG)).toEqual([
+      'Nên có review bảo mật cho #1 (đụng auth)',
+      'Agent herdr: subagent chỉ là gợi ý (#1)',
+    ]);
+  });
+});
+
+describe('buildLeaderPrompt repos, agents, judging and current items', () => {
+  it('lists the repos and agents, the work pipeline, and each member current item', () => {
+    const prompt = buildLeaderPrompt({
+      folderName: 'app',
+      request: 'Làm',
+      repos: CATALOG.repos,
+      agents: CATALOG.agents,
+      autoJudge: true,
+      members: [{ ...HERDR_MEMBER, currentItem: 4 }, SESSION_MEMBER],
+      items: [],
+      reviews: [],
+      history: [],
+      turn: 1,
+    });
+    expect(prompt).toContain('## Repos');
+    expect(prompt).toContain(`- ${REPO}`);
+    expect(prompt).toContain('- scout · read-only · Tìm thông tin');
+    expect(prompt).toContain('- sonic · changes code · Việc cơ học');
+    expect(prompt).toContain('Work pipeline for each request:');
+    expect(prompt).toContain('automatic judging is on');
+    expect(prompt).toContain('current item: #4');
+    expect(prompt).toContain('current item: none');
+  });
+});
+
+describe('saved squad fields', () => {
+  it('reads a proposal saved before warnings existed as having none', () => {
+    const parsed = parseSquadFile({
+      version: 1,
+      revision: 1,
+      runs: [
+        {
+          ...storedRun(),
+          proposals: [
+            {
+              id: randomUUID(),
+              turn: 1,
+              note: '',
+              status: 'pending',
+              createdAt: AT,
+              rows: [{ text: 'Làm', assignee: { kind: 'auto' }, priority: 2, dependsOn: [] }],
+            },
+          ],
+        },
+      ],
+    });
+    expect(parsed.dropped).toBe(0);
+    expect(parsed.file.runs[0]?.proposals[0]?.warnings).toEqual([]);
+  });
+
+  it('reads a saved review with no outcome as waiting for judgment', () => {
+    const parsed = parseSquadFile({
+      version: 1,
+      revision: 1,
+      runs: [{ ...storedRun(), pendingReviews: [{ itemId: randomUUID(), at: AT, text: 'Form' }] }],
+    });
+    expect(parsed.dropped).toBe(0);
+    expect(parsed.file.runs[0]?.pendingReviews[0]?.outcome).toBe('review');
   });
 });

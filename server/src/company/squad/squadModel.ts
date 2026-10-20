@@ -5,6 +5,8 @@
  */
 
 import type {
+  CompanyRole,
+  OmpAgentInfo,
   SquadDependency,
   SquadEvent,
   SquadEventKind,
@@ -16,6 +18,7 @@ import type {
   SquadRunStatus,
   WorkItemAssignee,
 } from '../../../../core/src/messages.js';
+import { planCompleteness, SQUAD_DEFAULT_AGENT } from '../../../../core/src/squadCompleteness.js';
 import {
   graphHasCycle,
   isWorkItemPriority,
@@ -26,14 +29,20 @@ import {
   WORK_ITEM_PRIORITY_MAX,
 } from '../../../../core/src/workItemGraph.js';
 import { isRecord } from '../typeGuards.js';
+import { findAgent } from '../workItems/agentCatalog.js';
 import {
   assigneeKey,
   clip,
+  isItemRole,
   isUuid,
   isWorkItemAssignee,
+  normalizeAreas,
   normalizeAssignee,
   refuseText,
+  WORK_ITEM_AREA_MAX_CHARS,
+  WORK_ITEM_AREAS_MAX,
 } from '../workItems/workItemModel.js';
+import { checkoutKey } from '../workItems/workItemScheduler.js';
 
 /** Most assignments one leader reply may propose. */
 export const SQUAD_MAX_ROWS = 8;
@@ -78,13 +87,19 @@ export interface SquadMember {
   readonly role: string;
   /** Items of this folder still waiting for or holding this agent. */
   readonly queued: number;
+  /** The #n of the item this member is running now, or waiting on the user for. */
+  readonly currentItem?: number;
 }
+
+/** How a finished item reaches the leader: waiting for judgment, judged done, or failed. */
+export type SquadReviewOutcome = 'review' | 'done' | 'failed';
 
 /** A finished work item the leader has not yet read. */
 export interface SquadReview {
   readonly itemId: string;
-  /** When the item reached review; with `itemId` it identifies this review. */
+  /** When the item settled; with `itemId` it identifies this review. */
   readonly at: string;
+  readonly outcome: SquadReviewOutcome;
   readonly text: string;
   readonly result?: string;
   /** The item's "done when" text, which the leader judges the result against. */
@@ -137,8 +152,25 @@ export type DependencyRef =
   | { readonly kind: 'row'; readonly row: number }
   | { readonly kind: 'item'; readonly sequence: number };
 
+/** The optional fields a row names: its repo, role, omp agent, and code areas. */
+export interface SquadRowFields {
+  /** One of the folder's repo paths; absent means the folder root. */
+  readonly repo?: string;
+  readonly role?: Exclude<CompanyRole, 'director'>;
+  /** One of the omp agents in the catalog; absent means the default worker. */
+  readonly agent?: string;
+  /** Lowercase code areas the row edits; absent when there are none. */
+  readonly areas?: string[];
+}
+
+/** The folder's repos and omp agents a row may name, as the work item service reads them. */
+export interface SquadCatalog {
+  readonly repos: readonly string[];
+  readonly agents: readonly OmpAgentInfo[];
+}
+
 /** One assignment the leader proposed, after validation. */
-export interface LeaderAssignment {
+export interface LeaderAssignment extends SquadRowFields {
   readonly assignee: WorkItemAssignee;
   readonly text: string;
   readonly reason?: string;
@@ -158,7 +190,7 @@ export interface LeaderReply {
  * One row ready for `WorkItemService.createWorkItems`. `dependsOn` names existing items by id;
  * `dependsOnDrafts` names rows of the same batch by their index in it.
  */
-export interface SquadDraft {
+export interface SquadDraft extends SquadRowFields {
   readonly text: string;
   readonly assignee: WorkItemAssignee;
   readonly priority: number;
@@ -192,6 +224,12 @@ export interface LeaderItemView {
 export interface LeaderPromptInput {
   readonly folderName: string;
   readonly request: string;
+  /** The folder's repo paths; a row names one of them. */
+  readonly repos: readonly string[];
+  /** The omp agents a row may name. */
+  readonly agents: readonly OmpAgentInfo[];
+  /** Whether a judge agent decides finished items, rather than the leader. */
+  readonly autoJudge: boolean;
   readonly members: readonly SquadMember[];
   readonly items: readonly LeaderItemView[];
   readonly reviews: readonly SquadReview[];
@@ -220,6 +258,15 @@ const EVENT_KINDS: readonly SquadEventKind[] = [
   'failed',
   'stopped',
 ];
+
+/** Outcomes a finished item may reach the leader with. */
+const REVIEW_OUTCOMES: readonly SquadReviewOutcome[] = ['review', 'done', 'failed'];
+/** How the leader reads each outcome in the prompt. */
+const REVIEW_OUTCOME_LABEL: Record<SquadReviewOutcome, string> = {
+  review: 'waiting for judgment',
+  done: 'done',
+  failed: 'failed',
+};
 const REPLY_KEYS: readonly string[] = ['assignments', 'note', 'done'];
 const ASSIGNMENT_KEYS: readonly string[] = [
   'assignee',
@@ -228,7 +275,12 @@ const ASSIGNMENT_KEYS: readonly string[] = [
   'priority',
   'acceptance',
   'dependsOn',
+  'repo',
+  'role',
+  'agent',
+  'areas',
 ];
+const AUTO_REF = 'auto';
 const NEW_SESSION_REF = 'new-session';
 const OPEN_ITEM_STATUSES: Record<string, true> = {
   queued: true,
@@ -359,11 +411,12 @@ export function parseSquadFile(raw: unknown): ParsedSquadFile {
  * Parses the leader's final text. Accepts one JSON object with exactly the keys the prompt asks
  * for, optionally inside one code fence. Anything else is refused and nothing is assigned.
  * `openSequences` holds the #n of the open work items the leader was shown: only those may be
- * waited for.
+ * waited for. `catalog` holds the folder's repos and agents: a row may name only those.
  */
 export function parseLeaderReply(
   output: string,
   members: readonly SquadMember[],
+  catalog: SquadCatalog,
   openSequences: ReadonlySet<number>,
 ): Checked<LeaderReply> {
   let value: unknown;
@@ -399,7 +452,14 @@ export function parseLeaderReply(
   }
   const assignments: LeaderAssignment[] = [];
   for (const [index, entry] of rawAssignments.entries()) {
-    const checked = parseAssignment(entry, index, rawAssignments.length, members, openSequences);
+    const checked = parseAssignment(
+      entry,
+      index,
+      rawAssignments.length,
+      members,
+      catalog,
+      openSequences,
+    );
     if (!checked.ok) return checked;
     assignments.push(checked.value);
   }
@@ -416,12 +476,14 @@ export function parseLeaderReply(
 
 /**
  * Checks the rows the board sends back on approval: 1 to {@link SQUAD_MAX_ROWS} rows, each with
- * non-empty text, a valid assignee, and optional priority, acceptance and dependsOn. A row waits for
- * another row by its 0-based index in this list, and for an open item by its `#n`, which
- * `openItemId` resolves to the item's id. Returns the drafts to create and the rows to keep.
+ * non-empty text, a valid assignee, and optional priority, acceptance, dependsOn, repo, role, agent
+ * and areas. A row waits for another row by its 0-based index in this list, and for an open item by
+ * its `#n`, which `openItemId` resolves to the item's id. The repo and agent must be in `catalog`.
+ * Returns the drafts to create and the rows to keep.
  */
 export function parseSquadRows(
   value: unknown,
+  catalog: SquadCatalog,
   openItemId: (sequence: number) => string | undefined,
 ): Checked<SquadApproval> {
   if (!Array.isArray(value) || value.length === 0 || value.length > SQUAD_MAX_ROWS) {
@@ -430,7 +492,7 @@ export function parseSquadRows(
   const entries: readonly unknown[] = value;
   const checkedRows: CheckedRow[] = [];
   for (const [index, entry] of entries.entries()) {
-    const checked = parseSquadRow(entry, index);
+    const checked = parseSquadRow(entry, index, catalog);
     if (!checked.ok) return checked;
     const refusal = refuseRefs(
       checked.value.dependsOn,
@@ -459,6 +521,7 @@ export function parseSquadRows(
       assignee: row.assignee,
       priority: row.priority,
       ...acceptance,
+      ...rowFieldsOf(row),
       dependsOn,
       dependsOnDrafts,
     });
@@ -467,6 +530,7 @@ export function parseSquadRows(
       assignee: row.assignee,
       priority: row.priority,
       ...acceptance,
+      ...rowFieldsOf(row),
       dependsOn: row.dependsOn.map(toDependency),
     });
   }
@@ -481,8 +545,30 @@ export function rowsOf(assignments: readonly LeaderAssignment[]): SquadRow[] {
     ...(assignment.reason === undefined ? {} : { reason: assignment.reason }),
     priority: assignment.priority,
     ...(assignment.acceptance === undefined ? {} : { acceptance: assignment.acceptance }),
+    ...rowFieldsOf(assignment),
     dependsOn: assignment.dependsOn.map(toDependency),
   }));
+}
+
+/**
+ * The completeness notes of a plan's rows, in row order. A row's agent is read against the folder's
+ * catalog: an agent the catalog marks read-only changes no files. Advice only; it never blocks.
+ */
+export function warningsOf(rows: readonly SquadRow[], catalog: SquadCatalog): string[] {
+  const readOnlyAgents = new Set(
+    catalog.agents.filter((agent) => agent.readOnly).map((agent) => agent.name),
+  );
+  return planCompleteness(
+    rows.map((row) => ({
+      text: row.text,
+      ...(row.acceptance === undefined ? {} : { acceptance: row.acceptance }),
+      ...(row.agent === undefined ? {} : { agent: row.agent }),
+      ...(row.areas === undefined ? {} : { areas: row.areas }),
+      assigneeKind: row.assignee.kind,
+      dependsOn: row.dependsOn,
+    })),
+    readOnlyAgents,
+  );
 }
 
 /** The prompt one leader turn reads: the rules, the reply shape, the team, and the run so far. */
@@ -492,19 +578,39 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
     '',
     'Rules:',
     '- You run no tools and do no work yourself. Each assignment is a prompt its assignee will run.',
-    '- Assign only to ids listed under "Team", or to "new-session" to open a fresh omp chat in the folder. Never invent an id.',
-    '- Give each assignee a self-contained prompt that says what to do and what to report back.',
+    '- "assignee" is an id listed under "Team", "auto" (the scheduler picks a free agent in the row repo), or "new-session" (a fresh omp chat in the folder). Never invent an id. Omitted means "auto".',
+    '- "repo" is one of the paths under "Repos": the repo the row works in. Omitted means the folder root.',
+    `- "agent" is one name under "Agents". Omitted means "${SQUAD_DEFAULT_AGENT}", the default worker. Read-only agents only report; "${SQUAD_DEFAULT_AGENT}" changes code.`,
+    '- "role" is one of: advisor, worker, qa, judge, chat. Omitted means no role.',
+    '- "areas" lists the lowercase code areas a row edits, such as web:src/app; at most 8. Read-only agents take none.',
     '- Optional per assignment: "priority" from 0 (most urgent) to 3 (least), default 2; "acceptance", a short "done when" the result must meet; "dependsOn", the 0-based positions of OTHER assignments in this reply that must finish first, plus "#n" for open work items listed below. Leave out what you do not need.',
-    '- Judge each finished result against its "done when" line when it has one.',
+    '- Give each assignment a "reason" in one short sentence.',
     `- Propose at most ${SQUAD_MAX_ROWS} assignments per reply.`,
     '- Write "text", "reason", "acceptance" and "note" in the language of the request.',
     '',
+    'Work pipeline for each request:',
+    '1. If facts are missing (where the code lives, how it works, what is required), first assign a read-only "scout" row that reports them.',
+    `2. Code changes go to "${SQUAD_DEFAULT_AGENT}" rows with a repo and areas.`,
+    '3. Each row that changes code is followed by a "reviewer" row that depends on it. Skip the reviewer only for trivial mechanical work done by "sonic".',
+    '4. Add a "security-reviewer" row that depends on any row that touches auth, user input, SQL, tokens, file paths, or shell commands.',
+    '5. Every row has an "acceptance" line that says what done means.',
+    '',
+    input.autoJudge
+      ? 'Judging: automatic judging is on. A judge agent decides each finished item; you read only the judged results.'
+      : 'Judging: automatic judging is off. You judge each finished result against its "done when" line.',
+    '',
     'Reply with ONLY one JSON object: no text before or after it, no code fence.',
-    '{"assignments":[{"assignee":"<id>","text":"<prompt>","reason":"<one short sentence>"}],"note":"<one short sentence for the user>","done":false}',
+    '{"assignments":[{"assignee":"auto","agent":"task","repo":"<repo path>","role":"worker","areas":["web:src/app"],"text":"<prompt>","reason":"<one short sentence>","acceptance":"<done when>","priority":2,"dependsOn":[]}],"note":"<one short sentence for the user>","done":false}',
     'Set "done" to true only when the request is complete, judged from the results below. Then "assignments" must be [].',
     '',
     '## Request',
     input.request,
+    '',
+    '## Repos',
+    ...repoLines(input.repos),
+    '',
+    '## Agents',
+    ...agentLines(input.agents),
     '',
     '## Team',
     ...teamLines(input.members),
@@ -512,7 +618,7 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
     '## Work items of this request',
     ...itemLines(input.items),
     '',
-    '## Finished work waiting for your review',
+    '## New results since your last turn',
     ...reviewLines(input.reviews),
     '',
     '## Earlier steps',
@@ -589,11 +695,15 @@ function parseStoredProposal(value: unknown): SquadProposal | null {
   ) {
     return null;
   }
+  const rawWarnings = value['warnings'] === undefined ? [] : value['warnings'];
+  const warnings = parseAll(rawWarnings, (entry) => (typeof entry === 'string' ? entry : null));
+  if (warnings === null) return null;
   return {
     id,
     turn: turn as number,
     note,
     rows,
+    warnings,
     status: status as SquadProposalStatus,
     createdAt: value['createdAt'] as string,
   };
@@ -612,6 +722,8 @@ function parseRow(value: unknown): SquadRow | null {
   if (reason !== undefined && typeof reason !== 'string') return null;
   if (priority !== undefined && !isWorkItemPriority(priority)) return null;
   if (acceptance !== undefined && typeof acceptance !== 'string') return null;
+  const fields = parseStoredFields(value);
+  if (fields === null) return null;
   const refs: DependencyRef[] | null =
     dependsOn === undefined ? [] : parseAll(dependsOn, parseDependencyRef);
   if (refs === null) return null;
@@ -620,6 +732,7 @@ function parseRow(value: unknown): SquadRow | null {
     assignee: normalizeAssignee(assignee),
     priority: isWorkItemPriority(priority) ? priority : WORK_ITEM_PRIORITY_DEFAULT,
     dependsOn: refs.map(toDependency),
+    ...fields,
   };
   if (typeof reason === 'string') row.reason = reason;
   if (typeof acceptance === 'string') row.acceptance = acceptance;
@@ -633,16 +746,25 @@ function parseReview(value: unknown): SquadReview | null {
   const text = value['text'];
   const result = value['result'];
   const acceptance = value['acceptance'];
+  const outcome = parseOutcome(value['outcome']);
   if (!isUuid(itemId) || !isTimestamp(at) || typeof text !== 'string') return null;
   if (result !== undefined && typeof result !== 'string') return null;
   if (acceptance !== undefined && typeof acceptance !== 'string') return null;
+  if (outcome === null) return null;
   return {
     itemId,
     at,
+    outcome,
     text,
     ...(typeof result === 'string' ? { result } : {}),
     ...(typeof acceptance === 'string' ? { acceptance } : {}),
   };
+}
+
+/** A saved review's outcome: absent means it waited for judgment; anything else must be one. */
+function parseOutcome(raw: unknown): SquadReviewOutcome | null {
+  if (raw === undefined) return 'review';
+  return REVIEW_OUTCOMES.find((outcome) => outcome === raw) ?? null;
 }
 
 function isInteger(value: unknown): value is number {
@@ -701,15 +823,16 @@ function parseAll<T>(values: unknown, parse: (value: unknown) => T | null): T[] 
 }
 
 /**
- * Checks one leader row: its assignee must be a listed member, its text non-empty, and its optional
- * priority, acceptance, dependsOn and reason valid. Dependencies are also checked against the rest
- * of the reply by the caller.
+ * Checks one leader row: its assignee must be "auto", "new-session" or a listed member, its text
+ * non-empty, and its optional priority, acceptance, dependsOn, reason, repo, role, agent and areas
+ * valid. Dependencies are also checked against the rest of the reply by the caller.
  */
 function parseAssignment(
   entry: unknown,
   index: number,
   count: number,
   members: readonly SquadMember[],
+  catalog: SquadCatalog,
   openSequences: ReadonlySet<number>,
 ): Checked<LeaderAssignment> {
   const position = index + 1;
@@ -720,9 +843,10 @@ function parseAssignment(
   if (extra !== undefined) {
     return { ok: false, message: `Việc ${position} có trường không hỗ trợ: ${clip(extra, 40)}.` };
   }
-  const ref = entry['assignee'];
+  const rawRef = entry['assignee'];
+  const ref = rawRef === undefined ? AUTO_REF : rawRef;
   if (typeof ref !== 'string') {
-    return { ok: false, message: `Việc ${position} thiếu người nhận.` };
+    return { ok: false, message: `Việc ${position} có người nhận không phải chữ.` };
   }
   const assignee = resolveAssignee(ref, members);
   if (assignee === undefined) {
@@ -752,6 +876,8 @@ function parseAssignment(
   }
   const acceptance = checkAcceptance(entry['acceptance'], position);
   if (!acceptance.ok) return acceptance;
+  const fields = checkRowFields(entry, position, catalog);
+  if (!fields.ok) return fields;
   const dependsOn = parseLeaderDependsOn(entry['dependsOn'], position, index, count, openSequences);
   if (!dependsOn.ok) return dependsOn;
   const rawReason = entry['reason'];
@@ -769,6 +895,7 @@ function parseAssignment(
       dependsOn: dependsOn.value,
       ...(acceptance.value === undefined ? {} : { acceptance: acceptance.value }),
       ...(reason === '' ? {} : { reason }),
+      ...fields.value,
     },
   };
 }
@@ -787,6 +914,152 @@ function checkAcceptance(raw: unknown, position: number): Checked<string | undef
     };
   }
   return { ok: true, value: text === '' ? undefined : text };
+}
+
+/** Checks the optional repo, role, agent and areas a leader row or board row names. */
+function checkRowFields(
+  entry: Record<string, unknown>,
+  position: number,
+  catalog: SquadCatalog,
+): Checked<SquadRowFields> {
+  const repo = checkRepo(entry['repo'], position, catalog);
+  if (!repo.ok) return repo;
+  const role = checkRole(entry['role'], position);
+  if (!role.ok) return role;
+  const agent = checkAgent(entry['agent'], position, catalog);
+  if (!agent.ok) return agent;
+  const areas = checkAreas(entry['areas'], position);
+  if (!areas.ok) return areas;
+  const agentInfo = agent.value === undefined ? undefined : findAgent(catalog.agents, agent.value);
+  if (agentInfo?.readOnly === true && areas.value !== undefined) {
+    return {
+      ok: false,
+      message: `Việc ${position} dùng agent chỉ đọc "${agentInfo.name}" nên không có khu vực sửa.`,
+    };
+  }
+  return {
+    ok: true,
+    value: rowFieldsOf({
+      repo: repo.value,
+      role: role.value,
+      agent: agent.value,
+      areas: areas.value,
+    }),
+  };
+}
+
+/** Checks an optional repo: absent or blank means the folder root, else a repo of the folder. */
+function checkRepo(
+  raw: unknown,
+  position: number,
+  catalog: SquadCatalog,
+): Checked<string | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (typeof raw !== 'string') {
+    return { ok: false, message: `Việc ${position} có thư mục làm việc không phải chữ.` };
+  }
+  const text = raw.trim();
+  if (text === '') return { ok: true, value: undefined };
+  const repo = catalog.repos.find((path) => checkoutKey(path) === checkoutKey(text));
+  if (repo === undefined) {
+    return {
+      ok: false,
+      message: `Việc ${position} làm ở "${clip(text, 200)}", không phải thư mục repo của dự án này.`,
+    };
+  }
+  return { ok: true, value: repo };
+}
+
+/** Checks an optional role: absent means none, else one of the item roles. */
+function checkRole(
+  raw: unknown,
+  position: number,
+): Checked<Exclude<CompanyRole, 'director'> | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (!isItemRole(raw)) {
+    return { ok: false, message: `Việc ${position} có vai trò không hợp lệ.` };
+  }
+  return { ok: true, value: raw };
+}
+
+/** Checks an optional agent: absent means the default worker, else a name in the catalog. */
+function checkAgent(
+  raw: unknown,
+  position: number,
+  catalog: SquadCatalog,
+): Checked<string | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (typeof raw !== 'string') {
+    return { ok: false, message: `Việc ${position} có agent không phải chữ.` };
+  }
+  const name = raw.trim();
+  if (name === '') return { ok: true, value: undefined };
+  if (findAgent(catalog.agents, name) === undefined) {
+    return {
+      ok: false,
+      message: `Việc ${position} dùng agent "${clip(name, 80)}", không có trong danh sách agent.`,
+    };
+  }
+  return { ok: true, value: name };
+}
+
+/** Checks optional code areas: at most {@link WORK_ITEM_AREAS_MAX}, each within its limit. */
+function checkAreas(raw: unknown, position: number): Checked<string[] | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (!Array.isArray(raw)) {
+    return { ok: false, message: `Việc ${position} có "areas" không phải danh sách.` };
+  }
+  if (raw.length > WORK_ITEM_AREAS_MAX) {
+    return {
+      ok: false,
+      message: `Việc ${position} có ${raw.length} khu vực, tối đa ${WORK_ITEM_AREAS_MAX}.`,
+    };
+  }
+  const entries: readonly unknown[] = raw;
+  if (entries.some((area) => typeof area !== 'string')) {
+    return { ok: false, message: `Việc ${position} có khu vực không phải chữ.` };
+  }
+  const areas = normalizeAreas(entries);
+  if (areas.some((area) => area.length > WORK_ITEM_AREA_MAX_CHARS)) {
+    return {
+      ok: false,
+      message: `Việc ${position} có khu vực dài quá ${WORK_ITEM_AREA_MAX_CHARS} ký tự.`,
+    };
+  }
+  return { ok: true, value: areas.length === 0 ? undefined : areas };
+}
+
+/** The optional row fields that are set, and no others, so absent fields stay absent. */
+function rowFieldsOf(source: SquadRowFields): SquadRowFields {
+  return {
+    ...(source.repo === undefined ? {} : { repo: source.repo }),
+    ...(source.role === undefined ? {} : { role: source.role }),
+    ...(source.agent === undefined ? {} : { agent: source.agent }),
+    ...(source.areas === undefined ? {} : { areas: source.areas }),
+  };
+}
+
+/** The optional row fields a saved row holds; a value of the wrong shape makes the row invalid. */
+function parseStoredFields(value: Record<string, unknown>): SquadRowFields | null {
+  const rawRepo = value['repo'];
+  const rawRole = value['role'];
+  const rawAgent = value['agent'];
+  const rawAreas = value['areas'];
+  if (rawRepo !== undefined && (typeof rawRepo !== 'string' || rawRepo.trim() === '')) {
+    return null;
+  }
+  if (rawRole !== undefined && !isItemRole(rawRole)) return null;
+  if (rawAgent !== undefined && (typeof rawAgent !== 'string' || rawAgent.trim() === '')) {
+    return null;
+  }
+  if (rawAreas !== undefined && !Array.isArray(rawAreas)) return null;
+  const areas = rawAreas === undefined ? [] : normalizeAreas(rawAreas);
+  return rowFieldsOf({
+    repo: typeof rawRepo === 'string' ? rawRepo : undefined,
+    role: isItemRole(rawRole) ? rawRole : undefined,
+    agent: typeof rawAgent === 'string' ? rawAgent : undefined,
+    areas: areas.length === 0 ? undefined : areas,
+  });
 }
 
 /**
@@ -849,7 +1122,7 @@ function parseRowDependsOn(raw: unknown, position: number): Checked<DependencyRe
 }
 
 /** A row the board sent back, after its own checks. Its dependencies are checked against the rest. */
-interface CheckedRow {
+interface CheckedRow extends SquadRowFields {
   readonly text: string;
   readonly assignee: WorkItemAssignee;
   readonly priority: number;
@@ -857,7 +1130,7 @@ interface CheckedRow {
   readonly dependsOn: readonly DependencyRef[];
 }
 
-function parseSquadRow(entry: unknown, index: number): Checked<CheckedRow> {
+function parseSquadRow(entry: unknown, index: number, catalog: SquadCatalog): Checked<CheckedRow> {
   const position = index + 1;
   if (!isRecord(entry)) return { ok: false, message: `Việc ${position} không hợp lệ.` };
   const text = typeof entry['text'] === 'string' ? entry['text'].trim() : '';
@@ -881,6 +1154,8 @@ function parseSquadRow(entry: unknown, index: number): Checked<CheckedRow> {
   }
   const acceptance = checkAcceptance(entry['acceptance'], position);
   if (!acceptance.ok) return acceptance;
+  const fields = checkRowFields(entry, position, catalog);
+  if (!fields.ok) return fields;
   const dependsOn = parseRowDependsOn(entry['dependsOn'], position);
   if (!dependsOn.ok) return dependsOn;
   return {
@@ -891,6 +1166,7 @@ function parseSquadRow(entry: unknown, index: number): Checked<CheckedRow> {
       priority: isWorkItemPriority(rawPriority) ? rawPriority : WORK_ITEM_PRIORITY_DEFAULT,
       ...(acceptance.value === undefined ? {} : { acceptance: acceptance.value }),
       dependsOn: dependsOn.value,
+      ...fields.value,
     },
   };
 }
@@ -943,6 +1219,7 @@ function resolveAssignee(
   ref: string,
   members: readonly SquadMember[],
 ): WorkItemAssignee | undefined {
+  if (ref === AUTO_REF) return { kind: 'auto' };
   if (ref === NEW_SESSION_REF) return { kind: 'new-session' };
   return members.find((member) => member.ref === ref)?.assignee;
 }
@@ -968,10 +1245,27 @@ function teamLines(members: readonly SquadMember[]): string[] {
     if (member.title) parts.push(`title "${clip(member.title, SQUAD_CONTEXT_MEMBER_MAX_CHARS)}"`);
     parts.push(member.role === '' ? 'role: none' : `role: "${member.role}"`);
     parts.push(`queued items: ${member.queued}`);
+    const current = member.currentItem === undefined ? 'none' : `#${member.currentItem}`;
+    parts.push(`current item: ${current}`);
     return parts.join(' · ');
   });
+  lines.push(`- auto · the scheduler picks a free agent in the row repo`);
   lines.push(`- ${NEW_SESSION_REF} · opens a new omp chat in the folder when assigned`);
   return lines;
+}
+
+function repoLines(repos: readonly string[]): string[] {
+  if (repos.length === 0) return ['(no repos: leave "repo" out)'];
+  return repos.map((repo) => `- ${repo}`);
+}
+
+function agentLines(agents: readonly OmpAgentInfo[]): string[] {
+  if (agents.length === 0) return ['(no agents: leave "agent" out)'];
+  return agents.map((agent) => {
+    const kind = agent.readOnly ? 'read-only' : 'changes code';
+    const note = clip(agent.description, SQUAD_CONTEXT_MEMBER_MAX_CHARS);
+    return `- ${agent.name} · ${kind} · ${note}`;
+  });
 }
 
 function itemLines(items: readonly LeaderItemView[]): string[] {
@@ -995,7 +1289,8 @@ function itemLines(items: readonly LeaderItemView[]): string[] {
 function reviewLines(reviews: readonly SquadReview[]): string[] {
   if (reviews.length === 0) return ['(none)'];
   return reviews.flatMap((review) => {
-    const lines = [`- ${clip(review.text, SQUAD_CONTEXT_TEXT_MAX_CHARS)}`];
+    const label = REVIEW_OUTCOME_LABEL[review.outcome];
+    const lines = [`- [${label}] ${clip(review.text, SQUAD_CONTEXT_TEXT_MAX_CHARS)}`];
     if (review.acceptance !== undefined) lines.push(`  done when: ${review.acceptance}`);
     if (review.result !== undefined) lines.push(`  result: ${review.result}`);
     return lines;

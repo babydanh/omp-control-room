@@ -425,6 +425,33 @@ describe('session lifecycle on the workspace coordinator', () => {
     await coordinator.dispose();
   });
 
+  it('lists the OMP sessions of the repos the folder holds and of board sessions inside it', async () => {
+    const repo = path.join(workspace, 'repo-a');
+    const sessionCwd = path.join(workspace, 'worktree-b');
+    await fs.promises.mkdir(path.join(repo, '.git'), { recursive: true });
+    await fs.promises.mkdir(sessionCwd);
+    const repoFile = path.join(ompSessionDirForFolder(repo), 'repo.jsonl');
+    const boardFile = path.join(ompSessionDirForFolder(sessionCwd), 'board.jsonl');
+    await fs.promises.mkdir(path.dirname(repoFile), { recursive: true });
+    await fs.promises.mkdir(path.dirname(boardFile), { recursive: true });
+    await fs.promises.writeFile(repoFile, '{}\n');
+    await fs.promises.writeFile(boardFile, '{}\n');
+    const coordinator = await open([
+      put(session('worker-b', { cwd: sessionCwd, nativeSessionPath: boardFile })),
+    ]);
+
+    const listing = await coordinator.listOmpSessions();
+
+    expect(listing.sessions.map((entry) => path.basename(entry.file)).sort()).toEqual([
+      'board.jsonl',
+      'repo.jsonl',
+    ]);
+    expect(listing.sessions.find((entry) => entry.file === boardFile)).toMatchObject({
+      boardSessionId: 'worker-b',
+    });
+    await coordinator.dispose();
+  });
+
   it('opens a saved OMP session as a chat session through the effect', async () => {
     const dir = ompSessionDirForFolder(workspace);
     await fs.promises.mkdir(dir, { recursive: true });
@@ -441,6 +468,71 @@ describe('session lifecycle on the workspace coordinator', () => {
     await expect(coordinator.resumeOmpSession(file)).resolves.toBe('chat-1');
 
     expect(opened).toEqual([file]);
+    await coordinator.dispose();
+  });
+
+  it('resumes a repo session in its repo, taking the directory from the file header', async () => {
+    const repo = path.join(workspace, 'repo-a');
+    await fs.promises.mkdir(path.join(repo, '.git'), { recursive: true });
+    const dir = ompSessionDirForFolder(repo);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'repo.jsonl');
+    await fs.promises.writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'repo', cwd: repo })}\n`,
+    );
+    const opened: unknown[] = [];
+    const coordinator = await open([], {
+      openChatSession: async (input) => {
+        opened.push(input);
+        return session('chat-repo', { role: 'chat', name: 'Chat' });
+      },
+    });
+
+    await expect(coordinator.resumeOmpSession(file)).resolves.toBe('chat-repo');
+
+    expect(opened).toEqual([{ resumeFile: file, cwd: await fs.promises.realpath(repo) }]);
+    await coordinator.dispose();
+  });
+
+  it('resumes a session whose header names a directory outside the folder in the folder root', async () => {
+    const repo = path.join(workspace, 'repo-a');
+    const elsewhere = path.join(tempHome, 'elsewhere');
+    await fs.promises.mkdir(path.join(repo, '.git'), { recursive: true });
+    await fs.promises.mkdir(elsewhere);
+    const dir = ompSessionDirForFolder(repo);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'stray.jsonl');
+    await fs.promises.writeFile(
+      file,
+      `${JSON.stringify({ type: 'session', id: 'stray', cwd: elsewhere })}\n`,
+    );
+    const opened: unknown[] = [];
+    const coordinator = await open([], {
+      openChatSession: async (input) => {
+        opened.push(input);
+        return session('chat-stray', { role: 'chat', name: 'Chat' });
+      },
+    });
+
+    await expect(coordinator.resumeOmpSession(file)).resolves.toBe('chat-stray');
+
+    expect(opened).toEqual([{ resumeFile: file }]);
+    await coordinator.dispose();
+  });
+
+  it('refuses a saved file in the session directory of a folder outside the workspace', async () => {
+    const other = path.join(tempHome, 'other-folder');
+    await fs.promises.mkdir(other);
+    const dir = ompSessionDirForFolder(other);
+    await fs.promises.mkdir(dir, { recursive: true });
+    const file = path.join(dir, 'foreign.jsonl');
+    await fs.promises.writeFile(file, '{}\n');
+    const coordinator = await open([]);
+
+    await expect(coordinator.resumeOmpSession(file)).rejects.toMatchObject({
+      code: 'omp_session_outside_folder',
+    });
     await coordinator.dispose();
   });
 
@@ -515,6 +607,31 @@ describe('session lifecycle on the workspace coordinator', () => {
     await expect(coordinator.openNewChat()).resolves.toBe('chat-new');
 
     expect(inputs).toEqual([{}]);
+    await coordinator.dispose();
+  });
+
+  it('opens a new chat in a directory inside the folder, and refuses a directory outside it', async () => {
+    const repo = path.join(workspace, 'repo-a');
+    await fs.promises.mkdir(repo);
+    const inputs: unknown[] = [];
+    const coordinator = await open([], {
+      openChatSession: async (input) => {
+        inputs.push(input);
+        return session('chat-in-repo', { role: 'worker', name: 'Worker', cwd: repo });
+      },
+    });
+
+    await expect(coordinator.openNewChat({ cwd: repo, role: 'worker' })).resolves.toBe(
+      'chat-in-repo',
+    );
+    await expect(coordinator.openNewChat({ cwd: tempHome })).rejects.toMatchObject({
+      code: 'cwd_outside_folder',
+    });
+    await expect(
+      coordinator.openNewChat({ cwd: path.join(workspace, 'missing') }),
+    ).rejects.toMatchObject({ code: 'cwd_invalid' });
+
+    expect(inputs).toEqual([{ cwd: await fs.promises.realpath(repo), role: 'worker' }]);
     await coordinator.dispose();
   });
 

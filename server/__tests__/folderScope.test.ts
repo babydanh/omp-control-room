@@ -1,8 +1,15 @@
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { FolderScope, type RealpathNative } from '../src/company/folderScope.js';
+import {
+  canonicalWithinFolder,
+  FolderScope,
+  type RealpathNative,
+  resolveFolderCwd,
+} from '../src/company/folderScope.js';
 
 /**
  * A fake `realpath.native`: a path under a junction resolves through it, a path in `missing` fails
@@ -117,5 +124,88 @@ describe('FolderScope', () => {
 
     expect(await scope.folderOf('/home/u/app/src')).toBe('/home/u/app');
     expect(await scope.folderOf('/home/u/APP/src')).toBeUndefined();
+  });
+});
+
+describe('resolveFolderCwd and canonicalWithinFolder', () => {
+  let scratch: string;
+  let root: string;
+
+  beforeEach(async () => {
+    scratch = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'pxl-folder-cwd-'));
+    root = path.join(scratch, 'Project');
+    await fs.promises.mkdir(path.join(root, 'repo'), { recursive: true });
+    await fs.promises.mkdir(path.join(scratch, 'Project2'));
+    await fs.promises.writeFile(path.join(root, 'file.txt'), 'x');
+  });
+
+  afterEach(async () => {
+    await fs.promises.rm(scratch, { recursive: true, force: true });
+  });
+
+  it('accepts the folder itself and a directory inside it, in canonical form', async () => {
+    expect(await resolveFolderCwd(root, root)).toBe(await fs.promises.realpath(root));
+    expect(await resolveFolderCwd(path.join(root, 'repo'), root)).toBe(
+      await fs.promises.realpath(path.join(root, 'repo')),
+    );
+  });
+
+  it.skipIf(process.platform !== 'win32')(
+    'matches the folder case-insensitively on Windows',
+    async () => {
+      await expect(resolveFolderCwd(path.join(root.toUpperCase(), 'repo'), root)).resolves.toEqual(
+        expect.any(String),
+      );
+    },
+  );
+
+  it('refuses a directory outside the folder, a sibling sharing its name prefix, and a ".." escape', async () => {
+    await expect(resolveFolderCwd(path.join(scratch, 'Project2'), root)).rejects.toMatchObject({
+      code: 'cwd_outside_folder',
+    });
+    await expect(resolveFolderCwd(path.join(root, '..', 'Project2'), root)).rejects.toMatchObject({
+      code: 'cwd_outside_folder',
+    });
+    await expect(resolveFolderCwd(scratch, root)).rejects.toMatchObject({
+      code: 'cwd_outside_folder',
+    });
+  });
+
+  it('refuses a path that does not exist and a file that is not a directory', async () => {
+    await expect(resolveFolderCwd(path.join(root, 'missing'), root)).rejects.toMatchObject({
+      code: 'cwd_invalid',
+    });
+    await expect(resolveFolderCwd(path.join(root, 'file.txt'), root)).rejects.toMatchObject({
+      code: 'cwd_invalid',
+    });
+  });
+
+  it('refuses a junction inside the folder that leads outside it', async () => {
+    const junction = path.join(root, 'link');
+    const outside = path.join(scratch, 'Project2');
+    // Models the junction: anything under `link` resolves to the same place under the outside folder.
+    const realpath: RealpathNative = (target) =>
+      target === junction || target.startsWith(`${junction}${path.sep}`)
+        ? fs.promises.realpath(path.join(outside, path.relative(junction, target)))
+        : fs.promises.realpath(target);
+    await expect(resolveFolderCwd(junction, root, realpath)).rejects.toMatchObject({
+      code: 'cwd_outside_folder',
+    });
+  });
+
+  it('maps the folder and anything inside it, even a directory that no longer exists, to a canonical path', async () => {
+    const real = await fs.promises.realpath(root);
+    expect(await canonicalWithinFolder(real, root)).toBe(real);
+    expect(await canonicalWithinFolder(path.join(real, 'repo'), root)).toBe(
+      path.join(real, 'repo'),
+    );
+    expect(await canonicalWithinFolder(path.join(real, 'gone'), root)).toBe(
+      path.join(real, 'gone'),
+    );
+  });
+
+  it('maps a path outside the folder, or a sibling sharing its name prefix, to nothing', async () => {
+    expect(await canonicalWithinFolder(path.join(scratch, 'Project2'), root)).toBeUndefined();
+    expect(await canonicalWithinFolder(scratch, root)).toBeUndefined();
   });
 });

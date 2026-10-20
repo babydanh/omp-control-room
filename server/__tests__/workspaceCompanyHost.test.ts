@@ -82,6 +82,8 @@ class FakeRuntime implements CompanyRuntime {
   readonly written: string[] = [];
   readonly resized: string[] = [];
   readonly described: string[] = [];
+  /** Each chat the owner opened, with the cwd and role it was asked for (absent when not given). */
+  readonly openedChats: { cwd?: string; role?: string }[] = [];
   private leases = 0;
 
   readonly effects: WorkspaceCompanyCoordinatorEffects;
@@ -92,8 +94,20 @@ class FakeRuntime implements CompanyRuntime {
       getModelCatalog: async () => MODEL_CATALOG,
       diagnostics: () => DIAGNOSTICS,
       onPromptSubmitted: async () => undefined,
-      openChatSession: async () => {
-        throw new Error('openChatSession is not used by this test');
+      openChatSession: async (input) => {
+        this.openedChats.push({ cwd: input.cwd, role: input.role });
+        return {
+          id: randomUUID(),
+          code: 'PA-S0001',
+          name: 'Chat',
+          role: 'chat',
+          workstreamId: randomUUID(),
+          workspaceKey: 'workspace',
+          requestedModel: 'provider/model',
+          runEpoch: 0,
+          status: 'idle',
+          lastUsedAt: '2026-10-02T00:00:00.000Z',
+        };
       },
       onContractDecision: async () => undefined,
       onQuestionAnswered: async () => undefined,
@@ -421,6 +435,42 @@ describe('workspace company host', () => {
     ).rejects.toMatchObject({ code: 'company_command_unknown' });
 
     expect(owner.services.coordinator.snapshot().revision).toBe(before);
+  });
+
+  it('forwards a follower chat request with its folder and role, and a bare one as a root chat', async () => {
+    await harness.open();
+    const follower = await harness.open({ clientId: 'follower-surface' });
+    const repo = path.join(workspacePath, 'repo-a');
+    fs.mkdirSync(repo);
+
+    await follower.services.coordinator.openNewChat({ cwd: repo, role: 'worker' });
+    await follower.services.coordinator.openNewChat();
+
+    expect(harness.runtime().openedChats).toEqual([
+      { cwd: fs.realpathSync(repo), role: 'worker' },
+      {},
+    ]);
+  });
+
+  it('refuses a chat request for a role outside the roster, opening no session', async () => {
+    await harness.open();
+    const channel = await ownerChannel(workspacePath);
+
+    await expect(
+      sendCompanyBrokerRequest({
+        endpoint: channel.endpoint,
+        nonce: channel.nonce,
+        command: 'company.chat.new',
+        params: {
+          privileged: true,
+          executionAllowed: true,
+          clientId: 'follower-surface',
+          role: 'boss',
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'company_role_invalid' });
+
+    expect(harness.runtime().openedChats).toEqual([]);
   });
 
   it('gives a session to one viewer: the owner surface and a follower never both see it', async () => {

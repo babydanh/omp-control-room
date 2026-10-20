@@ -42,7 +42,8 @@ function member(
     role: undefined,
     note: undefined,
     free: true,
-    squadOpened: false,
+    busy: false,
+    squadRepo: undefined,
     ...overrides,
   };
 }
@@ -246,7 +247,7 @@ describe('decideStart: auto', () => {
     const decision = decideStart(
       item({ role: 'qa' }),
       ctx({
-        members: [herdr('A'), session('S', { squadOpened: true, role: 'qa' })],
+        members: [herdr('A'), session('S', { squadRepo: REPO, role: 'qa' })],
       }),
     );
     expect(usedKey(decision)).toBe('session:S');
@@ -257,7 +258,7 @@ describe('decideStart: auto', () => {
       item({ role: 'qa' }),
       ctx({
         members: [
-          session('S', { squadOpened: true, role: 'qa' }),
+          session('S', { squadRepo: REPO, role: 'qa' }),
           herdr('A', { note: 'Chuyên QA mobile' }),
         ],
       }),
@@ -265,22 +266,72 @@ describe('decideStart: auto', () => {
     expect(usedKey(decision)).toBe('herdr:A');
   });
 
-  it('gives squad reuse only to a session in the same checkout', () => {
+  it('gives squad reuse only to a session the squad opened for this repo', () => {
     const decision = decideStart(
       item({ role: 'qa' }),
       ctx({
         members: [
-          session('A', { squadOpened: true, role: 'qa', cwd: `${REPO}/sub` }),
-          session('B', { squadOpened: true, role: 'qa', cwd: REPO }),
+          session('A', { squadRepo: OTHER, role: 'qa' }),
+          session('B', { squadRepo: REPO, role: 'qa' }),
         ],
       }),
     );
     expect(usedKey(decision)).toBe('session:B');
   });
 
+  it('reaches a squad worktree outside the repo folder when the squad opened it for the repo', () => {
+    const decision = decideStart(
+      item({ role: 'qa' }),
+      ctx({
+        members: [session('W', { cwd: '/work/folder/.worktrees/squad-1a2b3c4d', squadRepo: REPO, role: 'qa' })],
+      }),
+    );
+    expect(usedKey(decision)).toBe('session:W');
+  });
+
+  it('never picks a herdr pane for a subagent, and opens a read-only omp session in the repo for it', () => {
+    const decision = decideStart(
+      item({ agent: 'scout', readOnly: true }),
+      ctx({ members: [herdr('A')] }),
+    );
+    expect(decision).toEqual({ kind: 'open', cwd: REPO, role: 'chat', isolate: false });
+  });
+
+  it('gives a subagent a free omp session in the repo, never a herdr pane', () => {
+    const decision = decideStart(
+      item({ agent: 'reviewer' }),
+      ctx({ members: [herdr('A'), session('S')] }),
+    );
+    expect(usedKey(decision)).toBe('session:S');
+  });
+
+  it('leaves busy herdr panes out of the refusal for a subagent, since none can take it', () => {
+    const decision = decideStart(
+      item({ agent: 'reviewer' }),
+      ctx({ members: [herdr('A', { free: false, busy: true })], maxSquadSessions: 0 }),
+    );
+    expect(blockerOf(decision)).toEqual({ kind: 'no_member' });
+    expect(reasonOf(decision)).not.toContain('bận');
+  });
+
+  it('still lets the default worker take a free herdr pane', () => {
+    expect(usedKey(decideStart(item({ agent: 'task' }), ctx({ members: [herdr('A')] })))).toBe(
+      'herdr:A',
+    );
+    expect(usedKey(decideStart(item(), ctx({ members: [herdr('A')] })))).toBe('herdr:A');
+  });
+
+  it('keeps an explicit herdr assignee open to a subagent', () => {
+    const decision = decideStart(
+      item({ kind: 'herdr', memberKey: 'herdr:A', agent: 'scout', readOnly: true }),
+      ctx({ members: [herdr('A')] }),
+    );
+    expect(usedKey(decision)).toBe('herdr:A');
+  });
+
   it('skips a busy member and opens a session instead', () => {
     const decision = decideStart(item(), ctx({ members: [session('a', { free: false })] }));
-    expect(decision).toEqual({ kind: 'open', cwd: REPO, role: 'chat' });
+    expect(decision).toEqual({ kind: 'open', cwd: REPO, role: 'chat', isolate: true });
   });
 
   it('skips a member that a running item holds', () => {
@@ -320,7 +371,12 @@ describe('decideStart: auto', () => {
   });
 
   it('opens a chat session in the repo when nothing is idle', () => {
-    expect(decideStart(item(), ctx())).toEqual({ kind: 'open', cwd: REPO, role: 'chat' });
+    expect(decideStart(item(), ctx())).toEqual({
+      kind: 'open',
+      cwd: REPO,
+      role: 'chat',
+      isolate: true,
+    });
   });
 
   it('opens a session with the item role when it has one', () => {
@@ -328,6 +384,7 @@ describe('decideStart: auto', () => {
       kind: 'open',
       cwd: REPO,
       role: 'qa',
+      isolate: true,
     });
   });
 
@@ -360,11 +417,13 @@ describe('decideStart: new session', () => {
       kind: 'open',
       cwd: REPO,
       role: 'worker',
+      isolate: true,
     });
     expect(decideStart(item({ kind: 'new-session' }), ctx())).toEqual({
       kind: 'open',
       cwd: REPO,
       role: 'chat',
+      isolate: true,
     });
   });
 
@@ -382,12 +441,90 @@ describe('decideStart: new session', () => {
     expect(blockerOf(decision)).toEqual({ kind: 'capacity', running: 4, limit: 4 });
   });
 
-  it('waits on the checkout lock of its repo', () => {
+  it('opens an isolated session even when another item holds the repo checkout', () => {
     const decision = decideStart(
       item({ kind: 'new-session' }),
       ctx({ holds: [hold('herdr:H', { sequence: 3, checkout: REPO })] }),
     );
-    expect(blockerOf(decision)).toEqual({ kind: 'area', sequence: 3, area: 'app' });
+    expect(decision).toEqual({ kind: 'open', cwd: REPO, role: 'chat', isolate: true });
+  });
+
+  it('still waits on the area of a running item the new session would overlap', () => {
+    const decision = decideStart(
+      item({ kind: 'new-session', areas: ['app/ui'] }),
+      ctx({ holds: [hold('herdr:H', { sequence: 3, areas: ['app'] })] }),
+    );
+    expect(blockerOf(decision)).toEqual({ kind: 'area', sequence: 3, area: 'app/ui' });
+  });
+
+  it('opens the repo itself, without isolation, for a read-only new session', () => {
+    const decision = decideStart(
+      item({ kind: 'new-session', readOnly: true }),
+      ctx({ holds: [hold('herdr:H', { sequence: 3, checkout: REPO })] }),
+    );
+    expect(decision).toEqual({ kind: 'open', cwd: REPO, role: 'chat', isolate: false });
+  });
+});
+
+describe('decideStart: busy agents and isolation', () => {
+  it('waits on the checkout of a busy agent outside the board for an editing auto item', () => {
+    const decision = decideStart(
+      item(),
+      ctx({
+        members: [session('a', { cwd: REPO }), session('b', { cwd: REPO, free: false, busy: true })],
+      }),
+    );
+    expect(blockerOf(decision)).toEqual({ kind: 'busy_checkout', area: 'app' });
+    expect(reasonOf(decision)).toContain('đang làm trong app');
+  });
+
+  it('lets a read-only item use an idle member while a busy agent shares its checkout', () => {
+    const decision = decideStart(
+      item({ readOnly: true }),
+      ctx({
+        members: [session('a', { cwd: REPO }), session('b', { cwd: REPO, free: false, busy: true })],
+      }),
+    );
+    expect(usedKey(decision)).toBe('session:a');
+  });
+
+  it('ignores a busy agent whose work the board holds read-only', () => {
+    const decision = decideStart(
+      item(),
+      ctx({
+        members: [session('a', { cwd: REPO }), session('b', { cwd: REPO, free: false, busy: true })],
+        holds: [hold('session:b', { readOnly: true, checkout: REPO })],
+      }),
+    );
+    expect(usedKey(decision)).toBe('session:a');
+  });
+
+  it('makes an explicit editing item wait while a busy agent works in its checkout', () => {
+    const decision = decideStart(
+      item({ kind: 'herdr', memberKey: 'herdr:A' }),
+      ctx({
+        members: [herdr('A', { cwd: REPO }), session('b', { cwd: REPO, free: false, busy: true })],
+      }),
+    );
+    expect(blockerOf(decision)).toEqual({ kind: 'busy_checkout', area: 'app' });
+  });
+
+  it('opens an isolated session for an editing item when a busy agent shares the repo', () => {
+    const decision = decideStart(
+      item(),
+      ctx({ members: [session('b', { cwd: REPO, free: false, busy: true })] }),
+    );
+    expect(decision).toEqual({ kind: 'open', cwd: REPO, role: 'chat', isolate: true });
+  });
+
+  it('does not lock a checkout for a busy agent outside the repo', () => {
+    const decision = decideStart(
+      item(),
+      ctx({
+        members: [session('a', { cwd: REPO }), session('b', { cwd: OTHER, free: false, busy: true })],
+      }),
+    );
+    expect(usedKey(decision)).toBe('session:a');
   });
 });
 

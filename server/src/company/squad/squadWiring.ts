@@ -70,6 +70,9 @@ export interface SquadWiring {
 /** Live work items count as queued for an agent until they finish or fail. */
 const LIVE_STATUSES: readonly WorkItemStatus[] = ['queued', 'running', 'needs_input'];
 
+/** Items an agent is running or waiting on the user for: the leader sees each as its current item. */
+const CURRENT_STATUSES: readonly WorkItemStatus[] = ['running', 'needs_input'];
+
 /**
  * Loads one folder's squad runs and starts them: the service is ready to take commands when this
  * resolves.
@@ -109,6 +112,7 @@ export interface MemberSources {
   readonly sessions: readonly SquadSessionView[];
   readonly roles: readonly AgentRole[];
   readonly items: readonly {
+    readonly sequence: number;
     readonly assignee: WorkItemAssignee;
     readonly status: WorkItemStatus;
   }[];
@@ -128,6 +132,12 @@ export function squadMembers(sources: MemberSources): SquadMember[] {
     const key = assigneeKey(item.assignee);
     queued.set(key, (queued.get(key) ?? 0) + 1);
   }
+  const current = new Map<string, number>();
+  for (const item of sources.items) {
+    if (!CURRENT_STATUSES.includes(item.status)) continue;
+    const key = assigneeKey(item.assignee);
+    if (!current.has(key)) current.set(key, item.sequence);
+  }
   const members: SquadMember[] = [];
   const roster = sources.herdr?.snapshot();
   if (roster?.available === true) {
@@ -139,6 +149,7 @@ export function squadMembers(sources: MemberSources): SquadMember[] {
         continue;
       const assignee = { kind: 'herdr' as const, paneId: agent.paneId };
       const ref = assigneeKey(assignee);
+      const currentItem = current.get(ref);
       members.push({
         ref,
         kind: 'herdr',
@@ -151,6 +162,7 @@ export function squadMembers(sources: MemberSources): SquadMember[] {
         ...(agent.title === undefined ? {} : { title: agent.title }),
         role: roles.get(ref) ?? '',
         queued: queued.get(ref) ?? 0,
+        ...(currentItem === undefined ? {} : { currentItem }),
       });
     }
   }
@@ -158,6 +170,7 @@ export function squadMembers(sources: MemberSources): SquadMember[] {
     if (observeSessionStatus(session.status) === 'gone') continue;
     const assignee = { kind: 'session' as const, sessionId: session.id };
     const ref = assigneeKey(assignee);
+    const currentItem = current.get(ref);
     members.push({
       ref,
       kind: 'session',
@@ -166,6 +179,7 @@ export function squadMembers(sources: MemberSources): SquadMember[] {
       status: session.status,
       role: roles.get(ref) ?? '',
       queued: queued.get(ref) ?? 0,
+      ...(currentItem === undefined ? {} : { currentItem }),
     });
   }
   return members;

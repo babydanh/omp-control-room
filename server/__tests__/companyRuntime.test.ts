@@ -848,6 +848,30 @@ describe('chat sessions', () => {
     expect(h.runners[0]?.resumeFile).toBeUndefined();
   });
 
+  it('judges a worker opened in a repo against that repo, not the whole folder', async () => {
+    const h = await harness();
+    const repo = path.join(WORKSPACE, 'repo-a');
+    await fs.promises.mkdir(repo, { recursive: true });
+    await h.coordinator.openNewChat({ cwd: repo, role: 'worker' });
+    const [runner] = h.runners;
+    if (runner === undefined) throw new Error('no runner was started');
+
+    const decision = await h.rpcHandler()({
+      id: 'auth-1',
+      sessionId: runner.sessionId,
+      runEpoch: runner.runEpoch,
+      method: 'authorize_tool',
+      toolCallId: 'call-1',
+      toolName: 'write',
+      input: { path: '../repo-b/app.ts', content: 'x' },
+    } as never);
+
+    expect(decision).toEqual({
+      allow: false,
+      reason: 'Path resolves outside the canonical workspace.',
+    });
+  });
+
   it('reopens a parked chat session on its own omp file under the same session record', async () => {
     const h = await harness();
     const file = path.join(WORKSPACE, 'parked.jsonl');

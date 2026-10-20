@@ -2640,7 +2640,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       role: fromChild ? 'judge' : session.role,
       tool: request.toolName,
       args: request.input,
-      workspaceRoot: this.store.workspacePath,
+      workspaceRoot: session.cwd ?? this.store.workspacePath,
       writeScopes: fromChild ? [] : (task?.writeScopes ?? []),
       approvedCommands: fromChild ? [] : this.approvedCommandsFor(task),
     });

@@ -39,6 +39,7 @@ import * as path from 'node:path';
 import type {
   AgentInfo,
   CompanyModelCatalogEntry,
+  CompanyRole,
   QuestionAnswerInput,
   RoleProfile,
   SubmitPromptInput,
@@ -106,7 +107,11 @@ import { createOmpLeaderRunner } from './squad/squadRunner.js';
 import { type SquadWiring, startSquad } from './squad/squadWiring.js';
 import { UsageLedger } from './usageService.js';
 import type { PrerequisiteCheck } from './verificationRunner.js';
-import { startWorkItems, type WorkItemHerdr, type WorkItemWiring } from './workItems/workItemWiring.js';
+import {
+  startWorkItems,
+  type WorkItemHerdr,
+  type WorkItemWiring,
+} from './workItems/workItemWiring.js';
 
 /**
  * The client identity a surface gets when it does not name one: this process's
@@ -122,7 +127,7 @@ export const COMPANY_HOST_MAX_SUBSCRIBERS = 8;
 /** Bounded body fields, so a hostile peer cannot pin the owner with one value. */
 const MAX_ID_LENGTH = 128;
 const MAX_NOTE_LENGTH = 4_096;
-/** An absolute OMP session file path; longer than any path the owner can open. */
+/** An absolute path: an OMP session file or a working directory. */
 const MAX_FILE_PATH_LENGTH = 4_096;
 /** A PTY dimension is never zero, negative, or larger than a giant display. */
 const MAX_TERMINAL_DIMENSION = 1_000;
@@ -765,7 +770,14 @@ export function createCompanyHostDispatcher(
       }
 
       case COMPANY_HOST_COMMANDS.openNewChat: {
-        const sessionId = await withCompanyCode(() => options.coordinator().openNewChat());
+        const cwd = readOptionalBoundedString(body, 'cwd', MAX_FILE_PATH_LENGTH);
+        const role = readOptionalRole(body);
+        const sessionId = await withCompanyCode(() =>
+          options.coordinator().openNewChat({
+            ...(cwd === undefined ? {} : { cwd }),
+            ...(role === undefined ? {} : { role }),
+          }),
+        );
         return { sessionId };
       }
 
@@ -893,6 +905,16 @@ function readRequiredDimension(body: Record<string, unknown>, key: string): numb
   const value = readDimension(body, key);
   if (value === undefined) throw companyHostError('command_invalid');
   return value;
+}
+
+/** An optional company role for a new chat; a name outside the roster is refused, never guessed. */
+function readOptionalRole(body: Record<string, unknown>): CompanyRole | undefined {
+  const value = body['role'];
+  if (value === undefined) return undefined;
+  if (typeof value !== 'string' || COMPANY_ROLES.includes(value as CompanyRole) === false) {
+    throw companyHostError('role_invalid');
+  }
+  return value as CompanyRole;
 }
 
 /** Run one disposal step, remembering the first failure instead of aborting. */

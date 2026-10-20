@@ -237,6 +237,12 @@ export function blockerChip(item: {
       return { text: 'Vùng đang bị giữ', tone: 'muted' };
     case 'no_member':
       return { text: 'Chưa có agent', tone: 'muted' };
+    case 'busy_checkout':
+      return { text: 'Repo đang bận', tone: 'muted' };
+    case 'worktree':
+      return { text: 'Chờ worktree', tone: 'muted' };
+    case 'pool_full':
+      return { text: 'Hết phiên chạy', tone: 'muted' };
   }
 }
 
@@ -267,6 +273,16 @@ export function blockerSentence(blocker: WorkItemBlocker | null | undefined): st
         : `Vùng ${blocker.area} đang có việc khác giữ.`;
     case 'no_member':
       return 'Thư mục chưa có agent nào để nhận việc này.';
+    case 'busy_checkout':
+      return blocker.area === undefined || blocker.area === ''
+        ? 'Repo của việc này đang có agent làm việc, chờ agent đó rảnh.'
+        : `Repo ${blocker.area} đang có agent làm việc, chờ agent đó rảnh.`;
+    case 'worktree':
+      return blocker.detail === undefined || blocker.detail === ''
+        ? 'Chưa tạo được worktree riêng cho việc này, việc vẫn đang chờ.'
+        : `Chưa tạo được worktree riêng cho việc này, việc vẫn đang chờ: ${blocker.detail}`;
+    case 'pool_full':
+      return 'Đã hết phiên chạy của công ty, việc chờ có chỗ trống.';
   }
 }
 

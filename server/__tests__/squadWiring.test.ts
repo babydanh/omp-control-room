@@ -28,8 +28,9 @@ function sources(overrides: Partial<MemberSources> = {}): MemberSources {
 function live(
   paneId: string,
   status: WorkItemStatus,
-): { assignee: { kind: 'herdr'; paneId: string }; status: WorkItemStatus } {
-  return { assignee: { kind: 'herdr', paneId }, status };
+  sequence: number,
+): { sequence: number; assignee: { kind: 'herdr'; paneId: string }; status: WorkItemStatus } {
+  return { sequence, assignee: { kind: 'herdr', paneId }, status };
 }
 
 describe('squadMembers', () => {
@@ -58,7 +59,7 @@ describe('squadMembers', () => {
           }),
         },
         roles: [role],
-        items: [live('wA:p1', 'queued'), live('wA:p1', 'done'), live('wA:p1', 'running')],
+        items: [live('wA:p1', 'queued', 1), live('wA:p1', 'done', 2), live('wA:p1', 'running', 3)],
       }),
     );
     expect(members).toEqual([
@@ -73,6 +74,7 @@ describe('squadMembers', () => {
         cwd: 'V:\\pixel-agents\\app\\ui',
         role: 'Frontend',
         queued: 2,
+        currentItem: 3,
       },
     ]);
   });
@@ -113,12 +115,29 @@ describe('squadMembers', () => {
       sources({
         sessions: [{ id: 's1', code: 'S1', name: 'Dev', status: 'idle' }],
         items: [
-          { assignee: { kind: 'session', sessionId: 's1' }, status: 'needs_input' },
-          { assignee: { kind: 'session', sessionId: 's1' }, status: 'failed' },
+          { sequence: 1, assignee: { kind: 'session', sessionId: 's1' }, status: 'needs_input' },
+          { sequence: 2, assignee: { kind: 'session', sessionId: 's1' }, status: 'failed' },
         ],
       }),
     );
     expect(members[0]?.queued).toBe(1);
+  });
+
+  it('names the item a member is running or waiting on as its current item', () => {
+    const members = squadMembers(
+      sources({
+        sessions: [
+          { id: 's1', code: 'S1', name: 'Dev', status: 'busy' },
+          { id: 's2', code: 'S2', name: 'QA', status: 'idle' },
+        ],
+        items: [
+          { sequence: 4, assignee: { kind: 'session', sessionId: 's1' }, status: 'running' },
+          { sequence: 5, assignee: { kind: 'session', sessionId: 's1' }, status: 'queued' },
+        ],
+      }),
+    );
+    expect(members[0]).toMatchObject({ currentItem: 4, queued: 2 });
+    expect(members[1]?.currentItem).toBeUndefined();
   });
 });
 

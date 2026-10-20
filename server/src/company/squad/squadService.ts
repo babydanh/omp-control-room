@@ -39,18 +39,23 @@ import {
   SQUAD_MAX_TURNS,
   SQUAD_RUNS_KEEP,
   type SquadApproval,
+  type SquadCatalog,
   squadEvent,
   type SquadFile,
   type SquadMember,
   squadProgress,
   type SquadReview,
+  type SquadReviewOutcome,
   type StoredSquadRun,
   toWireRun,
+  warningsOf,
 } from './squadModel.js';
 import { type LeaderRunner, SquadLeaderError } from './squadRunner.js';
 
 /** Answers to recent commands kept, so a resent command is answered without repeating its work. */
 const REQUEST_MEMORY_MAX = 256;
+/** Settled work items remembered, so one settle starts one leader turn; the oldest fall off. */
+const SETTLE_MEMORY_MAX = 512;
 
 /** Run statuses that count as finished: they can be pruned and hold no turn. */
 const FINISHED_STATUSES: readonly string[] = ['done', 'dismissed', 'stopped'];
@@ -63,7 +68,7 @@ export interface SquadWorkItems {
     options: { squadRunId: string },
   ): Promise<string[]>;
   onChange(listener: () => void): () => void;
-  onReview(listener: (item: WorkItem) => void): () => void;
+  onItemSettled(listener: (item: WorkItem) => void): () => void;
   /** The work item with this id, if the service has it. */
   get(id: string): WorkItem | undefined;
   /** The open item (queued, running, waiting for input, or in review) with this #n, if any. */
@@ -105,6 +110,13 @@ export interface SquadRequestCommand extends SquadCommand {
   readonly fromWorkItemId?: string;
 }
 
+/** A proposal the board approves, with the rows the user kept. */
+type ApproveCommand = SquadCommand & {
+  readonly runId: string;
+  readonly proposalId: string;
+  readonly rows: unknown;
+};
+
 /** Vietnamese refusals and notices the board shows. */
 const MESSAGE = {
   noMembers: 'Chưa có thành viên nào trong thư mục này để đội trưởng giao việc.',
@@ -139,6 +151,8 @@ export class SquadService {
   private readonly answers = new Map<string, string>();
   /** Approvals in progress, by proposal id, so a double click approves once. */
   private readonly approvals = new Map<string, Promise<void>>();
+  /** Work items whose settle already started a turn, by settle key, so one settle counts once. */
+  private readonly settles = new Set<string>();
   /** The last leader turn queued per run. Turns of one run run one after another. */
   private readonly turnQueue = new Map<string, Promise<void>>();
   /** Leader processes in flight, so dispose can stop them. */
@@ -152,7 +166,7 @@ export class SquadService {
     this.ports = ports;
     this.unsubscribes.push(
       ports.workItems.onChange(() => this.onItemsChanged()),
-      ports.workItems.onReview((item) => this.onItemReview(item)),
+      ports.workItems.onItemSettled((item) => this.onItemSettled(item)),
     );
   }
 
@@ -275,9 +289,15 @@ export class SquadService {
    * Approves a proposal with the rows the user kept: creates one work item per row. Idempotent by
    * proposal: the work item service answers a repeated create with the same items.
    */
-  async approve(
-    command: SquadCommand & { runId: string; proposalId: string; rows: unknown },
-  ): Promise<void> {
+  async approve(command: ApproveCommand): Promise<void> {
+    await this.approveProposal(command, false);
+  }
+
+  /**
+   * The approval the board and the automatic next-step approval share. A resent command is answered
+   * from memory; a proposal already in flight is awaited rather than approved twice.
+   */
+  private async approveProposal(command: ApproveCommand, automatic: boolean): Promise<void> {
     if (this.answers.has(command.requestId)) return;
     const run = this.requireRun(command.runId);
     const proposal = this.requireProposal(run, command.proposalId);
@@ -291,6 +311,7 @@ export class SquadService {
     }
     const checked = parseSquadRows(
       command.rows,
+      this.catalog(),
       (sequence) => this.ports.workItems.findOpen(sequence)?.id,
     );
     if (!checked.ok) throw new CompanyError('squad_rows_invalid', checked.message);
@@ -299,7 +320,7 @@ export class SquadService {
       await inFlight;
       return;
     }
-    const work = this.performApprove(run, proposal.id, checked.value, command.requestId);
+    const work = this.performApprove(run, proposal.id, checked.value, command.requestId, automatic);
     this.approvals.set(proposal.id, work);
     try {
       await work;
@@ -372,6 +393,7 @@ export class SquadService {
     proposalId: string,
     approval: SquadApproval,
     requestId: string,
+    automatic: boolean,
   ): Promise<void> {
     // Idempotent by proposal: a retry after a failed save gets the same items back.
     await this.ports.workItems.createWorkItems(approval.drafts, { squadRunId: proposalId });
@@ -381,9 +403,12 @@ export class SquadService {
     const at = this.iso();
     proposal.status = 'approved';
     proposal.rows = approval.rows;
+    proposal.warnings = warningsOf(approval.rows, this.catalog());
     run.status = 'working';
     delete run.error;
-    appendEvent(run, squadEvent(at, 'approved', `Đã giao ${approval.drafts.length} việc.`));
+    const count = approval.drafts.length;
+    const message = automatic ? `Tự duyệt: đã giao ${count} việc.` : `Đã giao ${count} việc.`;
+    appendEvent(run, squadEvent(at, 'approved', message));
     this.remember(requestId, run.id);
     this.commit();
     await this.flush();
@@ -418,8 +443,10 @@ export class SquadService {
     this.controllers.add(controller);
     try {
       const reviews = run.pendingReviews.slice();
+      const snapshot = this.ports.workItems.snapshot();
+      const catalog: SquadCatalog = { repos: snapshot.repos, agents: snapshot.agents };
       const members = this.ports.members();
-      const items = this.itemViews(run);
+      const items = this.itemViews(run, snapshot.items);
       const openSequences = new Set(
         items.filter((item) => isOpenItemStatus(item.status)).map((item) => item.sequence),
       );
@@ -427,6 +454,9 @@ export class SquadService {
         buildLeaderPrompt({
           folderName: this.folderName,
           request: run.request,
+          repos: catalog.repos,
+          agents: catalog.agents,
+          autoJudge: snapshot.settings.autoJudge,
           members,
           items,
           reviews,
@@ -435,7 +465,7 @@ export class SquadService {
         }),
         controller.signal,
       );
-      const checked = parseLeaderReply(output, members, openSequences);
+      const checked = parseLeaderReply(output, members, catalog, openSequences);
       if (!checked.ok) throw new SquadLeaderError(checked.message);
       if (this.disposed) return;
       this.applyReply(run, checked.value, reviews);
@@ -462,6 +492,7 @@ export class SquadService {
       run,
       squadEvent(at, 'turn', `Lượt ${run.turns}: ${reply.note === '' ? 'đã trả lời' : reply.note}`),
     );
+    let proposed: SquadProposal | undefined;
     if (reply.done) {
       run.status = 'done';
       run.pendingReviews = [];
@@ -470,18 +501,24 @@ export class SquadService {
         squadEvent(at, 'done', reply.note === '' ? MESSAGE.doneDefault : reply.note),
       );
     } else {
-      run.proposals.push({
+      const rows = rowsOf(reply.assignments);
+      proposed = {
         id: this.ports.newId(),
         turn: run.turns,
         note: reply.note,
-        rows: rowsOf(reply.assignments),
+        rows,
+        warnings: warningsOf(rows, this.catalog()),
         status: 'pending',
         createdAt: at,
-      });
+      };
+      run.proposals.push(proposed);
       run.status = 'proposed';
       appendEvent(run, squadEvent(at, 'proposal', `Đề xuất ${reply.assignments.length} việc.`));
     }
     this.commit();
+    if (proposed !== undefined && this.autoApproves(run, proposed)) {
+      this.approveAutomatically(run, proposed);
+    }
   }
 
   private failRun(run: StoredSquadRun, message: string): void {
@@ -505,25 +542,76 @@ export class SquadService {
     this.commit();
   }
 
-  /** A finished item of an approved run: remember it for the next leader turn, and run that turn. */
-  private onItemReview(item: WorkItem): void {
+  /**
+   * Starts the next leader turn for a settled work item of an approved run. The work item port
+   * calls this for every settle, and the judge calls it again after it decides, so a settle seen
+   * twice counts once. Which settles the leader reads depends on automatic judging: see
+   * {@link settleOutcome}.
+   */
+  onItemSettled(item: WorkItem): void {
     if (this.disposed || item.squadRunId === undefined) return;
     const run = this.runForApprovedProposal(item.squadRunId);
-    if (run === undefined) return;
-    if (run.status === 'done' || run.status === 'stopped' || run.status === 'dismissed') return;
+    if (run === undefined || FINISHED_STATUSES.includes(run.status)) return;
+    const key = `${item.id}|${item.status}|${item.updatedAt}`;
+    if (this.settles.has(key)) return;
+    if (this.settles.size >= SETTLE_MEMORY_MAX) {
+      const oldest = this.settles.values().next().value;
+      if (oldest !== undefined) this.settles.delete(oldest);
+    }
+    this.settles.add(key);
+    const snapshot = this.ports.workItems.snapshot();
+    const finished = planFinished(run, snapshot.items);
+    const outcome = settleOutcome(item, snapshot.settings.autoJudge, finished);
+    if (outcome === undefined) return;
+    const result = item.result ?? (item.status === 'failed' ? item.reason : undefined);
     const review: SquadReview = {
       itemId: item.id,
       at: item.updatedAt,
+      outcome,
       text: clip(item.text, SQUAD_CONTEXT_TEXT_MAX_CHARS),
       ...(item.acceptance === undefined ? {} : { acceptance: item.acceptance }),
-      ...(item.result === undefined
-        ? {}
-        : { result: clip(item.result, SQUAD_CONTEXT_RESULT_MAX_CHARS) }),
+      ...(result === undefined ? {} : { result: clip(result, SQUAD_CONTEXT_RESULT_MAX_CHARS) }),
     };
     if (run.pendingReviews.some((entry) => reviewKey(entry) === reviewKey(review))) return;
     run.pendingReviews.push(review);
     this.commit();
     this.scheduleTurnIfReviewed(run);
+  }
+
+  /**
+   * Whether a new proposal is a clean next step the board approves on its own: automatic approval
+   * is on, an earlier step is approved, and the proposal carries no completeness warning.
+   */
+  private autoApproves(run: StoredSquadRun, proposal: SquadProposal): boolean {
+    return (
+      this.ports.workItems.snapshot().settings.autoApproveNext &&
+      proposal.warnings.length === 0 &&
+      run.proposals.some((entry) => entry.status === 'approved')
+    );
+  }
+
+  /** Approves a clean next step as the board's approval would; a failure is recorded and the proposal stays pending. */
+  private approveAutomatically(run: StoredSquadRun, proposal: SquadProposal): void {
+    const command: ApproveCommand = {
+      requestId: `auto:${proposal.id}`,
+      runId: run.id,
+      proposalId: proposal.id,
+      rows: proposal.rows,
+    };
+    void this.approveProposal(command, true).catch((error: unknown) => {
+      const current = this.runs.get(run.id);
+      if (this.disposed || current === undefined) return;
+      const detail = error instanceof Error ? clip(error.message, 200) : MESSAGE.unknownError;
+      appendEvent(
+        current,
+        squadEvent(
+          this.iso(),
+          'failed',
+          `Không tự duyệt được đề xuất: ${detail}. Hãy duyệt tay hoặc bỏ đề xuất.`,
+        ),
+      );
+      this.commit();
+    });
   }
 
   /** Progress lives in the work items, so the squad message follows every item change of an approved run. */
@@ -544,13 +632,12 @@ export class SquadService {
   }
 
   /** The work items of a run's approved proposals, the newest kept, for the leader to read. */
-  private itemViews(run: StoredSquadRun): LeaderItemView[] {
+  private itemViews(run: StoredSquadRun, all: readonly WorkItem[]): LeaderItemView[] {
     const approved = new Set(
       run.proposals
         .filter((proposal) => proposal.status === 'approved')
         .map((proposal) => proposal.id),
     );
-    const all = this.ports.workItems.snapshot().items;
     const sequenceById = new Map(all.map((item): [string, number] => [item.id, item.sequence]));
     return all
       .filter((item) => item.squadRunId !== undefined && approved.has(item.squadRunId))
@@ -577,6 +664,12 @@ export class SquadService {
       if (oldest !== undefined) this.answers.delete(oldest);
     }
     this.answers.set(requestId, runId);
+  }
+
+  /** The folder's repos and omp agents, as the work item service reads them now. */
+  private catalog(): SquadCatalog {
+    const snapshot = this.ports.workItems.snapshot();
+    return { repos: snapshot.repos, agents: snapshot.agents };
   }
 
   private requireRun(id: string): StoredSquadRun {
@@ -652,4 +745,33 @@ function leaderFailureMessage(error: unknown): string {
   if (error instanceof SquadLeaderError) return error.message;
   const detail = error instanceof Error ? clip(error.message, 200) : MESSAGE.unknownError;
   return `Đội trưởng gặp lỗi: ${detail}. Thử lại.`;
+}
+
+/**
+ * What a settled item tells the leader, or undefined when the leader need not read it now. A
+ * review is read only when automatic judging is off, since the judge decides it otherwise; a
+ * failure is always read; a done item is read when judging is automatic or it finished the plan.
+ */
+function settleOutcome(
+  item: WorkItem,
+  autoJudge: boolean,
+  finished: boolean,
+): SquadReviewOutcome | undefined {
+  if (item.status === 'review') return autoJudge ? undefined : 'review';
+  if (item.status === 'failed') return 'failed';
+  if (item.status === 'done') return autoJudge || finished ? 'done' : undefined;
+  return undefined;
+}
+
+/** Whether every work item of the run's approved proposals has finished, so the plan is complete. */
+function planFinished(run: StoredSquadRun, items: readonly WorkItem[]): boolean {
+  const approved = new Set(
+    run.proposals
+      .filter((proposal) => proposal.status === 'approved')
+      .map((proposal) => proposal.id),
+  );
+  const planItems = items.filter(
+    (item) => item.squadRunId !== undefined && approved.has(item.squadRunId),
+  );
+  return planItems.length > 0 && planItems.every((item) => !isOpenItemStatus(item.status));
 }

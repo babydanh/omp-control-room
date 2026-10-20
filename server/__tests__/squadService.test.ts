@@ -6,6 +6,7 @@ import type {
   AgentRole,
   CompanySquadMessage,
   CompanyWorkItemsMessage,
+  OmpAgentInfo,
   SquadRun,
   WorkItem,
   WorkItemStatus,
@@ -53,12 +54,53 @@ function proposal(text: string, assignee = 'herdr:wA:p1'): string {
 
 const DONE_REPLY = JSON.stringify({ assignments: [], note: 'Đội đã xong.', done: true });
 
-/** In-memory work items. A review or a status change notifies the listeners the way Phase 1 does. */
+const REPO_APP = '/work/folder/app';
+
+/** The omp agents the folder offers. The read-only ones change no files. */
+const AGENTS: OmpAgentInfo[] = [
+  { name: 'task', description: 'Làm việc', readOnly: false, source: 'bundled' },
+  { name: 'sonic', description: 'Việc cơ học', readOnly: false, source: 'bundled' },
+  { name: 'scout', description: 'Tìm thông tin', readOnly: true, source: 'bundled' },
+  { name: 'reviewer', description: 'Review code', readOnly: true, source: 'bundled' },
+  { name: 'security-reviewer', description: 'Review bảo mật', readOnly: true, source: 'bundled' },
+];
+
+/** A plan that passes the completeness check: a task with acceptance, then a review that waits for it. */
+const CLEAN_REPLY = JSON.stringify({
+  assignments: [
+    { assignee: 'auto', text: 'Viết trang giới thiệu', reason: 'Lý do', acceptance: 'Có test' },
+    {
+      assignee: 'auto',
+      agent: 'reviewer',
+      text: 'Review trang giới thiệu',
+      reason: 'Lý do',
+      acceptance: 'Không lỗi',
+      dependsOn: [0],
+    },
+  ],
+  note: 'Ghi chú',
+  done: false,
+});
+
+/** In-memory work items. A settle notifies the settle listeners the way the work item service does. */
 class FakeWorkItems implements SquadWorkItems {
   readonly items: WorkItem[] = [];
   readonly creates: { drafts: WorkItemDraft[]; squadRunId: string }[] = [];
+  /** The folder's settings. Automatic judging is off unless a test turns it on. */
+  readonly settings: CompanyWorkItemsMessage['settings'] = {
+    maxParallel: 4,
+    maxSquadSessions: 3,
+    minFreeRamGb: 2,
+    autoJudge: false,
+    autoApproveNext: false,
+  };
+  /** The folder's repos: the paths a row may name. */
+  readonly repos: string[] = [REPO_APP];
+  readonly agents: OmpAgentInfo[] = AGENTS;
+  /** Set to make creates fail, as a failed save does. */
+  createError: Error | null = null;
   private readonly changeListeners = new Set<() => void>();
-  private readonly reviewListeners = new Set<(item: WorkItem) => void>();
+  private readonly settleListeners = new Set<(item: WorkItem) => void>();
   private sequence = 0;
 
   snapshot(): CompanyWorkItemsMessage {
@@ -69,15 +111,9 @@ class FakeWorkItems implements SquadWorkItems {
       revision: this.sequence,
       items: structuredClone(this.items),
       roles,
-      settings: {
-        maxParallel: 4,
-        maxSquadSessions: 3,
-        minFreeRamGb: 2,
-        autoJudge: true,
-        autoApproveNext: false,
-      },
-      repos: [],
-      agents: [],
+      settings: { ...this.settings },
+      repos: [...this.repos],
+      agents: structuredClone(this.agents),
     };
   }
 
@@ -98,6 +134,7 @@ class FakeWorkItems implements SquadWorkItems {
     drafts: readonly WorkItemDraft[],
     options: { squadRunId: string },
   ): Promise<string[]> {
+    if (this.createError !== null) throw this.createError;
     this.creates.push({ drafts: [...drafts], squadRunId: options.squadRunId });
     const ids = drafts.map(() => randomUUID());
     const idOf = (position: number): string => {
@@ -154,20 +191,29 @@ class FakeWorkItems implements SquadWorkItems {
     };
   }
 
-  onReview(listener: (item: WorkItem) => void): () => void {
-    this.reviewListeners.add(listener);
+  onItemSettled(listener: (item: WorkItem) => void): () => void {
+    this.settleListeners.add(listener);
     return () => {
-      this.reviewListeners.delete(listener);
+      this.settleListeners.delete(listener);
     };
   }
 
   /** Moves an item to review with a result, the way the work item service does. */
   review(id: string, at: string, result: string): void {
+    this.settle(id, 'review', at, result);
+  }
+
+  /**
+   * Moves an item to a settled status and tells the settle listeners. A failed item keeps its text
+   * as the reason; the others keep it as the result, as the work item service does.
+   */
+  settle(id: string, status: 'review' | 'done' | 'failed', at: string, text: string): void {
     const item = this.find(id);
-    item.status = 'review';
-    item.result = result;
+    item.status = status;
     item.updatedAt = at;
-    for (const listener of this.reviewListeners) listener(structuredClone(item));
+    if (status === 'failed') item.reason = text;
+    else item.result = text;
+    for (const listener of this.settleListeners) listener(structuredClone(item));
     this.notifyChange();
   }
 
@@ -277,6 +323,11 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await Promise.resolve();
   }
   throw new Error('the squad did not reach the expected state');
+}
+
+/** Lets any turn that should start do so. Used where no turn may start, so the wait is a fixed count. */
+async function letTurnsPass(): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) await Promise.resolve();
 }
 
 async function rejectionOf(promise: Promise<unknown>): Promise<unknown> {
@@ -854,5 +905,206 @@ describe('SquadService waits and priorities', () => {
     await waitFor(() => h.runOf(runId)?.status === 'done');
     expect(h.leader.prompts[1]).toContain('done when: Có test form');
     expect(h.leader.prompts[1]).toContain('result: Form đã xong');
+  });
+});
+
+describe('SquadService completeness, settles and automatic approval', () => {
+  it('keeps the completeness warnings with the proposal and hints at a herdr subagent', async () => {
+    const h = new Harness();
+    h.leader.reply(
+      JSON.stringify({
+        assignments: [
+          { assignee: 'herdr:wA:p1', text: 'Tìm nguồn', reason: 'Lý do', agent: 'scout' },
+        ],
+        note: '',
+        done: false,
+      }),
+    );
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    expect(h.runOf(runId)?.proposal?.warnings).toContain('Agent herdr: subagent chỉ là gợi ý (#1)');
+  });
+
+  it('refuses a row for a repo the folder does not have, and creates nothing', async () => {
+    const h = new Harness();
+    h.leader.reply(proposal('Việc'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    const proposalId = h.runOf(runId)?.proposal?.id ?? '';
+    const refused = await rejectionOf(
+      h.service.approve({
+        requestId: randomUUID(),
+        runId,
+        proposalId,
+        rows: [
+          {
+            text: 'Việc',
+            assignee: { kind: 'new-session' },
+            repo: '/elsewhere/api',
+            dependsOn: [],
+          },
+        ],
+      }),
+    );
+    expect((refused as CompanyError).code).toBe('squad_rows_invalid');
+    expect(h.workItems.creates).toHaveLength(0);
+  });
+
+  it('creates drafts with the repo, role, agent and areas the board kept', async () => {
+    const h = new Harness();
+    h.leader.reply(proposal('Việc'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    const proposalId = h.runOf(runId)?.proposal?.id ?? '';
+    await h.service.approve({
+      requestId: randomUUID(),
+      runId,
+      proposalId,
+      rows: [
+        {
+          text: 'Viết form',
+          assignee: { kind: 'new-session' },
+          repo: REPO_APP,
+          role: 'worker',
+          agent: 'sonic',
+          areas: ['web:src/app'],
+          acceptance: 'Có test',
+          dependsOn: [],
+        },
+      ],
+    });
+    expect(h.workItems.creates[0]?.drafts[0]).toMatchObject({
+      repo: REPO_APP,
+      role: 'worker',
+      agent: 'sonic',
+      areas: ['web:src/app'],
+    });
+  });
+
+  it('a settle seen twice starts one leader turn', async () => {
+    const h = new Harness();
+    const { runId, proposalId } = await approvedRun(h, 'Viết trang');
+    h.leader.reply(proposal('Việc tiếp'));
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    h.workItems.review(item.id, h.stamp(), 'Xong');
+    await waitFor(() => h.runOf(runId)?.status === 'proposed' && h.runOf(runId)?.turns === 2);
+    const settled = h.workItems.get(item.id);
+    if (settled === undefined) throw new Error('no item');
+    h.service.onItemSettled(settled);
+    await letTurnsPass();
+    expect(h.leader.prompts).toHaveLength(2);
+    expect(h.runOf(runId)?.status).toBe('proposed');
+  });
+
+  it('a failed item starts the next leader turn even when judging is automatic', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoJudge = true;
+    const { runId, proposalId } = await approvedRun(h, 'Viết form');
+    h.leader.reply(proposal('Sửa lỗi build'));
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    h.workItems.settle(item.id, 'failed', h.stamp(), 'Lỗi build');
+    await waitFor(() => h.runOf(runId)?.turns === 2);
+    expect(h.leader.prompts[1]).toContain('[failed]');
+    expect(h.leader.prompts[1]).toContain('result: Lỗi build');
+  });
+
+  it('with automatic judging a review waits for the judge, and a done item starts the next turn', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoJudge = true;
+    const { runId, proposalId } = await approvedRun(h, 'Viết trang');
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    h.workItems.review(item.id, h.stamp(), 'Đã viết');
+    await letTurnsPass();
+    expect(h.leader.prompts).toHaveLength(1);
+
+    h.leader.reply(proposal('Việc sau khi duyệt'));
+    h.workItems.settle(item.id, 'done', h.stamp(), 'Đạt');
+    await waitFor(() => h.runOf(runId)?.turns === 2);
+    expect(h.leader.prompts[1]).toContain('[done]');
+  });
+
+  it('with manual judging an unfinished plan starts no turn until its last item is done', async () => {
+    const h = new Harness();
+    h.leader.reply(proposal('Việc'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    const proposalId = h.runOf(runId)?.proposal?.id ?? '';
+    await h.service.approve({
+      requestId: randomUUID(),
+      runId,
+      proposalId,
+      rows: [
+        {
+          text: 'Việc một',
+          assignee: { kind: 'new-session' },
+          acceptance: 'Có test',
+          dependsOn: [],
+        },
+        {
+          text: 'Việc hai',
+          assignee: { kind: 'new-session' },
+          acceptance: 'Có test',
+          dependsOn: [],
+        },
+      ],
+    });
+    h.leader.reply(proposal('Việc sau hai việc'));
+    const [first, second] = h.itemsOf(proposalId);
+    if (first === undefined || second === undefined) throw new Error('no items');
+    h.workItems.settle(first.id, 'done', h.stamp(), 'Xong');
+    await letTurnsPass();
+    expect(h.leader.prompts).toHaveLength(1);
+
+    h.workItems.settle(second.id, 'done', h.stamp(), 'Xong');
+    await waitFor(() => h.runOf(runId)?.turns === 2);
+    expect(h.leader.prompts[1]).toContain('[done]');
+  });
+
+  it('autoApproveNext approves a clean next step and records it', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoApproveNext = true;
+    const { runId, proposalId } = await approvedRun(h, 'Viết form');
+    h.leader.reply(CLEAN_REPLY);
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    h.workItems.review(item.id, h.stamp(), 'Đã viết');
+    await waitFor(() => h.workItems.creates.length === 2);
+    await waitFor(() => h.runOf(runId)?.status === 'working');
+    expect(h.workItems.creates[1]?.drafts).toHaveLength(2);
+    expect(h.runOf(runId)?.history.some((event) => event.message?.startsWith('Tự duyệt'))).toBe(
+      true,
+    );
+  });
+
+  it('autoApproveNext leaves a proposal with a warning for the user to approve', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoApproveNext = true;
+    const { runId, proposalId } = await approvedRun(h, 'Viết form');
+    h.leader.reply(proposal('Viết trang giới thiệu'));
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    h.workItems.review(item.id, h.stamp(), 'Đã viết');
+    await waitFor(() => h.runOf(runId)?.turns === 2);
+    await letTurnsPass();
+    expect(h.runOf(runId)?.proposal?.status).toBe('pending');
+    expect(h.runOf(runId)?.proposal?.warnings.length).toBeGreaterThan(0);
+    expect(h.workItems.creates).toHaveLength(1);
+  });
+
+  it('a failed automatic approval keeps the proposal pending and says so in the history', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoApproveNext = true;
+    const { runId, proposalId } = await approvedRun(h, 'Viết form');
+    h.workItems.createError = new Error('ghi lỗi');
+    h.leader.reply(CLEAN_REPLY);
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    h.workItems.review(item.id, h.stamp(), 'Đã viết');
+    await waitFor(() => h.runOf(runId)?.history.at(-1)?.kind === 'failed');
+    expect(h.runOf(runId)?.history.at(-1)?.message).toContain('Không tự duyệt được đề xuất');
+    expect(h.runOf(runId)?.proposal?.status).toBe('pending');
   });
 });

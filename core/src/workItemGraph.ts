@@ -157,6 +157,13 @@ export function blockerReason(blocker: WorkItemBlocker): string {
   }
   if (blocker.kind === 'area') return `Chờ việc #${blocker.sequence ?? 0} trả vùng ${blocker.area ?? ''}.`;
   if (blocker.kind === 'no_member') return 'Chưa có agent rảnh trong repo này.';
+  if (blocker.kind === 'busy_checkout') {
+    return `Chờ agent khác rảnh, đang làm trong ${blocker.area ?? ''}.`;
+  }
+  if (blocker.kind === 'pool_full') return 'Đã đủ phiên omp đang chạy, chờ chỗ trống rồi thử lại.';
+  if (blocker.kind === 'worktree') {
+    return `Chưa tạo được worktree riêng cho việc này: ${blocker.detail ?? 'lỗi không rõ'}.`;
+  }
   return `Việc #${blocker.sequence ?? 0} bị lỗi, gỡ chờ hoặc giao lại.`;
 }
 

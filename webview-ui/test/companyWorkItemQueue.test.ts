@@ -102,6 +102,21 @@ describe('blockerChip', () => {
       tone: 'muted',
     });
   });
+
+  it('names a busy repo, a worktree not yet made and a full pool, in muted tone', () => {
+    expect(blockerChip({ blocker: { kind: 'busy_checkout', area: 'web' } })).toEqual({
+      text: 'Repo đang bận',
+      tone: 'muted',
+    });
+    expect(blockerChip({ blocker: { kind: 'worktree' } })).toEqual({
+      text: 'Chờ worktree',
+      tone: 'muted',
+    });
+    expect(blockerChip({ blocker: { kind: 'pool_full' } })).toEqual({
+      text: 'Hết phiên chạy',
+      tone: 'muted',
+    });
+  });
 });
 
 describe('queueOrder', () => {

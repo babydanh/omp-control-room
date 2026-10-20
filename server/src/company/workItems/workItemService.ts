@@ -27,6 +27,7 @@ import type {
   SquadSettings,
   WorkItem,
   WorkItemAssignee,
+  WorkItemBlocker,
   WorkItemVerdict,
 } from '../../../../core/src/messages.js';
 import {
@@ -45,6 +46,7 @@ import { CompanyError } from '../companyError.js';
 import { BUNDLED_AGENTS, findAgent } from './agentCatalog.js';
 import { composeDispatchPrompt } from './dispatchPrompt.js';
 import { GIB, isSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
+import type { SquadWorktree } from './squadWorktree.js';
 import {
   type AgentObservation,
   assigneeKey,
@@ -71,9 +73,11 @@ import {
   toWorkItem,
   WORK_ITEM_AREA_MAX_CHARS,
   WORK_ITEM_AREAS_MAX,
+  WORK_ITEM_BLOCKER_DETAIL_MAX_CHARS,
   WORK_ITEM_FINISHED_KEEP,
   WORK_ITEM_GRACE_MS,
   WORK_ITEM_HISTORY_MAX,
+  WORK_ITEM_HOLD_RETRY_MS,
   WORK_ITEM_REASON,
   WORK_ITEM_REASON_MAX_CHARS,
   WORK_ITEM_RESULT_LINES,
@@ -153,11 +157,17 @@ export interface WorkItemPersistence {
   save(file: WorkItemsFile): Promise<void>;
 }
 
+/** Creates the isolated git worktree an editing item runs in. Rejects with the reason when it cannot. */
+export interface WorkItemWorktrees {
+  create(repo: string, shortId: string): Promise<SquadWorktree>;
+}
+
 /** Everything the service reaches outside itself. */
 export interface WorkItemPorts {
   readonly roster: WorkItemRoster;
   readonly sessions: WorkItemSessions;
   readonly persistence: WorkItemPersistence;
+  readonly worktrees: WorkItemWorktrees;
   publish(message: CompanyWorkItemsMessage): void;
   now(): number;
   newId(): string;
@@ -280,6 +290,8 @@ export class WorkItemService {
   private settings: SquadSettings = { ...SQUAD_SETTINGS_DEFAULT };
   /** Sessions the squad opened, oldest first. Used for reuse and the open cap. */
   private squadSessionIds: string[] = [];
+  /** The repo each squad-opened session was opened for, keyed by session id. */
+  private squadSessionRepos = new Map<string, string>();
   private catalog: WorkItemCatalog = { repos: [], agents: BUNDLED_AGENTS };
   /** Items the agent was seen working on, so its return to free means it finished. */
   private readonly observedBusy = new Set<string>();
@@ -294,7 +306,10 @@ export class WorkItemService {
   private lastWriteFailed = false;
   private disposed = false;
   private readonly changeListeners = new Set<() => void>();
-  private readonly reviewListeners = new Set<(item: WorkItem) => void>();
+  private readonly settledListeners = new Set<(item: WorkItem) => void>();
+  /** Items held back with the reason they cannot start yet: the omp pool is full or the worktree failed. */
+  private readonly held = new Map<string, WorkItemBlocker>();
+  private holdRetryPending = false;
 
   constructor(workspacePath: string, ports: WorkItemPorts) {
     this.workspacePath = workspacePath;
@@ -309,6 +324,7 @@ export class WorkItemService {
     this.roles = parsed.file.roles;
     this.settings = { ...parsed.file.settings };
     this.squadSessionIds = [...parsed.file.squadSessionIds];
+    this.squadSessionRepos = new Map(Object.entries(parsed.file.squadSessionRepos));
     for (const item of parsed.file.items) this.items.set(item.id, item);
     await this.refreshCatalog();
     // A running item from before this start gets its grace check again.
@@ -478,6 +494,7 @@ export class WorkItemService {
     }
     this.remember(command.requestId, '');
     this.commit();
+    this.notifySettled(item);
     await this.flush();
     // A verdict of done may free the items that waited for this one.
     if (command.verdict === 'done') await this.reconcileAfterSave();
@@ -494,6 +511,7 @@ export class WorkItemService {
         'work_item_awaited',
         awaitedMessage(waiters.map((waiter) => waiter.sequence)),
       );
+    this.held.delete(item.id);
     this.items.delete(item.id);
     this.remember(command.requestId, '');
     this.commit();
@@ -611,7 +629,7 @@ export class WorkItemService {
     for (const cancel of this.cancelTimers) cancel();
     this.cancelTimers.clear();
     this.changeListeners.clear();
-    this.reviewListeners.clear();
+    this.settledListeners.clear();
   }
 
   /** Calls `listener` after every change to the folder's state. Returns the function that removes it. */
@@ -622,11 +640,14 @@ export class WorkItemService {
     };
   }
 
-  /** Calls `listener` with each item the moment it reaches review. Returns the function that removes it. */
-  onReview(listener: (item: WorkItem) => void): () => void {
-    this.reviewListeners.add(listener);
+  /**
+   * Calls `listener` with each item the moment it settles: it reaches review, fails, or is marked done.
+   * Returns the function that removes it.
+   */
+  onItemSettled(listener: (item: WorkItem) => void): () => void {
+    this.settledListeners.add(listener);
     return () => {
-      this.reviewListeners.delete(listener);
+      this.settledListeners.delete(listener);
     };
   }
 
@@ -942,6 +963,7 @@ export class WorkItemService {
       roles: this.roles,
       settings: { ...this.settings },
       squadSessionIds: [...this.squadSessionIds],
+      squadSessionRepos: Object.fromEntries(this.squadSessionRepos),
     };
   }
 
@@ -1000,7 +1022,10 @@ export class WorkItemService {
       if (this.items.get(candidate.id) !== candidate || candidate.status !== 'queued') continue;
       if (!this.isReady(candidate)) continue;
       const decision = decideStart(this.schedulerItem(candidate), this.schedulerContext(view));
-      if (decision.kind === 'wait') continue;
+      if (decision.kind === 'wait') {
+        if (this.held.delete(candidate.id)) this.ports.publish(this.snapshot());
+        continue;
+      }
       await this.start(candidate, decision);
     }
   }
@@ -1012,14 +1037,21 @@ export class WorkItemService {
   private async start(item: StoredWorkItem, decision: StartDecision): Promise<void> {
     const auto = item.assignee.kind === 'auto';
     if (decision.kind === 'open') {
+      const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
+      if (cwd === undefined) return;
       let sessionId: string;
       try {
-        sessionId = await this.ports.sessions.openChat({ cwd: decision.cwd, role: decision.role });
+        sessionId = await this.ports.sessions.openChat({ cwd, role: decision.role });
       } catch (error) {
+        // A full omp runner pool is temporary: the item waits and the next pass tries it again.
+        if (error instanceof CompanyError && error.code === 'company_pool_full') {
+          this.hold(item, { kind: 'pool_full' });
+          return;
+        }
         this.fail(item, WORK_ITEM_REASON.openFailed, describe(error));
         return;
       }
-      this.recordSquadSession(sessionId);
+      this.recordSquadSession(sessionId, decision.cwd);
       item.assignee = { kind: 'session', sessionId };
       const message = auto
         ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
@@ -1032,15 +1064,23 @@ export class WorkItemService {
         makeEvent(this.iso(), 'assigned', `Tự chọn: ${memberLabel(decision.member)}.`),
       );
     }
+    this.held.delete(item.id);
     await this.dispatch(item);
   }
 
-  /** Remembers a session the squad opened, keeping the newest SQUAD_SESSIONS_KEPT. */
-  private recordSquadSession(sessionId: string): void {
+  /**
+   * Remembers a session the squad opened for `repo`, keeping the newest SQUAD_SESSIONS_KEPT. The
+   * repo is what reuse matches on, since an isolated session's cwd is its own worktree.
+   */
+  private recordSquadSession(sessionId: string, repo: string): void {
     this.squadSessionIds = [
       ...this.squadSessionIds.filter((id) => id !== sessionId),
       sessionId,
     ].slice(-SQUAD_SESSIONS_KEPT);
+    this.squadSessionRepos.set(sessionId, repo);
+    for (const id of [...this.squadSessionRepos.keys()]) {
+      if (!this.squadSessionIds.includes(id)) this.squadSessionRepos.delete(id);
+    }
   }
 
   /** Keys of the agents that have live items, in order of their oldest live item. */
@@ -1083,8 +1123,10 @@ export class WorkItemService {
     const blocker = blockerOf(item.dependsOn, (id) => this.dependencyState(item, id), false);
     if (blocker !== null) return { ...wire, blocker, reason: blockerReason(blocker) };
     const decision = decideStart(this.schedulerItem(item), this.schedulerContext(view));
-    if (decision.kind !== 'wait') return wire;
-    return { ...wire, blocker: decision.blocker, reason: decision.reason };
+    if (decision.kind === 'wait') return { ...wire, blocker: decision.blocker, reason: decision.reason };
+    const held = this.held.get(item.id);
+    if (held === undefined) return wire;
+    return { ...wire, blocker: held, reason: blockerReason(held) };
   }
 
   /** What the queue knows about one dependency: its status, or failed at its last #n once it is gone. */
@@ -1116,6 +1158,7 @@ export class WorkItemService {
       role: item.role,
       areas: item.areas ?? [],
       readOnly: this.isReadOnly(item.agent),
+      agent: item.agent,
     };
   }
 
@@ -1155,27 +1198,31 @@ export class WorkItemService {
     const panes = view.roster.panes.map((pane): SchedulerMember => {
       const assignee: WorkItemAssignee = { kind: 'herdr', paneId: pane.paneId };
       const key = assigneeKey(assignee);
+      const observed = view.roster.available ? observeHerdrStatus(pane.status) : 'unknown';
       return {
         key,
         assignee,
         cwd: pane.cwd,
         role: undefined,
         note: notes.get(key),
-        free: view.roster.available && observeHerdrStatus(pane.status) === 'free',
-        squadOpened: false,
+        free: observed === 'free',
+        busy: observed === 'busy' || observed === 'blocked',
+        squadRepo: undefined,
       };
     });
     const sessions = view.sessions.map((session): SchedulerMember => {
       const assignee: WorkItemAssignee = { kind: 'session', sessionId: session.id };
       const key = assigneeKey(assignee);
+      const observed = observeSessionStatus(session.status);
       return {
         key,
         assignee,
         cwd: session.cwd,
         role: isItemRole(session.role) ? session.role : undefined,
         note: notes.get(key),
-        free: observeSessionStatus(session.status) === 'free',
-        squadOpened: this.squadSessionIds.includes(session.id),
+        free: observed === 'free',
+        busy: observed === 'busy' || observed === 'blocked',
+        squadRepo: this.squadSessionRepos.get(session.id),
       };
     });
     return [...panes, ...sessions];
@@ -1308,8 +1355,7 @@ export class WorkItemService {
     this.pushEvent(item, makeEvent(at, 'status', 'Agent đã dừng.'));
     this.again = true;
     this.commit();
-    const review = toWorkItem(item);
-    for (const listener of this.reviewListeners) listener(review);
+    this.notifySettled(item);
   }
 
   private async readResult(paneId: string): Promise<string | undefined> {
@@ -1323,12 +1369,14 @@ export class WorkItemService {
   private fail(item: StoredWorkItem, reason: string, message: string = reason): void {
     const at = this.iso();
     this.observedBusy.delete(item.id);
+    this.held.delete(item.id);
     item.status = 'failed';
     item.updatedAt = at;
     item.reason = clip(reason, WORK_ITEM_REASON_MAX_CHARS);
     this.pushEvent(item, makeEvent(at, 'status', message));
     this.again = true;
     this.commit();
+    this.notifySettled(item);
   }
 
   /** Sends a queued item to its agent. `start` has already chosen the agent and opened its session. */
@@ -1398,5 +1446,57 @@ export class WorkItemService {
       this.scheduleReconcile();
     }, WORK_ITEM_GRACE_MS);
     this.cancelTimers.add(cancel);
+  }
+
+  /**
+   * The checkout an editing item's new session opens in: the worktree made for the item earlier, or a
+   * new one in its repo. Undefined when that failed; the item then waits with a worktree blocker.
+   */
+  private async isolatedCheckout(item: StoredWorkItem, repo: string): Promise<string | undefined> {
+    if (item.worktree !== undefined) return item.worktree.path;
+    let worktree: SquadWorktree;
+    try {
+      worktree = await this.ports.worktrees.create(repo, item.id.slice(0, 8));
+    } catch (error) {
+      const detail = clip(describe(error), WORK_ITEM_BLOCKER_DETAIL_MAX_CHARS);
+      this.hold(item, { kind: 'worktree', detail });
+      return undefined;
+    }
+    item.worktree = worktree;
+    this.commit();
+    // The worktree must be on disk before its session opens; otherwise a restart would make another.
+    if (!(await this.writesLanded())) {
+      this.hold(item, { kind: 'worktree', detail: 'không lưu được việc để nhớ worktree' });
+      return undefined;
+    }
+    return worktree.path;
+  }
+
+  /** Keeps a ready item queued with the reason it cannot start yet, and schedules another pass. */
+  private hold(item: StoredWorkItem, blocker: WorkItemBlocker): void {
+    const before = this.held.get(item.id);
+    this.held.set(item.id, blocker);
+    if (before?.kind !== blocker.kind || before.detail !== blocker.detail) {
+      this.ports.publish(this.snapshot());
+    }
+    this.scheduleHoldRetry();
+  }
+
+  /** Runs another pass after the hold delay, unless one is already scheduled. */
+  private scheduleHoldRetry(): void {
+    if (this.holdRetryPending) return;
+    this.holdRetryPending = true;
+    const cancel = this.ports.schedule(() => {
+      this.cancelTimers.delete(cancel);
+      this.holdRetryPending = false;
+      this.scheduleReconcile();
+    }, WORK_ITEM_HOLD_RETRY_MS);
+    this.cancelTimers.add(cancel);
+  }
+
+  /** Tells each settled listener about an item that reached review, failed, or was marked done. */
+  private notifySettled(item: StoredWorkItem): void {
+    const settled = toWorkItem(item);
+    for (const listener of this.settledListeners) listener(settled);
   }
 }

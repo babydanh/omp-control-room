@@ -110,6 +110,24 @@ describe('blockerSentence', () => {
       'Thư mục chưa có agent nào để nhận việc này.',
     );
   });
+
+  it('says where a busy repo, a worktree not yet made and a full pool hold the item', () => {
+    expect(blockerSentence({ kind: 'busy_checkout', area: 'web' })).toBe(
+      'Repo web đang có agent làm việc, chờ agent đó rảnh.',
+    );
+    expect(blockerSentence({ kind: 'busy_checkout' })).toBe(
+      'Repo của việc này đang có agent làm việc, chờ agent đó rảnh.',
+    );
+    expect(blockerSentence({ kind: 'worktree', detail: 'git fetch lỗi' })).toBe(
+      'Chưa tạo được worktree riêng cho việc này, việc vẫn đang chờ: git fetch lỗi',
+    );
+    expect(blockerSentence({ kind: 'worktree' })).toBe(
+      'Chưa tạo được worktree riêng cho việc này, việc vẫn đang chờ.',
+    );
+    expect(blockerSentence({ kind: 'pool_full' })).toBe(
+      'Đã hết phiên chạy của công ty, việc chờ có chỗ trống.',
+    );
+  });
 });
 
 describe('the auto assignee', () => {

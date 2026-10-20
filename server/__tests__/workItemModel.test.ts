@@ -120,10 +120,20 @@ describe('work item file parsing', () => {
         roles: [],
         settings: SQUAD_SETTINGS_DEFAULT,
         squadSessionIds: [],
+        squadSessionRepos: {},
       },
       dropped: 0,
       corrupt: false,
     });
+  });
+
+  it('keeps the repo of each listed squad session and drops the others', () => {
+    const parsed = parseWorkItemsFile({
+      version: 1,
+      squadSessionIds: ['a', 'b'],
+      squadSessionRepos: { a: '/work/folder/app', c: '/work/folder/other' },
+    });
+    expect(parsed.file.squadSessionRepos).toEqual({ a: '/work/folder/app' });
   });
 
   it('marks a file that is not an object or has another version as corrupt', () => {

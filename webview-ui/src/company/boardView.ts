@@ -19,6 +19,7 @@ import type {
   VerificationEvidence,
 } from '../../../core/src/company.js';
 import type {
+  OmpAgentInfo,
   SquadRun,
   WorkItem,
   WorkItemBlocker,
@@ -184,6 +185,10 @@ export interface BoardSquad {
   rows: { text: string; assignee: string }[];
   /** The folder's work items as the server sent them; a squad card picks its own children out. */
   items: readonly WorkItem[];
+  /** The folder's repos as canonical paths: the values a squad row may name. */
+  repos: readonly string[];
+  /** The folder's subagent catalog: the values a squad row's agent may name. */
+  agents: readonly OmpAgentInfo[];
   /** The folder the run is filed under when every folder is shown; null in folder mode. */
   folder: FolderIdentity | null;
 }
@@ -274,6 +279,7 @@ function squadCards(state: CompanyViewState): BoardSquad[] {
       text: row.text,
       assignee: assigneeLabel(row.assignee, state, workspacePath),
     }));
+    const work = workItemsOf(state, workspacePath);
     cards.push({
       runId: run.id,
       workspacePath,
@@ -281,7 +287,9 @@ function squadCards(state: CompanyViewState): BoardSquad[] {
       head: workItemCardHead(run.request),
       run,
       rows,
-      items: workItemsOf(state, workspacePath).items,
+      items: work.items,
+      repos: work.repos,
+      agents: work.agents,
       folder,
     });
   }

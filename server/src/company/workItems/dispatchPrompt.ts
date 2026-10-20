@@ -15,10 +15,10 @@ export const SAFE_WORK_BLOCK =
 
 /** The safe-work block for a read-only agent: it reports what it read, and edits nothing. */
 export const SAFE_READ_ONLY_BLOCK =
-  'Việc này chỉ đọc, không sửa file. Khi xong, báo lại các file đã xem, các lệnh đã chạy và mã thoát của từng lệnh.';
+  'Việc này chỉ đọc: không sửa file, không push thẳng lên main. Khi xong, báo lại các file đã xem, các lệnh đã chạy và mã thoát của từng lệnh.';
 
 /** The default worker. Naming it adds no subagent line. */
-const DEFAULT_AGENT = 'task';
+export const DEFAULT_AGENT = 'task';
 
 /** What a prompt is composed from. `agent` absent means the default worker. */
 export interface DispatchPromptParts {

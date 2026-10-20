@@ -8,6 +8,7 @@ import type { WorkItemStatus } from '../../../../core/src/messages.js';
 import type { BoardSquad } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
 import {
+  type EpicChild,
   epicChildren,
   openSequencesOf,
   rowsFromProposal,
@@ -17,6 +18,7 @@ import {
   validateRows,
 } from '../squadView.js';
 import { useCommandDialog } from '../useCommandDialog.js';
+import { blockerChip, blockerSentence } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 import { FolderTag } from './FolderTag.js';
 
@@ -34,6 +36,26 @@ const CHILD_STATUS_TONE: Readonly<Record<WorkItemStatus, string>> = {
   done: 'text-text-muted',
   failed: 'text-danger',
 };
+
+/** A child row's blocker: what holds the item, as a chip and a sentence. */
+function ChildBlocker({ child }: { child: EpicChild }) {
+  const chip = blockerChip(child);
+  const sentence = blockerSentence(child.blocker);
+  if (chip === null || sentence === null) return null;
+  return (
+    <span
+      data-testid="squad-child-blocker"
+      className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-text-muted"
+    >
+      <span
+        className={`shrink-0 rounded-full bg-well px-1.5 ${chip.tone === 'danger' ? 'text-danger' : ''}`}
+      >
+        {chip.text}
+      </span>
+      <span className="line-clamp-2 break-words">{sentence}</span>
+    </span>
+  );
+}
 
 export interface SquadRunCardProps {
   card: BoardSquad;
@@ -53,7 +75,10 @@ export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRun
   const verdict =
     proposal === undefined
       ? null
-      : validateRows(rowsFromProposal(proposal), openSequencesOf(card.items));
+      : validateRows(rowsFromProposal(proposal), openSequencesOf(card.items), {
+          repos: card.repos,
+          agents: card.agents,
+        });
   const progress = squadProgressView(run.progress);
   const children = epicChildren(run, card.items);
   const head = card.head === '' ? CARD_HEAD_FALLBACK : card.head;
@@ -147,6 +172,7 @@ export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRun
               {child.head !== '' && (
                 <span className="line-clamp-2 break-words text-text">{child.head}</span>
               )}
+              <ChildBlocker child={child} />
             </li>
           ))}
         </ul>

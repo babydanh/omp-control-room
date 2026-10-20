@@ -37,6 +37,7 @@ import type {
   CompanyDiagnostics,
   CompanyModelCatalogEntry,
   CompanyPrompt,
+  CompanyRole,
   CompanySnapshot,
   QuestionAnswerInput,
   RoleProfile,
@@ -121,6 +122,7 @@ const ERROR_TEXT = {
   owner_unavailable: 'Chủ sở hữu công ty cho workspace này không khả dụng.',
   privileged_required: 'Client công ty đó không được phép chạy lệnh công ty.',
   role_forbidden: 'Chỉ chủ sở hữu công ty nắm quyền chạy native.',
+  role_invalid: 'Vai trò công ty đó không có trong công ty này.',
   reply_too_large: 'Sự kiện công ty đó vượt quá giới hạn khung môi giới.',
   subscriber_limit: 'Chủ sở hữu công ty không còn lease thuê bao trống nào.',
   terminal_lease_denied: 'Lease terminal đó không thuộc về thuê bao này.',
@@ -676,8 +678,11 @@ export class CompanyFollowerProxy {
         return sessionId;
       },
 
-      async openNewChat(): Promise<string> {
-        const value = await proxy.send(COMPANY_HOST_COMMANDS.openNewChat);
+      async openNewChat(input: { cwd?: string; role?: CompanyRole } = {}): Promise<string> {
+        const value = await proxy.send(COMPANY_HOST_COMMANDS.openNewChat, {
+          ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+          ...(input.role === undefined ? {} : { role: input.role }),
+        });
         if (!isFrameObject(value)) throw hostError('owner_protocol_error');
         const sessionId = value['sessionId'];
         if (typeof sessionId !== 'string') throw hostError('owner_protocol_error');

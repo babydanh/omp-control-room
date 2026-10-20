@@ -71,13 +71,25 @@ function proposal(overrides: Partial<SquadProposal> = {}): SquadProposal {
       { text: 'Viết API', assignee: SESSION, priority: 2, dependsOn: [] },
     ],
     status: 'pending',
+    warnings: [],
     createdAt: AT,
     ...overrides,
   };
 }
 
 function draft(text: string, assignee: WorkItemAssignee | null = SESSION): SquadDraftRow {
-  return { key: `key-${text}`, text, assignee, priority: 2, acceptance: '', dependsOn: [] };
+  return {
+    key: `key-${text}`,
+    text,
+    repo: null,
+    role: null,
+    agent: '',
+    areas: '',
+    assignee,
+    priority: 2,
+    acceptance: '',
+    dependsOn: [],
+  };
 }
 
 function workItem(overrides: Partial<WorkItem> & Pick<WorkItem, 'id' | 'sequence'>): WorkItem {
@@ -143,6 +155,10 @@ describe('proposal rows', () => {
       {
         key: 'prop-1:0',
         text: 'Dựng form',
+        repo: null,
+        role: null,
+        agent: '',
+        areas: '',
         assignee: SESSION,
         priority: 2,
         acceptance: '',
@@ -151,6 +167,10 @@ describe('proposal rows', () => {
       {
         key: 'prop-1:1',
         text: 'Viết API',
+        repo: null,
+        role: null,
+        agent: '',
+        areas: '',
         assignee: SESSION,
         priority: 2,
         acceptance: '',
@@ -163,6 +183,10 @@ describe('proposal rows', () => {
     expect(blankDraftRow('prop-1:new:1')).toEqual({
       key: 'prop-1:new:1',
       text: '',
+      repo: null,
+      role: null,
+      agent: '',
+      areas: '',
       assignee: null,
       priority: 2,
       acceptance: '',

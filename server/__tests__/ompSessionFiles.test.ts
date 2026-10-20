@@ -11,6 +11,7 @@ import {
   OMP_SESSION_LIST_LIMIT,
   ompSessionDirName,
   ompSessionsRoot,
+  readOmpSessionCwd,
   readOmpSessionTitle,
   removeSessionFileWithin,
 } from '../src/company/ompSessionFiles.js';
@@ -82,9 +83,30 @@ describe('readOmpSessionTitle', () => {
   });
 });
 
+describe('readOmpSessionCwd', () => {
+  it('reads the cwd the session header names', async () => {
+    const file = path.join(scratch, 'repo.jsonl');
+    await writeFile(file, `${JSON.stringify({ type: 'session', id: 's', cwd: '/work/repo' })}\n`);
+    expect(await readOmpSessionCwd(file)).toBe('/work/repo');
+  });
+
+  it('answers nothing for a header without a cwd, a cwd off the first line, or an unreadable file', async () => {
+    const bare = path.join(scratch, 'bare.jsonl');
+    await writeFile(bare, `${JSON.stringify({ type: 'session', id: 's' })}\n`);
+    expect(await readOmpSessionCwd(bare)).toBeUndefined();
+    const offHead = path.join(scratch, 'off-head.jsonl');
+    await writeFile(
+      offHead,
+      `${JSON.stringify({ type: 'message' })}\n${JSON.stringify({ type: 'session', cwd: '/work/repo' })}\n`,
+    );
+    expect(await readOmpSessionCwd(offHead)).toBeUndefined();
+    expect(await readOmpSessionCwd(path.join(scratch, 'missing.jsonl'))).toBeUndefined();
+  });
+});
+
 describe('listOmpSessionFiles', () => {
   it('lists nothing for a folder that has no session directory yet', async () => {
-    expect(await listOmpSessionFiles(path.join(scratch, 'absent'), new Map())).toEqual([]);
+    expect(await listOmpSessionFiles([path.join(scratch, 'absent')], new Map())).toEqual([]);
   });
 
   it('lists only .jsonl files, newest first, with titles and board session links', async () => {
@@ -98,7 +120,7 @@ describe('listOmpSessionFiles', () => {
     await fs.promises.utimes(older, new Date('2026-01-01'), new Date('2026-01-01'));
     await fs.promises.utimes(newer, new Date('2026-02-01'), new Date('2026-02-01'));
 
-    const listing = await listOmpSessionFiles(dir, new Map([[comparableOmpPath(newer), 'S-9']]));
+    const listing = await listOmpSessionFiles([dir], new Map([[comparableOmpPath(newer), 'S-9']]));
 
     expect(listing.map((entry) => path.basename(entry.file))).toEqual([
       'newer.jsonl',
@@ -108,6 +130,26 @@ describe('listOmpSessionFiles', () => {
     expect(listing[0]?.title).toBeUndefined();
     expect(listing[1]).toMatchObject({ title: 'Cũ', updatedAt: expect.any(String) });
     expect(listing[1]?.boardSessionId).toBeUndefined();
+  });
+
+  it('merges several directories newest first, and lists a directory named twice once', async () => {
+    const first = path.join(scratch, 'first');
+    const second = path.join(scratch, 'second');
+    await fs.promises.mkdir(first);
+    await fs.promises.mkdir(second);
+    const older = path.join(first, 'older.jsonl');
+    const newer = path.join(second, 'newer.jsonl');
+    await writeFile(older, '{}\n');
+    await writeFile(newer, '{}\n');
+    await fs.promises.utimes(older, new Date('2026-01-01'), new Date('2026-01-01'));
+    await fs.promises.utimes(newer, new Date('2026-02-01'), new Date('2026-02-01'));
+
+    const listing = await listOmpSessionFiles([second, first, second], new Map());
+
+    expect(listing.map((entry) => path.basename(entry.file))).toEqual([
+      'newer.jsonl',
+      'older.jsonl',
+    ]);
   });
 
   it('caps the listing at the newest entries', async () => {
@@ -123,7 +165,7 @@ describe('listOmpSessionFiles', () => {
       }),
     );
 
-    const listing = await listOmpSessionFiles(dir, new Map());
+    const listing = await listOmpSessionFiles([dir], new Map());
 
     expect(listing).toHaveLength(OMP_SESSION_LIST_LIMIT);
     expect(path.basename(listing[0]?.file ?? '')).toBe(`s${total - 1}.jsonl`);
@@ -136,7 +178,7 @@ describe('assertOmpSessionFileIn', () => {
     await fs.promises.mkdir(dir);
     const file = path.join(dir, 'saved.jsonl');
     await writeFile(file, '{}\n');
-    expect(await assertOmpSessionFileIn(file, dir)).toBe(path.resolve(file));
+    expect(await assertOmpSessionFileIn(file, [dir])).toBe(path.resolve(file));
   });
 
   it('refuses a relative path, a non-.jsonl file, and a file that does not exist', async () => {
@@ -144,15 +186,17 @@ describe('assertOmpSessionFileIn', () => {
     await fs.promises.mkdir(dir);
     const notSession = path.join(dir, 'saved.txt');
     await writeFile(notSession, 'x');
-    await expect(assertOmpSessionFileIn('saved.jsonl', dir)).rejects.toMatchObject({
+    await expect(assertOmpSessionFileIn('saved.jsonl', [dir])).rejects.toMatchObject({
       code: 'omp_session_invalid',
     });
-    await expect(assertOmpSessionFileIn(notSession, dir)).rejects.toMatchObject({
+    await expect(assertOmpSessionFileIn(notSession, [dir])).rejects.toMatchObject({
       code: 'omp_session_invalid',
     });
-    await expect(assertOmpSessionFileIn(path.join(dir, 'gone.jsonl'), dir)).rejects.toMatchObject({
-      code: 'omp_session_missing',
-    });
+    await expect(assertOmpSessionFileIn(path.join(dir, 'gone.jsonl'), [dir])).rejects.toMatchObject(
+      {
+        code: 'omp_session_missing',
+      },
+    );
   });
 
   it('refuses a file outside the folder, including one reached through ..', async () => {
@@ -160,12 +204,25 @@ describe('assertOmpSessionFileIn', () => {
     await fs.promises.mkdir(dir);
     const outside = path.join(scratch, 'outside.jsonl');
     await writeFile(outside, '{}\n');
-    await expect(assertOmpSessionFileIn(outside, dir)).rejects.toMatchObject({
+    await expect(assertOmpSessionFileIn(outside, [dir])).rejects.toMatchObject({
       code: 'omp_session_outside_folder',
     });
     await expect(
-      assertOmpSessionFileIn(path.join(dir, '..', 'outside.jsonl'), dir),
+      assertOmpSessionFileIn(path.join(dir, '..', 'outside.jsonl'), [dir]),
     ).rejects.toMatchObject({ code: 'omp_session_outside_folder' });
+  });
+
+  it('accepts a file in any listed directory and refuses one in none of them', async () => {
+    const repo = path.join(scratch, 'repo-sessions');
+    const root = path.join(scratch, 'root-sessions');
+    await fs.promises.mkdir(repo);
+    await fs.promises.mkdir(root);
+    const file = path.join(repo, 'repo.jsonl');
+    await writeFile(file, '{}\n');
+    expect(await assertOmpSessionFileIn(file, [root, repo])).toBe(path.resolve(file));
+    await expect(assertOmpSessionFileIn(file, [root])).rejects.toMatchObject({
+      code: 'omp_session_outside_folder',
+    });
   });
 });
 

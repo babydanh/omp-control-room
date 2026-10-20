@@ -3847,7 +3847,7 @@ components:
 
     WorkItemBlockerKind:
       type: string
-      enum: [agent, dependency, failed, capacity, area, no_member]
+      enum: [agent, dependency, failed, capacity, area, no_member, busy_checkout, pool_full, worktree]
 
     WorkItemBlocker:
       type: object
@@ -3858,7 +3858,9 @@ components:
         not done yet. failed: a dependency failed or was removed. capacity: the folder has no free slot; running and
         limit give the count. area: a running item holds an area or checkout this one needs; sequence is that
         item's #n and area names it. no_member: no free agent in the item's repo, and the squad cannot open one;
-        the reason sentence says why.
+        the reason sentence says why. busy_checkout: an agent outside the work items is working in the checkout
+        this item needs; area names the checkout. pool_full: the omp runner pool has no free slot; the item retries
+        on its own. worktree: the squad could not create the isolated worktree for this item; detail says why.
       properties:
         kind:
           $ref: '#/components/schemas/WorkItemBlockerKind'
@@ -3874,6 +3876,9 @@ components:
         limit:
           type: integer
           minimum: 0
+        detail:
+          type: string
+          maxLength: 300
     WorkItem:
       type: object
       additionalProperties: false
@@ -3940,6 +3945,22 @@ components:
           description: >-
             Name of the omp subagent that does the item, such as task, reviewer, or a custom agent. Absent
             means the default worker.
+        worktree:
+          type: object
+          additionalProperties: false
+          required: [path, branch]
+          description: >-
+            The isolated git worktree the squad created for this editing item, and its branch. Absent for read-only
+            items and for items that have not started yet. The squad removes it when the item is cleaned up.
+          properties:
+            path:
+              type: string
+              minLength: 1
+              maxLength: 4096
+            branch:
+              type: string
+              minLength: 1
+              maxLength: 256
         blocker:
           $ref: '#/components/schemas/WorkItemBlocker'
         squadRunId:
@@ -3982,7 +4003,8 @@ components:
       description: >-
         Per-folder limits for the squad scheduler. maxParallel caps running work items in the folder.
         maxSquadSessions caps the omp sessions the squad opens. minFreeRamGb is the free memory needed before
-        opening one. autoJudge and autoApproveNext are read by the judge and the leader in later phases.
+        opening one. autoJudge is read by the judge in a later phase. autoApproveNext approves a leader's follow-up
+        proposal by itself when it has no completeness warning; the first proposal of a run is always left to the user.
       properties:
         maxParallel:
           type: integer
@@ -4375,6 +4397,29 @@ components:
           maxItems: 10
           items:
             $ref: '#/components/schemas/SquadDependency'
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            Canonical path of the repo or checkout the row works in. Absent means the Company folder root.
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        agent:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Name of the omp subagent that does the row, such as scout, task, or reviewer. Absent means the default
+            worker.
+        areas:
+          type: array
+          maxItems: 8
+          description: Code areas the row edits, lowercase, such as web:src/app. Read-only agents take none.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
 
     SquadRow:
       type: object
@@ -4402,6 +4447,29 @@ components:
             What this row waits for. Row indexes are 0-based positions in this proposal. Items are their #n.
           items:
             $ref: '#/components/schemas/SquadDependency'
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 4096
+          description: >-
+            Canonical path of the repo or checkout the row works in. Absent means the Company folder root.
+        role:
+          $ref: '#/components/schemas/CompanyRole'
+        agent:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            Name of the omp subagent that does the row, such as scout, task, or reviewer. Absent means the default
+            worker.
+        areas:
+          type: array
+          maxItems: 8
+          description: Code areas the row edits, lowercase, such as web:src/app. Read-only agents take none.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
 
     SquadProposalStatus:
       type: string
@@ -4410,7 +4478,7 @@ components:
     SquadProposal:
       type: object
       additionalProperties: false
-      required: [id, turn, note, rows, status, createdAt]
+      required: [id, turn, note, rows, warnings, status, createdAt]
       description: >-
         One leader reply that assigns work. id is the squadRunId that the approved items carry. rows is what the
         leader proposed, before any edit by the user.
@@ -4430,6 +4498,16 @@ components:
           maxItems: 8
           items:
             $ref: '#/components/schemas/SquadRow'
+        warnings:
+          type: array
+          maxItems: 20
+          description: >-
+            Completeness notes the server reads from the rows: a missing review, a missing security review, or a
+            missing acceptance. They show as chips on the proposal and never block approval.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 300
         status:
           $ref: '#/components/schemas/SquadProposalStatus'
         createdAt:

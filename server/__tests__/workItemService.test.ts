@@ -17,6 +17,7 @@ import {
   parseWorkItemsFile,
   WORK_ITEM_FINISHED_KEEP,
   WORK_ITEM_GRACE_MS,
+  WORK_ITEM_HOLD_RETRY_MS,
   WORK_ITEM_REASON,
   WORK_ITEM_TEXT_MAX_BYTES,
   type WorkItemDraft,
@@ -63,6 +64,9 @@ class Fixture {
   readonly submits: { sessionId: string; text: string; mode: 'chat' | 'company' }[] = [];
   chatsOpened = 0;
   readonly openedWith: { cwd: string; role: string }[] = [];
+  poolFull = false;
+  readonly worktreesMade: { repo: string; shortId: string }[] = [];
+  worktreeError: Error | null = null;
   readonly saves: WorkItemsFile[] = [];
   saveError: Error | null = null;
   repos: string[] = [];
@@ -92,6 +96,9 @@ class Fixture {
           this.submits.push({ sessionId, text, mode });
         },
         openChat: async (input) => {
+          if (this.poolFull) {
+            throw new CompanyError('company_pool_full', 'Đã đủ phiên omp đang chạy.');
+          }
           this.chatsOpened += 1;
           const id = `chat-${this.chatsOpened}`;
           this.openedWith.push({ cwd: input.cwd, role: input.role });
@@ -120,6 +127,13 @@ class Fixture {
       },
       catalog: async () => ({ repos: this.repos, agents: this.agents }),
       freeMemoryBytes: () => this.freeBytes,
+      worktrees: {
+        create: async (repo, shortId) => {
+          if (this.worktreeError !== null) throw this.worktreeError;
+          this.worktreesMade.push({ repo, shortId });
+          return { path: `${repo}/.worktrees/squad-${shortId}`, branch: `squad-${shortId}` };
+        },
+      },
     });
   }
 
@@ -141,6 +155,11 @@ class Fixture {
 
 function herdr(paneId: string): WorkItemAssignee {
   return { kind: 'herdr', paneId };
+}
+
+/** The worktree the squad makes for an item of this id in REPO. */
+function worktreeOf(id: string): string {
+  return `${REPO}/.worktrees/squad-${id.slice(0, 8)}`;
 }
 
 function itemOf(f: Fixture, id: string): WorkItem {
@@ -249,7 +268,9 @@ describe('WorkItemService: dispatch and status', () => {
     const stopChanges = f.service.onChange(() => {
       changes += 1;
     });
-    const stopReviews = f.service.onReview((item) => reviewed.push(item.id));
+    const stopReviews = f.service.onItemSettled((item) => {
+      if (item.status === 'review') reviewed.push(item.id);
+    });
     const id = await f.service.create({ requestId: randomUUID(), text: 'Nhanh', assignee: herdr(PANE_A) });
     expect(changes).toBeGreaterThan(0);
 
@@ -1001,7 +1022,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
   it('normalizes the repo, role and areas an item names, and clears them on a new assignee', async () => {
     const f = await repoFixture();
     f.panes.push(
-      { paneId: PANE_A, status: 'working', cwd: REPO },
+      { paneId: PANE_A, status: 'working' },
       { paneId: PANE_B, status: 'idle', cwd: REPO },
     );
     const id = await f.service.create({
@@ -1072,7 +1093,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       repo: REPO,
       role: 'worker',
     });
-    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+    expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'worker' }]);
     expect(itemOf(f, id)).toMatchObject({
       status: 'running',
       assignee: { kind: 'session', sessionId: 'chat-1' },
@@ -1089,7 +1110,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       repo: REPO,
       role: 'qa',
     });
-    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'qa' }]);
+    expect(f.openedWith).toEqual([{ cwd: worktreeOf(first), role: 'qa' }]);
     expect(itemOf(f, first)).toMatchObject({
       status: 'running',
       assignee: { kind: 'session', sessionId: 'chat-1' },
@@ -1220,8 +1241,169 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     // Memory frees up: the next pass opens the session in the repo with the default chat role.
     f.freeBytes = 8 * GIB;
     await f.service.reconcileNow();
-    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'chat' }]);
+    expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'chat' }]);
     expect(itemOf(f, id).status).toBe('running');
+  });
+
+  it('runs an editing new session in its own worktree, made before its session opens', async () => {
+    const f = await repoFixture();
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa API',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+    });
+    expect(f.worktreesMade).toEqual([{ repo: REPO, shortId: id.slice(0, 8) }]);
+    expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'worker' }]);
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'running',
+      worktree: { path: worktreeOf(id), branch: `squad-${id.slice(0, 8)}` },
+    });
+  });
+
+  it('opens a read-only agent in the repo itself, with no worktree', async () => {
+    const f = await repoFixture();
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Tìm lỗi',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+      agent: 'scout',
+    });
+    expect(f.worktreesMade).toEqual([]);
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+    expect(itemOf(f, id)).toMatchObject({ status: 'running' });
+    expect(itemOf(f, id).worktree).toBeUndefined();
+  });
+
+  it('keeps an editing item queued with a worktree reason when its worktree fails, then retries', async () => {
+    const f = await repoFixture();
+    f.worktreeError = new Error('git fetch origin lỗi: không kết nối');
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa API',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+    });
+    expect(f.chatsOpened).toBe(0);
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'queued',
+      blocker: { kind: 'worktree', detail: 'git fetch origin lỗi: không kết nối' },
+    });
+    expect(itemOf(f, id).reason).toContain('Chưa tạo được worktree riêng');
+
+    f.worktreeError = null;
+    await f.elapse(WORK_ITEM_HOLD_RETRY_MS);
+    expect(f.worktreesMade).toHaveLength(1);
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'running',
+      assignee: { kind: 'session', sessionId: 'chat-1' },
+    });
+  });
+
+  it('waits for a free runner slot when the omp pool is full, and keeps the worktree it made', async () => {
+    const f = await repoFixture();
+    f.poolFull = true;
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa API',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+    });
+    expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'pool_full' } });
+    expect(itemOf(f, id).reason).toContain('Đã đủ phiên omp');
+
+    f.poolFull = false;
+    await f.elapse(WORK_ITEM_HOLD_RETRY_MS);
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'running',
+      assignee: { kind: 'session', sessionId: 'chat-1' },
+    });
+    // The worktree made on the first try is reused, not made again.
+    expect(f.worktreesMade).toHaveLength(1);
+  });
+
+  it('holds an auto item while a busy agent locks the checkout of the idle one', async () => {
+    const f = await repoFixture();
+    f.sessions.push(
+      { id: 'busy-ext', status: 'busy', role: 'worker', cwd: REPO },
+      { id: 'idle-ext', status: 'idle', role: 'chat', cwd: REPO },
+    );
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa API',
+      assignee: { kind: 'auto' },
+      repo: REPO,
+      role: 'worker',
+    });
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'queued',
+      blocker: { kind: 'busy_checkout', area: 'app' },
+    });
+    expect(f.submits).toEqual([]);
+    expect(f.chatsOpened).toBe(0);
+
+    // The busy agent finishes: the item goes to a free member of the repo, not to a new session.
+    f.sessions[0] = { ...f.sessions[0], status: 'idle' };
+    await f.service.reconcileNow();
+    expect(itemOf(f, id).status).toBe('running');
+    expect(f.chatsOpened).toBe(0);
+  });
+
+  it('sends a subagent to an omp session in the repo, never to a herdr pane, and opens a read-only one at the repo root', async () => {
+    const f = await repoFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle', cwd: REPO });
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Tìm chỗ gọi API',
+      assignee: { kind: 'auto' },
+      repo: REPO,
+      agent: 'scout',
+    });
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'running',
+      assignee: { kind: 'session', sessionId: 'chat-1' },
+    });
+    expect(f.prompts).toEqual([]);
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'chat' }]);
+    expect(f.worktreesMade).toEqual([]);
+    expect(f.submits).toHaveLength(1);
+    expect(f.submits[0].text).toContain('tool task, agent: scout');
+  });
+
+  it('tells settle listeners when an item reaches review, fails, or is marked done', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' }, { paneId: PANE_B, status: 'idle' });
+    const settled: string[] = [];
+    const stop = f.service.onItemSettled((item) => settled.push(`${item.status}:${item.id}`));
+
+    const reviewed = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Xem lại',
+      assignee: herdr(PANE_A),
+    });
+    await f.elapse(WORK_ITEM_GRACE_MS);
+    expect(settled).toEqual([`review:${reviewed}`]);
+
+    const failed = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Hỏng',
+      assignee: herdr(PANE_B),
+    });
+    f.panes.splice(
+      f.panes.findIndex((pane) => pane.paneId === PANE_B),
+      1,
+    );
+    await f.service.reconcileNow();
+    expect(settled).toEqual([`review:${reviewed}`, `failed:${failed}`]);
+
+    await f.service.mark({ requestId: randomUUID(), id: reviewed, verdict: 'done' });
+    expect(settled).toEqual([`review:${reviewed}`, `failed:${failed}`, `done:${reviewed}`]);
+    stop();
   });
 
   it('saves squad settings once per request id and refuses values out of range', async () => {

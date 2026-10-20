@@ -51,6 +51,13 @@ export const WORK_ITEM_FINISHED_KEEP = 200;
  * finished. An agent that was seen busy and is now free finishes at once.
  */
 export const WORK_ITEM_GRACE_MS = 10_000;
+/**
+ * How long a queued item waits before the board tries it again when the omp runner pool was full or
+ * its isolated worktree could not be created.
+ */
+export const WORK_ITEM_HOLD_RETRY_MS = 10_000;
+/** Longest detail text a blocker carries, as the contract allows. */
+export const WORK_ITEM_BLOCKER_DETAIL_MAX_CHARS = 300;
 /** Non-empty screen lines kept as an item's result. */
 export const WORK_ITEM_RESULT_LINES = 12;
 /** Most code areas one work item may lock. */
@@ -117,6 +124,8 @@ export interface WorkItemsFile {
   settings: SquadSettings;
   /** Sessions the squad opened, oldest first; used for reuse and the open cap. */
   squadSessionIds: string[];
+  /** The repo each squad-opened session was opened for, keyed by session id. */
+  squadSessionRepos: Record<string, string>;
 }
 
 /** What a persisted file parsed to. `corrupt` means the file existed but was not a usable file. */
@@ -369,6 +378,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     : [];
   const agent =
     typeof value.agent === 'string' && isValidAgentName(value.agent) ? value.agent : undefined;
+  const worktree = parseWorktree(value.worktree);
   return {
     id: value.id,
     text: value.text,
@@ -394,6 +404,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     ...(role === undefined ? {} : { role }),
     areas,
     ...(agent === undefined ? {} : { agent }),
+    ...(worktree === undefined ? {} : { worktree }),
   };
 }
 
@@ -420,6 +431,15 @@ function parseWaitSequences(value: unknown, dependsOn: readonly string[]): Recor
   return waits;
 }
 
+/** Validates a stored isolated worktree: an absolute path and a branch name, or nothing. */
+function parseWorktree(value: unknown): { path: string; branch: string } | undefined {
+  if (!isRecord(value)) return undefined;
+  if (typeof value.path !== 'string' || value.path.trim() === '') return undefined;
+  if (typeof value.branch !== 'string' || value.branch.trim() === '') return undefined;
+  if (value.path.length > WORK_ITEM_REPO_MAX_CHARS) return undefined;
+  return { path: value.path.trim(), branch: value.branch.trim() };
+}
+
 /** Validates one stored role note. */
 export function parseRole(value: unknown): AgentRole | null {
   if (!isRecord(value)) return null;
@@ -444,6 +464,22 @@ function parseSquadSessionIds(value: unknown): string[] {
   return [...ids].slice(-SQUAD_SESSIONS_KEPT);
 }
 
+/**
+ * Keeps the repo each listed squad session was opened for. An entry for a session not in `ids`, or
+ * one that is not a well-formed repo path, is dropped.
+ */
+function parseSquadSessionRepos(value: unknown, ids: readonly string[]): Record<string, string> {
+  const repos: Record<string, string> = {};
+  if (!isRecord(value)) return repos;
+  for (const id of ids) {
+    const repo = value[id];
+    if (typeof repo === 'string' && repo.trim() !== '' && repo.length <= WORK_ITEM_REPO_MAX_CHARS) {
+      repos[id] = repo.trim();
+    }
+  }
+  return repos;
+}
+
 /** A file with nothing in it: revision zero, no items, no role notes. */
 export function emptyWorkItemsFile(): WorkItemsFile {
   return {
@@ -454,6 +490,7 @@ export function emptyWorkItemsFile(): WorkItemsFile {
     roles: [],
     settings: { ...SQUAD_SETTINGS_DEFAULT },
     squadSessionIds: [],
+    squadSessionRepos: {},
   };
 }
 
@@ -502,6 +539,7 @@ export function parseWorkItemsFile(raw: unknown): ParsedWorkItems {
   const highest = items.reduce((max, item) => Math.max(max, item.sequence), -1);
   const revision = nonNegativeInt(raw.revision) ?? 0;
   const nextSequence = Math.max(nonNegativeInt(raw.nextSequence) ?? 0, highest + 1);
+  const squadSessionIds = parseSquadSessionIds(raw.squadSessionIds);
   return {
     file: {
       version: 1,
@@ -510,7 +548,8 @@ export function parseWorkItemsFile(raw: unknown): ParsedWorkItems {
       items,
       roles,
       settings: parseSquadSettings(raw.settings),
-      squadSessionIds: parseSquadSessionIds(raw.squadSessionIds),
+      squadSessionIds,
+      squadSessionRepos: parseSquadSessionRepos(raw.squadSessionRepos, squadSessionIds),
     },
     dropped,
     corrupt: false,

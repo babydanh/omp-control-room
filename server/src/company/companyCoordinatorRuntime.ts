@@ -55,16 +55,19 @@ import type { CompanyStore } from './companyStore.js';
 import { COMPANY_MAX_PROMPT_BYTES, COMPANY_PROMPT_TEXT_MEDIA_TYPE } from './constants.js';
 import { type ContractDraftProposal, createContractDraft } from './contractDraft.js';
 import { recordArchitectureReview as recordArchitectureReviewTransition } from './contractWorkflow.js';
+import { canonicalWithinFolder, resolveFolderCwd } from './folderScope.js';
 import { SESSION_ACTION_LABELS, SESSION_STATUS_LABELS } from './labels.js';
 import {
   assertOmpSessionFileIn,
   comparableOmpPath,
   listOmpSessionFiles,
   ompSessionDirForFolder,
+  readOmpSessionCwd,
 } from './ompSessionFiles.js';
 import { resolveWorkspaceTarget } from './permissionPolicy.js';
 import type { UsageLedger } from './usageService.js';
 import { type PrerequisiteCheck, runVerificationCommand } from './verificationRunner.js';
+import { listFolderRepos } from './workItems/folderRepos.js';
 
 const REQUIRED_ROLES = ['director', 'advisor', 'worker', 'qa', 'judge', 'chat'] as const;
 const ROLE_TOOL_POLICIES: Record<(typeof REQUIRED_ROLES)[number], RoleProfile['toolsPolicy']> = {
@@ -1299,7 +1302,7 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     });
   }
 
-  /** List the OMP session files saved for the workspace folder. Read-only. */
+  /** List the OMP session files saved for the workspace folder and its repos. Read-only. */
   async listOmpSessions(): Promise<OmpSessionListing> {
     this.assertNotDisposed();
     const boardSessionByFile = new Map<string, string>();
@@ -1309,10 +1312,44 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
       }
     }
     const sessions = await listOmpSessionFiles(
-      ompSessionDirForFolder(this.workspaceRoot),
+      await this.ompSessionDirectories(),
       boardSessionByFile,
     );
     return { folder: this.workspaceRoot, sessions };
+  }
+
+  /**
+   * Every directory a folder session's OMP files can live in: the folder root's, each repo the
+   * folder holds, and the directory of each board session whose cwd is inside the folder.
+   */
+  private async ompSessionDirectories(): Promise<string[]> {
+    const repos = await listFolderRepos(this.workspaceRoot);
+    const boardCwds = await Promise.all(
+      Object.values(this.state.sessions).map(async (session) =>
+        session.cwd === undefined
+          ? undefined
+          : canonicalWithinFolder(session.cwd, this.workspaceRoot),
+      ),
+    );
+    const insideBoardCwds = boardCwds.filter((cwd): cwd is string => cwd !== undefined);
+    return [this.workspaceRoot, ...repos, ...insideBoardCwds].map((folder) =>
+      ompSessionDirForFolder(folder),
+    );
+  }
+
+  /**
+   * The directory a resumed session ran in, read from its file's header, when that directory is
+   * an existing directory inside the folder. Anything else resumes in the folder root.
+   */
+  private async resumedSessionCwd(file: string): Promise<string | undefined> {
+    const headerCwd = await readOmpSessionCwd(file);
+    if (headerCwd === undefined) return undefined;
+    try {
+      return await resolveFolderCwd(headerCwd, this.workspaceRoot);
+    } catch (error) {
+      if (error instanceof CompanyError) return undefined;
+      throw error;
+    }
   }
 
   /**
@@ -1328,7 +1365,12 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
       this.assertOwner();
       this.assertStarted();
     });
-    const session = await this.options.effects.openChatSession({ ...input });
+    const cwd =
+      input.cwd === undefined ? undefined : await resolveFolderCwd(input.cwd, this.workspaceRoot);
+    const session = await this.options.effects.openChatSession({
+      ...(cwd === undefined ? {} : { cwd }),
+      ...(input.role === undefined ? {} : { role: input.role }),
+    });
     return session.id;
   }
 
@@ -1338,7 +1380,7 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
    * on its own file under the same record. Concurrent opens of one file are refused.
    */
   async resumeOmpSession(file: string): Promise<string> {
-    const resolved = await assertOmpSessionFileIn(file, ompSessionDirForFolder(this.workspaceRoot));
+    const resolved = await assertOmpSessionFileIn(file, await this.ompSessionDirectories());
     const key = comparableOmpPath(resolved);
     const target = await this.serialize(async (): Promise<OmpResumeTarget> => {
       this.assertOwner();
@@ -1375,7 +1417,11 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     if (target.kind === 'focus') return target.sessionId;
     try {
       if (target.kind === 'open') {
-        const session = await this.options.effects.openChatSession({ resumeFile: resolved });
+        const cwd = await this.resumedSessionCwd(resolved);
+        const session = await this.options.effects.openChatSession({
+          resumeFile: resolved,
+          ...(cwd === undefined ? {} : { cwd }),
+        });
         return session.id;
       }
       await this.controlSession(target.sessionId, target.action, target.runEpoch);

@@ -11,6 +11,7 @@ import type { HerdrLink } from '../../herdr/herdrLink.js';
 import type { CompanyCoordinator } from '../companyCoordinator.js';
 import { loadAgentCatalog } from './agentCatalog.js';
 import { listFolderRepos } from './folderRepos.js';
+import { createSquadWorktree, findOnPath, runCommand } from './squadWorktree.js';
 import {
   type WorkItemCatalog,
   type WorkItemRoster,
@@ -123,6 +124,16 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     },
     catalog: () => catalogFor(options.workspacePath),
     freeMemoryBytes: () => freemem(),
+    worktrees: {
+      create: (repo, shortId) =>
+        createSquadWorktree({
+          repo,
+          folderRoot: options.workspacePath,
+          shortId,
+          gitWt: findOnPath('git-wt'),
+          run: runCommand,
+        }),
+    },
   });
   await service.load();
   const unsubscribe = options.herdr?.onAgents(() => service.scheduleReconcile());

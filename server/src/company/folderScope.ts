@@ -10,6 +10,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
+import { CompanyError } from './companyError.js';
+
 /** Resolves a path to its real location, following symlinks and Windows junctions. */
 export type RealpathNative = (target: string) => Promise<string>;
 
@@ -106,4 +108,67 @@ export class FolderScope {
     const prefix = folderKey.endsWith(this.pathApi.sep) ? folderKey : folderKey + this.pathApi.sep;
     return targetKey.startsWith(prefix);
   }
+}
+
+/** The JS realpath. omp derives its session directory names from it, so cwd canonical forms must match. */
+const jsRealpath: RealpathNative = fs.promises.realpath;
+
+const CWD_INVALID_TEXT = 'Thư mục làm việc phải là một thư mục có thật trên máy này.';
+const CWD_OUTSIDE_TEXT =
+  'Thư mục làm việc phải là thư mục của workspace này hoặc nằm bên trong nó.';
+
+async function realpathOrUndefined(
+  target: string,
+  realpath: RealpathNative,
+): Promise<string | undefined> {
+  try {
+    return await realpath(target);
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether `target` is `root` or lies under it. Both paths are canonical. */
+function isWithin(root: string, target: string): boolean {
+  const relative = path.relative(root, target);
+  if (relative === '') return true;
+  return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+}
+
+/**
+ * The canonical form of a working directory a folder session may run in: an existing directory
+ * that is the folder root or lies inside it. Refused with `cwd_invalid` when it is missing or not
+ * a directory, and with `cwd_outside_folder` when it lies outside the folder. Containment is
+ * checked on realpaths, so a junction that leads out of the folder is refused too.
+ */
+export async function resolveFolderCwd(
+  cwd: string,
+  folderRoot: string,
+  realpath: RealpathNative = jsRealpath,
+): Promise<string> {
+  const canonical = await realpathOrUndefined(cwd, realpath);
+  if (canonical === undefined) throw new CompanyError('cwd_invalid', CWD_INVALID_TEXT);
+  const root = (await realpathOrUndefined(folderRoot, realpath)) ?? path.resolve(folderRoot);
+  if (!isWithin(root, canonical)) throw new CompanyError('cwd_outside_folder', CWD_OUTSIDE_TEXT);
+  const isDirectory = await fs.promises.stat(canonical).then(
+    (stat) => stat.isDirectory(),
+    () => false,
+  );
+  if (!isDirectory) throw new CompanyError('cwd_invalid', CWD_INVALID_TEXT);
+  return canonical;
+}
+
+/**
+ * Canonical path of `target` when it is the folder root or lies inside it, else undefined. A path
+ * that does not exist keeps its lexical spelling, so a session whose worktree was removed still
+ * maps to its folder. Never rejects.
+ */
+export async function canonicalWithinFolder(
+  target: string,
+  folderRoot: string,
+  realpath: RealpathNative = jsRealpath,
+): Promise<string | undefined> {
+  const root = (await realpathOrUndefined(folderRoot, realpath)) ?? path.resolve(folderRoot);
+  const canonical = (await realpathOrUndefined(target, realpath)) ?? path.resolve(target);
+  return isWithin(root, canonical) ? canonical : undefined;
 }

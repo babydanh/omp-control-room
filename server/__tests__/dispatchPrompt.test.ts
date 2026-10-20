@@ -42,6 +42,7 @@ describe('composeDispatchPrompt', () => {
 
   it('uses the read-only block, and no edit block, for a read-only agent', () => {
     const prompt = composeDispatchPrompt({ text: 'Xem code', agent: 'scout', readOnly: true });
+    expect(prompt).toContain('tool task, agent: scout');
     expect(prompt).toContain(SAFE_READ_ONLY_BLOCK);
     expect(prompt).not.toContain(SAFE_WORK_BLOCK);
   });
