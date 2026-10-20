@@ -86,6 +86,16 @@ export class LedgerService {
     });
   }
 
+  /** Read-only project-tree seam: shares the source instance owned by the ledger. */
+  get projectTreeSource(): LedgerSource {
+    return this.options.source;
+  }
+
+  /** Read-only project-tree seam: shares the configured git runner. */
+  get projectTreeGit(): GitRunner {
+    return this.options.git;
+  }
+
   /** Latest view. Waits only for repos that have never been read; cached scans are reused. */
   async getView(): Promise<LedgerView> {
     this.touch();

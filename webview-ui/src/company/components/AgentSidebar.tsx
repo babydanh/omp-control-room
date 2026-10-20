@@ -46,6 +46,7 @@ import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
 import { isSheetDismissSwipe, type SidebarPresentation } from '../layoutMode.js';
+import { ProjectTree, type ProjectTreeProps } from '../projects/ProjectTree.js';
 import { ROLE_EDGE_CLASS } from '../roleProfiles.js';
 import { clampSidebarWidth } from '../sidebarPrefs.js';
 import type { PreviewTarget } from '../terminalPreview.js';
@@ -84,6 +85,7 @@ export interface AgentSidebarProps {
   presentation: PanelPresentation;
   /** The keys of the projects the user folded. */
   collapsedProjects: ReadonlySet<string>;
+  projectTree: ProjectTreeProps;
   onWidthChange: (width: number) => void;
   onCollapse: () => void;
   onSelectSession: (sessionId: string) => void;
@@ -133,6 +135,7 @@ export function AgentSidebar({
   onMenu,
   onDismiss,
   onOpenRoles,
+  projectTree,
 }: AgentSidebarProps) {
   const now = useNow();
   const treeRef = useRef<HTMLDivElement>(null);
@@ -224,6 +227,7 @@ export function AgentSidebar({
           </button>
         </div>
       </header>
+      <ProjectTree {...projectTree} />
       <ActivityChips counts={counts} />
 
       <div ref={treeRef} data-testid="agent-tree" className="min-h-0 flex-1 overflow-y-auto">

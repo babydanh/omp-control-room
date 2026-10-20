@@ -157,6 +157,13 @@ components:
         - $ref: '#/components/schemas/LedgerTimelineMessage'
         - $ref: '#/components/schemas/LedgerFileDiffMessage'
         - $ref: '#/components/schemas/LedgerCommandResultMessage'
+        # Project tree (privileged; project, checkout and session data)
+        - $ref: '#/components/schemas/ProjectTreeSnapshotMessage'
+        - $ref: '#/components/schemas/ProjectDiffMessage'
+        - $ref: '#/components/schemas/ProjectSettingsMessage'
+        - $ref: '#/components/schemas/ProjectCommandResultMessage'
+        - $ref: '#/components/schemas/ProjectSessionStartResultMessage'
+        - $ref: '#/components/schemas/ProjectMergePreviewResultMessage'
         # Library (privileged; accounts, storage, skills and MCP)
         - $ref: '#/components/schemas/LibraryAccountsSnapshot'
         - $ref: '#/components/schemas/LibrarySkillsSnapshot'
@@ -254,6 +261,19 @@ components:
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
         - $ref: '#/components/schemas/LedgerFileDiffRequestMessage'
         - $ref: '#/components/schemas/LedgerSendMessage'
+        # Project tree (privileged; tree CRUD, diffs, comments, settings and sessions)
+        - $ref: '#/components/schemas/ProjectTreeRequestMessage'
+        - $ref: '#/components/schemas/ProjectNodeCreateMessage'
+        - $ref: '#/components/schemas/ProjectNodeUpdateMessage'
+        - $ref: '#/components/schemas/ProjectNodeDeleteMessage'
+        - $ref: '#/components/schemas/ProjectNodeMoveMessage'
+        - $ref: '#/components/schemas/ProjectDiffRequestMessage'
+        - $ref: '#/components/schemas/ProjectCommentMessage'
+        - $ref: '#/components/schemas/ProjectSettingsRequestMessage'
+        - $ref: '#/components/schemas/ProjectSettingsSetMessage'
+        - $ref: '#/components/schemas/ProjectSettingsClearMessage'
+        - $ref: '#/components/schemas/ProjectSessionStartMessage'
+        - $ref: '#/components/schemas/ProjectMergePreviewRequestMessage'
         # Library (privileged; pages and commands)
         - $ref: '#/components/schemas/LibrarySnapshotRequest'
         - $ref: '#/components/schemas/LibrarySkillPreviewRequest'
@@ -7446,3 +7466,577 @@ components:
           minimum: 0
         reason:
           type: string
+    # ── Project tree: privileged project, checkout and session protocol ─
+    ProjectTreeRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: projectTreeRequest
+        requestId:
+          type: string
+          format: uuid
+
+    ProjectNodeCreateMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, kind, name]
+      properties:
+        type:
+          const: projectNodeCreate
+        requestId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [project, folder, group]
+        parentId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        path:
+          type: string
+          minLength: 1
+          maxLength: 4096
+
+    ProjectNodeUpdateMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, nodeId, name]
+      properties:
+        type:
+          const: projectNodeUpdate
+        requestId:
+          type: string
+          format: uuid
+        nodeId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    ProjectNodeDeleteMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, nodeId]
+      properties:
+        type:
+          const: projectNodeDelete
+        requestId:
+          type: string
+          format: uuid
+        nodeId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+
+    ProjectNodeMoveMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, nodeId]
+      properties:
+        type:
+          const: projectNodeMove
+        requestId:
+          type: string
+          format: uuid
+        nodeId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        parentId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        index:
+          type: integer
+          minimum: 0
+
+    ProjectDiffRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, checkout, scope, sha]
+      properties:
+        type:
+          const: projectDiffRequest
+        requestId:
+          type: string
+          format: uuid
+        checkout:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        scope:
+          type: string
+          enum: [uncommitted, branch, commit]
+        sha:
+          type: string
+          minLength: 1
+          maxLength: 128
+
+    ProjectCommentMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, checkout, file, line, snippet, content, receivingSessionId]
+      properties:
+        type:
+          const: projectComment
+        requestId:
+          type: string
+          format: uuid
+        checkout:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        file:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        line:
+          type: integer
+          minimum: 1
+        snippet:
+          type: string
+          maxLength: 12000
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4000
+        receivingSessionId:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    ProjectSettingsRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: projectSettingsRequest
+        requestId:
+          type: string
+          format: uuid
+        nodeId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+
+    ProjectSettingsSetMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, scope, nodeId, field, value]
+      properties:
+        type:
+          const: projectSettingsSet
+        requestId:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum: [project, folder]
+        nodeId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        field:
+          $ref: '#/components/schemas/ProjectSettingField'
+        value:
+          $ref: '#/components/schemas/ProjectSettingValue'
+
+    ProjectSettingsClearMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, scope, nodeId, field]
+      properties:
+        type:
+          const: projectSettingsClear
+        requestId:
+          type: string
+          format: uuid
+        scope:
+          type: string
+          enum: [project, folder]
+        nodeId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        field:
+          $ref: '#/components/schemas/ProjectSettingField'
+
+    ProjectSessionStartMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, nodeId, engine, worktree, taskName, initialPrompt]
+      properties:
+        type:
+          const: projectSessionStart
+        requestId:
+          type: string
+          format: uuid
+        nodeId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        engine:
+          type: string
+          enum: [omp, claude, agy]
+        worktree:
+          type: string
+          enum: [separate, shared]
+        taskName:
+          type: string
+          minLength: 1
+          maxLength: 256
+        initialPrompt:
+          type: string
+          minLength: 1
+          maxLength: 12000
+
+    ProjectTreeSnapshotMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, nodes]
+      properties:
+        type:
+          const: projectTreeSnapshot
+        requestId:
+          type: string
+          format: uuid
+        nodes:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectTreeNode'
+
+    ProjectDiffMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, checkout, scope, sha, files, truncated]
+      properties:
+        type:
+          const: projectDiff
+        requestId:
+          type: string
+          format: uuid
+        checkout:
+          type: string
+        scope:
+          type: string
+          enum: [uncommitted, branch, commit]
+        sha:
+          type: string
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectDiffFile'
+        truncated:
+          type: boolean
+        reason:
+          type: string
+          description: Vietnamese refusal or failure reason.
+
+    ProjectSettingsMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, values, sources]
+      properties:
+        type:
+          const: projectSettings
+        requestId:
+          type: string
+          format: uuid
+        nodeId:
+          type: string
+        values:
+          $ref: '#/components/schemas/ProjectSettingsValues'
+        sources:
+          $ref: '#/components/schemas/ProjectSettingsSources'
+
+    ProjectCommandResultMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, command, ok]
+      properties:
+        type:
+          const: projectCommandResult
+        requestId:
+          type: string
+          format: uuid
+        command:
+          type: string
+          enum: [create, update, delete, move, comment, settingsSet, settingsClear]
+        ok:
+          type: boolean
+        nodeId:
+          type: string
+        reason:
+          type: string
+          description: Vietnamese refusal or failure reason.
+
+    ProjectSessionStartResultMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, ok]
+      properties:
+        type:
+          const: projectSessionStartResult
+        requestId:
+          type: string
+          format: uuid
+        ok:
+          type: boolean
+        sessionId:
+          type: string
+        checkout:
+          type: string
+        reason:
+          type: string
+          description: Vietnamese refusal or failure reason.
+
+    ProjectTreeNode:
+      type: object
+      additionalProperties: false
+      required: [id, kind, name]
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        parentId:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        kind:
+          type: string
+          enum: [project, folder, group, repository, checkout, file-agg, session]
+        name:
+          type: string
+        path:
+          type: string
+        engine:
+          type: string
+          enum: [omp, claude, agy, herdr, board]
+        agentKind:
+          type: string
+          enum: [omp, sub, claude, agy, herdr, board]
+        branch:
+          type: string
+        sessionId:
+          type: string
+        state:
+          type: string
+        title:
+          type: string
+        color:
+          type: string
+        dirty:
+          type: boolean
+        ahead:
+          type: integer
+          minimum: 0
+        behind:
+          type: integer
+          minimum: 0
+        additions:
+          type: integer
+          minimum: 0
+        deletions:
+          type: integer
+          minimum: 0
+        overlap:
+          type: boolean
+        overlappingWorktrees:
+          type: array
+          items:
+            type: string
+        pendingWork:
+          type: boolean
+    ProjectMergePreviewRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, repo, branchA, branchB]
+      properties:
+        type:
+          const: projectMergePreviewRequest
+        requestId:
+          type: string
+          format: uuid
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        branchA:
+          type: string
+          minLength: 1
+          maxLength: 256
+        branchB:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    ProjectMergePreviewResultMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, repo, branchA, branchB, clean, conflicts]
+      properties:
+        type:
+          const: projectMergePreviewResult
+        requestId:
+          type: string
+          format: uuid
+        repo:
+          type: string
+        branchA:
+          type: string
+        branchB:
+          type: string
+        clean:
+          type: boolean
+        conflicts:
+          type: array
+          items:
+            type: string
+        reason:
+          type: string
+          description: Vietnamese refusal or failure reason.
+
+    ProjectDiffFile:
+      type: object
+      additionalProperties: false
+      required: [path, status, additions, deletions, author, hunks]
+      properties:
+        path:
+          type: string
+          minLength: 1
+        oldPath:
+          type: string
+        status:
+          type: string
+          enum: [added, modified, deleted, renamed, copied, binary]
+        additions:
+          type: integer
+          minimum: 0
+        deletions:
+          type: integer
+          minimum: 0
+        author:
+          type: string
+        hunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectDiffHunk'
+
+    ProjectDiffHunk:
+      type: object
+      additionalProperties: false
+      required: [header, content]
+      properties:
+        header:
+          type: string
+        content:
+          type: string
+          description: Unified diff hunk lines, including +/- status markers.
+
+    ProjectSettingField:
+      type: string
+      enum: [engineLeader, engineJudge, engineWorker, modelLeader, modelJudge, modelWorker, maxParallel, worktreePrepare]
+
+    ProjectSettingValue:
+      anyOf:
+        - $ref: '#/components/schemas/ProjectEngine'
+        - type: string
+          minLength: 1
+          maxLength: 256
+        - type: integer
+          minimum: 1
+          maximum: 64
+        - $ref: '#/components/schemas/ProjectPrepareScript'
+
+    ProjectEngine:
+      type: string
+      enum: [omp, claude, agy]
+
+
+    ProjectSettingsValues:
+      type: object
+      additionalProperties: false
+      properties:
+        engineLeader:
+          type: string
+          enum: [omp, claude, agy]
+        engineJudge:
+          type: string
+          enum: [omp, claude, agy]
+        engineWorker:
+          type: string
+          enum: [omp, claude, agy]
+        modelLeader:
+          type: string
+          minLength: 1
+        modelJudge:
+          type: string
+          minLength: 1
+        modelWorker:
+          type: string
+          minLength: 1
+        maxParallel:
+          type: integer
+          minimum: 1
+          maximum: 64
+        worktreePrepare:
+          $ref: '#/components/schemas/ProjectPrepareScript'
+
+    ProjectPrepareScript:
+      type: object
+      additionalProperties: false
+      required: [argv, timeoutMs]
+      properties:
+        argv:
+          type: array
+          minItems: 1
+          maxItems: 64
+          items:
+            type: string
+            minLength: 1
+            maxLength: 4096
+        timeoutMs:
+          type: integer
+          minimum: 1
+          maximum: 3600000
+
+    ProjectSettingsSources:
+      type: object
+      additionalProperties: false
+      properties:
+        engineLeader:
+          type: string
+          enum: [global, project, folder]
+        engineJudge:
+          type: string
+          enum: [global, project, folder]
+        engineWorker:
+          type: string
+          enum: [global, project, folder]
+        modelLeader:
+          type: string
+          enum: [global, project, folder]
+        modelJudge:
+          type: string
+          enum: [global, project, folder]
+        modelWorker:
+          type: string
+          enum: [global, project, folder]
+        maxParallel:
+          type: string
+          enum: [global, project, folder]
+        worktreePrepare:
+          type: string
+          enum: [global, project, folder]

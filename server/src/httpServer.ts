@@ -4,17 +4,16 @@ import { extname } from 'node:path';
 import fastifyCors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
-import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import Fastify from 'fastify';
+import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
-import type {
-  AssetCache,
-  ReloadAssetsSideEffect,
-  SetHooksEnabledSideEffect,
+import {
+  type AssetCache,
+  handleClientMessage,
+  type ReloadAssetsSideEffect,
+  type SetHooksEnabledSideEffect,
 } from './clientMessageHandler.js';
-import { handleClientMessage } from './clientMessageHandler.js';
 import type { BrowserReaperControl } from './company/browserReaper.js';
 import type { CompanyCommandServices, CompanyWorkspaceControl } from './company/clientCommands.js';
 import { CompanyClientGate } from './company/egress.js';
@@ -33,6 +32,8 @@ import {
 import type { HerdrLink } from './herdr/herdrLink.js';
 import type { LedgerService } from './ledger/ledgerService.js';
 import { resolveProofPath } from './library/storage.js';
+import { handleProjectMessage, type ProjectCommandContext } from './projects/handler.js';
+import type { HerdrProjectSession } from './projects/projectTree.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
 import { registerTerminalRoutes } from './terminal/terminalRoutes.js';
 import type { AgentState } from './types.js';
@@ -87,6 +88,8 @@ export interface HttpServerOptions {
   /** PTY terminals for standalone-launched agents. Absent = terminal feature off
    *  (VS Code embedded mode, where the editor owns terminals). */
   ptyManager?: PtySessionManager;
+  /** Project persistence and checkout discovery, supplied by the host composition root. */
+  projects?: Omit<ProjectCommandContext, 'privileged' | 'agents' | 'herdrSessions'>;
   /** Extra Host names (beyond loopback and a specific bind address) a
    *  privileged standalone handshake may arrive under -- e.g. a reverse proxy's
    *  public name. See wsAuth.privilegedHostnames. */
@@ -268,6 +271,50 @@ function registerWebSocketRoute(
     }
 
     const { store } = options;
+    let projectTreeRequested = false;
+    let projectTreeTimer: NodeJS.Timeout | undefined;
+    const projectContext = (): ProjectCommandContext => ({
+      ...options.projects,
+      ...(options.projects?.tree === undefined && options.ledger !== undefined && options.ledger !== null
+        ? {
+            tree: {
+              ledger: options.ledger.projectTreeSource,
+              git: options.ledger.projectTreeGit,
+              overlapScans: () => options.ledger?.overlapScans() ?? Promise.resolve([]),
+            },
+          }
+        : {}),
+      privileged,
+      agents: store.values(),
+      herdrSessions: () => {
+        const snapshot = options.herdr?.snapshot();
+        if (snapshot === undefined) return [];
+        const toSession = (
+          session: { paneId: string; cwd?: string; status?: string; title?: string; name?: string },
+        ): HerdrProjectSession[] => session.cwd === undefined ? [] : [{
+          id: session.paneId,
+          cwd: session.cwd,
+          status: session.status ?? 'sleeping',
+          title: session.title ?? session.name ?? '',
+        }];
+        return [...snapshot.agents.flatMap(toSession), ...snapshot.sleeping.flatMap(toSession)];
+      },
+    });
+    const scheduleProjectTree = () => {
+      if (!projectTreeRequested || !privileged || projectTreeTimer !== undefined) return;
+      projectTreeTimer = setTimeout(() => {
+        projectTreeTimer = undefined;
+        handleProjectMessage(
+          { type: 'projectTreeRequest', requestId: 'project-tree-refresh' },
+          (message) => {
+            gate.observeOutbound(message as unknown as Record<string, unknown>);
+            safeSend(socket, message as unknown as Record<string, unknown>);
+          },
+          projectContext(),
+        );
+      }, 250);
+      projectTreeTimer.unref?.();
+    };
 
     // Pipe store events to WebSocket client
     const onAgentAdded = (id: number, agent: AgentState) => {
@@ -284,10 +331,12 @@ function registerWebSocketRoute(
         palette: agent.palette,
         hueShift: agent.hueShift,
       });
+      scheduleProjectTree();
     };
 
     const onAgentRemoved = (id: number) => {
       safeSend(socket, { type: 'agentClosed', id });
+      scheduleProjectTree();
     };
 
     // Per-socket egress gate. Ingress is checked in the dispatcher; this is the
@@ -301,6 +350,7 @@ function registerWebSocketRoute(
     const onBroadcast = (message: Record<string, unknown>) => {
       if (!gate.allowsDelivery(message)) return;
       safeSend(socket, message);
+      if (message.type === 'companyWorkspaces') scheduleProjectTree();
     };
 
     store.on('agentAdded', onAgentAdded);
@@ -309,15 +359,19 @@ function registerWebSocketRoute(
     // Ledger snapshots reach privileged sockets only: the board shows session intents and file paths.
     const unsubscribeLedger =
       privileged && options.ledger
-        ? options.ledger.subscribe((message) =>
-            safeSend(socket, message as unknown as Record<string, unknown>),
-          )
+        ? options.ledger.subscribe((message) => {
+            safeSend(socket, message as unknown as Record<string, unknown>);
+            scheduleProjectTree();
+          })
         : null;
+    const unsubscribeHerdr =
+      privileged && options.herdr ? options.herdr.onAgents(() => scheduleProjectTree()) : null;
 
     // Handle incoming client messages
     socket.on('message', (data: Buffer | string) => {
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
+        if (msg.type === 'projectTreeRequest') projectTreeRequested = true;
         if (!options.embedded && msg.type) {
           console.log('[Pixel Agents] WS client message:', msg.type);
         }
@@ -346,6 +400,18 @@ function registerWebSocketRoute(
             browserReaper: options.browserReaper ?? null,
             usage: options.usage ?? null,
             ptyManager: options.ptyManager,
+            projects: {
+              ...options.projects,
+              ...(options.projects?.tree === undefined && options.ledger !== undefined && options.ledger !== null
+                ? {
+                    tree: {
+                      ledger: options.ledger.projectTreeSource,
+                      git: options.ledger.projectTreeGit,
+                      overlapScans: () => options.ledger?.overlapScans() ?? Promise.resolve([]),
+                    },
+                  }
+                : {}),
+            },
           },
         );
       } catch {
@@ -354,10 +420,12 @@ function registerWebSocketRoute(
     });
 
     socket.on('close', () => {
+      clearTimeout(projectTreeTimer);
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);
       unsubscribeLedger?.();
+      unsubscribeHerdr?.();
       gate.dispose();
     });
   });

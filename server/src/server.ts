@@ -23,6 +23,7 @@ import {
 import type { HerdrLink } from './herdr/herdrLink.js';
 import { createHttpServer } from './httpServer.js';
 import type { LedgerService } from './ledger/ledgerService.js';
+import type { ProjectCommandContext } from './projects/handler.js';
 import type { ServerConfig, StandaloneAccess } from './serverConfig.js';
 import { isServerConfig, isServerTarget, sameStandaloneAccess } from './serverConfig.js';
 import { loadOrCreateStandaloneToken } from './serverToken.js';
@@ -90,6 +91,8 @@ export class PixelAgentsServer {
     /** Usage page reader; absent when this process runs none. */
     usage?: UsageControl | null;
     ptyManager?: PtySessionManager;
+    /** Project persistence and checkout discovery, supplied by the host composition root. */
+    projects?: Omit<ProjectCommandContext, 'privileged' | 'agents' | 'herdrSessions'>;
     /** Extra privileged Host names (standalone; see wsAuth.privilegedHostnames). */
     allowedHosts?: readonly string[];
     /** Replace the persisted standalone token, revoking every URL that carried
@@ -176,6 +179,7 @@ export class PixelAgentsServer {
       browserReaper: options?.browserReaper,
       usage: options?.usage,
       ptyManager: options?.ptyManager,
+      projects: options?.projects,
       allowedHosts: standalone?.allowedHosts,
     });
 

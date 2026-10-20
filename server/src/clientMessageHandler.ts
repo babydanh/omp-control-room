@@ -30,6 +30,7 @@ import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { handleLedgerMessage } from './ledger/handler.js';
 import type { LedgerService } from './ledger/ledgerService.js';
 import { handleLibraryMessage } from './library/handler.js';
+import { handleProjectMessage, type ProjectCommandContext } from './projects/handler.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
@@ -110,6 +111,8 @@ export interface ClientMessageContext {
   ptyManager?: PtySessionManager;
   /** Ledger board service for this process; null or absent when the ledger is not wired. */
   ledger?: LedgerService | null;
+  /** Project persistence and checkout discovery; request privilege is supplied per socket. */
+  projects?: Omit<ProjectCommandContext, 'privileged' | 'agents' | 'herdrSessions'>;
 }
 
 // ── Setting key constants (mirror adapters/vscode/constants.ts) ──
@@ -205,6 +208,38 @@ export function handleClientMessage(
     handleLedgerMessage(msg, (message) => send(message as unknown as Record<string, unknown>), {
       ledger: ctx.ledger ?? null,
       privileged: ctx.privileged === true,
+    })
+  ) {
+    return;
+  }
+
+  if (
+    handleProjectMessage(msg, (message) => send(message as unknown as Record<string, unknown>), {
+      ...ctx.projects,
+      privileged: ctx.privileged === true,
+      agents: ctx.store.values(),
+      herdrSessions: () => {
+        const snapshot = ctx.herdr?.snapshot();
+        if (snapshot === undefined) return [];
+        return [
+          ...snapshot.agents.flatMap((agent) =>
+            agent.cwd === undefined ? [] : [{
+              id: agent.paneId,
+              cwd: agent.cwd,
+              status: agent.status,
+              title: agent.title ?? agent.name ?? '',
+            }],
+          ),
+          ...snapshot.sleeping.flatMap((session) =>
+            session.cwd === undefined ? [] : [{
+              id: session.paneId,
+              cwd: session.cwd,
+              status: 'sleeping',
+              title: session.title,
+            }],
+          ),
+        ];
+      },
     })
   ) {
     return;

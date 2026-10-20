@@ -16,20 +16,23 @@ import type { CompanyClient } from './companyClient.js';
 import { isCompanyServerMessage } from './companyMessages.js';
 import { ledgerStore } from './ledger/ledgerClient.js';
 import { libraryStore } from './library/libraryClient.js';
+import { projectStore } from './projects/projectClient.js';
 
 export function useCompanyTransport(client: CompanyClient): void {
   useEffect(() => {
     const unsubscribe = transport.onMessage((message: ServerMessage) => {
       libraryStore.accept(message);
       ledgerStore.accept(message);
+      projectStore.accept(message);
       if (isCompanyServerMessage(message)) client.accept(message);
     });
     client.connect();
+    projectStore.requestTree();
     ledgerStore.connect();
     const unsubscribeState = transport.onStateChange((state) => {
       if (state === TRANSPORT_STATE_CONNECTED) {
         client.connect();
-        ledgerStore.connect();
+        projectStore.requestTree();
       }
     });
     return () => {

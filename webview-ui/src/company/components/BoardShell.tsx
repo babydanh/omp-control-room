@@ -40,6 +40,11 @@ import { AccountsPage } from '../library/AccountsPage.js';
 import { McpPage } from '../library/McpPage.js';
 import { SkillsPage } from '../library/SkillsPage.js';
 import { StoragePage } from '../library/StoragePage.js';
+import { ChangesPage } from '../projects/ChangesPage.js';
+import { LayeredSettingsDialog } from '../projects/LayeredSettingsDialog.js';
+import { NewSessionDialog } from '../projects/NewSessionDialog.js';
+import { projectStore } from '../projects/projectClient.js';
+import { useProjectState } from '../projects/projectStore.js';
 import { startScrollFades } from '../scrollFades.js';
 import {
   type DrawerSubject,
@@ -91,7 +96,7 @@ function browserStorage(): Storage | null {
   }
 }
 
-type ShellPage = 'board' | 'ledger' | 'usage' | 'storage' | 'skills' | 'mcp' | 'accounts';
+type ShellPage = 'board' | 'ledger' | 'usage' | 'storage' | 'skills' | 'mcp' | 'accounts' | 'changes';
 
 const NAV_COLLAPSED_KEY = 'company.nav.collapsed.v1';
 
@@ -131,6 +136,11 @@ export interface BoardShellProps {
 }
 
 export function BoardShell({ client }: BoardShellProps) {
+  const projects = useProjectState(projectStore);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [projectSettingsNode, setProjectSettingsNode] = useState<string | null>(null);
+  const [newSessionNode, setNewSessionNode] = useState<string | null>(null);
+  const [selectedCheckoutId, setSelectedCheckoutId] = useState('');
   const state = useCompanyState(client);
   useSessionLogBackfill(client, state);
   const ledger = useLedgerState(ledgerStore);
@@ -155,7 +165,6 @@ export function BoardShell({ client }: BoardShellProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [rolesOpen, setRolesOpen] = useState(false);
-  const [browseRequest, setBrowseRequest] = useState(0);
   const [herdrTab, setHerdrTab] = useState<HerdrDrawerTab>('screen');
   const [menu, setMenu] = useState<(AgentMenuRequest & { token: number }) | null>(null);
   // Each open gets a new token, so the menu remounts and starts from its first view.
@@ -495,7 +504,6 @@ export function BoardShell({ client }: BoardShellProps) {
         setOpened({ kind: 'files' });
         return;
       case 'open-folder':
-        setBrowseRequest((count) => count + 1);
         return;
       case 'open-roles':
         setRolesOpen(true);
@@ -636,7 +644,6 @@ export function BoardShell({ client }: BoardShellProps) {
         onOpenShortcuts={() => setShortcutsOpen(true)}
         onOpenRoles={() => setRolesOpen(true)}
         onOpenUsage={() => selectPage('usage')}
-        browseRequest={browseRequest}
       />
       {state.needsSnapshot && (
         <p className="bg-warning/12 px-3 py-1.5 text-2xs text-warning">
@@ -708,6 +715,33 @@ export function BoardShell({ client }: BoardShellProps) {
               onOpenSleeping={openSleeping}
               onToggleProject={toggleProject}
               onMenu={openMenu}
+              projectTree={{
+                nodes: projects.nodes,
+                selectedProjectId,
+                onSelectProject: (projectId) => {
+                  setSelectedProjectId(projectId);
+                  if (projectId === null) {
+                    client.setViewMode('all');
+                    return;
+                  }
+                  const node = projects.nodes.find((candidate) => candidate.id === projectId);
+                  if (node?.path !== undefined) {
+                    client.setFocusFolder(node.path);
+                    client.setViewMode('folder');
+                  }
+                },
+                onCreateNode: (kind, parentId) => projectStore.createNode({ kind, ...(parentId === undefined ? {} : { parentId }), name: kind === 'project' ? 'Dự án mới' : kind === 'group' ? 'Nhóm mới' : 'Thư mục mới' }),
+                onOpenChanges: (checkoutId) => {
+                  setSelectedCheckoutId(checkoutId);
+                  projectStore.requestDiff({ checkout: checkoutId, scope: 'uncommitted', sha: '' });
+                  selectPage('changes');
+                },
+                onOpenSettings: (nodeId) => {
+                  setProjectSettingsNode(nodeId);
+                  projectStore.requestSettings(nodeId ?? undefined);
+                },
+                onNewSession: (nodeId) => setNewSessionNode(nodeId),
+              }}
               onOpenRoles={() => setRolesOpen(true)}
               onDismiss={dismissSheet}
             />
@@ -779,6 +813,8 @@ export function BoardShell({ client }: BoardShellProps) {
       {!composerHidden && <PromptComposer client={client} />}
       </div>
       </>
+      ) : activePage === 'changes' ? (
+        <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} onClose={() => selectPage('board')} />
       ) : activePage === 'usage' ? (
         <div key="usage-page" className="company-shell-page flex min-h-0 flex-1 flex-col">
           <UsagePage client={client} />
@@ -800,6 +836,8 @@ export function BoardShell({ client }: BoardShellProps) {
           <AccountsPage />
         </div>
       )}
+      {projectSettingsNode !== null && <LayeredSettingsDialog store={projectStore} nodeId={projectSettingsNode} onClose={() => setProjectSettingsNode(null)} />}
+      {newSessionNode !== null && <NewSessionDialog store={projectStore} nodeId={newSessionNode} onClose={() => setNewSessionNode(null)} />}
       {paletteOpen && (
         <CommandPalette
           items={paletteItems}

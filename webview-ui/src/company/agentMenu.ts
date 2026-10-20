@@ -87,7 +87,8 @@ export type AgentMenuAction =
   | { kind: 'describeRole' }
   | { kind: 'workItemAction'; action: WorkItemMenuAction }
   | { kind: 'squadAction'; action: SquadRunMenuAction }
-  | { kind: 'wake' };
+  | { kind: 'wake' }
+  | { kind: 'projectNodeAction'; action: 'project' | 'group' | 'folder' | 'repository' | 'worktree' };
 
 export interface AgentMenuItem {
   /** Stable within one menu: a React key, and how tests find an item. */

@@ -16,7 +16,6 @@ import { matchShortcut, type ShortcutId, shortcutKeysLabel, SHORTCUTS } from '..
 import { ChatNewButton } from './ChatNewButton.js';
 import { Icon } from './Icon.js';
 import { StatusPill } from './StatusPill.js';
-import { WorkspaceSwitcher } from './WorkspaceSwitcher.js';
 
 export interface BoardTopBarProps {
   client: CompanyClient;
@@ -38,8 +37,6 @@ export interface BoardTopBarProps {
   onOpenRoles: () => void;
   /** Opens the usage page: a route of its own, so the board is not drawn beneath it. */
   onOpenUsage: () => void;
-  /** Bumped by the palette to open the folder browser once per bump. */
-  browseRequest: number;
 }
 
 /** The key label of a registry shortcut, or null when the registry has none. */
@@ -149,7 +146,6 @@ export function BoardTopBar({
   onOpenShortcuts,
   onOpenRoles,
   onOpenUsage,
-  browseRequest,
 }: BoardTopBarProps) {
   const phone = mode === 'phone';
   const searchLabel = withShortcut('Tìm kiếm và lệnh', 'board.palette', isMac);
@@ -210,9 +206,6 @@ export function BoardTopBar({
       }
     >
       <h1 className={phone ? 'sr-only' : 'shrink-0 text-base text-text'}>Agent Board</h1>
-      <div className={phone ? 'min-w-0 flex-1' : 'min-w-0'}>
-        <WorkspaceSwitcher client={client} state={state} browseRequest={browseRequest} />
-      </div>
       {!phone && <div className="min-w-0 flex-1" />}
       <ChatNewButton client={client} compact={phone} />
       <StatusPill client={client} state={state} />
