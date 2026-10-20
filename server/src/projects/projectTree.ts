@@ -1,14 +1,14 @@
+import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
 import type { LedgerOverlapScan, ProjectTreeNode } from '../../../core/src/messages.js';
 import { listFolderRepos } from '../company/workItems/folderRepos.js';
 import {
-  LEDGER_DEV_NULL,
   LEDGER_DIFF_MAX_BYTES,
   LEDGER_DIFF_TIMEOUT_MS,
   LEDGER_GIT_MAX_BYTES,
 } from '../ledger/constants.js';
-import { type GitRunner, type GitRunOptions, readRepo } from '../ledger/git.js';
+import { type GitRepoScan, type GitRunner, type GitRunOptions, readRepo } from '../ledger/git.js';
 import type { LedgerSource, SessionRow } from '../ledger/ledgerDb.js';
 import { normalizeLedgerPath } from '../ledger/ledgerPath.js';
 import type { AgentState } from '../types.js';
@@ -41,6 +41,8 @@ export interface ProjectTreeOptions {
   readonly herdrSessions?: () => readonly HerdrProjectSession[];
   readonly overlapScans?: () => Promise<readonly LedgerOverlapScan[]>;
   readonly listRepos?: typeof listFolderRepos;
+  /** Repo scan source; the ledger passes its cached scans. Defaults to a fresh read. */
+  readonly readRepo?: (repo: string) => Promise<GitRepoScan>;
 }
 function canonicalKey(folder: string): string {
   const resolved = path.resolve(folder);
@@ -75,7 +77,7 @@ function agentKindForLedger(row: SessionRow): ProjectAgentKind {
 }
 
 function titleForLedger(row: SessionRow): string {
-  return row.agentName ?? '';
+  return row.agentName ?? `${agentKindForLedger(row)} · ${row.sessionId.slice(-8)}`;
 }
 
 function ledgerStatus(row: SessionRow): string {
@@ -85,15 +87,23 @@ function ledgerStatus(row: SessionRow): string {
   return 'running';
 }
 
+/**
+ * Live sessions working in `checkout`. A cwd inside a nested checkout (a
+ * `.worktrees/<name>` under the main one) belongs to that deeper checkout only.
+ * Ended ledger sessions are left out: the tree shows who is working, not history.
+ */
 function sessionsForCheckout(
   checkout: string,
+  nestedCheckouts: readonly string[],
   ledgerRows: readonly SessionRow[],
   agents: readonly AgentState[],
   herdrSessions: readonly HerdrProjectSession[],
 ): ProjectSessionSnapshot[] {
+  const owns = (cwd: string): boolean =>
+    pathContains(checkout, cwd) && !nestedCheckouts.some((nested) => pathContains(nested, cwd));
   const sessions: ProjectSessionSnapshot[] = [];
   for (const row of ledgerRows) {
-    if (row.cwd === null || !pathContains(checkout, row.cwd)) continue;
+    if (row.cwd === null || row.endedAt !== null || !owns(row.cwd)) continue;
     sessions.push({
       engine: engineForLedger(row),
       agentKind: agentKindForLedger(row),
@@ -104,7 +114,7 @@ function sessionsForCheckout(
     });
   }
   for (const agent of agents) {
-    if (!pathContains(checkout, agent.projectDir)) continue;
+    if (!owns(agent.projectDir)) continue;
     sessions.push({
       engine: 'board',
       agentKind: 'board',
@@ -115,7 +125,7 @@ function sessionsForCheckout(
     });
   }
   for (const session of herdrSessions) {
-    if (!pathContains(checkout, session.cwd)) continue;
+    if (!owns(session.cwd)) continue;
     sessions.push({ engine: 'herdr', agentKind: 'herdr', ...session });
   }
   return sessions;
@@ -131,11 +141,39 @@ const UNTRACKED_STAT_OPTIONS: GitRunOptions = {
   okCodes: [0, 1],
   maxBytes: LEDGER_GIT_MAX_BYTES,
 };
+/** New files whose lines are counted per checkout; the rest still list as changed-without-count. */
+const UNTRACKED_COUNT_LIMIT = 200;
+/** Checkouts of one repo whose change counts are read at once. */
+const CHANGED_FILES_CONCURRENCY = 4;
 
 interface FileChangeCount {
   readonly path: string;
   readonly additions: number;
   readonly deletions: number;
+}
+
+/** Repos under a folder change rarely, and walking a large folder takes seconds. */
+const REPO_LIST_REUSE_MS = 60_000;
+/** Change counts are re-read at most this often per checkout. */
+const CHANGED_FILES_REUSE_MS = 10_000;
+
+interface Reused<T> {
+  readonly at: number;
+  readonly value: Promise<T>;
+}
+const repoLists = new Map<string, Reused<string[]>>();
+const changeCounts = new Map<string, Reused<FileChangeCount[]>>();
+
+/** `load` result for `key`, reused for `ttlMs`; a failed load is dropped so the next call retries. */
+function reuse<T>(cache: Map<string, Reused<T>>, key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const hit = cache.get(key);
+  if (hit !== undefined && Date.now() - hit.at < ttlMs) return hit.value;
+  const value = load();
+  cache.set(key, { at: Date.now(), value });
+  value.catch(() => {
+    if (cache.get(key)?.value === value) cache.delete(key);
+  });
+  return value;
 }
 
 interface NodeAggregate {
@@ -191,18 +229,78 @@ async function changedFiles(git: GitRunner, checkout: string): Promise<FileChang
     { ...UNTRACKED_STAT_OPTIONS, okCodes: [0] },
   );
   if (!untracked.ok || untracked.truncated) return [...files.values()];
-  for (const filePath of untracked.stdout.split('\0')) {
-    if (!validRelativeFile(filePath) || files.has(filePath)) continue;
-    const stat = await git.run(
-      checkout,
-      ['diff', '--no-index', '--numstat', '--', LEDGER_DEV_NULL, filePath],
-      UNTRACKED_STAT_OPTIONS,
-    );
-    if (!stat.ok || stat.truncated) continue;
-    const [change] = parseNumstat(stat.stdout);
-    if (change !== undefined) files.set(filePath, change);
+  const fresh = untracked.stdout
+    .split('\0')
+    .filter((filePath) => validRelativeFile(filePath) && !files.has(filePath));
+  // Counted in-process: one git spawn per new file made large worktrees take minutes.
+  for (const [index, filePath] of fresh.entries()) {
+    const additions = index < UNTRACKED_COUNT_LIMIT ? await countFileLines(path.join(checkout, filePath)) : 0;
+    files.set(filePath, { path: filePath, additions, deletions: 0 });
   }
   return [...files.values()];
+}
+
+/** Lines a new file adds; 0 for binary, unreadable or oversized files. */
+async function countFileLines(filePath: string): Promise<number> {
+  try {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile() || stat.size > LEDGER_DIFF_MAX_BYTES) return 0;
+    const content = await fs.readFile(filePath);
+    if (content.includes(0)) return 0;
+    let lines = 0;
+    for (const byte of content) if (byte === 0x0a) lines += 1;
+    return content.length > 0 && content[content.length - 1] !== 0x0a ? lines + 1 : lines;
+  } catch {
+    return 0;
+  }
+}
+
+/** Runs `task` over `items` with at most `limit` in flight, keeping input order. */
+async function mapLimit<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await task(items[index] as T);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/**
+ * The main repos behind `paths`: a linked worktree (`.git` file pointing at
+ * `<main>/.git/worktrees/<name>`) is replaced by its main repo, so each repo is
+ * scanned once; scanning every worktree as its own repo re-read all sibling
+ * worktrees each time (quadratic). Other `.git` files (submodules point into
+ * `.git/modules/...`) are repos of their own and stay.
+ */
+async function mainRepos(paths: readonly string[]): Promise<string[]> {
+  const mains = new Map<string, string>();
+  for (const candidate of paths) {
+    let main = candidate;
+    try {
+      const dotGit = path.join(candidate, '.git');
+      if ((await fs.stat(dotGit)).isFile()) {
+        const match = /^gitdir:\s*(.+)$/m.exec(await fs.readFile(dotGit, 'utf8'));
+        const adminDir = match?.[1] === undefined ? undefined : path.resolve(candidate, match[1].trim());
+        const worktreesDir = adminDir === undefined ? undefined : path.dirname(adminDir);
+        if (
+          worktreesDir !== undefined &&
+          path.basename(worktreesDir) === 'worktrees' &&
+          path.basename(path.dirname(worktreesDir)) === '.git'
+        ) {
+          main = path.dirname(path.dirname(worktreesDir));
+        }
+      }
+    } catch {
+      // Unreadable .git: keep the path; readRepo decides whether it is a repo.
+    }
+    mains.set(canonicalKey(main), main);
+  }
+  return [...mains.values()];
 }
 
 function overlapForCheckout(
@@ -273,9 +371,14 @@ async function appendNodes(
     }
 
     output.push({ id: node.id, parentId, kind: 'folder', name: node.name, path: node.path });
-    const repos = await (options.listRepos ?? listFolderRepos)(node.path);
-    for (const repoPath of repos) {
-      const scan = await readRepo(options.git, repoPath);
+    const listed = options.listRepos === undefined
+      ? await reuse(repoLists, canonicalKey(node.path), REPO_LIST_REUSE_MS, () => listFolderRepos(node.path))
+      : await options.listRepos(node.path);
+    const repos = await mainRepos(listed);
+    const scanRepo = options.readRepo ?? ((repo: string) => readRepo(options.git, repo));
+    const scans = await mapLimit(repos, CHANGED_FILES_CONCURRENCY, scanRepo);
+    for (const [repoIndex, repoPath] of repos.entries()) {
+      const scan = scans[repoIndex] ?? { kind: 'not-repo' as const };
       if (scan.kind !== 'repo') continue;
       const mainCheckout = scan.worktrees.find((worktree) => worktree.isMain);
       if (mainCheckout === undefined || canonicalKey(mainCheckout.path) !== canonicalKey(repoPath)) continue;
@@ -285,7 +388,13 @@ async function appendNodes(
         id: repoId, parentId: node.id, kind: 'repository', name: path.basename(repoPath), path: repoPath,
       });
       aggregates.set(repoId, emptyAggregate());
-      for (const worktree of scan.worktrees) {
+      // A clean checkout has nothing to count: skip its two git calls.
+      const changes = await mapLimit(scan.worktrees, CHANGED_FILES_CONCURRENCY, (worktree) =>
+        worktree.dirtyCount > 0
+          ? reuse(changeCounts, canonicalKey(worktree.path), CHANGED_FILES_REUSE_MS, () => changedFiles(options.git, worktree.path))
+          : Promise.resolve([]),
+      );
+      for (const [worktreeIndex, worktree] of scan.worktrees.entries()) {
         const overlap = overlapForCheckout(worktree.path, overlapScans);
         output.push({
           id: worktree.path,
@@ -306,7 +415,7 @@ async function appendNodes(
           pendingWork: pendingCheckouts.has(canonicalKey(worktree.path)),
         });
 
-        const files = await changedFiles(options.git, worktree.path);
+        const files = changes[worktreeIndex] ?? [];
         for (const file of files) {
           const fileId = `file:${worktree.path}:${file.path}`;
           const normalizedFile = file.path.replaceAll(path.sep, '/');
@@ -328,7 +437,10 @@ async function appendNodes(
           });
         }
 
-        for (const session of sessionsForCheckout(worktree.path, ledgerRows, agents, herdrSessions)) {
+        const nested = scan.worktrees
+          .map((other) => other.path)
+          .filter((other) => canonicalKey(other) !== canonicalKey(worktree.path) && pathContains(worktree.path, other));
+        for (const session of sessionsForCheckout(worktree.path, nested, ledgerRows, agents, herdrSessions)) {
           output.push({
             id: `${session.agentKind}:${session.id}`,
             parentId: worktree.path,

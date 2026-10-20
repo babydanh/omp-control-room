@@ -156,7 +156,7 @@ function SettingRow({ definition, message, scope, draft, onDraft, onSave, onClea
   const source = message.sources[definition.field];
   const hasOverride = source === scope;
   const shownDraft = draft ?? effective;
-  const stateLabel = hasOverride ? 'đang ghi đè' : `kế thừa từ ${source === undefined ? 'chưa đặt' : SOURCE_LABELS[source]}`;
+  const stateLabel = hasOverride ? 'đang ghi đè' : source === undefined ? 'không tầng nào đặt' : `kế thừa từ ${SOURCE_LABELS[source]}`;
   return (
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(160px,1fr)_auto] items-center gap-2 rounded-(--company-radius-sm) border border-hairline bg-raised p-2 max-sm:grid-cols-1">
       <div className="min-w-0">

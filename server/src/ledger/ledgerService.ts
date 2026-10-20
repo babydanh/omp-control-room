@@ -107,6 +107,22 @@ export class LedgerService {
     return (await this.refresh(true)).overlaps;
   }
 
+  /** Overlap scans as currently known, without waiting for unread repos. For the Project tree. */
+  async currentOverlapScans(): Promise<readonly LedgerOverlapScan[]> {
+    return (await this.refresh(false)).overlaps;
+  }
+
+  /**
+   * One repo's git scan from the shared cache: a stale scan is returned at once
+   * while a refresh runs; only a never-read repo waits for its first read.
+   */
+  async repoScan(repo: string): Promise<GitRepoScan> {
+    const entry = this.entryFor(repo);
+    const pending = this.refreshGit(repo, false);
+    if (entry.scan === null) await pending;
+    return entry.scan ?? { kind: 'not-repo' };
+  }
+
   /** Whether a board is looking at the ledger: a subscriber, or a view request within the activity window. */
   watched(): boolean {
     return this.isActive();

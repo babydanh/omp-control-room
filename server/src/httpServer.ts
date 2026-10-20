@@ -187,6 +187,20 @@ function registerLibraryProofRoute(app: FastifyInstance, token: string): void {
   });
 }
 
+/** Project tree inputs from the ledger's caches, unless the caller supplied its own. */
+function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandContext, 'tree'> {
+  const ledger = options.ledger;
+  if (options.projects?.tree !== undefined || ledger === undefined || ledger === null) return {};
+  return {
+    tree: {
+      ledger: ledger.projectTreeSource,
+      git: ledger.projectTreeGit,
+      readRepo: (repo) => ledger.repoScan(repo),
+      overlapScans: () => ledger.currentOverlapScans(),
+    },
+  };
+}
+
 // ── Hook Events ────────────────────────────────────────────────
 
 function registerHookRoute(app: FastifyInstance, options: HttpServerOptions): void {
@@ -275,15 +289,7 @@ function registerWebSocketRoute(
     let projectTreeTimer: NodeJS.Timeout | undefined;
     const projectContext = (): ProjectCommandContext => ({
       ...options.projects,
-      ...(options.projects?.tree === undefined && options.ledger !== undefined && options.ledger !== null
-        ? {
-            tree: {
-              ledger: options.ledger.projectTreeSource,
-              git: options.ledger.projectTreeGit,
-              overlapScans: () => options.ledger?.overlapScans() ?? Promise.resolve([]),
-            },
-          }
-        : {}),
+      ...projectTreeFromLedger(options),
       privileged,
       agents: store.values(),
       herdrSessions: () => {
@@ -402,15 +408,7 @@ function registerWebSocketRoute(
             ptyManager: options.ptyManager,
             projects: {
               ...options.projects,
-              ...(options.projects?.tree === undefined && options.ledger !== undefined && options.ledger !== null
-                ? {
-                    tree: {
-                      ledger: options.ledger.projectTreeSource,
-                      git: options.ledger.projectTreeGit,
-                      overlapScans: () => options.ledger?.overlapScans() ?? Promise.resolve([]),
-                    },
-                  }
-                : {}),
+              ...projectTreeFromLedger(options),
             },
           },
         );

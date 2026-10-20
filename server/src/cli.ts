@@ -359,7 +359,6 @@ async function main(): Promise<void> {
   const projects = createProjectRuntime({
     company,
     ledger,
-    agents: () => store.values(),
     runProcess,
   });
   // Terminals for agents this server launches. Construction is cheap -- the

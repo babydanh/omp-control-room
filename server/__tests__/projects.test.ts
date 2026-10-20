@@ -99,6 +99,9 @@ describe('buildProjectTreeSnapshot', () => {
     await fs.mkdir(path.join(repo, '.git'), { recursive: true });
     await fs.mkdir(worktree, { recursive: true });
     await fs.writeFile(ledgerPath, 'temporary-ledger');
+    // New files are counted from disk: 3 lines in each checkout.
+    await fs.writeFile(path.join(repo, 'new.txt'), 'a\nb\nc\n');
+    await fs.writeFile(path.join(worktree, 'new.txt'), 'a\nb\nc');
 
     const database: SqliteDatabase = {
       prepare: (sql) => ({
@@ -127,9 +130,6 @@ describe('buildProjectTreeSnapshot', () => {
         if (args[0] === 'merge-base') return processResult();
         if (args[0] === 'log') return processResult('feature\x002026-10-20T00:00:00Z');
         if (args[0] === 'diff' && args[1] === '--numstat') return processResult('1\t2\tsrc/main.ts\0');
-        if (args[0] === 'diff' && args[1] === '--no-index') {
-          return processResult('3\t0\tb/new.txt\0', 1, true);
-        }
         if (args[0] === 'ls-files') return processResult('new.txt\0');
         return processResult('', 128);
       },
@@ -187,6 +187,40 @@ describe('buildProjectTreeSnapshot', () => {
     expect(mainNode?.overlappingWorktrees).toEqual([normalizeLedgerPath(worktree)]);
     expect(trackedFile).toMatchObject({ additions: 1, deletions: 2, overlap: true });
     expect(untrackedFile).toMatchObject({ additions: 3, deletions: 0 });
+    // The session's cwd is inside both checkouts (feature nests under main): only the deeper one owns it.
+    const sessionParents = snapshot.nodes.filter((node) => node.kind === 'session').map((node) => node.parentId);
+    expect(sessionParents).toEqual([featureNode?.id]);
     ledger.close();
+  });
+
+  it('scans a linked worktree through its main repo but keeps a submodule as its own repo', async () => {
+    const root = await makeTempDir();
+    const folder = path.join(root, 'folder');
+    const repo = path.join(folder, 'repo');
+    const worktree = path.join(repo, '.worktrees', 'feature');
+    const submodule = path.join(repo, 'vendor', 'lib');
+    await fs.mkdir(path.join(repo, '.git', 'worktrees', 'feature'), { recursive: true });
+    await fs.mkdir(worktree, { recursive: true });
+    await fs.mkdir(submodule, { recursive: true });
+    await fs.writeFile(path.join(worktree, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 'feature')}\n`);
+    await fs.writeFile(path.join(submodule, '.git'), 'gitdir: ../../.git/modules/lib\n');
+    const scanned: string[] = [];
+    const git: GitRunner = {
+      async run(cwd, args) {
+        if (args[0] === 'rev-parse') scanned.push(path.resolve(cwd));
+        return processResult('', 128);
+      },
+    };
+    const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
+    const project = await store.createProject('Test');
+    await store.addFolder(project.id, folder);
+    await buildProjectTreeSnapshot(store, {
+      ledger: openLedgerSource(path.join(root, 'missing.db'), () => {
+        throw new Error('no database');
+      }),
+      git,
+      listRepos: async () => [repo, worktree, submodule],
+    });
+    expect(scanned.sort()).toEqual([path.resolve(repo), path.resolve(submodule)].sort());
   });
 });

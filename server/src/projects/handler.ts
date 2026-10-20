@@ -20,7 +20,12 @@ import { getProjectDiff } from './diff.js';
 import { previewProjectMerge } from './mergePreview.js';
 import { startProjectSession } from './newSession.js';
 import { type ProjectNode, type ProjectState, ProjectStore } from './projectStore.js';
-import { buildProjectTreeSnapshot, type HerdrProjectSession, type ProjectTreeOptions } from './projectTree.js';
+import {
+  buildProjectTreeSnapshot,
+  type HerdrProjectSession,
+  type ProjectTreeOptions,
+  type ProjectTreeSnapshot,
+} from './projectTree.js';
 import type { ProjectModuleDeps, ProjectServices } from './services.js';
 import { clearProjectSettings, getProjectSettings, refreshProjectSettings, setProjectSettings } from './settingsLayers.js';
 
@@ -232,15 +237,28 @@ async function runProjectRequest(
   }
 }
 
-async function buildTree(store: ProjectStore, context: ProjectCommandContext) {
+/** A tree build runs git across every checkout; sockets refreshing together share one. */
+const TREE_REUSE_MS = 3_000;
+const treeBuilds = new WeakMap<ProjectStore, { readonly at: number; readonly build: Promise<ProjectTreeSnapshot> }>();
+
+async function buildTree(store: ProjectStore, context: ProjectCommandContext): Promise<ProjectTreeSnapshot> {
   if (context.tree === undefined) throw new LibraryUserError('Không thể tải cây Project vì dữ liệu phiên chưa được kết nối.');
-  return buildProjectTreeSnapshot(store, {
+  const recent = treeBuilds.get(store);
+  if (recent !== undefined && Date.now() - recent.at < TREE_REUSE_MS) return recent.build;
+  const build = buildProjectTreeSnapshot(store, {
     ...context.tree,
     ...(context.agents === undefined ? {} : { agents: context.agents }),
     ...(context.herdrSessions === undefined ? {} : { herdrSessions: context.herdrSessions }),
   });
+  treeBuilds.set(store, { at: Date.now(), build });
+  // A failed build must not be served to the next request.
+  build.catch(() => {
+    if (treeBuilds.get(store)?.build === build) treeBuilds.delete(store);
+  });
+  return build;
 }
 
+/** Sends a fresh snapshot after a change; a reused one would show the tree from before it. */
 async function sendTreeSnapshot(
   requestId: string,
   send: (message: ServerMessage) => void,
@@ -248,6 +266,7 @@ async function sendTreeSnapshot(
   context: ProjectCommandContext,
 ): Promise<void> {
   if (context.tree === undefined) return;
+  treeBuilds.delete(store);
   const snapshot = await buildTree(store, context);
   send({ type: 'projectTreeSnapshot', requestId, nodes: snapshot.nodes });
 }

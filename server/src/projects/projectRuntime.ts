@@ -6,7 +6,6 @@ import { ledgerPathKey } from '../ledger/ledgerPath.js';
 import type { LedgerService } from '../ledger/ledgerService.js';
 import type { ProcessRunner } from '../ledger/processRunner.js';
 import { LibraryUserError } from '../library/libraryError.js';
-import type { AgentState } from '../types.js';
 import { createProjectCommentServices } from './comments.js';
 import { createProjectDiffServices } from './diff.js';
 import { createProjectMergePreviewServices } from './mergePreview.js';
@@ -26,7 +25,6 @@ type ProjectFolders = Pick<CompanyWorkspaceRegistry, 'entries' | 'servicesFor' |
 export interface ProjectRuntimeInput {
   readonly company: ProjectFolders;
   readonly ledger: LedgerService;
-  readonly agents: () => Iterable<AgentState>;
   readonly runProcess: ProcessRunner;
 }
 
@@ -43,12 +41,12 @@ export interface ProjectRuntime {
 export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime {
   const { company, ledger, runProcess } = input;
   const store = new ProjectStore();
+  // Settings and worktree setup only need Project/group/folder nodes: skip the git scan.
   const loadTree = (): Promise<ProjectTreeSnapshot> =>
     buildProjectTreeSnapshot(store, {
       ledger: ledger.projectTreeSource,
       git: ledger.projectTreeGit,
-      overlapScans: () => ledger.overlapScans(),
-      agents: input.agents(),
+      listRepos: async () => [],
     });
 
   const settings = createProjectSettingsServices({

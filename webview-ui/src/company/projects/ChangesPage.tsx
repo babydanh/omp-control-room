@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { ProjectDiffFile, ProjectMergePreviewResultMessage, ProjectTreeNode } from '../../../../core/src/messages.js';
+import type { ProjectDiffFile, ProjectTreeNode } from '../../../../core/src/messages.js';
 import { numberDiffLines } from './projectDiffLines.js';
 import { type ProjectStore, useProjectState } from './projectStore.js';
 
@@ -102,14 +102,24 @@ function FileRow({ file, selected, onClick }: { file: ProjectDiffFile; selected:
 
 function MergePanel({ store, checkout, branches, branchB, setBranchB, nodes }: { store: ProjectStore; checkout?: ProjectTreeNode; branches: ProjectTreeNode[]; branchB: string; setBranchB: (branch: string) => void; nodes: readonly ProjectTreeNode[] }) {
   const [branchA, setBranchA] = useState(checkout?.branch ?? '');
+  const [requestId, setRequestId] = useState<string | null>(null);
   useEffect(() => setBranchA(checkout?.branch ?? ''), [checkout?.branch]);
-  const result = Object.values(useProjectState(store).results)
-    .filter((entry): entry is ProjectMergePreviewResultMessage => entry.type === 'projectMergePreviewResult')
-    .find((entry) => entry.repo === nodes.find((node) => node.id === checkout?.parentId)?.path && entry.branchA === branchA && entry.branchB === branchB);
+  const state = useProjectState(store);
+  // Matched by request id: the server may spell the repo path differently from the tree.
+  const answer = requestId === null ? undefined : state.results[requestId];
+  const result = answer?.type === 'projectMergePreviewResult' ? answer : undefined;
+  const running = requestId !== null && state.pending[requestId] !== undefined;
   const repo = nodes.find((node) => node.id === checkout?.parentId);
   return <section className="flex flex-col gap-3 rounded border border-border/60 p-4">
     <p className="text-sm text-secondary">Chỉ xét phần đã commit; thay đổi chưa commit không được tính.</p>
-    <div className="flex flex-wrap items-center gap-2"><label className="text-sm">Nhánh hiện tại<select className="ml-2 rounded border border-border bg-panel px-2 py-1" value={branchA} onChange={(event) => setBranchA(event.target.value)}><option value="">Chọn nhánh</option>{[checkout, ...branches].filter((node): node is ProjectTreeNode => node !== undefined && Boolean(node.branch)).map((node) => <option key={node.id} value={node.branch ?? ''}>{node.branch}</option>)}</select></label><span aria-hidden="true">→</span><label className="text-sm">Nhánh kia<select className="ml-2 rounded border border-border bg-panel px-2 py-1" value={branchB} onChange={(event) => setBranchB(event.target.value)}><option value="">Chọn nhánh</option>{branches.map((node) => <option key={node.id} value={node.branch ?? ''}>{node.branch}</option>)}</select></label><button disabled={!repo?.path || !branchA || !branchB || branchA === branchB} className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent disabled:opacity-50" onClick={() => repo?.path && store.previewMerge({ repo: repo.path, branchA, branchB })}>Thử gộp</button></div>
-    {result && <div role="status" className="text-sm"><p className={result.clean ? 'text-success' : 'text-danger'}>{result.clean ? 'Không có xung đột' : 'Có xung đột'}</p>{result.conflicts.map((file) => <p key={file} className="font-mono text-xs">{file}</p>)}</div>}
+    <div className="flex flex-wrap items-center gap-2"><label className="text-sm">Nhánh hiện tại<select className="ml-2 rounded border border-border bg-panel px-2 py-1" value={branchA} onChange={(event) => setBranchA(event.target.value)}><option value="">Chọn nhánh</option>{[checkout, ...branches].filter((node): node is ProjectTreeNode => node !== undefined && Boolean(node.branch)).map((node) => <option key={node.id} value={node.branch ?? ''}>{node.branch}</option>)}</select></label><span aria-hidden="true">→</span><label className="text-sm">Nhánh kia<select className="ml-2 rounded border border-border bg-panel px-2 py-1" value={branchB} onChange={(event) => setBranchB(event.target.value)}><option value="">Chọn nhánh</option>{branches.map((node) => <option key={node.id} value={node.branch ?? ''}>{node.branch}</option>)}</select></label><button disabled={running || !repo?.path || !branchA || !branchB || branchA === branchB} className="rounded bg-accent px-3 py-1.5 text-sm text-on-accent disabled:opacity-50" onClick={() => { if (repo?.path) setRequestId(store.previewMerge({ repo: repo.path, branchA, branchB })); }}>{running ? 'Đang thử…' : 'Thử gộp'}</button></div>
+    {result !== undefined && (
+      <div role="status" className="text-sm">
+        {result.reason !== undefined && result.reason !== '' && result.conflicts.length === 0 && !result.clean
+          ? <p className="text-status-error">{result.reason}</p>
+          : <p className={result.clean ? 'text-status-success' : 'text-status-error'}>{result.clean ? 'Không có xung đột' : `Có xung đột ở ${result.conflicts.length} tệp`}</p>}
+        {result.conflicts.map((file) => <p key={file} className="font-mono text-xs">{file}</p>)}
+      </div>
+    )}
   </section>;
 }
