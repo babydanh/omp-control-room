@@ -14,12 +14,16 @@ export interface ChangesPageProps {
 }
 
 const SYNTAX_CLASS: Readonly<Record<SyntaxKind, string>> = {
-  plain: '',
-  keyword: 'text-orchid',
-  string: 'text-caution',
-  comment: 'text-text-muted italic',
-  number: 'text-accent-bright',
-  type: 'text-status-active',
+  plain: 'text-syntax-punctuation',
+  keyword: 'text-syntax-keyword',
+  storage: 'text-syntax-storage',
+  string: 'text-syntax-string',
+  number: 'text-syntax-number',
+  comment: 'text-syntax-comment italic',
+  function: 'text-syntax-function',
+  type: 'text-syntax-type',
+  variable: 'text-syntax-variable',
+  punctuation: 'text-syntax-punctuation',
 };
 const LINE_CLASS: Readonly<Record<NumberedDiffLine['kind'], string>> = {
   addition: 'bg-status-success/15',

@@ -1,11 +1,22 @@
 /**
  * projectSyntax: a small per-line highlighter for the Thay đổi page. Diff hunks are
- * fragments, so a full parser cannot help; keywords, strings, comments, numbers and
- * type-like names cover what makes code readable. A string or block comment that
+ * fragments, so a full parser cannot help; a token pass in the VS Code Dark+ style
+ * (control keywords, declarations, strings, numbers, comments, calls, types,
+ * variables, punctuation) makes code readable. A string or block comment that
  * spans lines is only coloured on the line it opens.
  */
 
-export type SyntaxKind = 'plain' | 'keyword' | 'string' | 'comment' | 'number' | 'type';
+export type SyntaxKind =
+  | 'plain'
+  | 'keyword'
+  | 'storage'
+  | 'string'
+  | 'number'
+  | 'comment'
+  | 'function'
+  | 'type'
+  | 'variable'
+  | 'punctuation';
 
 export interface SyntaxToken {
   readonly text: string;
@@ -13,7 +24,10 @@ export interface SyntaxToken {
 }
 
 interface Language {
+  /** Control flow: coloured like VS Code's pink keywords. */
   readonly keywords: ReadonlySet<string>;
+  /** Declarations and constants: coloured like VS Code's blue keywords. */
+  readonly storage: ReadonlySet<string>;
   readonly lineComment: string | null;
   readonly blockComment: boolean;
 }
@@ -22,28 +36,30 @@ const words = (list: string): ReadonlySet<string> => new Set(list.split(' '));
 
 const C_LIKE: Language = {
   keywords: words(
-    'abstract as async await break case catch class const continue default delete do dynamic else enum export ' +
-      'extends false final finally for from function get if implements import in instanceof interface is late let ' +
-      'new null of override private protected public readonly required return set static super switch this throw ' +
-      'true try type typeof undefined var void while with yield',
+    'await break case catch continue default do else export finally for from if import in instanceof is of ' +
+      'return switch throw try while with yield as delete new typeof',
+  ),
+  storage: words(
+    'abstract async class const dynamic enum extends false final function get implements interface late let ' +
+      'null override private protected public readonly required set static super this true type undefined var ' +
+      'void package fn func struct impl mut pub use mod',
   ),
   lineComment: '//',
   blockComment: true,
 };
 const PYTHON: Language = {
-  keywords: words(
-    'and as assert async await break class continue def del elif else except False finally for from global if ' +
-      'import in is lambda None nonlocal not or pass raise return True try while with yield',
-  ),
+  keywords: words('assert await break continue del elif else except finally for from if import in is not or and pass raise return try while with yield'),
+  storage: words('async class def False global lambda None nonlocal self True'),
   lineComment: '#',
   blockComment: false,
 };
 const HASH_COMMENTED: Language = {
-  keywords: words('if then else elif fi for in do done while case esac function return export local true false null'),
+  keywords: words('if then else elif fi for in do done while case esac return'),
+  storage: words('function export local true false null yes no on off'),
   lineComment: '#',
   blockComment: false,
 };
-const JSON_LIKE: Language = { keywords: words('true false null'), lineComment: null, blockComment: false };
+const JSON_LIKE: Language = { keywords: words(''), storage: words('true false null'), lineComment: null, blockComment: false };
 
 const LANGUAGE_BY_EXTENSION: Readonly<Record<string, Language>> = {
   ts: C_LIKE, tsx: C_LIKE, js: C_LIKE, jsx: C_LIKE, mjs: C_LIKE, cjs: C_LIKE, dart: C_LIKE, java: C_LIKE,
@@ -69,6 +85,8 @@ function patternFor(language: Language): RegExp {
     String.raw`(?<string>"(?:\\.|[^"\\])*"?|'(?:\\.|[^'\\])*'?|` + '`(?:\\\\.|[^`\\\\])*`?)',
     String.raw`(?<number>\b(?:0x[0-9a-fA-F]+|\d[\d_]*(?:\.\d+)?)\b)`,
     String.raw`(?<word>[A-Za-z_$][\w$]*)`,
+    // `/` and `#` stay out of punctuation runs so `);//` still opens a comment.
+    String.raw`(?<punctuation>[^\w\s$'"/#` + '`' + String.raw`]+)`,
   ].filter((part): part is string => part !== null).join('|');
   const pattern = new RegExp(source, 'g');
   patterns.set(language, pattern);
@@ -98,18 +116,23 @@ export function highlightLine(text: string, filePath: string): SyntaxToken[] {
       continue;
     }
     if (match.index > cursor) tokens.push({ text: text.slice(cursor, match.index), kind: 'plain' });
-    tokens.push({ text: match[0], kind: kindOf(match.groups ?? {}, language) });
-    cursor = match.index + match[0].length;
+    const end = match.index + match[0].length;
+    tokens.push({ text: match[0], kind: kindOf(match.groups ?? {}, language, text.slice(end)) });
+    cursor = end;
   }
   if (cursor < text.length) tokens.push({ text: text.slice(cursor), kind: 'plain' });
   return tokens;
 }
 
-function kindOf(groups: Record<string, string | undefined>, language: Language): SyntaxKind {
+function kindOf(groups: Record<string, string | undefined>, language: Language, rest: string): SyntaxKind {
   if (groups.comment !== undefined) return 'comment';
   if (groups.string !== undefined) return 'string';
   if (groups.number !== undefined) return 'number';
+  if (groups.punctuation !== undefined) return 'punctuation';
   const word = groups.word ?? '';
   if (language.keywords.has(word)) return 'keyword';
-  return /^[A-Z][a-z0-9]/.test(word) ? 'type' : 'plain';
+  if (language.storage.has(word)) return 'storage';
+  if (/^\s*(?:<[^>]*>)?\s*\(/.test(rest)) return 'function';
+  if (/^[A-Z][a-z0-9]/.test(word)) return 'type';
+  return 'variable';
 }
