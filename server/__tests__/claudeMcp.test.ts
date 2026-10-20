@@ -182,6 +182,16 @@ describe('credential entries are never listed or copied', () => {
     expect(isShareableEntry(null)).toBe(false);
     expect(isShareableEntry({ command: 'x' })).toBe(true);
   });
+
+  it('refuses a url with user info or a query string, and args that carry a credential', () => {
+    expect(isShareableEntry({ type: 'http', url: 'https://user:pw@mcp.example.com/mcp' })).toBe(false);
+    expect(isShareableEntry({ type: 'http', url: 'https://mcp.example.com/mcp?key=abc' })).toBe(false);
+    expect(isShareableEntry({ command: 'x', args: ['--api-key', 'abc'] })).toBe(false);
+    expect(isShareableEntry({ command: 'x', args: ['--token=abc'] })).toBe(false);
+    expect(isShareableEntry({ command: 'x', args: ['ghp_0123456789abcdefghij'] })).toBe(false);
+    expect(isShareableEntry({ type: 'http', url: 'http://127.0.0.1:18420/mcp' })).toBe(true);
+    expect(isShareableEntry({ command: 'ripwire.exe', args: ['--mcp', '--top-k=150', '--exclude=.git'] })).toBe(true);
+  });
 });
 
 describe('MCP config handling never logs', () => {

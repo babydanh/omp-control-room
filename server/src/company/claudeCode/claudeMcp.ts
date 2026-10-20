@@ -21,6 +21,15 @@ export const CLAUDE_MCP_NAMES_MAX = 200;
 /** Environment variable names that look like a credential, matched anywhere in the name, any case. */
 const CREDENTIAL_ENV_NAME = /TOKEN|KEY|SECRET|PASSWORD|PAT|AUTH|CREDENTIAL/i;
 
+/** An argument that names or carries a credential: a credential-like flag or a known token prefix. */
+const CREDENTIAL_ARG = /token|secret|password|passwd|api[-_]?key|auth|bearer|ghp_|gho_|github_pat_|sk-/i;
+
+/** Whether a URL carries a credential inline: user info before the host, or any query string. */
+function urlHasCredential(url: unknown): boolean {
+  if (typeof url !== 'string') return false;
+  return url.includes('?') || /^[a-z][a-z0-9+.-]*:\/\/[^/]*@/i.test(url);
+}
+
 /** Whether a value is a server name the squad keeps: a non-empty string up to the length limit. */
 export function isClaudeMcpServerName(value: unknown): value is string {
   return (
@@ -30,12 +39,17 @@ export function isClaudeMcpServerName(value: unknown): value is string {
 
 /**
  * Whether a server entry may be listed and copied. An object with `headers` is refused, since its
- * header values sit in the config. An `env` variable whose name looks like a credential refuses it
- * too. A value that is not an object is refused.
+ * header values sit in the config. So is one whose `env` has a credential-like name, whose `url`
+ * has user info or a query string, or whose `args` look like they carry a credential. A value
+ * that is not an object is refused.
  */
 export function isShareableEntry(entry: unknown): boolean {
   if (!isRecord(entry)) return false;
   if (Object.hasOwn(entry, 'headers')) return false;
+  if (urlHasCredential(entry.url)) return false;
+  if (Array.isArray(entry.args) && entry.args.some((a) => typeof a === 'string' && CREDENTIAL_ARG.test(a))) {
+    return false;
+  }
   if (!isRecord(entry.env)) return true;
   return !Object.keys(entry.env).some((name) => CREDENTIAL_ENV_NAME.test(name));
 }
