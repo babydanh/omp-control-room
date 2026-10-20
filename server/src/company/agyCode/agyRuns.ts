@@ -26,6 +26,13 @@ import {
 const AGY_TIMEOUT_MESSAGE = 'Antigravity chạy quá lâu và đã bị dừng.';
 const AGY_NO_RESULT_MESSAGE = 'Antigravity kết thúc nhưng không trả về kết quả.';
 const AGY_ERROR_RESULT_MESSAGE = 'Antigravity gặp lỗi.';
+/**
+ * Headless agy soft-denies a tool that needs approval and still exits 0 with SUCCESS, an empty
+ * response and no change on disk (seen 20/10/2026 writing outside the allowed `*.worktrees`).
+ */
+const AGY_EMPTY_RESPONSE_MESSAGE =
+  'Antigravity không trả lời gì, thường do bị từ chối quyền ghi file hoặc chạy lệnh ở thư mục này. ' +
+  'Quyền của agy nằm trong ~/.gemini/antigravity-cli/settings.json.';
 const AGY_MISSING_MESSAGE = 'Không tìm thấy lệnh agy. Cài Antigravity CLI rồi chạy lại.';
 const RESULT_MAX_CHARS = 4000;
 const ERROR_MAX_CHARS = 300;
@@ -136,7 +143,8 @@ export function createAgyRuns(options: AgyRunsOptions): AgyRuns {
     const ended = entry.ended;
     if (code === 0 && ended?.status === 'SUCCESS') {
       const response = ended.response.trim();
-      end(entry, 'finished', response === '' ? undefined : clip(response, resultMaxChars));
+      if (response === '') end(entry, 'failed', undefined, AGY_EMPTY_RESPONSE_MESSAGE);
+      else end(entry, 'finished', clip(response, resultMaxChars));
       return;
     }
     const reason = ended?.error ?? (ended?.status && ended.status !== 'SUCCESS'

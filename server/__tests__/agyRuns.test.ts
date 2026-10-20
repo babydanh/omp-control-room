@@ -103,6 +103,21 @@ describe('createAgyRuns', () => {
     expect([...timers]).toHaveLength(0);
   });
 
+  it('fails a SUCCESS run with an empty response, the way agy reports a soft-denied tool', () => {
+    const { runs, child } = harness();
+    runs.start({ cwd: 'D:/tmp/outside', prompt: 'Tạo file' });
+    child.stdout.emit(
+      'data',
+      Buffer.from(`${JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: '\n' } })}\n`),
+    );
+    child.stdout.emit('end');
+    child.emit('close', 0);
+
+    const view = runs.view('run-1');
+    expect(view?.state).toBe('failed');
+    expect(view?.error).toContain('từ chối quyền');
+  });
+
   it('kills the process tree when the run is cancelled', () => {
     const { runs, killed } = harness();
     runs.start({ cwd: 'V:/repo', prompt: 'Dừng' });
