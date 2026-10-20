@@ -138,11 +138,16 @@ describe('claudeRunArgs', () => {
 });
 
 describe('claudeTurnArgs', () => {
-  it('runs print mode with no tools, no saved session, a JSON schema, and two turns', () => {
+  it('runs print mode with no tools, no MCP server, no saved session, a JSON schema, and two turns', () => {
     expect(claudeTurnArgs({ model: 'opus', schemaJson: SCHEMA_JSON })).toEqual([
       '-p',
       '--tools',
       '',
+      '--strict-mcp-config',
+      '--mcp-config',
+      '{"mcpServers":{}}',
+      '--disallowedTools',
+      'mcp__*',
       '--no-session-persistence',
       '--output-format',
       'json',

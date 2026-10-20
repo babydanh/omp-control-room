@@ -96,6 +96,8 @@ export function claudeRunArgs(args: ClaudeRunArgs): string[] {
 /**
  * The argv for one leader or judge turn: print mode, no tools, no saved session, and one answer
  * checked against the schema. Two turns allow for a structured-output retry. The prompt goes on stdin.
+ * `--tools ""` only removes built-in tools; MCP tools stay unless the turn also loads no MCP server
+ * (`--strict-mcp-config` with an empty config) and denies every `mcp__` tool.
  */
 export function claudeTurnArgs(input: {
   readonly model: string;
@@ -105,6 +107,11 @@ export function claudeTurnArgs(input: {
     '-p',
     '--tools',
     '',
+    '--strict-mcp-config',
+    '--mcp-config',
+    CLAUDE_NO_MCP_CONFIG,
+    '--disallowedTools',
+    'mcp__*',
     '--no-session-persistence',
     '--output-format',
     'json',
@@ -116,6 +123,9 @@ export function claudeTurnArgs(input: {
     '2',
   ];
 }
+
+/** An MCP config with no server, so a leader or judge turn loads none of the user's MCP servers. */
+export const CLAUDE_NO_MCP_CONFIG = '{"mcpServers":{}}';
 
 /**
  * Reads the auth probe's outcome from `claude auth status`. Only the answer's `loggedIn` and
