@@ -418,6 +418,15 @@ export function BoardShell({ client }: BoardShellProps) {
     projectStore.requestSettings(nodeId ?? undefined);
   }
 
+  /** A board session opens in the drawer, a herdr pane in its screen; any other session shows its checkout's changes. */
+  function openProjectSession(session: ProjectTreeNode, checkoutPath: string | undefined): void {
+    const id = session.sessionId;
+    if (id === undefined) return;
+    if (state.sessions[id] !== undefined) selectSession(id);
+    else if (session.agentKind === 'herdr') openHerdr(id);
+    else if (checkoutPath !== undefined) openProjectChanges(checkoutPath);
+  }
+
   /** Menu actions that leave the menu: pages and dialogs. Tree edits run in the menu itself. */
   function runProjectNodeAction(node: ProjectTreeNode, action: ProjectNodeAction): void {
     if (action === 'changes' || action === 'merge') {
@@ -562,7 +571,10 @@ export function BoardShell({ client }: BoardShellProps) {
   const navItems: { page: ShellPage; label: string; icon: IconName; group: string }[] = [
     { page: 'board', label: 'Bảng việc', icon: 'list', group: 'Không gian làm việc' },
     ...(ledgerAvailable
-      ? [{ page: 'ledger' as const, label: 'Cây git', icon: 'git-branch' as const, group: 'Không gian làm việc' }]
+      ? [
+          { page: 'ledger' as const, label: 'Cây git', icon: 'git-branch' as const, group: 'Không gian làm việc' },
+          { page: 'changes' as const, label: 'Thay đổi', icon: 'file-text' as const, group: 'Không gian làm việc' },
+        ]
       : []),
     { page: 'usage', label: 'Sử dụng', icon: 'bar-chart', group: 'Không gian làm việc' },
     ...(ledgerAvailable
@@ -774,7 +786,7 @@ export function BoardShell({ client }: BoardShellProps) {
                 onOpenChanges: openProjectChanges,
                 onOpenSettings: openProjectSettings,
                 onNewSession: (nodeId, engine) => setNewSessionNode({ nodeId, ...(engine === undefined ? {} : { engine }) }),
-                onOpenSession: selectSession,
+                onOpenSession: openProjectSession,
                 onMenu: openMenu,
                 store: projectStore,
               }}

@@ -4,7 +4,14 @@ import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import type { ProjectStore } from './projectStore.js';
-import { buildProjectTree, canMoveProjectNode, filterProjectTree, type ProjectTreeBranch } from './projectTreeView.js';
+import {
+  buildAgentTree,
+  canMoveProjectNode,
+  countSessions,
+  filterProjectTree,
+  isRunningNode,
+  type ProjectTreeBranch,
+} from './projectTreeView.js';
 
 const COLLAPSED_KEY = 'company.projectTree.collapsed.v1';
 const AGENT_KINDS = ['omp', 'sub', 'claude', 'agy', 'herdr', 'board'] as const;
@@ -17,13 +24,20 @@ const AGENT_KIND_CLASS: Readonly<Record<NonNullable<ProjectTreeNode['agentKind']
   board: 'bg-selected text-text',
 };
 const SESSION_STATE_LABEL: Readonly<Record<string, string>> = {
-  running: 'Đang chạy',
-  waiting: 'Đang chờ',
-  waiting_input: 'Đang chờ bạn',
-  idle: 'Đang nghỉ',
-  ended: 'Đã kết thúc',
-  active: 'Đang chạy',
-  busy: 'Đang chạy',
+  running: 'đang chạy',
+  working: 'đang chạy',
+  active: 'đang chạy',
+  busy: 'đang chạy',
+  waiting: 'đang chờ',
+  waiting_input: 'chờ bạn',
+  blocked: 'chờ bạn',
+  idle: 'rảnh',
+  sleeping: 'ngủ',
+};
+const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>> = {
+  project: '▰',
+  group: '▸',
+  folder: '📁',
 };
 
 function readCollapsed(): ReadonlySet<string> {
@@ -45,21 +59,22 @@ export interface ProjectTreeProps {
   onOpenChanges: (checkoutId: string, tab?: 'diff' | 'merge') => void;
   onOpenSettings: (nodeId: string | null) => void;
   onNewSession: (nodeId: string, engine?: 'omp' | 'claude' | 'agy') => void;
-  onOpenSession: (sessionId: string) => void;
+  /** Opens a session row; `checkoutPath` is where it works, for sessions the board cannot show. */
+  onOpenSession: (session: ProjectTreeNode, checkoutPath: string | undefined) => void;
   onMenu: (request: AgentMenuRequest) => void;
 }
 
+/** Sidebar: Project → groups → folders → the sessions working there. Git and files live on other pages. */
 export function ProjectTree(props: ProjectTreeProps) {
   const { nodes, selectedProjectId, onSelectProject, onCreateNode } = props;
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [agentKind, setAgentKind] = useState<ProjectTreeNode['agentKind'] | 'all'>('all');
-  const [overlapOnly, setOverlapOnly] = useState(false);
   const [runningOnly, setRunningOnly] = useState(false);
-  const tree = useMemo(() => buildProjectTree(nodes), [nodes]);
+  const tree = useMemo(() => buildAgentTree(nodes), [nodes]);
   const selectedRoots = selectedProjectId === null
     ? tree
     : tree.filter((branch) => branch.node.id === selectedProjectId);
-  const visible = filterProjectTree(selectedRoots, { agentKind, overlapOnly, runningOnly });
+  const visible = filterProjectTree(selectedRoots, { agentKind, runningOnly });
   useEffect(() => {
     try {
       window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
@@ -89,20 +104,24 @@ export function ProjectTree(props: ProjectTreeProps) {
     <nav aria-label="Dự án" className="flex min-h-0 flex-col gap-1 border-b border-hairline px-2 py-2">
       <div className="flex items-center gap-1">
         <button type="button" aria-pressed={selectedProjectId === null} onClick={() => onSelectProject(null)} className="touch-target min-w-0 flex-1 rounded px-2 text-left text-2xs text-text-secondary aria-pressed:bg-selected">Tất cả dự án</button>
-        <button type="button" aria-label="Tạo project" onClick={() => onCreateNode('project')} className="touch-target rounded px-2 text-text-secondary">➕</button>
+        <button type="button" aria-label="Tạo project" title="Tạo project" onClick={() => onCreateNode('project')} className="touch-target rounded px-2 text-text-secondary">➕</button>
       </div>
-      <label className="flex items-center gap-2 px-2 text-2xs text-text-muted">Công cụ
+      <div className="flex items-center gap-2 px-2 text-2xs text-text-muted">
         <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-0 flex-1 rounded bg-well px-1 py-1 text-text">
-          <option value="all">Tất cả</option>
+          <option value="all">Mọi công cụ</option>
           {AGENT_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
         </select>
-      </label>
-      <label className="flex items-center gap-2 px-2 text-2xs text-text-muted"><input type="checkbox" checked={overlapOnly} onChange={(event) => setOverlapOnly(event.target.checked)} />Chỉ chồng dòng</label>
-      <label className="flex items-center gap-2 px-2 text-2xs text-text-muted"><input type="checkbox" checked={runningOnly} onChange={(event) => setRunningOnly(event.target.checked)} />Chỉ đang chạy</label>
+        <label className="flex items-center gap-1"><input type="checkbox" checked={runningOnly} onChange={(event) => setRunningOnly(event.target.checked)} />Đang chạy</label>
+      </div>
       <div className="min-h-0 overflow-y-auto">
         {visible.map((branch) => (
           <ProjectTreeRow key={branch.node.id} branch={branch} depth={0} collapsed={collapsed} onToggleCollapse={toggleCollapse} onMove={moveNode} {...props} />
         ))}
+        {visible.length === 0 && (
+          <p className="px-2 py-3 text-2xs text-text-muted">
+            {nodes.length === 0 ? 'Đang tải dự án…' : 'Không có phiên nào khớp bộ lọc.'}
+          </p>
+        )}
       </div>
     </nav>
   );
@@ -123,7 +142,9 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
     useMemo(() => ({ kind: 'projectNode' as const, node }), [node]),
     props.onMenu,
   );
-  const receivesDrop = node.kind === 'project' || node.kind === 'group' || node.kind === 'folder';
+  const isSession = node.kind === 'session';
+  const receivesDrop = !isSession;
+  const counts = isSession ? null : countSessions(branch);
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!receivesDrop) return;
     event.preventDefault();
@@ -142,33 +163,42 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           onMove(event.dataTransfer.getData('text/plain'), node);
         }}
         className="group flex min-w-0 items-center gap-1 rounded-(--company-radius-sm) hover:bg-hover"
-        style={{ paddingLeft: `${depth * 12}px` }}
+        style={{ paddingLeft: `${depth * 10}px` }}
       >
         {children.length > 0 ? (
-          <button type="button" aria-label={isCollapsed ? 'Mở rộng' : 'Thu gọn'} aria-expanded={!isCollapsed} onClick={() => onToggleCollapse(node.id)} className="touch-target size-6 shrink-0 text-text-muted">{isCollapsed ? '›' : '⌄'}</button>
-        ) : <span className="w-6 shrink-0" />}
+          <button type="button" aria-label={isCollapsed ? 'Mở rộng' : 'Thu gọn'} aria-expanded={!isCollapsed} onClick={() => onToggleCollapse(node.id)} className="touch-target size-5 shrink-0 text-text-muted">{isCollapsed ? '›' : '⌄'}</button>
+        ) : <span className="w-5 shrink-0" />}
         <button
           type="button"
           aria-label={`${node.kind}: ${node.name}`}
+          title={isSession ? [node.title, branch.where].filter(Boolean).join(' · ') : node.path ?? node.name}
           onClick={() => {
             if (node.kind === 'project') props.onSelectProject(node.id);
-            else if (node.kind === 'checkout') props.onOpenChanges(node.path ?? node.id);
-            else if (node.kind === 'session' && node.sessionId !== undefined) props.onOpenSession(node.sessionId);
+            else if (isSession) props.onOpenSession(node, branch.checkoutPath);
+            else onToggleCollapse(node.id);
           }}
           {...menu}
-          className={`touch-target flex min-w-0 flex-1 items-center gap-1.5 truncate rounded px-1.5 text-left text-xs ${node.kind === 'project' && props.selectedProjectId === node.id ? 'bg-selected text-text' : 'text-text-secondary'}`}
+          className={`touch-target flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 text-left text-xs ${node.kind === 'project' && props.selectedProjectId === node.id ? 'bg-selected text-text' : 'text-text-secondary'}`}
         >
-          <span aria-hidden="true" className="shrink-0 text-text-muted">{node.kind === 'project' ? '▰' : node.kind === 'group' ? '▸' : node.kind === 'folder' ? '📁' : node.kind === 'repository' ? '⌘' : node.kind === 'checkout' ? '⑂' : node.kind === 'session' ? '●' : '·'}</span>
-          <span className="min-w-0 flex-1 truncate">{node.name}</span>
-          {node.agentKind !== undefined && <span className={`rounded px-1 text-2xs ${AGENT_KIND_CLASS[node.agentKind]}`}>{node.agentKind}</span>}
-          {node.state !== undefined && <span className="truncate text-2xs text-text-muted">{SESSION_STATE_LABEL[node.state] ?? node.state}</span>}
-          {node.overlap && <span title={`Chồng dòng với ${(node.overlappingWorktrees ?? []).join(', ')}`} className="text-warning">⚠</span>}
-          {node.pendingWork && <span title="Có việc dở" className="text-warning">•</span>}
-          {node.dirty && <span title="Có thay đổi" className="text-warning">●</span>}
-          {node.branch !== undefined && <span className="max-w-24 truncate text-2xs text-text-muted">{node.branch}</span>}
-          {(node.ahead !== undefined || node.behind !== undefined) && <span className="text-2xs text-text-muted">↑{node.ahead ?? 0} ↓{node.behind ?? 0}</span>}
-          {(node.additions !== undefined || node.deletions !== undefined) && <span className="text-2xs text-text-muted">+{node.additions ?? 0} −{node.deletions ?? 0}</span>}
-          {node.title !== undefined && <span className="max-w-32 truncate text-2xs text-text-muted">{node.title}</span>}
+          {isSession ? (
+            <>
+              <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${isRunningNode(node) ? 'bg-status-success' : 'bg-text-muted'}`} />
+              {node.agentKind !== undefined && <span className={`shrink-0 rounded px-1 text-2xs ${AGENT_KIND_CLASS[node.agentKind]}`}>{node.agentKind}</span>}
+              <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
+              {branch.where !== undefined && <span className="max-w-20 shrink truncate text-2xs text-text-muted">{branch.where}</span>}
+              {node.state !== undefined && <span className="shrink-0 text-2xs text-text-muted">{SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state}</span>}
+            </>
+          ) : (
+            <>
+              <span aria-hidden="true" className="shrink-0 text-text-muted">{STRUCTURE_ICON[node.kind] ?? '·'}</span>
+              <span className={`min-w-0 flex-1 truncate ${node.kind === 'project' ? 'font-semibold text-text' : ''}`}>{node.name}</span>
+              {counts !== null && counts.total > 0 && (
+                <span className="shrink-0 text-2xs text-text-muted" title={`${counts.running} đang chạy / ${counts.total} phiên`}>
+                  {counts.running > 0 ? `${counts.running} chạy` : `${counts.total} phiên`}
+                </span>
+              )}
+            </>
+          )}
         </button>
       </div>
       {!isCollapsed && children.map((child) => (

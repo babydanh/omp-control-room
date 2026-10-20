@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectTreeNode } from '../../core/src/messages.js';
-import { buildProjectTree, canMoveProjectNode, filterProjectTree, projectNodeMenuItems } from '../src/company/projects/projectTreeView.js';
+import {
+  buildAgentTree,
+  canMoveProjectNode,
+  countSessions,
+  filterProjectTree,
+  projectNodeMenuItems,
+} from '../src/company/projects/projectTreeView.js';
 
 const node = (id: string, kind: ProjectTreeNode['kind'], parentId?: string, extra: Partial<ProjectTreeNode> = {}): ProjectTreeNode => ({
   id,
@@ -16,33 +22,38 @@ const nodes: ProjectTreeNode[] = [
   node('group', 'group', 'project'),
   node('folder', 'folder', 'group'),
   node('repo', 'repository', 'folder'),
-  node('checkout', 'checkout', 'repo', { branch: 'feature', overlap: true }),
+  node('checkout', 'checkout', 'repo', { branch: 'feature', overlap: true, path: '/work/repo/.worktrees/feature' }),
+  node('file', 'file-agg', 'checkout'),
   node('session', 'session', 'checkout', { agentKind: 'claude', state: 'running' }),
+  node('idle', 'session', 'checkout', { agentKind: 'omp', state: 'idle' }),
+  node('empty', 'folder', 'project'),
   node('other', 'project'),
 ];
 
 describe('projectTreeView', () => {
-  it('builds nested display branches from parent-linked flat nodes', () => {
-    const roots = buildProjectTree(nodes);
+  it('shows sessions directly under their folder, with the branch they work on, and no git or file rows', () => {
+    const roots = buildAgentTree(nodes);
     expect(roots.map((entry) => entry.node.id)).toEqual(['project', 'other']);
-    expect(roots[0]?.children[0]?.children[0]?.children[0]?.children[0]?.children[0]?.node.id).toBe('session');
+    const folder = roots[0]?.children[0]?.children[0];
+    expect(folder?.node.id).toBe('folder');
+    expect(folder?.children.map((child) => child.node.id)).toEqual(['session', 'idle']);
+    expect(folder?.children[0]).toMatchObject({ where: 'feature', checkoutPath: '/work/repo/.worktrees/feature' });
+    expect(countSessions(roots[0]!)).toEqual({ total: 2, running: 1 });
   });
 
-  it('filters by tool and preserves matching ancestors', () => {
-    const filtered = filterProjectTree(buildProjectTree(nodes), {
-      agentKind: 'claude',
-      overlapOnly: false,
-      runningOnly: false,
-    });
-    expect(filtered).toHaveLength(1);
-    expect(filtered[0]?.children[0]?.children[0]?.children[0]?.children[0]?.children[0]?.node.id).toBe('session');
-    expect(filterProjectTree(buildProjectTree(nodes), { agentKind: 'omp', overlapOnly: false, runningOnly: false })).toEqual([]);
+  it('keeps empty folders without a filter and drops them once a filter is on', () => {
+    const all = filterProjectTree(buildAgentTree(nodes), { agentKind: 'all', runningOnly: false });
+    expect(all[0]?.children.map((child) => child.node.id)).toEqual(['group', 'empty']);
+    const claude = filterProjectTree(buildAgentTree(nodes), { agentKind: 'claude', runningOnly: false });
+    expect(claude.map((entry) => entry.node.id)).toEqual(['project']);
+    expect(claude[0]?.children.map((child) => child.node.id)).toEqual(['group']);
+    expect(claude[0]?.children[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['session']);
   });
 
-  it('filters overlap and running state while keeping ancestors', () => {
-    const filtered = filterProjectTree(buildProjectTree(nodes), { agentKind: 'all', overlapOnly: true, runningOnly: false });
-    expect(filtered[0]?.children[0]?.children[0]?.children[0]?.children[0]?.node.id).toBe('checkout');
-    expect(filterProjectTree(buildProjectTree(nodes), { agentKind: 'all', overlapOnly: false, runningOnly: true })).toHaveLength(1);
+  it('running filter keeps only running sessions', () => {
+    const running = filterProjectTree(buildAgentTree(nodes), { agentKind: 'all', runningOnly: true });
+    expect(running[0]?.children[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['session']);
+    expect(filterProjectTree(buildAgentTree(nodes), { agentKind: 'agy', runningOnly: false })).toEqual([]);
   });
 
   it('provides menu actions for each node category', () => {

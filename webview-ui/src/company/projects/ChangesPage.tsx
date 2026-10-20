@@ -11,7 +11,7 @@ export interface ChangesPageProps {
   initialTab?: 'diff' | 'merge';
 }
 
-export function ChangesPage({ store, checkoutId, onClose, initialTab = 'diff' }: ChangesPageProps) {
+export function ChangesPage({ store, checkoutId: initialCheckout, onClose, initialTab = 'diff' }: ChangesPageProps) {
   const state = useProjectState(store);
   const [tab, setTab] = useState<'diff' | 'merge'>(initialTab);
   const [scope, setScope] = useState<'uncommitted' | 'branch' | 'commit'>('uncommitted');
@@ -21,11 +21,21 @@ export function ChangesPage({ store, checkoutId, onClose, initialTab = 'diff' }:
   const [comment, setComment] = useState('');
   const [receiver, setReceiver] = useState('');
   const [branchB, setBranchB] = useState('');
-
-  useEffect(() => { store.requestTree(); }, [store]);
-  useEffect(() => { if (scope !== 'commit' || sha.trim()) store.requestDiff({ checkout: checkoutId, scope, sha: scope === 'commit' ? sha.trim() : '' }); }, [checkoutId, scope, sha, store]);
+  const [picked, setPicked] = useState(initialCheckout);
+  useEffect(() => setPicked(initialCheckout), [initialCheckout]);
 
   const nodes = state.nodes;
+  const checkouts = nodes.filter((node) => node.kind === 'checkout' && node.path !== undefined);
+  // Opened from the nav with nothing picked: start on a checkout whose lines changed, else any dirty one.
+  const changed = checkouts.find((node) => (node.additions ?? 0) + (node.deletions ?? 0) > 0) ?? checkouts.find((node) => node.dirty);
+  const checkoutId = picked !== '' ? picked : (changed ?? checkouts[0])?.path ?? '';
+
+  useEffect(() => { store.requestTree(); }, [store]);
+  useEffect(() => {
+    if (checkoutId === '' || (scope === 'commit' && !sha.trim())) return;
+    store.requestDiff({ checkout: checkoutId, scope, sha: scope === 'commit' ? sha.trim() : '' });
+  }, [checkoutId, scope, sha, store]);
+
   const checkout = nodes.find((node) => node.id === checkoutId || node.path === checkoutId);
   const repoId = checkout?.parentId;
   const branches = nodes.filter((node) => node.kind === 'checkout' && node.parentId === repoId && node.id !== checkout?.id && node.branch);
@@ -36,6 +46,7 @@ export function ChangesPage({ store, checkoutId, onClose, initialTab = 'diff' }:
   const selected = activeDiff?.files.find((file) => file.path === selectedPath) ?? activeDiff?.files[0];
   const lines = useMemo(() => selected?.hunks.flatMap((hunk) => numberDiffLines(`${hunk.header}\n${hunk.content}`)) ?? [], [selected]);
   const sending = Object.values(state.pending).some((request) => request.type === 'projectDiffRequest' && request.checkout === checkoutId && request.scope === scope);
+  const repoName = (node: ProjectTreeNode) => nodes.find((candidate) => candidate.id === node.parentId)?.name ?? '';
 
   useEffect(() => {
     const fallback = sessions.find((session) => session.state === 'running')?.sessionId ?? sessions[0]?.sessionId ?? '';
@@ -58,7 +69,15 @@ export function ChangesPage({ store, checkoutId, onClose, initialTab = 'diff' }:
 
   return <main className="company-ui flex h-full min-h-0 flex-col gap-3 bg-panel p-4 text-primary" aria-label="Thay đổi">
     <header className="flex items-center justify-between border-b border-border/60 pb-3">
-      <div><h1 className="text-lg font-semibold">Thay đổi</h1><p className="text-xs text-secondary">{checkout?.name ?? checkoutId}</p></div>
+      <div className="min-w-0">
+        <h1 className="text-lg font-semibold">Thay đổi</h1>
+        <select aria-label="Worktree" className="mt-1 max-w-full rounded border border-border bg-panel px-2 py-1 text-xs" value={checkout?.path ?? ''} onChange={(event) => { setPicked(event.target.value); setSelectedPath(''); setCommentLine(null); }}>
+          {checkouts.length === 0 && <option value="">Đang tải worktree…</option>}
+          {checkouts.map((node) => (
+            <option key={node.id} value={node.path}>{`${node.dirty ? '● ' : ''}${repoName(node)} · ${node.branch ?? node.name}${node.dirty ? ` (+${node.additions ?? 0} −${node.deletions ?? 0})` : ''}`}</option>
+          ))}
+        </select>
+      </div>
       <button className="rounded border border-border px-3 py-1 text-sm hover:bg-panel-hover" onClick={onClose}>Đóng</button>
     </header>
     <nav className="flex gap-2" aria-label="Chế độ xem">
@@ -104,6 +123,8 @@ function MergePanel({ store, checkout, branches, branchB, setBranchB, nodes }: {
   const [branchA, setBranchA] = useState(checkout?.branch ?? '');
   const [requestId, setRequestId] = useState<string | null>(null);
   useEffect(() => setBranchA(checkout?.branch ?? ''), [checkout?.branch]);
+  // A result belongs to the pair it was asked for; another pair starts blank.
+  useEffect(() => setRequestId(null), [branchA, branchB]);
   const state = useProjectState(store);
   // Matched by request id: the server may spell the repo path differently from the tree.
   const answer = requestId === null ? undefined : state.results[requestId];

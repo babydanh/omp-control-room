@@ -4,45 +4,93 @@ export { projectNodeMenuItems } from '../agentMenu.js';
 export interface ProjectTreeBranch {
   node: ProjectTreeNode;
   children: ProjectTreeBranch[];
+  /** Session rows: the branch (or worktree name) the session works on. */
+  where?: string;
+  /** Session rows: the checkout the session works in, for its changes. */
+  checkoutPath?: string;
 }
 
-export function buildProjectTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBranch[] {
+const STRUCTURE_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
+
+/**
+ * The sidebar's tree: Project → groups → folders → the sessions working there.
+ * Repos, worktrees and files are not rows: each session is lifted to its nearest
+ * folder and keeps its branch as a label. The git and file tree lives on the
+ * Thay đổi and Cây git pages.
+ */
+export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBranch[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
   const branches = new Map<string, ProjectTreeBranch>();
   const roots: ProjectTreeBranch[] = [];
-  for (const node of nodes) branches.set(node.id, { node, children: [] });
-  for (const branch of branches.values()) {
-    const parent = branch.node.parentId === undefined ? undefined : branches.get(branch.node.parentId);
-    if (parent === undefined) roots.push(branch);
-    else parent.children.push(branch);
+  for (const node of nodes) {
+    if (STRUCTURE_KINDS.has(node.kind)) branches.set(node.id, { node, children: [] });
+  }
+  for (const node of nodes) {
+    const own = branches.get(node.id);
+    if (own !== undefined) {
+      const parent = node.parentId === undefined ? undefined : branches.get(node.parentId);
+      if (parent === undefined) roots.push(own);
+      else parent.children.push(own);
+      continue;
+    }
+    if (node.kind !== 'session') continue;
+    let checkout: ProjectTreeNode | undefined;
+    let cursor = node.parentId === undefined ? undefined : byId.get(node.parentId);
+    while (cursor !== undefined && !STRUCTURE_KINDS.has(cursor.kind)) {
+      if (cursor.kind === 'checkout') checkout ??= cursor;
+      cursor = cursor.parentId === undefined ? undefined : byId.get(cursor.parentId);
+    }
+    const folder = cursor === undefined ? undefined : branches.get(cursor.id);
+    if (folder === undefined) continue;
+    const where = checkout?.branch ?? checkout?.name;
+    folder.children.push({
+      node,
+      children: [],
+      ...(where === undefined ? {} : { where }),
+      ...(checkout?.path === undefined ? {} : { checkoutPath: checkout.path }),
+    });
   }
   return roots;
 }
 
 export interface ProjectTreeFilters {
   agentKind: ProjectTreeNode['agentKind'] | 'all';
-  overlapOnly: boolean;
   runningOnly: boolean;
 }
 
+/** Keeps sessions that pass the filters plus their ancestors; with no filter, empty folders stay. */
 export function filterProjectTree(
   roots: readonly ProjectTreeBranch[],
   filters: ProjectTreeFilters,
 ): ProjectTreeBranch[] {
+  const filtering = filters.agentKind !== 'all' || filters.runningOnly;
   const filterBranch = (branch: ProjectTreeBranch): ProjectTreeBranch | null => {
     const children = branch.children.map(filterBranch).filter((child): child is ProjectTreeBranch => child !== null);
-    const { node } = branch;
+    if (branch.node.kind !== 'session') return !filtering || children.length > 0 ? { ...branch, children } : null;
     const matched =
-      (filters.agentKind === 'all' || node.agentKind === filters.agentKind || children.length > 0) &&
-      (!filters.overlapOnly || node.overlap === true || children.length > 0) &&
-      (!filters.runningOnly || isRunningNode(node) || children.length > 0);
-    if (!matched) return null;
-    return { node, children };
+      (filters.agentKind === 'all' || branch.node.agentKind === filters.agentKind) &&
+      (!filters.runningOnly || isRunningNode(branch.node));
+    return matched ? branch : null;
   };
   return roots.map(filterBranch).filter((branch): branch is ProjectTreeBranch => branch !== null);
 }
 
-function isRunningNode(node: ProjectTreeNode): boolean {
-  return node.kind === 'session' && (node.state === 'running' || node.state === 'busy' || node.state === 'active');
+/** Sessions in a branch, at any depth: the count a folder row shows. */
+export function countSessions(branch: ProjectTreeBranch): { total: number; running: number } {
+  if (branch.node.kind === 'session') return { total: 1, running: isRunningNode(branch.node) ? 1 : 0 };
+  return branch.children.reduce(
+    (sum, child) => {
+      const counts = countSessions(child);
+      return { total: sum.total + counts.total, running: sum.running + counts.running };
+    },
+    { total: 0, running: 0 },
+  );
+}
+
+const RUNNING_STATES: ReadonlySet<string> = new Set(['running', 'busy', 'active', 'working']);
+
+export function isRunningNode(node: ProjectTreeNode): boolean {
+  return node.kind === 'session' && RUNNING_STATES.has((node.state ?? '').toLowerCase());
 }
 
 

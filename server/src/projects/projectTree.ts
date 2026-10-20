@@ -76,8 +76,10 @@ function agentKindForLedger(row: SessionRow): ProjectAgentKind {
   return 'omp';
 }
 
+/** The ledger's agent name when it says something; `main` and blanks fall back to the short session id. */
 function titleForLedger(row: SessionRow): string {
-  return row.agentName ?? `${agentKindForLedger(row)} · ${row.sessionId.slice(-8)}`;
+  const name = row.agentName?.trim() ?? '';
+  return name !== '' && name !== 'main' ? name : `…${row.sessionId.slice(-8)}`;
 }
 
 function ledgerStatus(row: SessionRow): string {
