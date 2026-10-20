@@ -258,7 +258,7 @@ describe('project tree request', () => {
     const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
     const project = await store.createProject('Test');
     await store.addFolder(project.id, folder);
-    const sent: Array<{ type: string; nodes?: Array<{ kind: string; parentId?: string; name: string }> }> = [];
+    const sent: Array<{ type: string; nodes?: Array<{ id: string; kind: string; parentId?: string; name: string }> }> = [];
     handleProjectMessage({ type: 'projectTreeRequest', requestId: 'r1' }, (message) => sent.push(message as never), {
       privileged: true,
       store,
