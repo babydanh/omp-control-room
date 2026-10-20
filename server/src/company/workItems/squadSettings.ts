@@ -17,6 +17,32 @@ export const GIB = 1024 ** 3;
  */
 const CLAUDE_MODEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/[\]-]{0,63}$/;
 
+/**
+ * One tool pattern `--allowedTools` takes: a tool name, optionally with one parenthesised argument
+ * such as `Bash(git status*)`. Newlines and nested parentheses are refused, so a line is one pattern.
+ */
+const CLAUDE_TOOL_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\([^()\n]*\))?$/;
+
+/** The tool patterns an editing run may use without asking, as a folder starts with them. */
+const CLAUDE_ALLOWED_TOOLS_DEFAULT: readonly string[] = [
+  'Bash(git status*)',
+  'Bash(git diff*)',
+  'Bash(git log*)',
+  'Bash(git add*)',
+  'Bash(git commit*)',
+  'Bash(npm test*)',
+  'Bash(npm run *)',
+  'Bash(npx tsc*)',
+  'Bash(npx vitest*)',
+  'Bash(npx eslint*)',
+  'Bash(bun test*)',
+  'Bash(pnpm *)',
+  'Bash(flutter test*)',
+  'Bash(flutter analyze*)',
+  'Bash(dart *)',
+  'Bash(python *)',
+];
+
 /** The settings a folder starts with, before the user changes any. */
 export const SQUAD_SETTINGS_DEFAULT: SquadSettings = {
   maxParallel: 4,
@@ -31,6 +57,8 @@ export const SQUAD_SETTINGS_DEFAULT: SquadSettings = {
   maxClaudeRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
+  claudePermission: 'auto',
+  claudeAllowedTools: [...CLAUDE_ALLOWED_TOOLS_DEFAULT],
 };
 
 /** Inclusive bounds the contract allows for each numeric setting. */
@@ -42,6 +70,9 @@ export const SQUAD_SETTINGS_BOUNDS = {
   claudeMaxTurns: { min: 1, max: 200 },
   claudeMaxBudgetUsd: { min: 0.1, max: 50 },
 } as const;
+
+/** How many tool patterns a folder may allow, and how long each may be. */
+export const CLAUDE_ALLOWED_TOOL_LIMITS = { maxCount: 32, maxLength: 120 } as const;
 
 function isIntegerIn(value: unknown, min: number, max: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
@@ -57,6 +88,33 @@ function isClaudeModel(value: unknown): value is string {
 
 function isBrain(value: unknown): value is SquadSettings['brain'] {
   return value === 'omp' || value === 'claude';
+}
+
+function isClaudePermission(value: unknown): value is SquadSettings['claudePermission'] {
+  return value === 'auto' || value === 'acceptEdits';
+}
+
+function isClaudeAllowedTool(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length <= CLAUDE_ALLOWED_TOOL_LIMITS.maxLength &&
+    CLAUDE_TOOL_PATTERN.test(value)
+  );
+}
+
+function isClaudeAllowedTools(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= CLAUDE_ALLOWED_TOOL_LIMITS.maxCount &&
+    value.every(isClaudeAllowedTool)
+  );
+}
+
+/** Keeps each valid stored tool pattern in order; a stored value that is not a list falls back. */
+function parseAllowedTools(value: unknown, fallback: readonly string[]): string[] {
+  if (!Array.isArray(value)) return [...fallback];
+  const items: unknown[] = value;
+  return items.filter(isClaudeAllowedTool).slice(0, CLAUDE_ALLOWED_TOOL_LIMITS.maxCount);
 }
 
 /** Whether a command's settings are complete and in range. */
@@ -82,21 +140,33 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
     typeof value.preferClaude === 'boolean' &&
     isIntegerIn(value.maxClaudeRuns, maxClaudeRuns.min, maxClaudeRuns.max) &&
     isIntegerIn(value.claudeMaxTurns, claudeMaxTurns.min, claudeMaxTurns.max) &&
-    isNumberIn(value.claudeMaxBudgetUsd, claudeMaxBudgetUsd.min, claudeMaxBudgetUsd.max)
+    isNumberIn(value.claudeMaxBudgetUsd, claudeMaxBudgetUsd.min, claudeMaxBudgetUsd.max) &&
+    isClaudePermission(value.claudePermission) &&
+    isClaudeAllowedTools(value.claudeAllowedTools)
   );
 }
 
 /** Reads a stored settings object, keeping each valid field and defaulting the rest. */
 export function parseSquadSettings(value: unknown): SquadSettings {
   const base = SQUAD_SETTINGS_DEFAULT;
-  if (!isRecord(value)) return { ...base };
-  const { maxParallel, maxSquadSessions, minFreeRamGb, maxClaudeRuns, claudeMaxTurns, claudeMaxBudgetUsd } =
-    SQUAD_SETTINGS_BOUNDS;
+  if (!isRecord(value)) return { ...base, claudeAllowedTools: [...base.claudeAllowedTools] };
+  const {
+    maxParallel,
+    maxSquadSessions,
+    minFreeRamGb,
+    maxClaudeRuns,
+    claudeMaxTurns,
+    claudeMaxBudgetUsd,
+  } = SQUAD_SETTINGS_BOUNDS;
   return {
     maxParallel: isIntegerIn(value.maxParallel, maxParallel.min, maxParallel.max)
       ? value.maxParallel
       : base.maxParallel,
-    maxSquadSessions: isIntegerIn(value.maxSquadSessions, maxSquadSessions.min, maxSquadSessions.max)
+    maxSquadSessions: isIntegerIn(
+      value.maxSquadSessions,
+      maxSquadSessions.min,
+      maxSquadSessions.max,
+    )
       ? value.maxSquadSessions
       : base.maxSquadSessions,
     minFreeRamGb: isNumberIn(value.minFreeRamGb, minFreeRamGb.min, minFreeRamGb.max)
@@ -119,8 +189,16 @@ export function parseSquadSettings(value: unknown): SquadSettings {
     claudeMaxTurns: isIntegerIn(value.claudeMaxTurns, claudeMaxTurns.min, claudeMaxTurns.max)
       ? value.claudeMaxTurns
       : base.claudeMaxTurns,
-    claudeMaxBudgetUsd: isNumberIn(value.claudeMaxBudgetUsd, claudeMaxBudgetUsd.min, claudeMaxBudgetUsd.max)
+    claudeMaxBudgetUsd: isNumberIn(
+      value.claudeMaxBudgetUsd,
+      claudeMaxBudgetUsd.min,
+      claudeMaxBudgetUsd.max,
+    )
       ? value.claudeMaxBudgetUsd
       : base.claudeMaxBudgetUsd,
+    claudePermission: isClaudePermission(value.claudePermission)
+      ? value.claudePermission
+      : base.claudePermission,
+    claudeAllowedTools: parseAllowedTools(value.claudeAllowedTools, base.claudeAllowedTools),
   };
 }

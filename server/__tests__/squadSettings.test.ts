@@ -19,6 +19,8 @@ const VALID = {
   maxClaudeRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
+  claudePermission: 'auto',
+  claudeAllowedTools: ['Bash(git status*)', 'Bash(npm run *)'],
 };
 
 describe('parseSquadSettings', () => {
@@ -53,7 +55,42 @@ describe('parseSquadSettings', () => {
       maxClaudeRuns: SQUAD_SETTINGS_DEFAULT.maxClaudeRuns,
       claudeMaxTurns: SQUAD_SETTINGS_DEFAULT.claudeMaxTurns,
       claudeMaxBudgetUsd: SQUAD_SETTINGS_DEFAULT.claudeMaxBudgetUsd,
+      claudePermission: SQUAD_SETTINGS_DEFAULT.claudePermission,
+      claudeAllowedTools: SQUAD_SETTINGS_DEFAULT.claudeAllowedTools,
     });
+  });
+
+  it('keeps each valid tool pattern in order and drops the invalid ones', () => {
+    expect(
+      parseSquadSettings({
+        claudePermission: 'acceptEdits',
+        claudeAllowedTools: ['Bash(git status*)', 'Bash(', 'Edit', 'Bash(a(b))', 42, ''],
+      }),
+    ).toMatchObject({
+      claudePermission: 'acceptEdits',
+      claudeAllowedTools: ['Bash(git status*)', 'Edit'],
+    });
+  });
+
+  it('defaults an unknown permission mode and a stored value that is not a list', () => {
+    expect(
+      parseSquadSettings({ claudePermission: 'bypassPermissions', claudeAllowedTools: 'Edit' }),
+    ).toMatchObject({
+      claudePermission: SQUAD_SETTINGS_DEFAULT.claudePermission,
+      claudeAllowedTools: SQUAD_SETTINGS_DEFAULT.claudeAllowedTools,
+    });
+  });
+
+  it('caps the allowlist at 32 patterns', () => {
+    const many = Array.from({ length: 40 }, (_, index) => `Bash(cmd${index}*)`);
+    const kept = parseSquadSettings({ claudeAllowedTools: many }).claudeAllowedTools;
+    expect(kept).toHaveLength(32);
+    expect(kept[0]).toBe('Bash(cmd0*)');
+  });
+
+  it('gives each caller its own copy of the default allowlist', () => {
+    parseSquadSettings(undefined).claudeAllowedTools.push('Edit');
+    expect(SQUAD_SETTINGS_DEFAULT.claudeAllowedTools).not.toContain('Edit');
   });
 });
 
@@ -74,5 +111,19 @@ describe('isSquadSettings', () => {
     expect(isSquadSettings({ ...VALID, minFreeRamGb: -1 })).toBe(false);
     expect(isSquadSettings({ ...VALID, autoJudge: undefined })).toBe(false);
     expect(isSquadSettings(null)).toBe(false);
+  });
+
+  it('refuses an unknown permission mode or a tool pattern that is not one', () => {
+    expect(isSquadSettings({ ...VALID, claudePermission: 'plan' })).toBe(false);
+    expect(isSquadSettings({ ...VALID, claudeAllowedTools: ['Bash('] })).toBe(false);
+    expect(
+      isSquadSettings({ ...VALID, claudeAllowedTools: ['--dangerously-skip-permissions'] }),
+    ).toBe(false);
+  });
+
+  it('accepts an empty allowlist and refuses more than 32 patterns', () => {
+    expect(isSquadSettings({ ...VALID, claudeAllowedTools: [] })).toBe(true);
+    const many = Array.from({ length: 33 }, (_, index) => `Bash(cmd${index}*)`);
+    expect(isSquadSettings({ ...VALID, claudeAllowedTools: many })).toBe(false);
   });
 });

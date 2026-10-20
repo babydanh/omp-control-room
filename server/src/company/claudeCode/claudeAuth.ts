@@ -1,8 +1,8 @@
 /**
  * Probes whether Claude Code is installed and signed in with a Claude account. The probe runs
  * `claude auth status` with argv and no shell, caches the answer for a short time, and shares one
- * probe between concurrent callers. Only the exit code and `authMethod` are read; nothing else from
- * the output is kept or logged.
+ * probe between concurrent callers. Only `loggedIn` and `authMethod` of the answer are read; nothing
+ * else from the output is kept or logged.
  */
 
 import { execFile } from 'node:child_process';

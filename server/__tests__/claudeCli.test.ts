@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLAUDE_AUTH_ARGS,
   CLAUDE_COMMAND,
+  type ClaudeRunArgs,
   claudeRunArgs,
   claudeStatusLabel,
   claudeTurnArgs,
@@ -15,17 +16,22 @@ import {
 const SESSION = '6f1c2b1e-0000-4000-8000-000000000001';
 const SCHEMA_JSON = '{"type":"object"}';
 
+/** Edit-run arguments with the usual values filled in; a test overrides only what it varies. */
+const BASE_RUN: ClaudeRunArgs = {
+  mode: 'edit',
+  permission: 'acceptEdits',
+  allowedTools: [],
+  sessionId: SESSION,
+  resume: false,
+  maxTurns: 40,
+  maxBudgetUsd: 3,
+};
+
+const DEFAULT_TOOLS = ['Bash(git status*)', 'Bash(npm run *)'];
+
 describe('claudeRunArgs', () => {
-  it('runs an edit with acceptEdits and opens a new session with --session-id', () => {
-    expect(
-      claudeRunArgs({
-        mode: 'edit',
-        sessionId: SESSION,
-        resume: false,
-        maxTurns: 40,
-        maxBudgetUsd: 3,
-      }),
-    ).toEqual([
+  it('runs an edit in acceptEdits and opens a new session with --session-id', () => {
+    expect(claudeRunArgs(BASE_RUN)).toEqual([
       '-p',
       '--output-format',
       'stream-json',
@@ -43,57 +49,83 @@ describe('claudeRunArgs', () => {
     ]);
   });
 
-  it('runs a read with plan mode', () => {
-    const args = claudeRunArgs({
-      mode: 'read',
-      sessionId: SESSION,
-      resume: false,
-      maxTurns: 5,
-      maxBudgetUsd: 0.5,
-    });
-    expect(args).toContain('plan');
+  it('runs an edit in auto mode when the setting says auto', () => {
+    const args = claudeRunArgs({ ...BASE_RUN, permission: 'auto' });
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('auto');
     expect(args).not.toContain('acceptEdits');
+  });
+
+  it('passes each allowed tool as its own argv element right after --allowedTools', () => {
+    const args = claudeRunArgs({ ...BASE_RUN, permission: 'auto', allowedTools: DEFAULT_TOOLS });
+    const at = args.indexOf('--allowedTools');
+    expect(at).toBeGreaterThan(-1);
+    expect(args.slice(at, at + DEFAULT_TOOLS.length + 1)).toEqual([
+      '--allowedTools',
+      ...DEFAULT_TOOLS,
+    ]);
+    expect(args.slice(-2)).toEqual(['--session-id', SESSION]);
+  });
+
+  it('passes no --allowedTools when the list is empty, in either edit mode', () => {
+    for (const permission of ['auto', 'acceptEdits'] as const) {
+      expect(claudeRunArgs({ ...BASE_RUN, permission })).not.toContain('--allowedTools');
+    }
+  });
+
+  it('passes no --allowedTools to a read, even when tools are listed', () => {
+    const args = claudeRunArgs({ ...BASE_RUN, mode: 'read', allowedTools: DEFAULT_TOOLS });
+    expect(args).not.toContain('--allowedTools');
+    expect(args).not.toContain('Bash(npm run *)');
+  });
+
+  it('runs a read in plan mode whatever the edit permission is', () => {
+    for (const permission of ['auto', 'acceptEdits'] as const) {
+      const args = claudeRunArgs({ ...BASE_RUN, mode: 'read', permission });
+      expect(args[args.indexOf('--permission-mode') + 1]).toBe('plan');
+      expect(args).not.toContain('acceptEdits');
+    }
+  });
+
+  it('keeps permission prompts off in every mode', () => {
+    for (const mode of ['edit', 'read'] as const) {
+      for (const permission of ['auto', 'acceptEdits'] as const) {
+        const args = claudeRunArgs({ ...BASE_RUN, mode, permission, allowedTools: DEFAULT_TOOLS });
+        expect(args[args.indexOf('--permission-prompts') + 1]).toBe('none');
+      }
+    }
   });
 
   it('continues an existing session with --resume instead of --session-id', () => {
     const args = claudeRunArgs({
-      mode: 'edit',
-      sessionId: SESSION,
+      ...BASE_RUN,
+      permission: 'auto',
+      allowedTools: DEFAULT_TOOLS,
       resume: true,
-      maxTurns: 40,
-      maxBudgetUsd: 3,
     });
     expect(args.slice(-2)).toEqual(['--resume', SESSION]);
     expect(args).not.toContain('--session-id');
   });
 
-  it('adds --agent before the session flag only when an agent is given', () => {
-    const withAgent = claudeRunArgs({
-      mode: 'edit',
-      sessionId: SESSION,
-      resume: false,
-      agent: 'reviewer',
-      maxTurns: 40,
-      maxBudgetUsd: 3,
-    });
-    expect(withAgent.slice(-4)).toEqual(['--agent', 'reviewer', '--session-id', SESSION]);
+  it('adds --agent after the allowlist and before the session flag only when an agent is given', () => {
+    const withAgent = claudeRunArgs({ ...BASE_RUN, allowedTools: ['Edit'], agent: 'reviewer' });
+    expect(withAgent.slice(-6)).toEqual([
+      '--allowedTools',
+      'Edit',
+      '--agent',
+      'reviewer',
+      '--session-id',
+      SESSION,
+    ]);
 
-    const withoutAgent = claudeRunArgs({
-      mode: 'edit',
-      sessionId: SESSION,
-      resume: false,
-      maxTurns: 40,
-      maxBudgetUsd: 3,
-    });
-    expect(withoutAgent).not.toContain('--agent');
+    expect(claudeRunArgs(BASE_RUN)).not.toContain('--agent');
   });
 
   it('never passes --bare', () => {
     for (const mode of ['edit', 'read'] as const) {
       for (const resume of [true, false]) {
         const args = claudeRunArgs({
+          ...BASE_RUN,
           mode,
-          sessionId: SESSION,
           resume,
           agent: 'a',
           maxTurns: 1,
@@ -136,27 +168,38 @@ describe('auth command', () => {
 });
 
 describe('parseAuthStatus', () => {
-  it('reads a signed-in account from a non-none authMethod', () => {
-    expect(parseAuthStatus(0, '{"authMethod":"claude.ai"}')).toBe('signed_in');
-    expect(parseAuthStatus(0, '{"authMethod":"oauth_token"}')).toBe('signed_in');
+  it('reads a signed-in account from loggedIn true and a real authMethod', () => {
+    expect(parseAuthStatus(0, '{"loggedIn":true,"authMethod":"claude.ai"}')).toBe('signed_in');
   });
 
-  it('reads none or a missing authMethod as signed out', () => {
-    expect(parseAuthStatus(0, '{"authMethod":"none"}')).toBe('signed_out');
-    expect(parseAuthStatus(0, '{"loggedIn":false}')).toBe('signed_out');
+  it('reads the CLI signed-out answer, exit 1 with loggedIn false, as signed out', () => {
+    expect(
+      parseAuthStatus(1, '{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}'),
+    ).toBe('signed_out');
   });
 
-  it('reads a non-zero exit as signed out', () => {
-    expect(parseAuthStatus(1, '{"authMethod":"claude.ai"}')).toBe('signed_out');
+  it('reads loggedIn true with authMethod none or missing as signed out', () => {
+    expect(parseAuthStatus(0, '{"loggedIn":true,"authMethod":"none"}')).toBe('signed_out');
+    expect(parseAuthStatus(0, '{"loggedIn":true}')).toBe('signed_out');
   });
 
-  it('reads exit 0 with unparseable output as unknown', () => {
+  it('reads an authMethod without a loggedIn true as signed out', () => {
+    expect(parseAuthStatus(0, '{"authMethod":"claude.ai"}')).toBe('signed_out');
+    expect(parseAuthStatus(0, '{"loggedIn":"true","authMethod":"claude.ai"}')).toBe('signed_out');
+  });
+
+  it('lets the JSON answer decide over the exit code', () => {
+    expect(parseAuthStatus(1, '{"loggedIn":true,"authMethod":"claude.ai"}')).toBe('signed_in');
+  });
+
+  it('reads output that is not a JSON object as unknown, at either exit code', () => {
     expect(parseAuthStatus(0, 'not json')).toBe('unknown');
     expect(parseAuthStatus(0, '[1,2]')).toBe('unknown');
+    expect(parseAuthStatus(1, 'Error: not logged in')).toBe('unknown');
   });
 
   it('reads a probe with no exit code as unknown, not signed out', () => {
-    expect(parseAuthStatus(null, '')).toBe('unknown');
+    expect(parseAuthStatus(null, '{"loggedIn":true,"authMethod":"claude.ai"}')).toBe('unknown');
   });
 });
 

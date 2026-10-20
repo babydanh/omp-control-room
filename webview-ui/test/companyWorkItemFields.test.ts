@@ -30,6 +30,8 @@ const SETTINGS = {
   maxClaudeRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
+  claudePermission: 'auto' as const,
+  claudeAllowedTools: [] as string[],
 };
 
 function workItem(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {

@@ -1673,6 +1673,8 @@ export class WorkItemService {
       resume: sessionId !== undefined,
       agent: this.claudeAgentFor(item.agent),
       maxTurns: this.settings.claudeMaxTurns,
+      permission: this.settings.claudePermission,
+      allowedTools: this.settings.claudeAllowedTools,
       maxBudgetUsd: this.settings.claudeMaxBudgetUsd,
     });
     item.claudeRunId = started.runId;

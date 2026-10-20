@@ -12,6 +12,7 @@ import { squadClaudeCheck } from '../src/company/companyMessages.js';
 import { applyCompanyMessage } from '../src/company/companyState.js';
 import {
   brainOf,
+  permissionOf,
   type SquadSettingsDraft,
   squadSettingsDraftOf,
   squadSettingsFromDraft,
@@ -34,6 +35,8 @@ const SETTINGS: SquadSettings = {
   maxClaudeRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
+  claudePermission: 'auto',
+  claudeAllowedTools: ['Bash(git status*)', 'Bash(npm run *)'],
 };
 
 /** The draft the form holds once a person has changed the given fields of the saved settings. */
@@ -137,6 +140,14 @@ describe('brainOf', () => {
   });
 });
 
+describe('permissionOf', () => {
+  it('names acceptEdits only for the acceptEdits choice, and auto otherwise', () => {
+    expect(permissionOf('acceptEdits')).toBe('acceptEdits');
+    expect(permissionOf('auto')).toBe('auto');
+    expect(permissionOf('bypassPermissions')).toBe('auto');
+  });
+});
+
 describe('squadSettingsFromDraft for the Claude Code settings', () => {
   it('saves the Claude Code settings, trimming the model names', () => {
     const reading = squadSettingsFromDraft(
@@ -175,6 +186,32 @@ describe('squadSettingsFromDraft for the Claude Code settings', () => {
     expect(squadSettingsFromDraft(draftWith({ claudeMaxTurns: '201' })).ok).toBe(false);
     expect(squadSettingsFromDraft(draftWith({ claudeMaxBudgetUsd: '0.05' })).ok).toBe(false);
     expect(squadSettingsFromDraft(draftWith({ claudeMaxBudgetUsd: '50.5' })).ok).toBe(false);
+  });
+
+  it('saves the permission mode and reads the allowlist one pattern per line', () => {
+    const reading = squadSettingsFromDraft(
+      draftWith({
+        claudePermission: 'acceptEdits',
+        claudeAllowedTools: '  Bash(git status*) \n\nEdit\r\n',
+      }),
+    );
+    expect(reading).toEqual({
+      ok: true,
+      settings: {
+        ...SETTINGS,
+        claudePermission: 'acceptEdits',
+        claudeAllowedTools: ['Bash(git status*)', 'Edit'],
+      },
+    });
+  });
+
+  it('refuses a tool line that is not one pattern, and a list longer than 32', () => {
+    const bad = squadSettingsFromDraft(
+      draftWith({ claudeAllowedTools: 'Bash(git status*)\nrm -rf /' }),
+    );
+    expect(bad.ok).toBe(false);
+    const many = Array.from({ length: 33 }, (_, index) => `Bash(cmd${index}*)`).join('\n');
+    expect(squadSettingsFromDraft(draftWith({ claudeAllowedTools: many })).ok).toBe(false);
   });
 });
 

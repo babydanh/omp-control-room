@@ -145,6 +145,24 @@ describe('Claude Code runs: start and end', () => {
     expect(lastStart(f).input.agent).toBeUndefined();
   });
 
+  it('passes the folder permission mode and tool allowlist into an editing run', async () => {
+    const f = new Fixture();
+    await f.service.load();
+    await f.service.setSettings({
+      requestId: randomUUID(),
+      settings: {
+        ...SQUAD_SETTINGS_DEFAULT,
+        claudePermission: 'acceptEdits',
+        claudeAllowedTools: ['Bash(npm test*)'],
+      },
+    });
+    await createClaudeItem(f);
+    expect(lastStart(f).input).toMatchObject({
+      permission: 'acceptEdits',
+      allowedTools: ['Bash(npm test*)'],
+    });
+  });
+
   it('runs a read-only subagent in the repo itself, in plan mode, under that subagent name', async () => {
     const f = new Fixture();
     await f.service.load();

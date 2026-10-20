@@ -5,7 +5,13 @@
  * through the same end path, which clears the timer and notifies listeners.
  */
 
-import { CLAUDE_COMMAND, claudeRunArgs, clipText, parseStreamLine } from './claudeCli.js';
+import {
+  CLAUDE_COMMAND,
+  type ClaudePermission,
+  claudeRunArgs,
+  clipText,
+  parseStreamLine,
+} from './claudeCli.js';
 import {
   type ClaudeChildProcess,
   type ClaudeClearTimer,
@@ -44,6 +50,8 @@ export interface ClaudeRunStart {
   readonly cwd: string;
   readonly prompt: string;
   readonly mode: 'edit' | 'read';
+  readonly permission: ClaudePermission;
+  readonly allowedTools: readonly string[];
   readonly sessionId: string;
   readonly resume: boolean;
   readonly agent?: string;
@@ -224,6 +232,8 @@ export function createClaudeRuns(options: ClaudeRunsOptions): ClaudeRuns {
           CLAUDE_COMMAND,
           claudeRunArgs({
             mode: input.mode,
+            permission: input.permission,
+            allowedTools: input.allowedTools,
             sessionId: input.sessionId,
             resume: input.resume,
             agent: input.agent,

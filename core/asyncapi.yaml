@@ -4084,7 +4084,7 @@ components:
     SquadSettings:
       type: object
       additionalProperties: false
-      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, brain, claudeModelLeader, claudeModelJudge, preferClaude, maxClaudeRuns, claudeMaxTurns, claudeMaxBudgetUsd]
+      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, brain, claudeModelLeader, claudeModelJudge, preferClaude, maxClaudeRuns, claudeMaxTurns, claudeMaxBudgetUsd, claudePermission, claudeAllowedTools]
       description: >-
         Per-folder limits for the squad scheduler. maxParallel caps running work items in the folder.
         maxSquadSessions caps the omp sessions the squad opens. minFreeRamGb is the free memory needed before
@@ -4134,6 +4134,23 @@ components:
           type: number
           minimum: 0.1
           maximum: 50
+        claudePermission:
+          type: string
+          enum: [auto, acceptEdits]
+          description: >-
+            Permission mode of an editing Claude Code run. auto lets the classifier approve safe actions and block
+            risky ones; acceptEdits approves file edits only. Read-only runs always plan.
+        claudeAllowedTools:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            minLength: 1
+            maxLength: 120
+            pattern: '^[A-Za-z][A-Za-z0-9_]*(\([^()\n]*\))?$'
+          description: >-
+            Tool patterns an editing Claude Code run may use without asking, passed as --allowedTools, such as
+            Bash(git status*). Read-only runs get none.
 
     ClaudeCodeStatus:
       type: object

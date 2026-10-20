@@ -46,6 +46,8 @@ const SETTINGS: SquadSettings = {
   maxClaudeRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
+  claudePermission: 'auto',
+  claudeAllowedTools: [],
 };
 
 function item(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {

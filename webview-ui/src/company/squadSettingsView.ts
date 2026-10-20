@@ -20,7 +20,12 @@ export const CLAUDE_SETTING_LIMITS = {
   claudeMaxTurns: { min: 1, max: 200 },
   /** The budget of one run, in US dollars. It need not be a whole number. */
   claudeMaxBudgetUsd: { min: 0.1, max: 50 },
+  /** How many tool patterns an editing run may allow, and how long each may be. */
+  claudeAllowedTools: { maxCount: 32, maxChars: 120 },
 } as const;
+
+/** A tool pattern `--allowedTools` takes: a tool name, optionally with one parenthesised argument. */
+const CLAUDE_TOOL_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\([^()\n]*\))?$/;
 
 /** The settings as the form holds them. The numbers stay text, so a half-typed value survives. */
 export interface SquadSettingsDraft {
@@ -36,6 +41,9 @@ export interface SquadSettingsDraft {
   maxClaudeRuns: string;
   claudeMaxTurns: string;
   claudeMaxBudgetUsd: string;
+  claudePermission: SquadSettings['claudePermission'];
+  /** One tool pattern per line, as the form shows them. */
+  claudeAllowedTools: string;
 }
 
 /** The outcome of reading a draft: the settings to save, or the reason they cannot be saved. */
@@ -46,6 +54,11 @@ export type SquadSettingsReading =
 /** The brain a form choice names. Anything but `claude` is omp, the default brain. */
 export function brainOf(choice: string): SquadSettings['brain'] {
   return choice === 'claude' ? 'claude' : 'omp';
+}
+
+/** The permission mode a form choice names. Anything but acceptEdits is auto, the default. */
+export function permissionOf(choice: string): SquadSettings['claudePermission'] {
+  return choice === 'acceptEdits' ? 'acceptEdits' : 'auto';
 }
 
 export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraft {
@@ -62,6 +75,8 @@ export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraf
     maxClaudeRuns: String(settings.maxClaudeRuns),
     claudeMaxTurns: String(settings.claudeMaxTurns),
     claudeMaxBudgetUsd: String(settings.claudeMaxBudgetUsd),
+    claudePermission: settings.claudePermission,
+    claudeAllowedTools: settings.claudeAllowedTools.join('\n'),
   };
 }
 
@@ -92,6 +107,11 @@ function modelIn(text: string, min: number, max: number): string | null {
   const trimmed = text.trim();
   const length = Array.from(trimmed).length;
   return length < min || length > max ? null : trimmed;
+}
+
+/** Whether a line is one tool pattern: a tool name, optionally with one parenthesised argument. */
+function isToolPattern(text: string, maxChars: number): boolean {
+  return text.length <= maxChars && CLAUDE_TOOL_PATTERN.test(text);
 }
 
 export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettingsReading {
@@ -151,6 +171,24 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
   if (claudeMaxBudgetUsd === null) {
     return { ok: false, reason: 'Ngân sách mỗi lần chạy là số USD từ 0,1 đến 50.' };
   }
+  const toolLimits = CLAUDE_SETTING_LIMITS.claudeAllowedTools;
+  const claudeAllowedTools = draft.claudeAllowedTools
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '');
+  if (claudeAllowedTools.length > toolLimits.maxCount) {
+    return {
+      ok: false,
+      reason: `Danh sách quyền công cụ có tối đa ${toolLimits.maxCount} dòng.`,
+    };
+  }
+  const badTool = claudeAllowedTools.find((line) => !isToolPattern(line, toolLimits.maxChars));
+  if (badTool !== undefined) {
+    return {
+      ok: false,
+      reason: `Quyền công cụ "${badTool}" không hợp lệ. Mỗi dòng là một quyền, ví dụ Bash(git status*) hoặc Edit.`,
+    };
+  }
   return {
     ok: true,
     settings: {
@@ -166,6 +204,8 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
       maxClaudeRuns,
       claudeMaxTurns,
       claudeMaxBudgetUsd,
+      claudePermission: draft.claudePermission,
+      claudeAllowedTools,
     },
   };
 }

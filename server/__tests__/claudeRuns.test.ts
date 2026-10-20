@@ -14,6 +14,8 @@ const START: ClaudeRunStart = {
   cwd: 'V:/repo/wt',
   prompt: 'Sửa lỗi',
   mode: 'edit',
+  permission: 'auto',
+  allowedTools: ['Bash(npm test*)'],
   sessionId: SESSION,
   resume: false,
   maxTurns: 40,
@@ -133,6 +135,8 @@ describe('createClaudeRuns start', () => {
         file: 'claude',
         args: claudeRunArgs({
           mode: 'edit',
+          permission: 'auto',
+          allowedTools: ['Bash(npm test*)'],
           sessionId: SESSION,
           resume: false,
           maxTurns: 40,
@@ -150,6 +154,23 @@ describe('createClaudeRuns start', () => {
       pid: 4321,
       started: false,
     });
+  });
+
+  it('spawns a read run in plan mode with no allowlist', () => {
+    const { runs, spawns } = harness();
+    runs.start({ ...START, mode: 'read' });
+    const args = claudeRunArgs({
+      mode: 'read',
+      permission: 'auto',
+      allowedTools: ['Bash(npm test*)'],
+      sessionId: SESSION,
+      resume: false,
+      maxTurns: 40,
+      maxBudgetUsd: 3,
+    });
+    expect(spawns).toEqual([{ file: 'claude', args, cwd: 'V:/repo/wt' }]);
+    expect(args).not.toContain('--allowedTools');
+    expect(args[args.indexOf('--permission-mode') + 1]).toBe('plan');
   });
 
   it('reports a spawn that throws at once as failed, with no pid', () => {

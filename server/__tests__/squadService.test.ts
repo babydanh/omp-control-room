@@ -100,6 +100,8 @@ class FakeWorkItems implements SquadWorkItems {
     maxClaudeRuns: 2,
     claudeMaxTurns: 40,
     claudeMaxBudgetUsd: 3,
+    claudePermission: 'auto',
+    claudeAllowedTools: [],
   };
   /** The folder's repos: the paths a row may name. */
   readonly repos: string[] = [REPO_APP];

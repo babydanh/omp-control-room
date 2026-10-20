@@ -12,9 +12,16 @@ export const CLAUDE_COMMAND = 'claude';
 /** What the auth probe concluded. Matches the state the core `ClaudeCodeStatus` carries. */
 export type ClaudeAuthState = 'unknown' | 'missing' | 'signed_out' | 'signed_in';
 
+/** The permission mode an editing run starts in. `auto` lets the classifier review each action. */
+export type ClaudePermission = 'auto' | 'acceptEdits';
+
 /** One item run: an editing run or a read-only run, opening or resuming one session. */
 export interface ClaudeRunArgs {
   readonly mode: 'edit' | 'read';
+  /** The permission mode of an editing run. A read-only run always plans. */
+  readonly permission: ClaudePermission;
+  /** Tool patterns an editing run may use without asking. A read-only run gets none. */
+  readonly allowedTools: readonly string[];
   readonly sessionId: string;
   /** `--resume` continues the session; otherwise `--session-id` opens it. */
   readonly resume: boolean;
@@ -56,14 +63,16 @@ const AUTH_LABELS: Record<ClaudeAuthState, string> = {
   unknown: 'Claude Code: chưa kiểm tra',
 };
 
-/** The argv for `claude auth status`. Only its exit code and `authMethod` are read. */
+/** The argv for `claude auth status`. Only the `loggedIn` and `authMethod` of its answer are read. */
 export const CLAUDE_AUTH_ARGS: readonly string[] = ['auth', 'status'];
 
 /**
- * The argv for one item run. An edit run accepts file edits and a read run only plans. Permission
- * prompts are off, so a run never waits on a person. The prompt goes on stdin.
+ * The argv for one item run. An editing run starts in its permission mode and may use the allowed
+ * tools without asking; a read-only run only plans and gets no allowlist. Permission prompts are
+ * off, so a run never waits on a person. The prompt goes on stdin.
  */
 export function claudeRunArgs(args: ClaudeRunArgs): string[] {
+  const edit = args.mode === 'edit';
   return [
     '-p',
     '--output-format',
@@ -72,11 +81,13 @@ export function claudeRunArgs(args: ClaudeRunArgs): string[] {
     '--permission-prompts',
     'none',
     '--permission-mode',
-    args.mode === 'edit' ? 'acceptEdits' : 'plan',
+    edit ? args.permission : 'plan',
     '--max-turns',
     String(args.maxTurns),
     '--max-budget-usd',
     String(args.maxBudgetUsd),
+    // --allowedTools reads its values up to the next flag, so the flags after it start with `--`.
+    ...(edit && args.allowedTools.length > 0 ? ['--allowedTools', ...args.allowedTools] : []),
     ...(args.agent === undefined ? [] : ['--agent', args.agent]),
     ...(args.resume ? ['--resume', args.sessionId] : ['--session-id', args.sessionId]),
   ];
@@ -107,19 +118,19 @@ export function claudeTurnArgs(input: {
 }
 
 /**
- * Reads the auth probe's outcome. A non-zero exit is signed out. An exit with no code (killed or
- * never finished) is unknown, not signed out. Exit 0 needs a JSON object whose `authMethod` names a
- * real method; `none`, a missing value, or an empty value is signed out.
+ * Reads the auth probe's outcome from `claude auth status`. Only the answer's `loggedIn` and
+ * `authMethod` decide: signed in needs `loggedIn` true and an `authMethod` that names a real method,
+ * never `none` or an empty value. The CLI answers signed out with exit 1 and JSON, so the JSON
+ * decides. A killed probe (no exit code), or output that is not a JSON object, is unknown.
  */
 export function parseAuthStatus(exitCode: number | null, stdout: string): ClaudeAuthState {
   if (exitCode === null) return 'unknown';
-  if (exitCode !== 0) return 'signed_out';
   const value = parseJson(stdout.trim());
   if (!isRecord(value)) return 'unknown';
   const method = value['authMethod'];
-  return typeof method === 'string' && method !== '' && method !== 'none'
-    ? 'signed_in'
-    : 'signed_out';
+  const signedIn =
+    value['loggedIn'] === true && typeof method === 'string' && method !== '' && method !== 'none';
+  return signedIn ? 'signed_in' : 'signed_out';
 }
 
 /** The Vietnamese status line the board shows for an auth state. */

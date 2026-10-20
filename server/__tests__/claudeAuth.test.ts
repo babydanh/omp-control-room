@@ -9,7 +9,10 @@ import { CLAUDE_AUTH_ARGS, CLAUDE_COMMAND } from '../src/company/claudeCode/clau
 
 const NOW = 1_000_000;
 const TTL_MS = 60_000;
-const SIGNED_IN: ClaudeAuthRunResult = { exitCode: 0, stdout: '{"authMethod":"claude.ai"}' };
+const SIGNED_IN: ClaudeAuthRunResult = {
+  exitCode: 0,
+  stdout: '{"loggedIn":true,"authMethod":"claude.ai"}',
+};
 
 /** A run that always answers the same way, and records each call. */
 function recordingRun(answer: ClaudeAuthRunResult) {
@@ -38,12 +41,20 @@ describe('createClaudeAuthProbe', () => {
     expect(probe.current().state).toBe('signed_in');
   });
 
-  it('reports signed_out when the command exits non-zero', async () => {
+  it('reports signed_out for the CLI logged-out answer, exit 1 with loggedIn false', async () => {
+    const probe = createClaudeAuthProbe({
+      run: recordingRun({ exitCode: 1, stdout: '{"loggedIn":false,"authMethod":"none"}' }).run,
+      now: () => NOW,
+    });
+    expect((await probe.check()).state).toBe('signed_out');
+  });
+
+  it('reports unknown when a non-zero exit gives no JSON answer', async () => {
     const probe = createClaudeAuthProbe({
       run: recordingRun({ exitCode: 1, stdout: '' }).run,
       now: () => NOW,
     });
-    expect((await probe.check()).state).toBe('signed_out');
+    expect((await probe.check()).state).toBe('unknown');
   });
 
   it('reports missing when the program cannot be found', async () => {

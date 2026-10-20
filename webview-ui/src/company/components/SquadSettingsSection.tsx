@@ -13,6 +13,7 @@ import type { CompanyClient } from '../companyClient.js';
 import {
   brainOf,
   CLAUDE_SETTING_LIMITS,
+  permissionOf,
   SQUAD_COUNT_LIMITS,
   type SquadSettingsDraft,
   squadSettingsDraftOf,
@@ -29,6 +30,11 @@ const FIELD_CLASS =
 const BRAIN_OPTIONS: readonly { value: string; label: string }[] = [
   { value: 'omp', label: 'omp (mặc định)' },
   { value: 'claude', label: 'Claude Code (claude -p)' },
+];
+
+const PERMISSION_OPTIONS: readonly { value: string; label: string }[] = [
+  { value: 'auto', label: 'auto (classifier duyệt)' },
+  { value: 'acceptEdits', label: 'acceptEdits (chỉ duyệt sửa file)' },
 ];
 
 export interface SquadSettingsSectionProps {
@@ -95,6 +101,7 @@ function SquadSettingsForm({
   const runs = CLAUDE_SETTING_LIMITS.maxClaudeRuns;
   const turns = CLAUDE_SETTING_LIMITS.claudeMaxTurns;
   const budget = CLAUDE_SETTING_LIMITS.claudeMaxBudgetUsd;
+  const tools = CLAUDE_SETTING_LIMITS.claudeAllowedTools;
 
   function save(): void {
     if (!reading.ok) return;
@@ -230,6 +237,25 @@ function SquadSettingsForm({
           disabled={command.pending}
           onChange={(value) => setDraft((current) => ({ ...current, claudeMaxBudgetUsd: value }))}
         />
+        <SelectSetting
+          id="squad-setting-claude-permission"
+          label="Chế độ quyền khi sửa"
+          hint="auto: classifier của Claude Code duyệt thao tác an toàn, chặn thao tác rủi ro. acceptEdits: chỉ tự duyệt sửa file; lệnh khác theo danh sách dưới."
+          value={draft.claudePermission}
+          options={PERMISSION_OPTIONS}
+          disabled={command.pending}
+          onChange={(value) =>
+            setDraft((current) => ({ ...current, claudePermission: permissionOf(value) }))
+          }
+        />
+        <TextareaSetting
+          id="squad-setting-claude-allowed-tools"
+          label="Công cụ được tự chạy khi sửa"
+          hint={`Mỗi dòng một quyền, ví dụ Bash(git status*). Tối đa ${tools.maxCount} dòng. Không áp dụng cho việc chỉ đọc.`}
+          value={draft.claudeAllowedTools}
+          disabled={command.pending}
+          onChange={(value) => setDraft((current) => ({ ...current, claudeAllowedTools: value }))}
+        />
       </section>
       {reading.ok ? null : (
         <p role="alert" className="text-danger">
@@ -363,6 +389,39 @@ function TextSetting({ id, label, hint, value, disabled, onChange }: TextSetting
         aria-describedby={`${id}-hint`}
         onChange={(event) => onChange(event.target.value)}
         className={FIELD_CLASS}
+      />
+      <p id={`${id}-hint`} className="text-2xs text-text-muted">
+        {hint}
+      </p>
+    </div>
+  );
+}
+
+interface TextareaSettingProps {
+  id: string;
+  label: string;
+  hint: string;
+  value: string;
+  disabled: boolean;
+  onChange(value: string): void;
+}
+
+function TextareaSetting({ id, label, hint, value, disabled, onChange }: TextareaSettingProps) {
+  return (
+    <div className="flex flex-col gap-1">
+      <label htmlFor={id} className="text-text-muted">
+        {label}
+      </label>
+      <textarea
+        id={id}
+        rows={4}
+        autoComplete="off"
+        spellCheck={false}
+        value={value}
+        disabled={disabled}
+        aria-describedby={`${id}-hint`}
+        onChange={(event) => onChange(event.target.value)}
+        className={`${FIELD_CLASS} resize-y`}
       />
       <p id={`${id}-hint`} className="text-2xs text-text-muted">
         {hint}

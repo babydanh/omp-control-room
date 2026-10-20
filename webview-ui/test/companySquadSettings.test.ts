@@ -23,6 +23,8 @@ const SETTINGS: SquadSettings = {
   maxClaudeRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
+  claudePermission: 'acceptEdits',
+  claudeAllowedTools: ['Bash(git status*)', 'Edit'],
 };
 
 /** The draft the form holds once a person has changed the given fields of the saved settings. */
@@ -45,6 +47,8 @@ describe('squadSettingsDraftOf', () => {
       maxClaudeRuns: '2',
       claudeMaxTurns: '40',
       claudeMaxBudgetUsd: '3',
+      claudePermission: 'acceptEdits',
+      claudeAllowedTools: 'Bash(git status*)\nEdit',
     });
   });
 });
