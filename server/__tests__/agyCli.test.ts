@@ -5,7 +5,6 @@ import { agyWorkerArgs, parseAgyStreamLine } from '../src/company/agyCode/agyCli
 describe('agyWorkerArgs', () => {
   it('uses stream-json, text stdin, and the 30-minute worker timeout without permission bypass', () => {
     expect(agyWorkerArgs()).toEqual([
-      '-p',
       '--output-format',
       'stream-json',
       '--input-format',

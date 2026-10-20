@@ -39,8 +39,8 @@ export function createAgyTurnRunner(options: AgyTurnRunnerOptions): LeaderRunner
         spawn,
         file: AGY_COMMAND,
         cwd: options.cwd,
+        // Prompt through stdin; no `-p`: agy takes the argument after `-p` as the prompt.
         args: [
-          '-p',
           '--output-format',
           'json',
           '--json-schema',

@@ -5,9 +5,13 @@ import { isRecord } from '../typeGuards.js';
 export const AGY_COMMAND = 'agy';
 export const AGY_RUN_TIMEOUT_MS = 30 * 60_000;
 
+/**
+ * Prompt goes through stdin (`--input-format text`), so there is no `-p`: agy's `-p` takes the next
+ * argument as the prompt, and a bare `-p` before another flag exits 2 without running.
+ */
 export function agyWorkerArgs(timeoutMs = AGY_RUN_TIMEOUT_MS): string[] {
   const timeout = timeoutMs === AGY_RUN_TIMEOUT_MS ? '30m' : `${Math.ceil(timeoutMs / 1000)}s`;
-  return ['-p', '--output-format', 'stream-json', '--input-format', 'text', '--print-timeout', timeout];
+  return ['--output-format', 'stream-json', '--input-format', 'text', '--print-timeout', timeout];
 }
 export interface AgyResultEvent {
   readonly kind: 'result';

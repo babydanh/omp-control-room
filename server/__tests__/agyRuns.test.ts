@@ -56,7 +56,6 @@ describe('createAgyRuns', () => {
 
     expect(spawns[0]).toMatchObject({ file: 'agy', cwd: 'V:/repo/worktree' });
     expect(spawns[0]?.args).toEqual([
-      '-p',
       '--output-format',
       'stream-json',
       '--input-format',

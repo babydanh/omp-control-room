@@ -72,6 +72,7 @@ describe('createAgyTurnRunner', () => {
     expect(calls[0]?.args).toContain('--json-schema');
     expect(calls[0]?.args).toContain('--input-format');
     expect(calls[0]?.args).toContain('text');
+    expect(calls[0]?.args).not.toContain('-p');
   });
 
   it('reports a missing agy executable in Vietnamese', async () => {
