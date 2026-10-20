@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CLAUDE_AUTH_ARGS,
   CLAUDE_COMMAND,
+  CLAUDE_DENIED_TOOLS,
   type ClaudeRunArgs,
   claudeRunArgs,
   claudeStatusLabel,
@@ -44,6 +45,15 @@ describe('claudeRunArgs', () => {
       '40',
       '--max-budget-usd',
       '3',
+      '--disallowedTools',
+      'Bash(git push*)',
+      'Bash(git reset --hard*)',
+      'Bash(git stash*)',
+      'Bash(git clean*)',
+      'Bash(git checkout -- *)',
+      'Bash(git restore*)',
+      'Bash(git branch -D*)',
+      'Bash(git worktree remove*)',
       '--session-id',
       SESSION,
     ]);
@@ -69,6 +79,20 @@ describe('claudeRunArgs', () => {
   it('passes no --allowedTools when the list is empty, in either edit mode', () => {
     for (const permission of ['auto', 'acceptEdits'] as const) {
       expect(claudeRunArgs({ ...BASE_RUN, permission })).not.toContain('--allowedTools');
+    }
+  });
+
+  it('denies git push and work-losing git commands in every mode, even if the allowlist names them', () => {
+    for (const run of [
+      { ...BASE_RUN, permission: 'auto' as const, allowedTools: ['Bash(git push*)'] },
+      { ...BASE_RUN, permission: 'acceptEdits' as const },
+      { ...BASE_RUN, mode: 'read' as const },
+    ]) {
+      const args = claudeRunArgs(run);
+      const at = args.indexOf('--disallowedTools');
+      expect(at).toBeGreaterThan(-1);
+      expect(args.slice(at + 1, at + 1 + CLAUDE_DENIED_TOOLS.length)).toEqual([...CLAUDE_DENIED_TOOLS]);
+      expect(CLAUDE_DENIED_TOOLS).toContain('Bash(git push*)');
     }
   });
 

@@ -67,6 +67,23 @@ const AUTH_LABELS: Record<ClaudeAuthState, string> = {
 export const CLAUDE_AUTH_ARGS: readonly string[] = ['auth', 'status'];
 
 /**
+ * Commands an item run may never run, whatever the permission mode or the allowlist says (deny
+ * rules win over allow rules in Claude Code). An allowlist only skips the prompt; in `auto` mode a
+ * command outside it still goes to the classifier, so a push has to be denied outright. The list
+ * mirrors what the user's omp `activity-ledger` blocks: pushing, and git commands that lose work.
+ */
+export const CLAUDE_DENIED_TOOLS: readonly string[] = [
+  'Bash(git push*)',
+  'Bash(git reset --hard*)',
+  'Bash(git stash*)',
+  'Bash(git clean*)',
+  'Bash(git checkout -- *)',
+  'Bash(git restore*)',
+  'Bash(git branch -D*)',
+  'Bash(git worktree remove*)',
+];
+
+/**
  * The argv for one item run. An editing run starts in its permission mode and may use the allowed
  * tools without asking; a read-only run only plans and gets no allowlist. Permission prompts are
  * off, so a run never waits on a person. The prompt goes on stdin.
@@ -86,6 +103,8 @@ export function claudeRunArgs(args: ClaudeRunArgs): string[] {
     String(args.maxTurns),
     '--max-budget-usd',
     String(args.maxBudgetUsd),
+    '--disallowedTools',
+    ...CLAUDE_DENIED_TOOLS,
     // --allowedTools reads its values up to the next flag, so the flags after it start with `--`.
     ...(edit && args.allowedTools.length > 0 ? ['--allowedTools', ...args.allowedTools] : []),
     ...(args.agent === undefined ? [] : ['--agent', args.agent]),
