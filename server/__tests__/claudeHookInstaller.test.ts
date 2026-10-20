@@ -100,6 +100,25 @@ describe('claudeHookInstaller', () => {
     expect(hooks['PermissionRequest']).toHaveLength(1);
   });
 
+  it('installs every event async except SessionEnd, which must block until delivered', async () => {
+    await installHooks();
+    const hooks = readSettings().hooks as Record<string, Array<{ hooks: Array<{ async?: boolean }> }>>;
+    expect(hooks['PreToolUse'][0].hooks[0].async).toBe(true);
+    expect(hooks['Stop'][0].hooks[0].async).toBe(true);
+    expect(hooks['SessionEnd'][0].hooks[0].async).toBeUndefined();
+  });
+
+  it('upgrades a synchronous install from an older version to async', async () => {
+    const settingsPath = settingsPathFor();
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    const legacy = { matcher: '', hooks: [{ type: 'command', command: ourCommand(), timeout: 5 }] };
+    fs.writeFileSync(settingsPath, JSON.stringify({ hooks: { PreToolUse: [legacy] } }));
+    await installHooks();
+    const hooks = readSettings().hooks as Record<string, Array<{ hooks: Array<{ async?: boolean }> }>>;
+    expect(hooks['PreToolUse']).toHaveLength(1);
+    expect(hooks['PreToolUse'][0].hooks[0].async).toBe(true);
+  });
+
   // 2. installHooks is idempotent
   it('installHooks is idempotent', async () => {
     await installHooks();

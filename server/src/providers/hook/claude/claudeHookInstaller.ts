@@ -22,6 +22,7 @@ interface ClaudeHookEntry {
     type: string;
     command: string;
     timeout?: number;
+    async?: boolean;
   }>;
 }
 
@@ -451,7 +452,8 @@ function settingsHoldOnlyOurHooks(settings: ClaudeSettings): boolean {
   if (hooks === null || typeof hooks !== 'object' || Array.isArray(hooks)) {
     return false;
   }
-  const reference = makeHookEntry();
+  // Any non-SessionEnd event: its entry carries every field the writer emits.
+  const reference = makeHookEntry('Stop');
   // Maps rather than index access: `has` distinguishes "the writer has no such
   // field" (an unknown field on the entry — not ours) from "the writer's value
   // is undefined", and neither needs a cast to an index-signature type.
@@ -532,8 +534,12 @@ function makeHookCommand(): string {
   return `node "${scriptPath}"`;
 }
 
-/** Create a hook entry object for Claude's settings.json. Matcher is empty (catch-all). */
-function makeHookEntry(): ClaudeHookEntry {
+/** Create a hook entry object for Claude's settings.json. Matcher is empty (catch-all).
+ *  Every event except SessionEnd runs async: the script decides nothing, so
+ *  Claude need not wait ~65 ms of node startup on each tool call. SessionEnd
+ *  stays blocking so the event is delivered before the CLI exits. The server
+ *  restores order from the script's timestamp (HookEventReorderer). */
+function makeHookEntry(event: string): ClaudeHookEntry {
   return {
     matcher: '',
     hooks: [
@@ -541,6 +547,7 @@ function makeHookEntry(): ClaudeHookEntry {
         type: 'command',
         command: makeHookCommand(),
         timeout: 5,
+        ...(event === 'SessionEnd' ? {} : { async: true }),
       },
     ],
   };
@@ -666,7 +673,7 @@ function installEntries(): Promise<boolean> {
       }
       const entries = hooks[event];
       // Remove any existing Pixel Agents commands (in case the script path changed)
-      const filtered = (withoutOurEntries(entries) ?? entries).concat(makeHookEntry());
+      const filtered = (withoutOurEntries(entries) ?? entries).concat(makeHookEntry(event));
       if (JSON.stringify(filtered) !== JSON.stringify(entries)) {
         hooks[event] = filtered;
         changed = true;

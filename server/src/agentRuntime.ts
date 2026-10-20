@@ -36,6 +36,7 @@ import {
 } from './fileWatcher.js';
 import type { HookEvent } from './hookEventHandler.js';
 import { HookEventHandler } from './hookEventHandler.js';
+import { HookEventReorderer } from './hookEventReorder.js';
 import { assignPaletteIfNeeded } from './paletteAssigner.js';
 import { PathSet, pathsMatch } from './pathKey.js';
 import { SessionRouter } from './sessionRouter.js';
@@ -83,6 +84,9 @@ export class AgentRuntime {
   /** Shadow-store watcher for unnamed background spawns (sub-agents). */
   readonly subagentWatch: SubagentWatch;
   private hookEventHandler: HookEventHandler;
+  private readonly hookReorder = new HookEventReorderer((providerId, event) =>
+    this.hookEventHandler.handleEvent(providerId, event as HookEvent),
+  );
   private lifecycleCallbacks: RuntimeLifecycleCallbacks = {};
 
   constructor(
@@ -287,9 +291,10 @@ export class AgentRuntime {
 
   // ── Hook event routing ──
 
-  /** Route an incoming hook event to the appropriate agent. */
+  /** Route an incoming hook event to the appropriate agent. Stamped events are
+   *  briefly held so async deliveries reach the handler in spawn order. */
   handleHookEvent(providerId: string, event: Record<string, unknown>): void {
-    this.hookEventHandler.handleEvent(providerId, event as HookEvent);
+    this.hookReorder.push(providerId, event);
   }
 
   /** Register an agent with the hook event handler for session->agent mapping. */
@@ -556,6 +561,7 @@ export class AgentRuntime {
 
   /** Clean up all scanners, timers, and agents. Called on shutdown. */
   dispose(): void {
+    this.hookReorder.flush();
     this.hookEventHandler.dispose();
     this.subagentWatch.dispose();
 

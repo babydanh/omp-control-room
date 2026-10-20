@@ -2,9 +2,11 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
+import { performance } from 'perf_hooks';
 
 import {
   HOOK_API_PREFIX,
+  HOOK_EVENT_TIMESTAMP_FIELD,
   SERVER_JSON_DIR,
   SERVER_JSON_NAME,
   SERVERS_DIR,
@@ -189,6 +191,10 @@ async function main(): Promise<void> {
     if (withDebugLog?.debugLog) debugLogPath = withDebugLog.debugLog;
   }
 
+  // Hooks run async, so concurrent hook processes may deliver out of order.
+  // timeOrigin is this process's start, taken before node's ~50 ms bootstrap,
+  // so it tracks the order Claude spawned the hooks in.
+  data[HOOK_EVENT_TIMESTAMP_FIELD] = performance.timeOrigin;
   const body = JSON.stringify(data);
   await Promise.all(servers.map((server) => postToServer(server, body, eventName, sid)));
 }

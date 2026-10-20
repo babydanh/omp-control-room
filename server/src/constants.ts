@@ -123,6 +123,13 @@ export const HOOK_EVENT_BUFFER_MS = 5_000;
  *  the agent is cleaned up instead of staying as a zombie with pendingClear forever. */
 export const SESSION_END_GRACE_MS = 2000;
 export const MAX_HOOK_BODY_SIZE = 65_536; // 64KB
+/** Payload field the Claude hook script stamps with its process start time
+ *  (epoch ms). Hooks run async, so deliveries can arrive out of order; the
+ *  server reorders per session by this stamp. */
+export const HOOK_EVENT_TIMESTAMP_FIELD = 'pixel_agents_ts';
+/** How long a stamped hook event waits for older stragglers of the same
+ *  session before dispatch. Covers node startup jitter (~tens of ms). */
+export const HOOK_REORDER_WINDOW_MS = 150;
 
 // ── Standalone Embedded Terminal ────────────────────────────
 /** PTY module ids tried in order by the loader. @lydell/node-pty ships prebuilt
