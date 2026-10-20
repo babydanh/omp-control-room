@@ -59,6 +59,8 @@ export interface ProjectCommandContext {
   readonly agents?: Iterable<AgentState>;
   readonly herdrSessions?: () => readonly HerdrProjectSession[];
   readonly services?: ProjectServices;
+  /** Board session behind an omp (native) session id, from the open folders. */
+  readonly boardSessionFor?: (nativeSessionId: string) => string | undefined;
 }
 
 /** Module deps for one phase-two command; throws a user error when its service is not wired. */
@@ -249,6 +251,7 @@ function treeOptions(context: ProjectCommandContext): ProjectTreeOptions {
     ...context.tree,
     ...(context.agents === undefined ? {} : { agents: context.agents }),
     ...(context.herdrSessions === undefined ? {} : { herdrSessions: context.herdrSessions }),
+    ...(context.boardSessionFor === undefined ? {} : { boardSessionFor: context.boardSessionFor }),
   };
 }
 

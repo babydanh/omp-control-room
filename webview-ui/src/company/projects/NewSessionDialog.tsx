@@ -5,11 +5,18 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import { type ProjectStore, useProjectState } from './projectStore.js';
 
-export interface NewSessionDialogProps { store: ProjectStore; nodeId: string; onClose: () => void; initialEngine?: SessionEngine; }
+export interface NewSessionDialogProps {
+  store: ProjectStore;
+  nodeId: string;
+  onClose: () => void;
+  initialEngine?: SessionEngine;
+  /** Called once the session is open, with the Project folder it runs in; the board takes the user to it. */
+  onStarted?: (session: { readonly sessionId: string; readonly engine: SessionEngine; readonly folderPath: string | undefined }) => void;
+}
 
 type SessionEngine = 'omp' | 'claude' | 'agy';
 
-export function NewSessionDialog({ store, nodeId, onClose, initialEngine }: NewSessionDialogProps) {
+export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStarted }: NewSessionDialogProps) {
   const state = useProjectState(store);
   const target = state.nodes.find((node) => node.id === nodeId);
   const candidateRepos = useMemo(() => getCandidateRepos(target, state.nodes), [target, state.nodes]);
@@ -38,6 +45,14 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine }: NewS
     else if (!candidateRepos.some((repo) => repo.id === repoId)) setRepoId('');
   }, [candidateRepos, repoId]);
 
+  // Repos arrive with the full tree; until any checkout is known the folder's repos are unknown.
+  const reposKnown = state.nodes.some((node) => node.kind === 'checkout');
+  const plainFolder = target?.kind === 'folder' && reposKnown && candidateRepos.length === 0;
+  useEffect(() => {
+    if (!plainFolder) return;
+    setEngine('omp');
+    setWorktree('shared');
+  }, [plainFolder]);
   const selectedRepo = candidateRepos.find((repo) => repo.id === repoId);
   const worktreePath = selectedRepo?.path === undefined || taskName.trim() === ''
     ? ''
@@ -49,12 +64,23 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine }: NewS
   const reason = result?.type === 'projectSessionStartResult' && !result.ok
     ? result.reason
     : requestId === null ? undefined : state.errors.sessionStart;
+  const started = result?.type === 'projectSessionStartResult' && result.ok ? result : undefined;
+  // The Project folder the session runs in: the board opens it there.
+  let folderNode = target;
+  while (folderNode !== undefined && folderNode.kind !== 'folder') {
+    const parentId = folderNode.parentId;
+    folderNode = parentId === undefined ? undefined : state.nodes.find((node) => node.id === parentId);
+  }
+  const folderPath = folderNode?.path;
+  useEffect(() => {
+    if (started?.sessionId !== undefined) onStarted?.({ sessionId: started.sessionId, engine, folderPath });
+  }, [started, onStarted, engine, folderPath]);
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (selectedRepo === undefined) return;
+    if (selectedRepo === undefined && !plainFolder) return;
     const nextRequestId = store.startSession({
-      nodeId: target?.kind === 'checkout' ? target.id : selectedRepo.id,
+      nodeId: target?.kind === 'checkout' || selectedRepo === undefined ? nodeId : selectedRepo.id,
       engine,
       worktree,
       taskName: taskName.trim(),
@@ -74,8 +100,8 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine }: NewS
           Engine
           <select value={engine} onChange={(event) => setEngine(event.target.value as SessionEngine)}>
             <option value="omp">OMP — phiên board</option>
-            <option value="claude">Claude Code</option>
-            <option value="agy">Antigravity</option>
+            <option value="claude" disabled={plainFolder}>Claude Code</option>
+            <option value="agy" disabled={plainFolder}>Antigravity</option>
           </select>
         </label>
         {candidateRepos.length > 1 && (
@@ -87,11 +113,16 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine }: NewS
             </select>
           </label>
         )}
-        <fieldset>
-          <legend>Thư mục làm việc</legend>
-          <label><input type="radio" name="project-session-worktree" checked={worktree === 'separate'} onChange={() => setWorktree('separate')} /> Worktree riêng (mặc định)</label>
-          <label><input type="radio" name="project-session-worktree" checked={worktree === 'shared'} onChange={() => setWorktree('shared')} /> Dùng chung thư mục này</label>
-        </fieldset>
+        {!reposKnown && target?.kind === 'folder' && <p className="project-session-dialog__path">Đang đọc các repo trong thư mục…</p>}
+        {plainFolder
+          ? <p className="project-session-dialog__path">Thư mục này không phải repo git: phiên OMP chạy ngay trong <code>{target?.path}</code>.</p>
+          : (
+            <fieldset>
+              <legend>Thư mục làm việc</legend>
+              <label><input type="radio" name="project-session-worktree" checked={worktree === 'separate'} onChange={() => setWorktree('separate')} /> Worktree riêng (mặc định)</label>
+              <label><input type="radio" name="project-session-worktree" checked={worktree === 'shared'} onChange={() => setWorktree('shared')} /> Dùng chung thư mục này</label>
+            </fieldset>
+          )}
         <label>
           Tên việc
           <input value={taskName} onChange={(event) => setTaskName(event.target.value)} required maxLength={120} />
@@ -105,7 +136,7 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine }: NewS
         {result?.type === 'projectSessionStartResult' && result.ok && <p role="status">Đã mở phiên tại <code>{result.checkout}</code></p>}
         <footer>
           <button type="button" onClick={onClose}>Huỷ</button>
-          <button type="submit" disabled={pending || selectedRepo === undefined || taskName.trim() === '' || initialPrompt.trim() === ''}>
+          <button type="submit" disabled={pending || (selectedRepo === undefined && !plainFolder) || taskName.trim() === '' || initialPrompt.trim() === ''}>
             {pending ? 'Đang mở…' : 'Mở phiên'}
           </button>
         </footer>

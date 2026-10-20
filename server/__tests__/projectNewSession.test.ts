@@ -167,6 +167,16 @@ describe('project session start', () => {
     expect(services.openChat).not.toHaveBeenCalled();
   });
 
+  it('opens an omp chat right in a folder that holds no repo, and refuses what needs git there', async () => {
+    const plain = { nodes: [{ id: 'folder', kind: 'folder', name: 'Notes', path: root }] satisfies ProjectTreeNode[] };
+    const services = createServices();
+    const plainDeps = { store: {} as ProjectStore, loadTree: async () => plain, services };
+    await expect(startProjectSession(request('omp', 'shared', 'folder'), plainDeps)).resolves.toMatchObject({ ok: true, checkout: root });
+    expect(services.openChat).toHaveBeenCalledWith(expect.objectContaining({ cwd: root }));
+    await expect(startProjectSession(request('omp', 'separate', 'folder'), plainDeps)).rejects.toThrow('không tạo được worktree');
+    await expect(startProjectSession(request('claude', 'shared', 'folder'), plainDeps)).rejects.toThrow('cần repo');
+  });
+
   it('adapts the coordinator and work-item service using their runtime contracts', async () => {
     const coordinator: Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt'> = {
       openNewChat: vi.fn(async () => 'board-session'),

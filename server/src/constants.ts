@@ -130,6 +130,8 @@ export const HOOK_EVENT_TIMESTAMP_FIELD = 'pixel_agents_ts';
 /** How long a stamped hook event waits for older stragglers of the same
  *  session before dispatch. Covers node startup jitter (~tens of ms). */
 export const HOOK_REORDER_WINDOW_MS = 150;
+/** How often a board showing the Project tree gets a fresh snapshot; git reads behind it are cached. */
+export const PROJECT_TREE_POLL_MS = 10_000;
 
 // ── Standalone Embedded Terminal ────────────────────────────
 /** PTY module ids tried in order by the loader. @lydell/node-pty ships prebuilt

@@ -247,6 +247,12 @@ export interface CompanyCoordinator {
    */
   holdsId(id: string): boolean;
 
+  /**
+   * The board session whose omp process has this native session id, or null. The Project
+   * tree and the activity ledger know sessions only by that id; the snapshot keeps it private.
+   */
+  sessionForNative?(nativeSessionId: string): string | null;
+
   /** Resource measurements for the diagnostics panel. */
   diagnostics(): CompanyDiagnostics;
 

@@ -22,6 +22,8 @@ export interface ProjectSessionSnapshot {
   readonly status: string;
   readonly title: string;
   readonly cwd: string;
+  /** Ledger sessions a board folder runs: that board session's id. */
+  readonly boardSessionId?: string;
 }
 
 export interface HerdrProjectSession {
@@ -46,6 +48,8 @@ export interface ProjectTreeOptions {
   readonly readRepo?: (repo: string) => Promise<GitRepoScan>;
   /** Folders and their sessions only, no git: answers at once while the full tree builds. */
   readonly sessionsOnly?: boolean;
+  /** The board session an open folder runs for an omp (native) session id, if any. */
+  readonly boardSessionFor?: (nativeSessionId: string) => string | undefined;
 }
 /** How far back a session's latest intent is looked up for its title. */
 const SESSION_INTENT_WINDOW_MS = 6 * 60 * 60 * 1000;
@@ -81,8 +85,8 @@ function agentKindForLedger(row: SessionRow): ProjectAgentKind {
   return 'omp';
 }
 
-/** A ledger session row with the intent of its latest tool call, when the recent events hold one. */
-type TitledSessionRow = SessionRow & { readonly intent?: string };
+/** A ledger session row with its latest intent and the board session behind it, when known. */
+type TitledSessionRow = SessionRow & { readonly intent?: string; readonly boardSessionId?: string };
 
 /** Agent name when it says something, else what the session is doing now, else the short session id. */
 function titleForLedger(row: TitledSessionRow): string {
@@ -91,8 +95,12 @@ function titleForLedger(row: TitledSessionRow): string {
   return row.intent ?? `…${row.sessionId.slice(-8)}`;
 }
 
-/** Latest non-empty intent per session from the last few hours of events. */
-function withIntents(rows: readonly SessionRow[], ledger: LedgerSource): TitledSessionRow[] {
+/** Adds each session's latest non-empty intent (last few hours) and its board session id. */
+function annotateLedgerRows(
+  rows: readonly SessionRow[],
+  ledger: LedgerSource,
+  boardSessionFor: ((nativeSessionId: string) => string | undefined) | undefined,
+): TitledSessionRow[] {
   const intents = new Map<string, string>();
   for (const event of ledger.eventRows(formatLedgerTime(Date.now() - SESSION_INTENT_WINDOW_MS))) {
     const intent = event.intent?.trim();
@@ -100,7 +108,12 @@ function withIntents(rows: readonly SessionRow[], ledger: LedgerSource): TitledS
   }
   return rows.map((row) => {
     const intent = intents.get(row.sessionId);
-    return intent === undefined ? row : { ...row, intent };
+    const boardSessionId = row.endedAt === null ? boardSessionFor?.(row.sessionId) : undefined;
+    return {
+      ...row,
+      ...(intent === undefined ? {} : { intent }),
+      ...(boardSessionId === undefined ? {} : { boardSessionId }),
+    };
   });
 }
 
@@ -119,7 +132,7 @@ function ledgerStatus(row: SessionRow): string {
 function sessionsForCheckout(
   checkout: string,
   nestedCheckouts: readonly string[],
-  ledgerRows: readonly SessionRow[],
+  ledgerRows: readonly TitledSessionRow[],
   agents: readonly AgentState[],
   herdrSessions: readonly HerdrProjectSession[],
 ): ProjectSessionSnapshot[] {
@@ -135,6 +148,7 @@ function sessionsForCheckout(
       status: ledgerStatus(row),
       title: titleForLedger(row),
       cwd: row.cwd,
+      ...(row.boardSessionId === undefined ? {} : { boardSessionId: row.boardSessionId }),
     });
   }
   for (const agent of agents) {
@@ -376,7 +390,7 @@ async function appendNodes(
   nodes: readonly ProjectNode[],
   parentId: string,
   options: ProjectTreeOptions,
-  ledgerRows: readonly SessionRow[],
+  ledgerRows: readonly TitledSessionRow[],
   agents: readonly AgentState[],
   herdrSessions: readonly HerdrProjectSession[],
   overlapScans: readonly LedgerOverlapScan[],
@@ -405,6 +419,9 @@ async function appendNodes(
     const repos = await mainRepos(listed);
     const scanRepo = options.readRepo ?? ((repo: string) => readRepo(options.git, repo));
     const scans = await mapLimit(repos, CHANGED_FILES_CONCURRENCY, scanRepo);
+    // Sessions in the folder but in no checkout (a plain folder, a non-repo subfolder) belong to the folder.
+    const checkoutPaths = scans.flatMap((scan) => (scan.kind === 'repo' ? scan.worktrees.map((worktree) => worktree.path) : []));
+    pushSessions(output, node.id, sessionsForCheckout(node.path, checkoutPaths, ledgerRows, agents, herdrSessions));
     for (const [repoIndex, repoPath] of repos.entries()) {
       const scan = scans[repoIndex] ?? { kind: 'not-repo' as const };
       if (scan.kind !== 'repo') continue;
@@ -487,6 +504,7 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
       state: session.status,
       title: session.title,
       path: session.cwd,
+      ...(session.boardSessionId === undefined ? {} : { boardSessionId: session.boardSessionId }),
     });
   }
 }
@@ -496,7 +514,7 @@ export async function buildProjectTreeSnapshot(
   options: ProjectTreeOptions,
 ): Promise<ProjectTreeSnapshot> {
   const state = await store.load();
-  const ledgerRows = withIntents(options.ledger.sessionRows(), options.ledger);
+  const ledgerRows = annotateLedgerRows(options.ledger.sessionRows(), options.ledger, options.boardSessionFor);
   const pendingCheckouts = new Set(options.ledger.pendingRows().map((row) => canonicalKey(row.checkout)));
   const overlapScans = options.sessionsOnly === true ? [] : await (options.overlapScans?.() ?? Promise.resolve([]));
   const agents = [...(options.agents ?? [])];

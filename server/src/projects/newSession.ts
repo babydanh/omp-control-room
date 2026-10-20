@@ -51,11 +51,15 @@ export async function startProjectSession(
   const repos = tree.nodes.filter((candidate) => candidate.kind === 'repository' && candidate.parentId === folder.id);
   const repo = node.kind === 'repository' ? node : ancestor(node, tree, 'repository');
   const selectedRepo = repo ?? (repos.length === 1 ? repos[0] : undefined);
-  if (selectedRepo === undefined) {
-    if (repos.length > 1) throw new LibraryUserError('Thư mục có nhiều repo. Hãy chọn repo cần mở phiên.');
-    throw new LibraryUserError('Không tìm thấy repo trong thư mục đã chọn.');
+  if (selectedRepo === undefined && repos.length > 1) {
+    throw new LibraryUserError('Thư mục có nhiều repo. Hãy chọn repo cần mở phiên.');
   }
-  const repoPath = selectedRepo.path;
+  // A folder that is not a git repo still hosts a plain omp chat, run right in the folder.
+  if (selectedRepo === undefined) {
+    if (request.engine !== 'omp') throw new LibraryUserError('Thư mục này không phải repo git: Claude và agy cần repo. Hãy chọn OMP.');
+    if (request.worktree !== 'shared') throw new LibraryUserError('Thư mục này không phải repo git nên không tạo được worktree. Hãy chọn "Dùng chung thư mục này".');
+  }
+  const repoPath = selectedRepo === undefined ? folderPath : selectedRepo.path;
   if (repoPath === undefined) throw new LibraryUserError('Đường dẫn repo không hợp lệ.');
   const sharedCheckout = node.kind === 'checkout' ? node.path : repoPath;
   const schedulerCreatesWorktree = request.engine !== 'omp' && request.worktree === 'separate';

@@ -26,6 +26,7 @@ import {
   LIBRARY_PROOF_NOT_FOUND_REASON,
   LIBRARY_PROOF_ROUTE,
   MAX_HOOK_BODY_SIZE,
+  PROJECT_TREE_POLL_MS,
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
@@ -287,6 +288,8 @@ function registerWebSocketRoute(
     const { store } = options;
     let projectTreeRequested = false;
     let projectTreeTimer: NodeJS.Timeout | undefined;
+    // Sessions change state (working → idle) without any event the server hears: poll while the tree is shown.
+    let projectTreePoll: NodeJS.Timeout | undefined;
     const projectContext = (): ProjectCommandContext => ({
       ...options.projects,
       ...projectTreeFromLedger(options),
@@ -377,7 +380,11 @@ function registerWebSocketRoute(
     socket.on('message', (data: Buffer | string) => {
       try {
         const msg = JSON.parse(data.toString()) as Record<string, unknown>;
-        if (msg.type === 'projectTreeRequest') projectTreeRequested = true;
+        if (msg.type === 'projectTreeRequest' && !projectTreeRequested) {
+          projectTreeRequested = true;
+          projectTreePoll = setInterval(() => scheduleProjectTree(), PROJECT_TREE_POLL_MS);
+          projectTreePoll.unref?.();
+        }
         if (!options.embedded && msg.type) {
           console.log('[Pixel Agents] WS client message:', msg.type);
         }
@@ -419,6 +426,7 @@ function registerWebSocketRoute(
 
     socket.on('close', () => {
       clearTimeout(projectTreeTimer);
+      clearInterval(projectTreePoll);
       store.off('agentAdded', onAgentAdded);
       store.off('agentRemoved', onAgentRemoved);
       store.off('broadcast', onBroadcast);

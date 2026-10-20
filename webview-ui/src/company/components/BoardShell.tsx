@@ -418,13 +418,19 @@ export function BoardShell({ client }: BoardShellProps) {
     projectStore.requestSettings(nodeId ?? undefined);
   }
 
-  /** A board session opens in the drawer, a herdr pane in its screen; any other session shows its checkout's changes. */
-  function openProjectSession(session: ProjectTreeNode, checkoutPath: string | undefined): void {
+  /**
+   * A board session opens in the drawer, a herdr pane in its screen; a session in a
+   * checkout shows that checkout's changes; one in a plain folder opens that folder's board.
+   */
+  function openProjectSession(session: ProjectTreeNode, where: { readonly checkoutPath?: string; readonly folderPath?: string }): void {
     const id = session.sessionId;
     if (id === undefined) return;
-    if (state.sessions[id] !== undefined) selectSession(id);
+    // The tree names omp sessions by their native id; the server adds the board session behind one.
+    const boardKey = session.boardSessionId ?? (state.sessions[id] !== undefined ? id : null);
+    if (boardKey !== null && state.sessions[boardKey] !== undefined) selectSession(boardKey);
+    else if (boardKey !== null && where.folderPath !== undefined) selectWorkspaceSession(where.folderPath, boardKey);
     else if (session.agentKind === 'herdr') openHerdr(id);
-    else if (checkoutPath !== undefined) openProjectChanges(checkoutPath);
+    else if (where.checkoutPath !== undefined) openProjectChanges(where.checkoutPath);
   }
 
   /** Menu actions that leave the menu: pages and dialogs. Tree edits run in the menu itself. */
@@ -898,6 +904,11 @@ export function BoardShell({ client }: BoardShellProps) {
           nodeId={newSessionNode.nodeId}
           {...(newSessionNode.engine === undefined ? {} : { initialEngine: newSessionNode.engine })}
           onClose={() => setNewSessionNode(null)}
+          onStarted={({ sessionId, engine, folderPath }) => {
+            setNewSessionNode(null);
+            // An omp chat lives in its folder's board; Claude/agy runs show up as work items there.
+            if (engine === 'omp' && folderPath !== undefined) selectWorkspaceSession(folderPath, sessionId);
+          }}
         />
       )}
       {paletteOpen && (

@@ -8,6 +8,8 @@ export interface ProjectTreeBranch {
   where?: string;
   /** Session rows: the checkout the session works in, for its changes. */
   checkoutPath?: string;
+  /** Session rows: the Project folder the session works under. */
+  folderPath?: string;
 }
 
 const STRUCTURE_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
@@ -49,6 +51,7 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
       children: [],
       ...(where === undefined ? {} : { where }),
       ...(checkout?.path === undefined ? {} : { checkoutPath: checkout.path }),
+      ...(folder.node.path === undefined ? {} : { folderPath: folder.node.path }),
     });
   }
   return roots;

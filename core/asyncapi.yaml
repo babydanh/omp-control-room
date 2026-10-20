@@ -7876,6 +7876,11 @@ components:
           type: string
         sessionId:
           type: string
+        boardSessionId:
+          type: string
+          description: >-
+            Session rows: the board session behind this omp session, when one of the open
+            folders runs it. Clicking the row opens that board session.
         state:
           type: string
         title:

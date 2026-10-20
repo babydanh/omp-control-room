@@ -37,6 +37,8 @@ export interface ProjectRuntime {
   refreshSettings(): Promise<void>;
   /** Reads every folder's repos once so the first board open finds git scans cached. */
   warm(): Promise<void>;
+  /** The board session an open folder runs for an omp (native) session id. */
+  boardSessionFor(nativeSessionId: string): string | undefined;
 }
 
 /** Composition root of the Project tree: one store, one tree loader, every service wired to the real runtime. */
@@ -74,6 +76,14 @@ export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime
     store,
     prepareWorktree: createPrepareWorktree({ effectivePrepareFor, runProcess }),
     refreshSettings: () => refreshProjectSettings(settingsDeps),
+    boardSessionFor: (nativeSessionId) => {
+      for (const entry of company.entries()) {
+        if (!entry.open) continue;
+        const found = company.servicesFor(entry.path)?.coordinator.sessionForNative?.(nativeSessionId);
+        if (found !== null && found !== undefined) return found;
+      }
+      return undefined;
+    },
     warm: async () => {
       await buildProjectTreeSnapshot(store, {
         ledger: ledger.projectTreeSource,

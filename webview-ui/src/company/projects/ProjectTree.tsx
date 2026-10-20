@@ -59,8 +59,8 @@ export interface ProjectTreeProps {
   onOpenChanges: (checkoutId: string, tab?: 'diff' | 'merge') => void;
   onOpenSettings: (nodeId: string | null) => void;
   onNewSession: (nodeId: string, engine?: 'omp' | 'claude' | 'agy') => void;
-  /** Opens a session row; `checkoutPath` is where it works, for sessions the board cannot show. */
-  onOpenSession: (session: ProjectTreeNode, checkoutPath: string | undefined) => void;
+  /** Opens a session row; the branch carries where it works (checkout, Project folder). */
+  onOpenSession: (session: ProjectTreeNode, where: { readonly checkoutPath?: string; readonly folderPath?: string }) => void;
   onMenu: (request: AgentMenuRequest) => void;
 }
 
@@ -175,7 +175,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           title={isSession ? [node.title, branch.where].filter(Boolean).join(' · ') : node.path ?? node.name}
           onClick={() => {
             if (node.kind === 'project') props.onSelectProject(node.id);
-            else if (isSession) props.onOpenSession(node, branch.checkoutPath);
+            else if (isSession) props.onOpenSession(node, branch);
             else onToggleCollapse(node.id);
           }}
           {...menu}
@@ -205,6 +205,17 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
             </>
           )}
         </button>
+        {node.kind === 'folder' && (
+          <button
+            type="button"
+            aria-label={`Phiên mới trong ${node.name}`}
+            title="Phiên mới trong thư mục này (chuột phải để chọn omp / Claude / agy)"
+            onClick={() => props.onNewSession(node.id)}
+            className="touch-target shrink-0 rounded px-1.5 text-sm text-text-muted hover:bg-hover hover:text-text"
+          >
+            +
+          </button>
+        )}
       </div>
       {!isCollapsed && children.map((child) => (
         <ProjectTreeRow key={child.node.id} branch={child} depth={depth + 1} collapsed={collapsed} onToggleCollapse={onToggleCollapse} onMove={onMove} {...props} />

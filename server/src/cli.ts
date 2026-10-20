@@ -499,7 +499,7 @@ async function main(): Promise<void> {
       isCompanyExecutionAllowed: () => acceptingCompany,
       workspaces: company,
       ledger,
-      projects: { store: projects.store, services: projects.services },
+      projects: { store: projects.store, services: projects.services, boardSessionFor: (id) => projects.boardSessionFor(id) },
       herdr,
       browserReaper,
       usage,

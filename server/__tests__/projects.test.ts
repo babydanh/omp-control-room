@@ -261,6 +261,8 @@ describe('project tree request', () => {
     const sent: Array<{ type: string; nodes?: Array<{ id: string; kind: string; parentId?: string; name: string }> }> = [];
     handleProjectMessage({ type: 'projectTreeRequest', requestId: 'r1' }, (message) => sent.push(message as never), {
       privileged: true,
+      // The board runs session-1 as its own session "board-1".
+      boardSessionFor: (nativeSessionId) => (nativeSessionId === 'session-1' ? 'board-1' : undefined),
       store,
       tree: {
         ledger,
@@ -279,7 +281,11 @@ describe('project tree request', () => {
     const folderNode = quick?.find((node) => node.kind === 'folder');
     expect(quick?.some((node) => node.kind === 'repository')).toBe(false);
     // The session sits under its folder and is named by what it is doing.
-    expect(quick?.find((node) => node.kind === 'session')).toMatchObject({ parentId: folderNode?.id, name: 'Sửa trang đăng ký' });
+    expect(quick?.find((node) => node.kind === 'session')).toMatchObject({
+      parentId: folderNode?.id,
+      name: 'Sửa trang đăng ký',
+      boardSessionId: 'board-1',
+    });
     expect(full?.some((node) => node.kind === 'repository')).toBe(true);
     ledger.close();
   });
