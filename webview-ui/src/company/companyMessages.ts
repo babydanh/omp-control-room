@@ -501,6 +501,11 @@ export function squadSettingsSet(
   return { type: 'companySquadSettingsSet', requestId, workspacePath, settings };
 }
 
+/** Ask the server whether Claude Code is installed and signed in. The board answers with a snapshot. */
+export function squadClaudeCheck(requestId: string, workspacePath: string): ClientMessage {
+  return { type: 'companySquadClaudeCheck', requestId, workspacePath };
+}
+
 export function sessionInfoRequest(requestId: string, sessionId: string): ClientMessage {
   return { type: 'companySessionInfoRequest', requestId, sessionId };
 }

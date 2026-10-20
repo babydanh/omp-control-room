@@ -293,6 +293,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySquadApprove',
   'companySquadDismiss',
   'companySquadRetry',
+  'companySquadClaudeCheck',
   'companyAgentRoleSet',
   ...FOLDER_COMMAND_TYPES,
   ...USAGE_COMMAND_TYPES,
@@ -337,6 +338,7 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companySquadApprove: true,
   companySquadDismiss: true,
   companySquadRetry: true,
+  companySquadClaudeCheck: true,
   companyAgentRoleSet: true,
 };
 
@@ -560,6 +562,7 @@ async function run(
       case 'companyWorkItemJudge':
       case 'companyWorkItemCleanWorktree':
       case 'companySquadSettingsSet':
+      case 'companySquadClaudeCheck':
       case 'companyAgentRoleSet':
         await workItemCommand(msg, requestId, services, send);
         return;
@@ -1303,6 +1306,11 @@ async function workItemCommand(
       return;
     }
     await work.setSettings({ requestId, settings: msg.settings });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companySquadClaudeCheck') {
+    await work.checkClaude();
     ok(send, requestId);
     return;
   }

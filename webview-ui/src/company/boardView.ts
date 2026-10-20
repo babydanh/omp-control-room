@@ -23,6 +23,7 @@ import type {
   SquadRun,
   WorkItem,
   WorkItemBlocker,
+  WorkItemClaudeRun,
   WorkItemConflicts,
   WorkItemJudge,
   WorkItemStatus,
@@ -179,6 +180,8 @@ export interface BoardWorkItem {
   conflicts: WorkItemConflicts | null;
   /** Whether the item's assignee is a parked squad session. */
   parked: boolean;
+  /** The Claude Code run on the item; null when no Claude Code run has started on it. */
+  claudeRun: WorkItemClaudeRun | null;
 }
 
 /** A squad run card: what the card shows, read from the run the server holds. */
@@ -280,6 +283,7 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
     judge: item.judge ?? null,
     conflicts: item.conflicts ?? null,
     parked: isParkedAssignee(item.assignee, workItemsOf(state, workspacePath).parkedSessionIds),
+    claudeRun: item.claudeRun ?? null,
   }));
 }
 

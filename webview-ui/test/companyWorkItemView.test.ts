@@ -39,6 +39,13 @@ const SETTINGS: SquadSettings = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  brain: 'omp',
+  claudeModelLeader: 'opus',
+  claudeModelJudge: 'sonnet',
+  preferClaude: false,
+  maxClaudeRuns: 2,
+  claudeMaxTurns: 40,
+  claudeMaxBudgetUsd: 3,
 };
 
 function item(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {
@@ -208,6 +215,7 @@ describe('workItemsOf and roleDescriptionFor', () => {
       revision: 0,
       items: [],
       parkedSessionIds: [],
+      claudeStatus: null,
       roles: [],
       repos: [],
       agents: [],

@@ -14,6 +14,7 @@ import type {
   WorkItem,
   WorkItemAssignee,
   WorkItemAssigneeKind,
+  WorkItemClaudeRun,
   WorkItemEvent,
   WorkItemEventKind,
   WorkItemJudge,
@@ -100,6 +101,10 @@ export const WORK_ITEM_REASON = {
   openFailed: 'Không mở được phiên omp mới.',
   saveFailed: 'Chưa lưu được việc nên chưa gửi. Board sẽ thử lại.',
   sendFailed: (detail: string): string => `Gửi việc thất bại: ${detail}`,
+  claudeInterrupted:
+    'Board khởi động lại khi Claude Code đang chạy. Gửi tiếp để chạy tiếp trong cùng phiên.',
+  claudeTimeout: 'Claude Code chạy quá lâu nên đã dừng.',
+  claudeFailed: (detail: string): string => `Claude Code dừng lỗi: ${detail}`,
 } as const;
 
 /**
@@ -112,6 +117,10 @@ export type StoredWorkItem = Omit<WorkItem, 'blocker'> & {
   waitSequences: Record<string, number>;
   /** Whether the judge's evidence request was already sent. Never leaves the server. */
   judgeEvidenceAsked?: boolean;
+  /** The Claude Code run in flight, if any. Server-only: a restart makes it interrupted. */
+  claudeRunId?: string;
+  /** The process id of that run, kept so a restart can stop a run that outlived the board. */
+  claudeRunPid?: number;
 };
 
 /** One work item to create, as the service API takes it. */
@@ -184,6 +193,7 @@ const ASSIGNEE_KINDS: Record<WorkItemAssigneeKind, true> = {
   session: true,
   'new-session': true,
   auto: true,
+  claude: true,
 };
 const EVENT_KINDS: Record<WorkItemEventKind, true> = {
   created: true,
@@ -217,7 +227,7 @@ function nonNegativeInt(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-/** Whether a value is an assignee the server can act on: herdr pane, session, new session, or auto. */
+/** Whether a value is an assignee the server can act on: herdr pane, session, new session, auto, or claude. */
 export function isWorkItemAssignee(value: unknown): value is WorkItemAssignee {
   if (!isRecord(value)) return false;
   if (typeof value.kind !== 'string' || !Object.hasOwn(ASSIGNEE_KINDS, value.kind)) return false;
@@ -238,6 +248,7 @@ export function normalizeAssignee(assignee: WorkItemAssignee): WorkItemAssignee 
   if (assignee.kind === 'herdr') return { kind: 'herdr', paneId: assignee.paneId ?? '' };
   if (assignee.kind === 'session') return { kind: 'session', sessionId: assignee.sessionId ?? '' };
   if (assignee.kind === 'auto') return { kind: 'auto' };
+  if (assignee.kind === 'claude') return { kind: 'claude' };
   return { kind: 'new-session' };
 }
 
@@ -246,6 +257,7 @@ export function assigneeKey(assignee: WorkItemAssignee): string {
   if (assignee.kind === 'herdr') return `herdr:${assignee.paneId ?? ''}`;
   if (assignee.kind === 'session') return `session:${assignee.sessionId ?? ''}`;
   if (assignee.kind === 'auto') return 'auto';
+  if (assignee.kind === 'claude') return 'claude';
   return 'new-session';
 }
 
@@ -352,6 +364,8 @@ export function toWorkItem(stored: StoredWorkItem): WorkItem {
   delete wire.pendingPrompt;
   delete wire.waitSequences;
   delete wire.judgeEvidenceAsked;
+  delete wire.claudeRunId;
+  delete wire.claudeRunPid;
   return wire as WorkItem;
 }
 
@@ -366,6 +380,20 @@ function parseEvent(value: unknown): WorkItemEvent | null {
     value.kind as WorkItemEventKind,
     typeof value.message === 'string' ? value.message : undefined,
   );
+}
+
+/** Validates a stored Claude Code run. A malformed one is dropped, and its item keeps its status. */
+function parseClaudeRun(value: unknown): WorkItemClaudeRun | undefined {
+  if (!isRecord(value)) return undefined;
+  const mode = value.mode === 'edit' || value.mode === 'read' ? value.mode : undefined;
+  if (mode === undefined || !isIsoString(value.startedAt)) return undefined;
+  if (value.sessionId !== undefined && !isUuid(value.sessionId)) return undefined;
+  return {
+    mode,
+    startedAt: value.startedAt,
+    ...(typeof value.sessionId === 'string' ? { sessionId: value.sessionId } : {}),
+    ...(value.interrupted === true ? { interrupted: true } : {}),
+  };
 }
 
 /** Validates one stored item. Anything that would break the board's invariants is rejected. */
@@ -411,6 +439,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     typeof value.agent === 'string' && isValidAgentName(value.agent) ? value.agent : undefined;
   const worktree = parseWorktree(value.worktree);
   const judge = parseJudge(value.judge);
+  const claudeRun = parseClaudeRun(value.claudeRun);
   return {
     id: value.id,
     text: value.text,
@@ -440,6 +469,9 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     ...(judge === undefined ? {} : { judge }),
     judgeEvidenceAsked: value.judgeEvidenceAsked === true,
     ...(value.worktreeRemoved === true ? { worktreeRemoved: true } : {}),
+    ...(claudeRun === undefined ? {} : { claudeRun }),
+    ...(typeof value.claudeRunId === 'string' ? { claudeRunId: value.claudeRunId } : {}),
+    ...(typeof value.claudeRunPid === 'number' ? { claudeRunPid: value.claudeRunPid } : {}),
   };
 }
 
@@ -501,7 +533,12 @@ function parseWorktree(value: unknown): { path: string; branch: string } | undef
 /** Validates one stored role note. */
 export function parseRole(value: unknown): AgentRole | null {
   if (!isRecord(value)) return null;
-  if (!isWorkItemAssignee(value.agent) || value.agent.kind === 'auto') return null;
+  if (
+    !isWorkItemAssignee(value.agent) ||
+    value.agent.kind === 'auto' ||
+    value.agent.kind === 'claude'
+  )
+    return null;
   if (typeof value.description !== 'string') return null;
   if (Array.from(value.description).length > ROLE_DESCRIPTION_MAX_CHARS) return null;
   if (!isIsoString(value.updatedAt)) return null;

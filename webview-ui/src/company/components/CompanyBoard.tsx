@@ -35,7 +35,7 @@ import {
   useState,
 } from 'react';
 
-import type { SquadSettings } from '../../../../core/src/messages.js';
+import type { ClaudeCodeStatus, SquadSettings } from '../../../../core/src/messages.js';
 import type { AgentBoardCard, AgentCardSubject } from '../agentBoard.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
@@ -100,7 +100,11 @@ export interface CompanyBoardProps {
   /** The folder a card's id belongs to, shown as a tag in all mode; null outside it. */
   identityOf: (id: string) => FolderIdentity | null;
   /** The folder whose squad settings the board's top shows; null when no folder is active. */
-  squadFolder: { workspacePath: string; settings: SquadSettings | null } | null;
+  squadFolder: {
+    workspacePath: string;
+    settings: SquadSettings | null;
+    claudeStatus: ClaudeCodeStatus | null;
+  } | null;
 }
 
 /**
@@ -591,6 +595,7 @@ export function CompanyBoard({
             client={client}
             workspacePath={squadFolder.workspacePath}
             settings={squadFolder.settings}
+            claudeStatus={squadFolder.claudeStatus}
           />
         </div>
       )}

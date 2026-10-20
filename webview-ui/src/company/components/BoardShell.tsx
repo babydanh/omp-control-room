@@ -145,7 +145,11 @@ export function BoardShell({ client }: BoardShellProps) {
   const squadFolder =
     squadPath === null
       ? null
-      : { workspacePath: squadPath, settings: workItemsOf(state, squadPath).settings };
+      : {
+          workspacePath: squadPath,
+          settings: workItemsOf(state, squadPath).settings,
+          claudeStatus: workItemsOf(state, squadPath).claudeStatus,
+        };
   const ledgerBoardSessions = useMemo(() => boardSessionIndex(state.sessions), [state.sessions]);
   const ledgerPanes = useMemo(
     () => panesOf(state.herdr.agents, state.herdr.sleeping),

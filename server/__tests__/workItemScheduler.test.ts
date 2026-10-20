@@ -76,6 +76,9 @@ function ctx(overrides: Partial<SchedulerContext> = {}): SchedulerContext {
     squadSessionsOpen: 0,
     freeBytes: 8 * GIB,
     minFreeBytes: 2 * GIB,
+    claudeRunsOpen: 0,
+    maxClaudeRuns: 2,
+    preferClaude: false,
     ...overrides,
   };
 }
@@ -544,5 +547,76 @@ describe('scheduler helpers', () => {
     expect(isInsideRepo(`${REPO}/sub`, REPO)).toBe(true);
     expect(isInsideRepo('/work/folder/application', REPO)).toBe(false);
     expect(isInsideRepo(undefined, REPO)).toBe(false);
+  });
+});
+
+describe('decideStart: Claude Code runs', () => {
+  it('starts an editing run in the item repo; the service isolates its checkout', () => {
+    expect(decideStart(item({ kind: 'claude' }), ctx())).toEqual({
+      kind: 'claude',
+      cwd: REPO,
+      readOnly: false,
+    });
+  });
+
+  it('starts a read-only run in the repo itself', () => {
+    expect(decideStart(item({ kind: 'claude', readOnly: true }), ctx())).toEqual({
+      kind: 'claude',
+      cwd: REPO,
+      readOnly: true,
+    });
+  });
+
+  it('waits once the claude run cap is full', () => {
+    const decision = decideStart(
+      item({ kind: 'claude' }),
+      ctx({ claudeRunsOpen: 2, maxClaudeRuns: 2 }),
+    );
+    expect(decision.kind).toBe('wait');
+    expect(blockerOf(decision).kind).toBe('capacity');
+  });
+
+  it('counts claude runs against the folder cap as well', () => {
+    const decision = decideStart(
+      item({ kind: 'claude' }),
+      ctx({ maxParallel: 1, holds: [hold('herdr:p1')] }),
+    );
+    expect(decision.kind).toBe('wait');
+  });
+
+  it('waits behind an editing run that shares an area', () => {
+    const decision = decideStart(
+      item({ kind: 'claude', areas: ['web'] }),
+      ctx({ holds: [hold('claude', { sequence: 2, areas: ['web'] })] }),
+    );
+    expect(decision.kind).toBe('wait');
+  });
+
+  it('prefers an idle member over a claude run for an auto item', () => {
+    const decision = decideStart(
+      item({ kind: 'auto' }),
+      ctx({ members: [herdr('p1')], preferClaude: true }),
+    );
+    expect(usedKey(decision)).toBe('herdr:p1');
+  });
+
+  it('starts a claude run for an auto item when claude is preferred and a slot is free', () => {
+    expect(decideStart(item({ kind: 'auto' }), ctx({ preferClaude: true }))).toEqual({
+      kind: 'claude',
+      cwd: REPO,
+      readOnly: false,
+    });
+  });
+
+  it('leaves an auto item to omp when the claude cap is full', () => {
+    const decision = decideStart(
+      item({ kind: 'auto' }),
+      ctx({ preferClaude: true, claudeRunsOpen: 2, maxClaudeRuns: 2 }),
+    );
+    expect(decision.kind).toBe('open');
+  });
+
+  it('keeps an auto item on omp when claude is not preferred', () => {
+    expect(decideStart(item({ kind: 'auto' }), ctx()).kind).toBe('open');
   });
 });

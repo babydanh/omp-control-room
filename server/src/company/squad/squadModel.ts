@@ -213,7 +213,7 @@ export interface LeaderItemView {
   readonly sequence: number;
   readonly text: string;
   readonly status: string;
-  /** The assignee's ref, as the leader wrote it: `herdr:<paneId>`, `session:<id>` or `new-session`. */
+  /** The assignee's ref, as the leader wrote it: `herdr:<paneId>`, `session:<id>`, `new-session` or `claude`. */
   readonly assignee: string;
   readonly priority: number;
   readonly acceptance?: string;
@@ -284,6 +284,7 @@ const ASSIGNMENT_KEYS: readonly string[] = [
 ];
 const AUTO_REF = 'auto';
 const NEW_SESSION_REF = 'new-session';
+const CLAUDE_REF = 'claude';
 const OPEN_ITEM_STATUSES: Record<string, true> = {
   queued: true,
   running: true,
@@ -322,7 +323,7 @@ export function reviewKey(review: Pick<SquadReview, 'itemId' | 'at' | 'conflicts
   return `${review.itemId}@${review.at}@${review.conflicts ?? ''}`;
 }
 
-/** The assignee's id as the leader writes it: `herdr:<paneId>`, `session:<id>` or `new-session`. */
+/** The assignee's id as the leader writes it: `herdr:<paneId>`, `session:<id>`, `new-session` or `claude`. */
 export function assigneeRef(assignee: WorkItemAssignee): string {
   return assigneeKey(assignee);
 }
@@ -584,6 +585,7 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
     'Rules:',
     '- You run no tools and do no work yourself. Each assignment is a prompt its assignee will run.',
     '- "assignee" is an id listed under "Team", "auto" (the scheduler picks a free agent in the row repo), or "new-session" (a fresh omp chat in the folder). Never invent an id. Omitted means "auto".',
+    '- "claude" as an "assignee" is a Claude Code run.',
     '- "repo" is one of the paths under "Repos": the repo the row works in. Omitted means the folder root.',
     `- "agent" is one name under "Agents". Omitted means "${SQUAD_DEFAULT_AGENT}", the default worker. Read-only agents only report; "${SQUAD_DEFAULT_AGENT}" changes code.`,
     '- "role" is one of: advisor, worker, qa, judge, chat. Omitted means no role.',
@@ -831,9 +833,9 @@ function parseAll<T>(values: unknown, parse: (value: unknown) => T | null): T[] 
 }
 
 /**
- * Checks one leader row: its assignee must be "auto", "new-session" or a listed member, its text
- * non-empty, and its optional priority, acceptance, dependsOn, reason, repo, role, agent and areas
- * valid. Dependencies are also checked against the rest of the reply by the caller.
+ * Checks one leader row: its assignee must be "auto", "new-session", "claude" or a listed member,
+ * its text non-empty, and its optional priority, acceptance, dependsOn, reason, repo, role, agent
+ * and areas valid. Dependencies are also checked against the rest of the reply by the caller.
  */
 function parseAssignment(
   entry: unknown,
@@ -1229,6 +1231,7 @@ function resolveAssignee(
 ): WorkItemAssignee | undefined {
   if (ref === AUTO_REF) return { kind: 'auto' };
   if (ref === NEW_SESSION_REF) return { kind: 'new-session' };
+  if (ref === CLAUDE_REF) return { kind: 'claude' };
   return members.find((member) => member.ref === ref)?.assignee;
 }
 
@@ -1259,6 +1262,7 @@ function teamLines(members: readonly SquadMember[]): string[] {
   });
   lines.push(`- auto · the scheduler picks a free agent in the row repo`);
   lines.push(`- ${NEW_SESSION_REF} · opens a new omp chat in the folder when assigned`);
+  lines.push(`- ${CLAUDE_REF} · a Claude Code run`);
   return lines;
 }
 

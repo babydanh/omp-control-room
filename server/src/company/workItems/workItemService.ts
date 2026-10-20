@@ -43,6 +43,8 @@ import {
   WORK_ITEM_ACCEPTANCE_MAX_CHARS,
   WORK_ITEM_PRIORITY_DEFAULT,
 } from '../../../../core/src/workItemGraph.js';
+import type { ClaudeAuthProbe } from '../claudeCode/claudeAuth.js';
+import type { ClaudeRuns,ClaudeRunView } from '../claudeCode/claudeRuns.js';
 import { CompanyError } from '../companyError.js';
 import { BUNDLED_AGENTS, findAgent } from './agentCatalog.js';
 import {
@@ -50,7 +52,7 @@ import {
   conflictsFor,
   describeConflicts,
 } from './conflictModel.js';
-import { composeDispatchPrompt } from './dispatchPrompt.js';
+import { composeDispatchPrompt, DEFAULT_AGENT, type PromptEngine } from './dispatchPrompt.js';
 import {
   buildJudgePrompt,
   decideJudgeAction,
@@ -125,6 +127,9 @@ const CONFLICT_RECHECK_MS = 2 * 60_000;
 /** The maintenance tick: parks idle squad sessions and re-checks conflicts when they are due. */
 const MAINTENANCE_MS = 60_000;
 
+/** How often a Claude Code run's output is shown: output bursts inside this window share one pass. */
+const CLAUDE_PROGRESS_MS = 1000;
+
 /** One herdr pane, as far as work items care. */
 export interface WorkItemPaneView {
   readonly paneId: string;
@@ -183,6 +188,8 @@ export interface WorkItemSessions {
 export interface WorkItemCatalog {
   readonly repos: readonly string[];
   readonly agents: readonly OmpAgentInfo[];
+  /** The Claude Code subagent names a claude run may pass to `--agent`. */
+  readonly claudeAgents: readonly string[];
 }
 
 /** Where the folder's file lives. */
@@ -219,6 +226,10 @@ export interface WorkItemPorts {
   overlaps(): Promise<readonly LedgerOverlapScan[]>;
   /** Whether a board is looking at the ledger. The conflict check runs only while one is. */
   boardWatching(): boolean;
+  /** Claude Code runs: one `claude -p` process per run, started in the item's checkout. */
+  readonly claude: ClaudeRuns;
+  /** Claude Code's auth status, read from `claude auth status` and cached. */
+  readonly claudeAuth: ClaudeAuthProbe;
 }
 
 /** A command the board sent. The request id makes a resent command harmless. */
@@ -339,7 +350,7 @@ export class WorkItemService {
   private squadSessionIds: string[] = [];
   /** The repo each squad-opened session was opened for, keyed by session id. */
   private squadSessionRepos = new Map<string, string>();
-  private catalog: WorkItemCatalog = { repos: [], agents: BUNDLED_AGENTS };
+  private catalog: WorkItemCatalog = { repos: [], agents: BUNDLED_AGENTS, claudeAgents: [] };
   /** Items the agent was seen working on, so its return to free means it finished. */
   private readonly observedBusy = new Set<string>();
   /** Answers to recent commands by request id; the work item id for a create, '' otherwise. */
@@ -367,6 +378,10 @@ export class WorkItemService {
   /** When each squad session was first seen idle by this process, by session id. */
   private readonly idleSince = new Map<string, number>();
   private maintenanceScheduled = false;
+  /** Unsubscribes from Claude Code run changes. Set by load, cleared by dispose. */
+  private unsubscribeClaude: (() => void) | null = null;
+  /** Whether a progress pass is already scheduled for Claude Code run output. */
+  private claudeNotifyPending = false;
 
   constructor(workspacePath: string, ports: WorkItemPorts) {
     this.workspacePath = workspacePath;
@@ -383,6 +398,9 @@ export class WorkItemService {
     this.squadSessionIds = [...parsed.file.squadSessionIds];
     this.squadSessionRepos = new Map(Object.entries(parsed.file.squadSessionRepos));
     for (const item of parsed.file.items) this.items.set(item.id, item);
+    this.unsubscribeClaude = this.ports.claude.onChange(() => this.onClaudeRunChange());
+    // A Claude Code run from before this start has no process the board can follow: its item fails as interrupted.
+    this.recoverClaudeRuns();
     await this.refreshCatalog();
     // A running item from before this start gets its grace check again.
     if ([...this.items.values()].some((item) => item.status === 'running'))
@@ -401,6 +419,7 @@ export class WorkItemService {
       items,
       roles: this.roles.map((role) => ({ ...role, agent: { ...role.agent } })),
       settings: { ...this.settings },
+      claudeStatus: this.ports.claudeAuth.current(),
       repos: [...this.catalog.repos],
       agents: this.catalog.agents.map((agent) => ({ ...agent })),
       parkedSessionIds: this.squadSessionIds.filter((id) =>
@@ -488,10 +507,11 @@ export class WorkItemService {
     const fields = this.prepareFields(command);
     const before = structuredClone(item);
     item.assignee = normalizeAssignee(command.assignee);
+    if (item.assignee.kind !== 'claude') delete item.claudeRun;
     applyFields(item, fields);
     this.requeue(
       item,
-      this.promptFor(item.text, item.acceptance, fields.agent),
+      this.promptFor(item.text, item.acceptance, fields.agent, item.assignee),
       'assigned',
       'Giao lại cho agent khác.',
     );
@@ -512,7 +532,7 @@ export class WorkItemService {
     const before = structuredClone(item);
     this.requeue(
       item,
-      this.promptFor(text, item.acceptance, item.agent),
+      this.promptFor(text, item.acceptance, item.agent, item.assignee),
       'followed_up',
       clip(text, WORK_ITEM_REASON_MAX_CHARS),
     );
@@ -545,6 +565,7 @@ export class WorkItemService {
     }
     const at = this.iso();
     this.observedBusy.delete(item.id);
+    this.stopClaudeRun(item);
     item.status = command.verdict;
     this.abortJudge(item);
     item.updatedAt = at;
@@ -701,6 +722,17 @@ export class WorkItemService {
     await this.reconcileAfterSave();
   }
 
+  /** The folder's squad settings as they stand now. The engine runners read `brain` and the models from it. */
+  currentSettings(): SquadSettings {
+    return { ...this.settings };
+  }
+
+  /** The settings panel's Claude Code check: uses the status cached for up to 60 s, then publishes it. */
+  async checkClaude(): Promise<void> {
+    await this.ports.claudeAuth.check(false);
+    this.commit();
+  }
+
   /**
    * Runs the status pass now. Calls made while a pass runs join that pass, which runs again once
    * more if anything changed. Resolves when the pass that covers the call is done.
@@ -735,6 +767,13 @@ export class WorkItemService {
   /** Cancels timers and stops further passes. Callers that already started a pass finish it. */
   dispose(): void {
     this.disposed = true;
+    this.unsubscribeClaude?.();
+    this.unsubscribeClaude = null;
+    // A run still in flight stops with the board; the next start finds its item failed as interrupted.
+    for (const item of this.items.values()) {
+      if (item.assignee.kind === 'claude' && item.claudeRunId !== undefined)
+        this.ports.claude.kill(item.claudeRunId);
+    }
     for (const run of this.judgeRuns.values()) run.controller.abort();
     this.judgeRuns.clear();
     for (const cancel of this.cancelTimers) cancel();
@@ -935,7 +974,8 @@ export class WorkItemService {
    * reachable: a new session opens when it starts, and an auto item picks its agent then.
    */
   private assertReachable(assignee: WorkItemAssignee): void {
-    if (assignee.kind === 'new-session' || assignee.kind === 'auto') return;
+    if (assignee.kind === 'new-session' || assignee.kind === 'auto' || assignee.kind === 'claude')
+      return;
     if (assignee.kind === 'herdr') {
       const roster = this.ports.roster.panes();
       if (!roster.available) throw new CompanyError('herdr_unavailable', MESSAGE.herdrUnavailable);
@@ -995,7 +1035,7 @@ export class WorkItemService {
       createdAt: at,
       updatedAt: at,
       history: [makeEvent(at, 'created'), makeEvent(at, 'queued')],
-      pendingPrompt: this.promptFor(text, acceptance, fields.agent),
+      pendingPrompt: this.promptFor(text, acceptance, fields.agent, draft.assignee),
       ...(acceptance === '' ? {} : { acceptance }),
       ...(squadRunId === undefined ? {} : { squadRunId }),
     };
@@ -1005,13 +1045,24 @@ export class WorkItemService {
     return item;
   }
 
-  /** The prompt an item owes its agent: its text, the subagent line, the safe-work block, then acceptance. */
+  /**
+   * The prompt an item owes its agent: its text, the subagent line, the safe-work block, then acceptance.
+   * A Claude Code assignee gets the role line for its engine, not the omp task tool.
+   */
   private promptFor(
     text: string,
     acceptance: string | undefined,
     agent: string | undefined,
+    assignee: WorkItemAssignee,
   ): string {
-    return composeDispatchPrompt({ text, acceptance, agent, readOnly: this.isReadOnly(agent) });
+    const engine: PromptEngine = assignee.kind === 'claude' ? 'claude' : 'omp';
+    return composeDispatchPrompt({
+      text,
+      acceptance,
+      agent,
+      readOnly: this.isReadOnly(agent),
+      engine,
+    });
   }
 
   /** Puts an item back in its assignee's queue, owing `prompt` to the agent. */
@@ -1123,6 +1174,7 @@ export class WorkItemService {
       const active = items.find((item) => occupiesAgent(item.status));
       if (active !== undefined) await this.advance(active, observation);
     }
+    this.reconcileClaudeRuns();
     await this.startQueued(view);
   }
 
@@ -1147,16 +1199,25 @@ export class WorkItemService {
    */
   private async start(item: StoredWorkItem, decision: StartDecision): Promise<void> {
     const auto = item.assignee.kind === 'auto';
-    if (decision.kind === 'open') {
+    if (decision.kind === 'claude') {
+      // An editing run gets its own checkout; a read-only run works in the repo itself.
+      const cwd = decision.readOnly ? decision.cwd : await this.isolatedCheckout(item, decision.cwd);
+      if (cwd === undefined) return;
+      if (auto) {
+        item.assignee = { kind: 'claude' };
+        item.pendingPrompt = this.promptFor(item.text, item.acceptance, item.agent, item.assignee);
+        this.pushEvent(item, makeEvent(this.iso(), 'assigned', 'Tự chọn: Claude Code (claude -p).'));
+      }
+    } else if (decision.kind === 'open') {
       const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
       if (cwd === undefined) return;
       let sessionId: string;
       try {
-      sessionId = await this.ports.sessions.openChat({
-        cwd,
-        role: decision.role,
-        workstreamKey: squadWorkstreamKey(decision.role, cwd),
-      });
+        sessionId = await this.ports.sessions.openChat({
+          cwd,
+          role: decision.role,
+          workstreamKey: squadWorkstreamKey(decision.role, cwd),
+        });
       } catch (error) {
         // A full omp runner pool is temporary: the item waits and the next pass tries it again.
         if (error instanceof CompanyError && error.code === 'company_pool_full') {
@@ -1202,8 +1263,13 @@ export class WorkItemService {
   private liveAgentKeys(): string[] {
     const keys = new Map<string, number>();
     for (const item of this.sortedItems()) {
-      // A new-session or auto item has no agent yet, so there is nothing to judge.
-      if (!isLive(item) || item.assignee.kind === 'new-session' || item.assignee.kind === 'auto')
+      // A new-session, auto or Claude Code item has no agent pane to judge: a Claude Code run is reconciled by its run.
+      if (
+        !isLive(item) ||
+        item.assignee.kind === 'new-session' ||
+        item.assignee.kind === 'auto' ||
+        item.assignee.kind === 'claude'
+      )
         continue;
       const key = assigneeKey(item.assignee);
       if (!keys.has(key)) keys.set(key, item.sequence);
@@ -1309,6 +1375,9 @@ export class WorkItemService {
       squadSessionsOpen,
       freeBytes: this.ports.freeMemoryBytes(),
       minFreeBytes: this.settings.minFreeRamGb * GIB,
+      claudeRunsOpen: this.claudeRunsOpen(),
+      maxClaudeRuns: this.settings.maxClaudeRuns,
+      preferClaude: this.settings.brain === 'claude' || this.settings.preferClaude,
     };
   }
 
@@ -1376,6 +1445,7 @@ export class WorkItemService {
     this.catalog = {
       repos: [...next.repos],
       agents: next.agents.map((agent) => ({ ...agent })),
+      claudeAgents: [...next.claudeAgents],
     };
     return changed;
   }
@@ -1390,6 +1460,8 @@ export class WorkItemService {
 
   /** What the queue knows about the herdr pane or session an item names. */
   private observeAssignee(assignee: WorkItemAssignee, view: FolderView): AgentObservation {
+    // A Claude Code run is reconciled from its run state, never observed as an agent.
+    if (assignee.kind === 'claude') return 'unknown';
     if (assignee.kind === 'new-session' || assignee.kind === 'auto') return 'free';
     if (assignee.kind === 'herdr') {
       if (!view.roster.available) return 'unknown';
@@ -1469,6 +1541,11 @@ export class WorkItemService {
         : undefined;
     // The user may have acted while the screen was read; only a still-running item moves.
     if (item.status !== before || !occupiesAgent(item.status)) return;
+    this.moveToReview(item, result, 'Agent đã dừng.');
+  }
+
+  /** Moves a running item to review with its result, then checks conflicts and judges it when autoJudge is on. */
+  private moveToReview(item: StoredWorkItem, result: string | undefined, message: string): void {
     const at = this.iso();
     this.observedBusy.delete(item.id);
     item.status = 'review';
@@ -1476,7 +1553,7 @@ export class WorkItemService {
     item.reason = WORK_ITEM_REASON.review;
     if (result === undefined) delete item.result;
     else item.result = result;
-    this.pushEvent(item, makeEvent(at, 'status', 'Agent đã dừng.'));
+    this.pushEvent(item, makeEvent(at, 'status', message));
     this.again = true;
     this.commit();
     this.notifySettled(item);
@@ -1533,7 +1610,7 @@ export class WorkItemService {
       return;
     }
     try {
-      await this.send(item.assignee, item.pendingPrompt);
+      await this.send(item, item.pendingPrompt);
     } catch (error) {
       if (item.status === 'running' && item.dispatchedAt === at) {
         const detail = describe(error);
@@ -1546,7 +1623,12 @@ export class WorkItemService {
     this.scheduleGraceCheck();
   }
 
-  private async send(assignee: WorkItemAssignee, text: string): Promise<void> {
+  private async send(item: StoredWorkItem, text: string): Promise<void> {
+    const assignee = item.assignee;
+    if (assignee.kind === 'claude') {
+      this.startClaudeRun(item, text);
+      return;
+    }
     if (assignee.kind === 'herdr') {
       await this.ports.roster.prompt(assignee.paneId ?? '', text);
       return;
@@ -1566,6 +1648,136 @@ export class WorkItemService {
       return;
     }
     throw new Error('item has no agent to send to yet');
+  }
+
+  /** Whether the item's Claude Code run is in flight: its items are running or waiting for the user. */
+  private claudeRunsOpen(): number {
+    let open = 0;
+    for (const item of this.items.values()) {
+      if (item.assignee.kind === 'claude' && occupiesAgent(item.status)) open += 1;
+    }
+    return open;
+  }
+
+  /** Starts the Claude Code run that carries a dispatched item. A follow-up resumes the session the run opened. */
+  private startClaudeRun(item: StoredWorkItem, prompt: string): void {
+    const mode = this.isReadOnly(item.agent) ? 'read' : 'edit';
+    const cwd = mode === 'read' ? (item.repo ?? this.workspacePath) : item.worktree?.path;
+    if (cwd === undefined) throw new Error('Việc này chưa có worktree để Claude Code làm.');
+    const sessionId = item.claudeRun?.sessionId;
+    const started = this.ports.claude.start({
+      cwd,
+      prompt,
+      mode,
+      sessionId: sessionId ?? this.ports.newId(),
+      resume: sessionId !== undefined,
+      agent: this.claudeAgentFor(item.agent),
+      maxTurns: this.settings.claudeMaxTurns,
+      maxBudgetUsd: this.settings.claudeMaxBudgetUsd,
+    });
+    item.claudeRunId = started.runId;
+    if (started.pid === undefined) delete item.claudeRunPid;
+    else item.claudeRunPid = started.pid;
+    item.claudeRun = {
+      mode,
+      startedAt: this.iso(),
+      ...(sessionId === undefined ? {} : { sessionId }),
+    };
+  }
+
+  /** The Claude Code subagent an item runs as: its role name, when Claude Code has an agent by that name. */
+  private claudeAgentFor(agent: string | undefined): string | undefined {
+    if (agent === undefined || agent === DEFAULT_AGENT) return undefined;
+    return this.catalog.claudeAgents.includes(agent) ? agent : undefined;
+  }
+
+  /** Stops an item's Claude Code run in flight, if any, and forgets it. Its progress goes with it. */
+  private stopClaudeRun(item: StoredWorkItem): void {
+    if (item.claudeRunId === undefined) return;
+    this.ports.claude.kill(item.claudeRunId);
+    this.ports.claude.forget(item.claudeRunId);
+    delete item.claudeRunId;
+    delete item.claudeRunPid;
+    if (item.claudeRun !== undefined) delete item.claudeRun.progress;
+  }
+
+  /** Run output arrives in bursts: one status pass covers each burst. */
+  private onClaudeRunChange(): void {
+    if (this.claudeNotifyPending) return;
+    this.claudeNotifyPending = true;
+    const cancel = this.ports.schedule(() => {
+      this.cancelTimers.delete(cancel);
+      this.claudeNotifyPending = false;
+      this.scheduleReconcile();
+    }, CLAUDE_PROGRESS_MS);
+    this.cancelTimers.add(cancel);
+  }
+
+  /** On load, each Claude Code run that was running when the board stopped fails as interrupted. */
+  private recoverClaudeRuns(): void {
+    for (const item of this.items.values()) {
+      if (item.assignee.kind !== 'claude' || item.status !== 'running') continue;
+      this.interruptClaude(item);
+    }
+  }
+
+  /** Moves each running Claude Code item along, given its run's state now. */
+  private reconcileClaudeRuns(): void {
+    for (const item of this.items.values()) {
+      if (item.assignee.kind !== 'claude' || item.status !== 'running') continue;
+      const runId = item.claudeRunId;
+      const view = runId === undefined ? undefined : this.ports.claude.view(runId);
+      if (view === undefined) this.interruptClaude(item);
+      else if (view.state === 'running') this.observeClaudeRun(item, view);
+      else this.settleClaudeRun(item, view);
+    }
+  }
+
+  /** A run still going: its progress, and once the CLI has opened the session, the id a follow-up resumes. */
+  private observeClaudeRun(item: StoredWorkItem, view: ClaudeRunView): void {
+    const run = item.claudeRun;
+    if (run === undefined) return;
+    const opened = run.sessionId === undefined && view.started;
+    const progressChanged = view.progress !== undefined && view.progress !== run.progress;
+    if (!opened && !progressChanged) return;
+    if (opened) run.sessionId = view.sessionId;
+    if (view.progress !== undefined) run.progress = view.progress;
+    if (opened) this.commit();
+    else this.ports.publish(this.snapshot());
+  }
+
+  /** A run that ended: its result goes to review; a failure, a timeout or a stop fails the item with the reason. */
+  private settleClaudeRun(item: StoredWorkItem, view: ClaudeRunView): void {
+    if (item.claudeRunId !== undefined) this.ports.claude.forget(item.claudeRunId);
+    delete item.claudeRunId;
+    delete item.claudeRunPid;
+    if (item.claudeRun !== undefined) delete item.claudeRun.progress;
+    if (view.state === 'finished') {
+      const result =
+        view.result === undefined ? undefined : clip(view.result, WORK_ITEM_RESULT_MAX_CHARS);
+      this.moveToReview(item, result, 'Claude Code đã chạy xong.');
+    } else if (view.state === 'timeout') {
+      this.fail(item, WORK_ITEM_REASON.claudeTimeout);
+    } else if (view.state === 'killed') {
+      this.fail(item, WORK_ITEM_REASON.markedFailed);
+    } else {
+      const detail = view.error ?? 'không rõ lý do';
+      this.fail(item, WORK_ITEM_REASON.claudeFailed(detail), detail);
+    }
+  }
+
+  /**
+   * A Claude Code run the board no longer follows. The item fails with the interrupted reason, so
+   * "Gửi tiếp" resumes its session; a failed item holds no agent slot, unlike a waiting one.
+   */
+  private interruptClaude(item: StoredWorkItem): void {
+    delete item.claudeRunId;
+    delete item.claudeRunPid;
+    if (item.claudeRun !== undefined) {
+      delete item.claudeRun.progress;
+      item.claudeRun.interrupted = true;
+    }
+    this.fail(item, WORK_ITEM_REASON.claudeInterrupted);
   }
 
   /** Re-checks the pass once the grace window after a dispatch has passed. */
@@ -1725,7 +1937,7 @@ export class WorkItemService {
       item.judgeEvidenceAsked = action.evidenceAsked;
       this.requeue(
         item,
-        this.promptFor(action.text, item.acceptance, item.agent),
+        this.promptFor(action.text, item.acceptance, item.agent, item.assignee),
         'followed_up',
         clip(`Giám khảo: ${reply.reason}`, WORK_ITEM_REASON_MAX_CHARS),
       );

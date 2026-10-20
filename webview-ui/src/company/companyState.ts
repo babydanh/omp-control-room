@@ -813,7 +813,14 @@ function applyWorkItems(
 ): CompanyViewState {
   const key = folderKeyOf(message);
   const held: FolderWorkItems | undefined = state.workItems[key];
-  if (held !== undefined && message.revision <= held.revision) return state;
+  if (held !== undefined && message.revision <= held.revision) {
+    // A repeated revision adds nothing, except the Claude Code check the board asked for.
+    if (message.claudeStatus === undefined) return state;
+    return {
+      ...state,
+      workItems: { ...state.workItems, [key]: { ...held, claudeStatus: message.claudeStatus } },
+    };
+  }
   return {
     ...state,
     workItems: {
@@ -826,6 +833,7 @@ function applyWorkItems(
         agents: [...(message.agents ?? [])],
         settings: message.settings ?? null,
         parkedSessionIds: [...(message.parkedSessionIds ?? [])],
+        claudeStatus: message.claudeStatus ?? held?.claudeStatus ?? null,
       },
     },
   };

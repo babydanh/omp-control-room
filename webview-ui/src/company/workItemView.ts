@@ -12,6 +12,7 @@
 
 import type {
   AgentRole,
+  ClaudeCodeStatus,
   CompanyRole,
   OmpAgentInfo,
   SquadSettings,
@@ -46,6 +47,8 @@ export interface FolderWorkItems {
   settings: SquadSettings | null;
   /** The omp sessions the server reports as parked. An item whose assignee is one shows a badge. */
   parkedSessionIds: string[];
+  /** The last Claude Code install and sign-in check the server sent for this folder; null until one arrives. */
+  claudeStatus: ClaudeCodeStatus | null;
 }
 
 /** Names one work item. Ids are unique within a folder, so the folder is part of the name. */
@@ -70,6 +73,9 @@ export const NEW_SESSION_LABEL = 'Phiên omp mới';
 
 /** The label of the option that leaves the agent to be picked when the item runs. */
 export const AUTO_ASSIGNEE_LABEL = 'Tự chọn agent';
+
+/** The label of the work item assignee that Claude Code runs. */
+export const CLAUDE_ASSIGNEE_LABEL = 'Claude Code';
 
 /** The roles a work item can be filed under, as the create and assign dialogs offer them. */
 export const WORK_ITEM_ROLES: readonly CompanyRole[] = ['chat', 'worker', 'qa', 'advisor', 'judge'];
@@ -170,6 +176,8 @@ export function assigneeLabel(
       return NEW_SESSION_LABEL;
     case 'auto':
       return AUTO_ASSIGNEE_LABEL;
+    case 'claude':
+      return CLAUDE_ASSIGNEE_LABEL;
   }
 }
 
@@ -459,6 +467,7 @@ export function workItemsOf(state: CompanyViewState, workspacePath: string): Fol
       agents: [],
       settings: null,
       parkedSessionIds: [],
+      claudeStatus: null,
     }
   );
 }

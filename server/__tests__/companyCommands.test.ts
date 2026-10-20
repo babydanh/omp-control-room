@@ -22,6 +22,7 @@ import type { CompanyStore } from '../src/company/companyStore.js';
 import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
 import { parseWorkItemsFile } from '../src/company/workItems/workItemModel.js';
 import { WorkItemService } from '../src/company/workItems/workItemService.js';
+import { FakeClaudeAuth, FakeClaudeRuns } from './fakeClaude.js';
 
 let tempHome: string;
 vi.mock('os', async () => {
@@ -1206,7 +1207,7 @@ describe('company client commands', () => {
         now: () => Date.now(),
         newId: () => randomUUID(),
         schedule: () => () => undefined,
-        catalog: async () => ({ repos: [], agents: [] }),
+        catalog: async () => ({ repos: [], agents: [], claudeAgents: [] }),
         freeMemoryBytes: () => 8 * 1024 ** 3,
         worktrees: {
           create: async (repo, shortId) => ({
@@ -1218,6 +1219,8 @@ describe('company client commands', () => {
         judge: () => new Promise<string>(() => undefined),
         overlaps: async () => [],
         boardWatching: () => false,
+        claude: new FakeClaudeRuns(),
+        claudeAuth: new FakeClaudeAuth(),
       });
       await work.load();
       services = { ...services, workItems: work };

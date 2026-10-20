@@ -234,6 +234,7 @@ components:
         - $ref: '#/components/schemas/CompanySquadApproveMessage'
         - $ref: '#/components/schemas/CompanySquadDismissMessage'
         - $ref: '#/components/schemas/CompanySquadRetryMessage'
+        - $ref: '#/components/schemas/CompanySquadClaudeCheckMessage'
         # Ledger (privileged; read-only views and one message command)
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
@@ -3800,7 +3801,7 @@ components:
 
     WorkItemAssigneeKind:
       type: string
-      enum: [herdr, session, new-session, auto]
+      enum: [herdr, session, new-session, auto, claude]
 
     WorkItemAssignee:
       type: object
@@ -3809,8 +3810,9 @@ components:
       description: >-
         Who a work item goes to. herdr names a herdr pane by paneId. session names an omp session on
         the board by sessionId. new-session opens a fresh omp chat in the item's repo when the item is
-        sent. auto lets the scheduler pick an idle member in the item's repo, or open one, when the item
-        is sent, and the item then takes the concrete assignee.
+        sent. claude runs the item as one Claude Code run (claude -p) in the item's worktree, or in its repo
+        when read-only; it names no pane or session. auto lets the scheduler pick an idle member in the item's
+        repo, or open one, or start a claude run, when the item is sent, and the item then takes the concrete assignee.
       properties:
         kind:
           $ref: '#/components/schemas/WorkItemAssigneeKind'
@@ -3963,6 +3965,8 @@ components:
               type: string
               minLength: 1
               maxLength: 256
+        claudeRun:
+          $ref: '#/components/schemas/WorkItemClaudeRun'
         judge:
           $ref: '#/components/schemas/WorkItemJudge'
         conflicts:
@@ -3993,6 +3997,30 @@ components:
     WorkItemJudgeVerdict:
       type: string
       enum: [pass, fail, need_evidence]
+
+    WorkItemClaudeRun:
+      type: object
+      additionalProperties: false
+      required: [mode, startedAt]
+      description: >-
+        The Claude Code run (claude -p) this item is in. While it runs, progress is the latest assistant text or
+        the name of the tool it uses. interrupted: the board restarted during the run; Gửi tiếp resumes the same
+        session in the same checkout.
+      properties:
+        mode:
+          type: string
+          enum: [edit, read]
+        startedAt:
+          type: string
+          format: date-time
+        sessionId:
+          type: string
+          format: uuid
+        progress:
+          type: string
+          maxLength: 300
+        interrupted:
+          type: boolean
 
     WorkItemJudge:
       type: object
@@ -4056,7 +4084,7 @@ components:
     SquadSettings:
       type: object
       additionalProperties: false
-      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext]
+      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, brain, claudeModelLeader, claudeModelJudge, preferClaude, maxClaudeRuns, claudeMaxTurns, claudeMaxBudgetUsd]
       description: >-
         Per-folder limits for the squad scheduler. maxParallel caps running work items in the folder.
         maxSquadSessions caps the omp sessions the squad opens. minFreeRamGb is the free memory needed before
@@ -4079,6 +4107,49 @@ components:
           type: boolean
         autoApproveNext:
           type: boolean
+        brain:
+          type: string
+          enum: [omp, claude]
+          description: Which CLI runs the squad leader and the judge. omp is the default; claude runs claude -p.
+        claudeModelLeader:
+          type: string
+          minLength: 1
+          maxLength: 64
+        claudeModelJudge:
+          type: string
+          minLength: 1
+          maxLength: 64
+        preferClaude:
+          type: boolean
+          description: When on, an auto item starts a Claude Code run before it opens a new omp session.
+        maxClaudeRuns:
+          type: integer
+          minimum: 1
+          maximum: 4
+        claudeMaxTurns:
+          type: integer
+          minimum: 1
+          maximum: 200
+        claudeMaxBudgetUsd:
+          type: number
+          minimum: 0.1
+          maximum: 50
+
+    ClaudeCodeStatus:
+      type: object
+      additionalProperties: false
+      required: [state]
+      description: >-
+        The Claude Code CLI on this machine, as the board last checked it with claude auth status. unknown: not
+        checked yet. missing: the claude command is not on PATH. signed_out: installed but not logged in. signed_in:
+        logged in through a Claude subscription. The check never reads or shows credentials.
+      properties:
+        state:
+          type: string
+          enum: [unknown, missing, signed_out, signed_in]
+        checkedAt:
+          type: string
+          format: date-time
 
     OmpAgentInfo:
       type: object
@@ -4127,6 +4198,8 @@ components:
             $ref: '#/components/schemas/AgentRole'
         settings:
           $ref: '#/components/schemas/SquadSettings'
+        claudeStatus:
+          $ref: '#/components/schemas/ClaudeCodeStatus'
         parkedSessionIds:
           type: array
           maxItems: 200
@@ -4800,6 +4873,24 @@ components:
         runId:
           type: string
           format: uuid
+
+    CompanySquadClaudeCheckMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath]
+      description: >-
+        Check the Claude Code CLI now with claude auth status (cached for a minute). The board answers with a new
+        folder snapshot whose claudeStatus is set. Nothing is sent to any agent.
+      properties:
+        type:
+          const: companySquadClaudeCheck
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
 
     CompanyViewModeMessage:
       type: object

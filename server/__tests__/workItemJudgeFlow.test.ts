@@ -12,6 +12,7 @@ import {
 import { GIB, SQUAD_SETTINGS_DEFAULT } from '../src/company/workItems/squadSettings.js';
 import { parseWorkItemsFile } from '../src/company/workItems/workItemModel.js';
 import { WorkItemService } from '../src/company/workItems/workItemService.js';
+import { FakeClaudeAuth, FakeClaudeRuns } from './fakeClaude.js';
 
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
 const WORKSPACE = '/work/folder';
@@ -89,7 +90,7 @@ class JudgeFixture {
           timer.cancelled = true;
         };
       },
-      catalog: async () => ({ repos: [], agents: BUNDLED_AGENTS }),
+      catalog: async () => ({ repos: [], agents: BUNDLED_AGENTS, claudeAgents: [] }),
       freeMemoryBytes: () => 8 * GIB,
       judge: (prompt, signal) =>
         new Promise<string>((resolve, reject) => {
@@ -97,6 +98,8 @@ class JudgeFixture {
         }),
       overlaps: async () => this.scans,
       boardWatching: () => this.watching,
+      claude: new FakeClaudeRuns(),
+      claudeAuth: new FakeClaudeAuth(),
     });
   }
 

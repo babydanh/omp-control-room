@@ -12,6 +12,13 @@ const VALID = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  brain: 'omp',
+  claudeModelLeader: 'opus',
+  claudeModelJudge: 'sonnet',
+  preferClaude: false,
+  maxClaudeRuns: 2,
+  claudeMaxTurns: 40,
+  claudeMaxBudgetUsd: 3,
 };
 
 describe('parseSquadSettings', () => {
@@ -28,6 +35,10 @@ describe('parseSquadSettings', () => {
         minFreeRamGb: 1.5,
         autoJudge: 'yes',
         autoApproveNext: true,
+        brain: 'claude',
+        claudeModelLeader: 'haiku',
+        maxClaudeRuns: 9,
+        claudeMaxBudgetUsd: 0.05,
       }),
     ).toEqual({
       maxParallel: SQUAD_SETTINGS_DEFAULT.maxParallel,
@@ -35,6 +46,13 @@ describe('parseSquadSettings', () => {
       minFreeRamGb: 1.5,
       autoJudge: SQUAD_SETTINGS_DEFAULT.autoJudge,
       autoApproveNext: true,
+      brain: 'claude',
+      claudeModelLeader: 'haiku',
+      claudeModelJudge: SQUAD_SETTINGS_DEFAULT.claudeModelJudge,
+      preferClaude: SQUAD_SETTINGS_DEFAULT.preferClaude,
+      maxClaudeRuns: SQUAD_SETTINGS_DEFAULT.maxClaudeRuns,
+      claudeMaxTurns: SQUAD_SETTINGS_DEFAULT.claudeMaxTurns,
+      claudeMaxBudgetUsd: SQUAD_SETTINGS_DEFAULT.claudeMaxBudgetUsd,
     });
   });
 });

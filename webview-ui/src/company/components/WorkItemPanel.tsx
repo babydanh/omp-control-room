@@ -12,6 +12,7 @@ import type { WorkItem, WorkItemEvent } from '../../../../core/src/messages.js';
 import { priorityLabel } from '../../../../core/src/workItemGraph.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import { assigneeOptionsFor } from '../assigneeOptions.js';
+import { claudeInterruptedNote, claudeProgressLine } from '../claudeCodeView.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
@@ -175,6 +176,9 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
     canRejudge ||
     canCleanWorktree;
 
+  const progress = claudeProgressLine(item);
+  const interrupted = claudeInterruptedNote(item.claudeRun);
+
   return (
     <div
       data-testid="work-item-panel"
@@ -200,6 +204,17 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
             <dd className={needsAttention ? 'text-warning' : 'text-text'}>{reason}</dd>
           </>
         )}
+        {progress !== null && (
+          <>
+            <dt className="text-text-muted">Tiến độ</dt>
+            <dd
+              data-testid="work-item-claude-progress"
+              className="whitespace-pre-wrap break-words text-text"
+            >
+              {progress}
+            </dd>
+          </>
+        )}
         {acceptance !== null && (
           <>
             <dt className="text-text-muted">Xong khi</dt>
@@ -215,6 +230,11 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
         <dt className="text-text-muted">Cập nhật</dt>
         <dd className="text-text">{updated ?? '—'}</dd>
       </dl>
+      {interrupted !== null && (
+        <p data-testid="work-item-claude-interrupted" className="px-2.5 text-2xs text-warning">
+          {interrupted}
+        </p>
+      )}
       <WorkItemReviewChips
         judge={judge}
         conflictText={conflictText(item.conflicts)}

@@ -44,7 +44,8 @@ import type {
   RoleProfile,
   SubmitPromptInput,
 } from '../../../core/src/company.js';
-import type { ServerMessage } from '../../../core/src/messages.js';
+import type { ServerMessage, SquadSettings } from '../../../core/src/messages.js';
+import { createClaudeTurnRunner, createEngineRunner } from './claudeCode/claudeTurnRunner.js';
 import type { CompanyCommandServices, CompanyTerminalGateway } from './clientCommands.js';
 import {
   type CompanyBrokerEvent,
@@ -103,10 +104,13 @@ import {
   readCompanyModelRoles,
 } from './hostModelRoles.js';
 import type { OmpRunnerCommand } from './ompRunner.js';
+import { SQUAD_LEADER_REPLY_SCHEMA } from './squad/squadLeaderSchema.js';
 import { createOmpLeaderRunner } from './squad/squadRunner.js';
 import { type SquadWiring, startSquad } from './squad/squadWiring.js';
 import { UsageLedger } from './usageService.js';
 import type { PrerequisiteCheck } from './verificationRunner.js';
+import { JUDGE_REPLY_SCHEMA } from './workItems/judgeSchema.js';
+import { SQUAD_SETTINGS_DEFAULT } from './workItems/squadSettings.js';
 import {
   NO_LEDGER,
   startWorkItems,
@@ -1112,21 +1116,33 @@ async function openOwnerCompanyHost(
       checkPrerequisite: options.checkPrerequisite ?? runtime.checkPrerequisite,
     });
     await coordinator.start();
+    // Each leader or judge turn reads its engine and models from the folder's squad settings.
+    const squadSettingsNow = (): SquadSettings =>
+      workItemsWiring?.service.currentSettings() ?? SQUAD_SETTINGS_DEFAULT;
     workItemsWiring = await startWorkItems({
       workspacePath: store.workspacePath,
       namespaceDir: store.namespaceDir,
       herdr: options.herdr,
       coordinator,
       publish,
-      judge: createOmpLeaderRunner({
-        command: hostModelRolesCommand(options),
-        cwd: store.workspacePath,
-        model: modelRoles.assignments.judge.model,
-        thinking:
-          modelRoles.assignments.judge.thinking === ''
-            ? null
-            : modelRoles.assignments.judge.thinking,
-        label: 'Giám khảo',
+      judge: createEngineRunner({
+        engine: () => squadSettingsNow().brain,
+        omp: createOmpLeaderRunner({
+          command: hostModelRolesCommand(options),
+          cwd: store.workspacePath,
+          model: modelRoles.assignments.judge.model,
+          thinking:
+            modelRoles.assignments.judge.thinking === ''
+              ? null
+              : modelRoles.assignments.judge.thinking,
+          label: 'Giám khảo',
+        }),
+        claude: createClaudeTurnRunner({
+          cwd: store.workspacePath,
+          label: 'Giám khảo',
+          model: () => squadSettingsNow().claudeModelJudge,
+          schema: JUDGE_REPLY_SCHEMA,
+        }),
       }),
       ledger: options.ledger ?? NO_LEDGER,
     });
@@ -1137,11 +1153,20 @@ async function openOwnerCompanyHost(
       herdr: options.herdr,
       coordinator,
       workItems: workItemsWiring.service,
-      leader: createOmpLeaderRunner({
-        command: hostModelRolesCommand(options),
-        cwd: store.workspacePath,
-        model: director.model,
-        thinking: director.thinking === '' ? null : director.thinking,
+      leader: createEngineRunner({
+        engine: () => squadSettingsNow().brain,
+        omp: createOmpLeaderRunner({
+          command: hostModelRolesCommand(options),
+          cwd: store.workspacePath,
+          model: director.model,
+          thinking: director.thinking === '' ? null : director.thinking,
+        }),
+        claude: createClaudeTurnRunner({
+          cwd: store.workspacePath,
+          label: 'Trưởng đội',
+          model: () => squadSettingsNow().claudeModelLeader,
+          schema: SQUAD_LEADER_REPLY_SCHEMA,
+        }),
       }),
       publish,
     });

@@ -15,14 +15,14 @@ import type { CompanyViewState } from './companyState.js';
 import { samePath } from './folderView.js';
 
 export interface AssigneeOption {
-  /** Stable for one assignee: `herdr:<paneId>`, `session:<sessionId>`, `new-session`, `auto`. */
+  /** Stable for one assignee: `herdr:<paneId>`, `session:<sessionId>`, `new-session`, `auto`, `claude`. */
   key: string;
   assignee: WorkItemAssignee;
   /** The name the picker shows. */
   label: string;
   /** A second line the picker may show: a repo and branch, a folder, or a session code. */
   detail?: string;
-  group: 'auto' | 'herdr' | 'session' | 'new';
+  group: 'auto' | 'herdr' | 'session' | 'new' | 'claude';
 }
 
 /** The label of the option that opens a new omp session. */
@@ -30,6 +30,17 @@ export const NEW_SESSION_LABEL = 'Phiên omp mới';
 
 /** The assignee that leaves the agent to be picked when the item runs. The picker offers it first. */
 export const AUTO_ASSIGNEE: WorkItemAssignee = { kind: 'auto' };
+
+/** The assignee that hands the item to Claude Code, which runs it with `claude -p`. */
+export const CLAUDE_ASSIGNEE: WorkItemAssignee = { kind: 'claude' };
+
+/** The picker row for Claude Code. The assign dialog lists it beside the auto row. */
+export const CLAUDE_OPTION: AssigneeOption = {
+  key: assigneeKeyOf(CLAUDE_ASSIGNEE),
+  assignee: CLAUDE_ASSIGNEE,
+  label: 'Claude Code (claude -p)',
+  group: 'claude',
+};
 
 /** Session states that cannot take work: the session is archived, stopped or has crashed. */
 const CLOSED_SESSION_STATUSES: Record<string, true> = {
@@ -54,6 +65,8 @@ export function assigneeKeyOf(assignee: WorkItemAssignee): string {
       return 'new-session';
     case 'auto':
       return 'auto';
+    case 'claude':
+      return 'claude';
   }
 }
 

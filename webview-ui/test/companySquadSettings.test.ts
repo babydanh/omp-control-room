@@ -16,6 +16,13 @@ const SETTINGS: SquadSettings = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  brain: 'omp',
+  claudeModelLeader: 'opus',
+  claudeModelJudge: 'sonnet',
+  preferClaude: false,
+  maxClaudeRuns: 2,
+  claudeMaxTurns: 40,
+  claudeMaxBudgetUsd: 3,
 };
 
 /** The draft the form holds once a person has changed the given fields of the saved settings. */
@@ -31,6 +38,13 @@ describe('squadSettingsDraftOf', () => {
       minFreeRamGb: '2',
       autoJudge: true,
       autoApproveNext: false,
+      brain: 'omp',
+      claudeModelLeader: 'opus',
+      claudeModelJudge: 'sonnet',
+      preferClaude: false,
+      maxClaudeRuns: '2',
+      claudeMaxTurns: '40',
+      claudeMaxBudgetUsd: '3',
     });
   });
 });

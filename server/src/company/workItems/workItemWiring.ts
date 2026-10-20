@@ -8,6 +8,9 @@ import { freemem, homedir } from 'node:os';
 
 import type { CompanyWorkItemsMessage, LedgerOverlapScan } from '../../../../core/src/messages.js';
 import type { HerdrLink } from '../../herdr/herdrLink.js';
+import { loadClaudeAgentNames } from '../claudeCode/claudeAgents.js';
+import { createClaudeAuthProbe } from '../claudeCode/claudeAuth.js';
+import { createClaudeRuns } from '../claudeCode/claudeRuns.js';
 import type { CompanyCoordinator } from '../companyCoordinator.js';
 import type { LeaderRunner } from '../squad/squadRunner.js';
 import { loadAgentCatalog } from './agentCatalog.js';
@@ -142,7 +145,11 @@ async function catalogFor(workspacePath: string): Promise<WorkItemCatalog> {
     folderRoot: workspacePath,
     repos,
   });
-  return { repos, agents };
+  const claudeAgents = await loadClaudeAgentNames({
+    homeDir: homedir(),
+    folderRoot: workspacePath,
+  });
+  return { repos, agents, claudeAgents };
 }
 
 /**
@@ -178,6 +185,8 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     judge: (prompt, signal) => options.judge.run(prompt, signal),
     overlaps: () => options.ledger.overlapScans(),
     boardWatching: () => options.ledger.watched(),
+    claude: createClaudeRuns({ newRunId: () => randomUUID() }),
+    claudeAuth: createClaudeAuthProbe(),
   });
   await service.load();
   const unsubscribe = options.herdr?.onAgents(() => service.scheduleReconcile());

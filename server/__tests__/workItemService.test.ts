@@ -12,7 +12,7 @@ import type {
 import { CompanyError } from '../src/company/companyError.js';
 import { BUNDLED_AGENTS } from '../src/company/workItems/agentCatalog.js';
 import { composeDispatchPrompt } from '../src/company/workItems/dispatchPrompt.js';
-import { GIB } from '../src/company/workItems/squadSettings.js';
+import { GIB, SQUAD_SETTINGS_DEFAULT } from '../src/company/workItems/squadSettings.js';
 import {
   parseWorkItemsFile,
   WORK_ITEM_FINISHED_KEEP,
@@ -28,6 +28,7 @@ import {
   WorkItemService,
   type WorkItemSessionView,
 } from '../src/company/workItems/workItemService.js';
+import { FakeClaudeAuth, FakeClaudeRuns } from './fakeClaude.js';
 
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
 const PANE_A = 'wA:p1';
@@ -74,6 +75,8 @@ class Fixture {
   freeBytes = 8 * GIB;
   readonly published: CompanyWorkItemsMessage[] = [];
   now = T0;
+  readonly claude = new FakeClaudeRuns();
+  readonly claudeAuth = new FakeClaudeAuth();
   private timers: Timer[] = [];
   readonly service: WorkItemService;
 
@@ -127,7 +130,7 @@ class Fixture {
           timer.cancelled = true;
         };
       },
-      catalog: async () => ({ repos: this.repos, agents: this.agents }),
+      catalog: async () => ({ repos: this.repos, agents: this.agents, claudeAgents: [] }),
       freeMemoryBytes: () => this.freeBytes,
       worktrees: {
         create: async (repo, shortId) => {
@@ -140,6 +143,8 @@ class Fixture {
       judge: () => new Promise<string>(() => undefined),
       overlaps: async () => [],
       boardWatching: () => false,
+      claude: this.claude,
+      claudeAuth: this.claudeAuth,
     });
   }
 
@@ -1010,6 +1015,7 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
 
 describe('WorkItemService: squad fields, auto assignee, and settings', () => {
   const SETTINGS = {
+    ...SQUAD_SETTINGS_DEFAULT,
     maxParallel: 4,
     maxSquadSessions: 3,
     minFreeRamGb: 2,
@@ -1416,6 +1422,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     const f = await openFixture();
     const requestId = randomUUID();
     const first = {
+      ...SQUAD_SETTINGS_DEFAULT,
       maxParallel: 2,
       maxSquadSessions: 1,
       minFreeRamGb: 4,

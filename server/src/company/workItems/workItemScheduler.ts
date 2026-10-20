@@ -39,7 +39,7 @@ import { GIB } from './squadSettings.js';
 export interface SchedulerItem {
   readonly sequence: number;
   readonly kind: WorkItemAssigneeKind;
-  /** Member key of a herdr or session assignee; undefined for auto and new-session items. */
+  /** Member key of a herdr or session assignee; undefined for auto, new-session and claude items. */
   readonly memberKey: string | undefined;
   /** Canonical repo or checkout the item works in; the folder root when the item names none. */
   readonly repo: string;
@@ -89,6 +89,11 @@ export interface SchedulerContext {
   readonly squadSessionsOpen: number;
   readonly freeBytes: number;
   readonly minFreeBytes: number;
+  /** Claude Code runs in flight. Each also holds a slot in the folder cap. */
+  readonly claudeRunsOpen: number;
+  readonly maxClaudeRuns: number;
+  /** Whether an auto item starts a Claude Code run before it opens a new omp session. */
+  readonly preferClaude: boolean;
 }
 
 /** What the service should do with a ready item. */
@@ -104,6 +109,11 @@ export type SchedulerDecision =
       readonly role: CompanyRole;
       readonly isolate: boolean;
     }
+  /**
+   * Start one Claude Code run (claude -p) for the item. An editing run gets its own worktree of
+   * `cwd`'s repo; a read-only run works in `cwd` itself.
+   */
+  | { readonly kind: 'claude'; readonly cwd: string; readonly readOnly: boolean }
   | { readonly kind: 'wait'; readonly blocker: WorkItemBlocker; readonly reason: string };
 
 /** Lowercase path key: forward slashes, no trailing slash. Windows paths compare case-insensitively. */
@@ -142,6 +152,7 @@ export function decideStart(item: SchedulerItem, ctx: SchedulerContext): Schedul
   if (item.kind === 'herdr' || item.kind === 'session') return decideNamed(item, ctx);
   if (ctx.holds.length >= ctx.maxParallel) return capacityWait(ctx);
   if (item.kind === 'new-session') return decideOpen(item, ctx);
+  if (item.kind === 'claude') return decideClaude(item, ctx);
   return decideAuto(item, ctx);
 }
 
@@ -167,6 +178,19 @@ function decideOpen(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecisi
     role: item.role ?? 'chat',
     isolate: !item.readOnly,
   };
+}
+
+/**
+ * Starts one Claude Code run when the claude run cap has room and no area conflicts. An editing run
+ * works in its own worktree, so only the areas can conflict.
+ */
+function decideClaude(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecision {
+  if (ctx.claudeRunsOpen >= ctx.maxClaudeRuns) {
+    return waitWith({ kind: 'capacity', running: ctx.claudeRunsOpen, limit: ctx.maxClaudeRuns });
+  }
+  const blocker = conflictWith(item, undefined, ctx);
+  if (blocker !== undefined) return waitWith(blocker);
+  return { kind: 'claude', cwd: item.repo, readOnly: item.readOnly };
 }
 
 function decideAuto(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecision {
@@ -196,6 +220,8 @@ function decideAuto(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecisi
     blocked ??= blocker;
   }
   if (blocked !== undefined) return waitWith(blocked);
+  // With claude preferred, a free claude run slot beats a new omp session; a full cap falls through.
+  if (ctx.preferClaude && ctx.claudeRunsOpen < ctx.maxClaudeRuns) return decideClaude(item, ctx);
   const busy = serving.filter((member) => !member.free || held.has(member.key)).length;
   return openOrRefuse(item, ctx, busy);
 }

@@ -23,6 +23,13 @@ const SETTINGS = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  brain: 'omp' as const,
+  claudeModelLeader: 'opus',
+  claudeModelJudge: 'sonnet',
+  preferClaude: false,
+  maxClaudeRuns: 2,
+  claudeMaxTurns: 40,
+  claudeMaxBudgetUsd: 3,
 };
 
 function workItem(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {

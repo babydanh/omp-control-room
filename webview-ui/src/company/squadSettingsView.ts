@@ -12,6 +12,16 @@ export const SQUAD_COUNT_LIMITS = {
   maxSquadSessions: { min: 0, max: 6 },
 } as const;
 
+/** The bounds of the Claude Code settings. The server enforces the same bounds. */
+export const CLAUDE_SETTING_LIMITS = {
+  /** A model name's length, in characters. */
+  modelChars: { min: 1, max: 64 },
+  maxClaudeRuns: { min: 1, max: 4 },
+  claudeMaxTurns: { min: 1, max: 200 },
+  /** The budget of one run, in US dollars. It need not be a whole number. */
+  claudeMaxBudgetUsd: { min: 0.1, max: 50 },
+} as const;
+
 /** The settings as the form holds them. The numbers stay text, so a half-typed value survives. */
 export interface SquadSettingsDraft {
   maxParallel: string;
@@ -19,12 +29,24 @@ export interface SquadSettingsDraft {
   minFreeRamGb: string;
   autoJudge: boolean;
   autoApproveNext: boolean;
+  brain: SquadSettings['brain'];
+  claudeModelLeader: string;
+  claudeModelJudge: string;
+  preferClaude: boolean;
+  maxClaudeRuns: string;
+  claudeMaxTurns: string;
+  claudeMaxBudgetUsd: string;
 }
 
 /** The outcome of reading a draft: the settings to save, or the reason they cannot be saved. */
 export type SquadSettingsReading =
   | { ok: true; settings: SquadSettings }
   | { ok: false; reason: string };
+
+/** The brain a form choice names. Anything but `claude` is omp, the default brain. */
+export function brainOf(choice: string): SquadSettings['brain'] {
+  return choice === 'claude' ? 'claude' : 'omp';
+}
 
 export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraft {
   return {
@@ -33,6 +55,13 @@ export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraf
     minFreeRamGb: String(settings.minFreeRamGb),
     autoJudge: settings.autoJudge,
     autoApproveNext: settings.autoApproveNext,
+    brain: settings.brain,
+    claudeModelLeader: settings.claudeModelLeader,
+    claudeModelJudge: settings.claudeModelJudge,
+    preferClaude: settings.preferClaude,
+    maxClaudeRuns: String(settings.maxClaudeRuns),
+    claudeMaxTurns: String(settings.claudeMaxTurns),
+    claudeMaxBudgetUsd: String(settings.claudeMaxBudgetUsd),
   };
 }
 
@@ -49,6 +78,20 @@ function wholeIn(text: string, min: number, max: number): number | null {
   const value = numberOf(text);
   if (value === null || !Number.isInteger(value) || value < min || value > max) return null;
   return value;
+}
+
+/** A number from `min` to `max` inclusive, or null. */
+function numberIn(text: string, min: number, max: number): number | null {
+  const value = numberOf(text);
+  if (value === null || value < min || value > max) return null;
+  return value;
+}
+
+/** A model name, trimmed, when it is `min` to `max` characters long; otherwise null. */
+function modelIn(text: string, min: number, max: number): string | null {
+  const trimmed = text.trim();
+  const length = Array.from(trimmed).length;
+  return length < min || length > max ? null : trimmed;
 }
 
 export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettingsReading {
@@ -72,6 +115,42 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
   if (minFreeRamGb === null || minFreeRamGb < 0) {
     return { ok: false, reason: 'RAM trống tối thiểu là số GB, từ 0 trở lên.' };
   }
+  const models = CLAUDE_SETTING_LIMITS.modelChars;
+  const claudeModelLeader = modelIn(draft.claudeModelLeader, models.min, models.max);
+  if (claudeModelLeader === null) {
+    return {
+      ok: false,
+      reason: `Model của trưởng nhóm có từ ${models.min} đến ${models.max} ký tự.`,
+    };
+  }
+  const claudeModelJudge = modelIn(draft.claudeModelJudge, models.min, models.max);
+  if (claudeModelJudge === null) {
+    return {
+      ok: false,
+      reason: `Model của trọng tài có từ ${models.min} đến ${models.max} ký tự.`,
+    };
+  }
+  const runs = CLAUDE_SETTING_LIMITS.maxClaudeRuns;
+  const maxClaudeRuns = wholeIn(draft.maxClaudeRuns, runs.min, runs.max);
+  if (maxClaudeRuns === null) {
+    return {
+      ok: false,
+      reason: `Số lần Claude Code chạy cùng lúc là số nguyên từ ${runs.min} đến ${runs.max}.`,
+    };
+  }
+  const turns = CLAUDE_SETTING_LIMITS.claudeMaxTurns;
+  const claudeMaxTurns = wholeIn(draft.claudeMaxTurns, turns.min, turns.max);
+  if (claudeMaxTurns === null) {
+    return {
+      ok: false,
+      reason: `Số lượt tối đa mỗi lần chạy là số nguyên từ ${turns.min} đến ${turns.max}.`,
+    };
+  }
+  const budget = CLAUDE_SETTING_LIMITS.claudeMaxBudgetUsd;
+  const claudeMaxBudgetUsd = numberIn(draft.claudeMaxBudgetUsd, budget.min, budget.max);
+  if (claudeMaxBudgetUsd === null) {
+    return { ok: false, reason: 'Ngân sách mỗi lần chạy là số USD từ 0,1 đến 50.' };
+  }
   return {
     ok: true,
     settings: {
@@ -80,6 +159,13 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
       minFreeRamGb,
       autoJudge: draft.autoJudge,
       autoApproveNext: draft.autoApproveNext,
+      brain: draft.brain,
+      claudeModelLeader,
+      claudeModelJudge,
+      preferClaude: draft.preferClaude,
+      maxClaudeRuns,
+      claudeMaxTurns,
+      claudeMaxBudgetUsd,
     },
   };
 }

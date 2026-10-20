@@ -625,6 +625,11 @@ export class CompanyClient {
     );
   }
 
+  /** Ask the server whether Claude Code is installed and signed in. The answer comes as a work-items snapshot. */
+  checkClaudeCode(workspacePath: string): SendOutcome {
+    return this.send(commands.squadClaudeCheck(commands.newRequestId(), workspacePath));
+  }
+
   updateRoleProfiles(roleProfiles: Record<string, RoleProfile>): SendOutcome {
     return this.send(
       commands.settingsUpdate(commands.newRequestId(), roleProfiles, this.targetFolder()),

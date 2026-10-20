@@ -6,6 +6,7 @@
 
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardWorkItem } from '../boardView.js';
+import { claudeInterruptedNote, claudeProgressLine } from '../claudeCodeView.js';
 import { companyRoleLabel } from '../roleProfiles.js';
 import { conflictText, judgeChipFor } from '../workItemReviewView.js';
 import {
@@ -37,6 +38,8 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
   const repoName = card.repo === null ? '' : repoShortName(card.repo);
   const areas = areaChipsOf(card.areas);
   const needsAttention = card.status === 'needs_input' || card.status === 'failed';
+  const progress = claudeProgressLine(card);
+  const interrupted = claudeInterruptedNote(card.claudeRun);
   return (
     <button
       type="button"
@@ -131,6 +134,23 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
         )}
         {updated !== null && <span className="shrink-0">{updated}</span>}
       </span>
+      {progress !== null && (
+        <span
+          data-testid="work-item-claude-progress"
+          title={progress}
+          className="block truncate text-2xs text-text-muted"
+        >
+          {progress}
+        </span>
+      )}
+      {interrupted !== null && (
+        <span
+          data-testid="work-item-claude-interrupted"
+          className="line-clamp-2 break-words text-2xs text-warning"
+        >
+          {interrupted}
+        </span>
+      )}
       {card.reason !== null && (
         <span
           className={`line-clamp-2 break-words text-2xs ${needsAttention ? 'text-warning' : 'text-text-muted'}`}

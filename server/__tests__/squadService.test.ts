@@ -93,6 +93,13 @@ class FakeWorkItems implements SquadWorkItems {
     minFreeRamGb: 2,
     autoJudge: false,
     autoApproveNext: false,
+    brain: 'omp',
+    claudeModelLeader: 'opus',
+    claudeModelJudge: 'sonnet',
+    preferClaude: false,
+    maxClaudeRuns: 2,
+    claudeMaxTurns: 40,
+    claudeMaxBudgetUsd: 3,
   };
   /** The folder's repos: the paths a row may name. */
   readonly repos: string[] = [REPO_APP];
