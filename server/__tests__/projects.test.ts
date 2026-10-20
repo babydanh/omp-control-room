@@ -73,9 +73,13 @@ describe('ProjectStore', () => {
     expect(store.snapshot().projects[1]?.children).toContainEqual(folder);
 
     await store.renameGroup(inner.id, 'Nested');
+    await store.moveNode(folder.id, projectA.id, inner.id);
+    await store.deleteGroup(outer.id);
+    // Deleting a group keeps what it held: Inner (with its folder) moves up.
+    expect(store.snapshot().projects[0]?.children.map((node) => node.id)).toEqual([inner.id]);
     await store.removeFolder(folder.id);
     await store.deleteGroup(inner.id);
-    expect(store.snapshot().projects[0]?.children).toEqual([outer]);
+    expect(store.snapshot().projects[0]?.children).toEqual([]);
     await expect(store.addFolder(projectB.id, folderB)).resolves.toMatchObject({ path: await fs.realpath(folderB) });
     await store.renameProject(projectA.id, 'Alpha renamed');
     await store.moveProject(projectB.id, 0);

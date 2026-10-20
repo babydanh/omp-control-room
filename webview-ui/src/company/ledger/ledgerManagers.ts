@@ -37,6 +37,7 @@ export type ManagerAction =
 export interface ManagerChip {
   readonly key: string;
   readonly label: string;
+  readonly agentKind: 'omp' | 'sub' | 'claude' | 'agy' | 'herdr' | 'board';
   readonly dot: ManagerDot;
   /** What the dot means, in words, so colour is never the only signal. */
   readonly state: string;
@@ -142,6 +143,24 @@ export function sessionActivityByCheckout(
   return latest;
 }
 
+export type ManagerAgentKind = ManagerChip['agentKind'];
+
+export function normalizeAgentKind(agentKind: string): ManagerAgentKind {
+  const kind = agentKind.toLowerCase();
+  if (kind === 'sub') return 'sub';
+  if (kind.includes('claude')) return 'claude';
+  if (kind.includes('agy')) return 'agy';
+  if (kind.includes('herdr')) return 'herdr';
+  if (kind.includes('board')) return 'board';
+  return 'omp';
+}
+
+export function filterManagerChips(
+  managers: readonly ManagerChip[],
+  agentKind: ManagerAgentKind | 'all',
+): ManagerChip[] {
+  return agentKind === 'all' ? [...managers] : managers.filter((manager) => manager.agentKind === agentKind);
+}
 /** The chips of every checkout in `input.checkouts`, most urgent first. */
 export function managersByCheckout(input: ManagerInput): Map<string, ManagerChip[]> {
   const nowMs = parseLedgerTimestamp(input.generatedAt);
@@ -201,6 +220,7 @@ function sessionEntry(session: LedgerSession, input: ManagerInput): Entry {
     chip: {
       key: `session:${session.sessionId}`,
       label: boardLabel ?? sessionTitle(session),
+      agentKind: normalizeAgentKind(session.agentKind),
       dot,
       state: presenceLabel(session),
       detail: session.lastIntent === null ? null : `đang: ${session.lastIntent}`,
@@ -228,6 +248,7 @@ function paneEntry(pane: PaneInput, generatedAt: string): Entry {
     chip: {
       key: `pane:${pane.paneId}`,
       label: `${pane.kind} ${paneShortCode(pane.paneId)}`,
+      agentKind: 'herdr',
       dot: PANE_DOT[pane.status],
       state: PANE_STATE[pane.status],
       detail: title === '' ? null : title,

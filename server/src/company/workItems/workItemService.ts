@@ -214,6 +214,7 @@ export interface WorkItemPorts {
   readonly sessions: WorkItemSessions;
   readonly persistence: WorkItemPersistence;
   readonly worktrees: WorkItemWorktrees;
+  readonly prepareWorktree?: (input: { readonly folder: string; readonly repo: string; readonly worktree: string }) => Promise<void>;
   publish(message: CompanyWorkItemsMessage): void;
   now(): number;
   newId(): string;
@@ -1084,6 +1085,7 @@ export class WorkItemService {
       pendingPrompt: this.promptFor(text, acceptance, fields.agent, draft.assignee),
       ...(acceptance === '' ? {} : { acceptance }),
       ...(squadRunId === undefined ? {} : { squadRunId }),
+      ...(draft.inPlace === true ? { inPlace: true } : {}),
     };
     applyFields(item, fields);
     this.nextSequence += 1;
@@ -1247,8 +1249,10 @@ export class WorkItemService {
   private async start(item: StoredWorkItem, decision: StartDecision): Promise<void> {
     const auto = item.assignee.kind === 'auto';
     if (decision.kind === 'claude' || decision.kind === 'agy') {
-      // Editing runs get their own checkout; read-only runs work in the repo itself.
-      const cwd = decision.readOnly ? decision.cwd : await this.isolatedCheckout(item, decision.cwd);
+      // In-place items keep the chosen checkout; other editing runs receive an isolated worktree.
+      const cwd = decision.readOnly || item.inPlace === true
+        ? decision.cwd
+        : await this.isolatedCheckout(item, decision.cwd);
       if (cwd === undefined) return;
       if (auto) {
         item.assignee = { kind: decision.kind };
@@ -1393,6 +1397,7 @@ export class WorkItemService {
       role: item.role,
       areas: item.areas ?? [],
       readOnly: this.isReadOnly(item.agent),
+      inPlace: item.inPlace === true,
       agent: item.agent,
     };
   }
@@ -1410,7 +1415,7 @@ export class WorkItemService {
         sequence: item.sequence,
         readOnly: this.isReadOnly(item.agent),
         areas: item.areas ?? [],
-        checkout: checkouts.get(memberKey),
+        checkout: item.inPlace === true ? item.repo : checkouts.get(memberKey),
       });
     }
     const squadSessionsOpen = this.squadSessionIds.filter((id) =>
@@ -1725,7 +1730,9 @@ export class WorkItemService {
   /** Starts the Claude Code run that carries a dispatched item. A follow-up resumes the session the run opened. */
   private startClaudeRun(item: StoredWorkItem, prompt: string): void {
     const mode = this.isReadOnly(item.agent) ? 'read' : 'edit';
-    const cwd = mode === 'read' ? (item.repo ?? this.workspacePath) : item.worktree?.path;
+    const cwd = mode === 'read' || item.inPlace === true
+      ? (item.repo ?? this.workspacePath)
+      : item.worktree?.path;
     if (cwd === undefined) throw new Error('Việc này chưa có worktree để Claude Code làm.');
     const sessionId = item.claudeRun?.sessionId;
     const started = this.ports.claude.start({
@@ -1757,7 +1764,9 @@ export class WorkItemService {
   /** Starts the Antigravity run that carries a dispatched item. */
   private startAgyRun(item: StoredWorkItem, prompt: string): void {
     const mode = this.isReadOnly(item.agent) ? 'read' : 'edit';
-    const cwd = mode === 'read' ? (item.repo ?? this.workspacePath) : item.worktree?.path;
+    const cwd = mode === 'read' || item.inPlace === true
+      ? (item.repo ?? this.workspacePath)
+      : item.worktree?.path;
     if (cwd === undefined) throw new Error('Việc này chưa có worktree để Antigravity làm.');
     const started = this.ports.agy.start({ cwd, prompt });
     this.agyRunIds.set(item.id, started.runId);
@@ -1952,6 +1961,22 @@ export class WorkItemService {
     } catch (error) {
       const detail = clip(describe(error), WORK_ITEM_BLOCKER_DETAIL_MAX_CHARS);
       this.hold(item, { kind: 'worktree', detail });
+      return undefined;
+    }
+    try {
+      await this.ports.prepareWorktree?.({
+        folder: this.workspacePath,
+        repo,
+        worktree: worktree.path,
+      });
+    } catch (error) {
+      item.worktree = worktree;
+      this.fail(
+        item,
+        error instanceof Error
+          ? `Script chuẩn bị worktree thất bại: ${error.message}`
+          : 'Script chuẩn bị worktree thất bại.',
+      );
       return undefined;
     }
     item.worktree = worktree;

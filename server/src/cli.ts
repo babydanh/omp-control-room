@@ -53,6 +53,8 @@ import {
 import { FileStateAdapter } from './fileStateAdapter.js';
 import { createHerdrLink } from './herdr/herdrLink.js';
 import { createLedgerService } from './ledger/ledgerRuntime.js';
+import { runProcess } from './ledger/processRunner.js';
+import { createProjectRuntime } from './projects/projectRuntime.js';
 import { claudeProvider, copyHookScript, hookProviderById } from './providers/index.js';
 import { PixelAgentsServer } from './server.js';
 import { PtySessionManager } from './terminal/ptySessionManager.js';
@@ -325,6 +327,7 @@ async function main(): Promise<void> {
       extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
       herdr,
       ledger: { overlapScans: () => ledger.overlapScans(), watched: () => ledger.watched() },
+      prepareWorktree: (input) => projects.prepareWorktree(input),
     },
     recents: {
       read: readRecentCompanyWorkspaces,
@@ -337,6 +340,10 @@ async function main(): Promise<void> {
         void herdr.rescope();
         ledger.rescope();
       });
+      // A newly opened folder's scheduler starts on its own file; give it the inherited values.
+      projects.refreshSettings().catch((error: unknown) => {
+        console.warn(`[Pixel Agents] Project settings refresh failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
     },
   });
   // Cây git board: scans the repos seen in recent activity plus the open company folders.
@@ -347,6 +354,13 @@ async function main(): Promise<void> {
         .filter((entry) => entry.open)
         .map((entry) => entry.path),
     workspaceFor: (target) => folderScope.folderOf(target),
+  });
+  // Project tree (sidebar): one store and the services its commands run on.
+  const projects = createProjectRuntime({
+    company,
+    ledger,
+    agents: () => store.values(),
+    runProcess,
   });
   // Terminals for agents this server launches. Construction is cheap -- the
   // native module is resolved (and probed) lazily on first use, so a user who
@@ -486,6 +500,7 @@ async function main(): Promise<void> {
       isCompanyExecutionAllowed: () => acceptingCompany,
       workspaces: company,
       ledger,
+      projects: { store: projects.store, services: projects.services },
       herdr,
       browserReaper,
       usage,

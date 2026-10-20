@@ -21,7 +21,7 @@ import { Icon } from '../components/Icon.js';
 import { formatRelativeTime } from './ledgerFormat.js';
 import { type NodeTone, TONE_LABEL } from './ledgerHealth.js';
 import { LedgerLegend } from './LedgerLegend.js';
-import { type ManagerAction, type ManagerChip, type PaneInput } from './ledgerManagers.js';
+import { filterManagerChips, type ManagerAction, type ManagerAgentKind, type ManagerChip, type PaneInput } from './ledgerManagers.js';
 import type { BoardSessionIndex } from './ledgerMapping.js';
 import {
   type ConflictRef,
@@ -51,6 +51,14 @@ import {
 
 /** Shown on a card with nothing to act on. */
 const ALL_CLEAR = 'Không có việc cần làm';
+const AGENT_KIND_CLASS: Readonly<Record<ManagerAgentKind, string>> = {
+  omp: 'bg-accent/12 text-text',
+  sub: 'bg-warning/12 text-warning',
+  claude: 'bg-status-active/12 text-status-active',
+  agy: 'bg-status-waiting/12 text-status-waiting',
+  herdr: 'bg-raised text-text-muted',
+  board: 'bg-selected text-text',
+};
 
 export interface LedgerTreeTabProps {
   view: LedgerView;
@@ -91,8 +99,8 @@ function isConflictSelected(
 
 export function LedgerTreeTab(props: LedgerTreeTabProps) {
   const { view, boardSessions, panes, selection, onSelect } = props;
+  const [agentKind, setAgentKind] = useState<ManagerAgentKind | 'all'>('all');
   const [expandedRepos, setExpandedRepos] = useState<ReadonlySet<string>>(() => new Set());
-
   const trees = useMemo(
     () =>
       view.repos.map((repo) =>
@@ -144,6 +152,18 @@ export function LedgerTreeTab(props: LedgerTreeTabProps) {
   return (
     <div className="flex flex-col gap-4">
       <LedgerLegend />
+      <label className="flex items-center gap-2 text-2xs text-text-muted">
+        Công cụ
+        <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ManagerAgentKind | 'all')} className="rounded bg-well px-2 py-1 text-text">
+          <option value="all">Tất cả</option>
+          <option value="omp">omp</option>
+          <option value="sub">sub</option>
+          <option value="claude">Claude</option>
+          <option value="agy">agy</option>
+          <option value="herdr">herdr</option>
+          <option value="board">board</option>
+        </select>
+      </label>
       {trees.map((tree) => (
         <RepoTreeSection
           key={tree.repo}
@@ -154,6 +174,7 @@ export function LedgerTreeTab(props: LedgerTreeTabProps) {
           expanded={expandedRepos.has(tree.repo)}
           onToggleFolded={() => toggleFolded(tree.repo)}
           onSelect={onSelect}
+          agentKind={agentKind}
           onOpenManager={openManager}
         />
       ))}
@@ -169,6 +190,7 @@ interface RepoTreeSectionProps {
   expanded: boolean;
   onToggleFolded: () => void;
   onSelect: (selection: LedgerSelection) => void;
+  agentKind: ManagerAgentKind | 'all';
   onOpenManager: (action: ManagerAction) => void;
 }
 
@@ -180,6 +202,7 @@ function RepoTreeSection({
   expanded,
   onToggleFolded,
   onSelect,
+  agentKind,
   onOpenManager,
 }: RepoTreeSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -221,6 +244,7 @@ function RepoTreeSection({
             generatedAt={generatedAt}
             selected={isBranchSelected(selection, tree.repo, node)}
             onSelect={onSelect}
+            agentKind={agentKind}
             onOpenManager={onOpenManager}
           />
         ))}
@@ -313,11 +337,13 @@ interface TreeCardProps {
   generatedAt: string;
   selected: boolean;
   onSelect: (selection: LedgerSelection) => void;
+  agentKind: ManagerAgentKind | 'all';
   onOpenManager: (action: ManagerAction) => void;
 }
 
-function TreeCard({ node, repo, generatedAt, selected, onSelect, onOpenManager }: TreeCardProps) {
+function TreeCard({ node, repo, generatedAt, selected, agentKind, onSelect, onOpenManager }: TreeCardProps) {
   const { worktree, health, managers } = node;
+  const visibleManagers = filterManagerChips(managers, agentKind);
   const title = worktree === null ? 'origin/main' : (worktree.branch ?? `HEAD ${worktree.head}`);
   const subtitle =
     worktree === null
@@ -382,10 +408,10 @@ function TreeCard({ node, repo, generatedAt, selected, onSelect, onOpenManager }
           )}
           <div className="flex min-w-0 flex-col gap-1.5">
             <span className="text-2xs text-text-muted">Ai đang quản lý</span>
-            {managers.length === 0 ? (
+            {visibleManagers.length === 0 ? (
               <span className="text-2xs text-text-muted">Không có phiên nào đang quản lý</span>
             ) : (
-              managers.map((chip) => (
+              visibleManagers.map((chip) => (
                 <ManagerChipButton key={chip.key} chip={chip} onOpen={onOpenManager} />
               ))
             )}
@@ -416,6 +442,7 @@ function ManagerChipButton({
           className={`size-2 shrink-0 rounded-full ${DOT_CLASS[chip.dot]}`}
         />
         <span className="truncate">{chip.label}</span>
+        <span className={`rounded px-1 text-2xs ${AGENT_KIND_CLASS[chip.agentKind]}`}>{chip.agentKind}</span>
       </span>
       <span className="text-2xs text-text-muted">
         {chip.age === null ? chip.state : `${chip.state} · ${chip.age}`}

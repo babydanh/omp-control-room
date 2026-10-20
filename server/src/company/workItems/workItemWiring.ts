@@ -52,6 +52,7 @@ export interface WorkItemWiringOptions {
   /** Absent when no herdr link runs: herdr assignees are then refused, and omp sessions still work. */
   readonly herdr: WorkItemHerdr | undefined;
   readonly coordinator: WorkItemCoordinator;
+  readonly prepareWorktree?: (input: { readonly folder: string; readonly repo: string; readonly worktree: string }) => Promise<void>;
   readonly publish: (message: CompanyWorkItemsMessage) => void;
   /** The judge role's omp runner: one judge turn per call. */
   readonly judge: LeaderRunner;
@@ -166,6 +167,7 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     persistence: new WorkItemFileStore(options.namespaceDir),
     publish: options.publish,
     now: () => Date.now(),
+    prepareWorktree: options.prepareWorktree,
     newId: () => randomUUID(),
     schedule: (run, ms) => {
       const timer = setTimeout(run, ms);

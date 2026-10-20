@@ -124,6 +124,8 @@ export type StoredWorkItem = Omit<WorkItem, 'blocker'> & {
   claudeRunPid?: number;
   /** The last time an archived work item was restored to the board. */
   restoredAt?: string;
+  /** Run the CLI in `repo` itself instead of allocating an isolated worktree. */
+  inPlace?: boolean;
 };
 
 /** One work item to create, as the service API takes it. */
@@ -145,6 +147,8 @@ export interface WorkItemDraft {
   areas?: readonly string[];
   /** Omp subagent name the item runs under. */
   agent?: string;
+  /** Run this work item directly in its repo checkout without creating or cleaning a worktree. */
+  inPlace?: boolean;
 }
 
 /** Where a folder's work items and role notes sit on disk. */
@@ -372,6 +376,7 @@ export function toWorkItem(stored: StoredWorkItem): WorkItem {
   delete wire.judgeEvidenceAsked;
   delete wire.claudeRunId;
   delete wire.claudeRunPid;
+  delete wire.inPlace;
   return wire as WorkItem;
 }
 
@@ -490,6 +495,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     ...(judge === undefined ? {} : { judge }),
     judgeEvidenceAsked: value.judgeEvidenceAsked === true,
     ...(value.worktreeRemoved === true ? { worktreeRemoved: true } : {}),
+    ...(value.inPlace === true ? { inPlace: true } : {}),
     ...(claudeRun === undefined ? {} : { claudeRun }),
     ...(agyRun === undefined ? {} : { agyRun }),
     ...(typeof value.claudeRunId === 'string' ? { claudeRunId: value.claudeRunId } : {}),

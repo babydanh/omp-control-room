@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import type { ProjectDiffRequestMessage } from '../../core/src/messages.js';
-import { createGitRunner } from '../src/ledger/git.js';
+import { createGitRunner, type GitRunner } from '../src/ledger/git.js';
 import type { EventRow, SessionRow } from '../src/ledger/ledgerDb.js';
 import { runProcess } from '../src/ledger/processRunner.js';
 import { PROJECT_DIFF_TEXT, readCheckoutDiff } from '../src/projects/projectDiffEngine.js';
@@ -85,6 +85,20 @@ describe('readCheckoutDiff: uncommitted', () => {
     expect(diff.reason).toBe(PROJECT_DIFF_TEXT.truncated);
     for (const file of diff.files) expect(file.additions + file.deletions).toBeGreaterThan(0);
     expect(diff.files.length).toBeLessThan(2);
+  });
+
+  it('reports a cut-off untracked file list as truncated and never uses its half path', async () => {
+    write('a.txt', 'moi\n');
+    // The real runner flags `ls-files` output past its byte cap as ok + truncated.
+    const cutList: GitRunner = {
+      run: (cwd, args, options) => (args.includes('ls-files')
+        ? Promise.resolve({ ok: true, code: 0, stdout: 'a.txt\0half/pa', stderr: '', timedOut: false, truncated: true })
+        : git.run(cwd, args, options)),
+    };
+    const diff = await readCheckoutDiff(request('uncommitted'), deps({ git: cutList }));
+    expect(diff.truncated).toBe(true);
+    expect(diff.reason).toBe(PROJECT_DIFF_TEXT.truncated);
+    expect(diff.files.map((file) => file.path)).toEqual(['a.txt']);
   });
 
   it('names the sessions that edited each file, newest first', async () => {

@@ -1,0 +1,95 @@
+.project-session-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  background: color-mix(in srgb, var(--color-bg-dark) 70%, transparent);
+  padding: 24px;
+}
+
+.project-session-dialog {
+  display: grid;
+  width: min(520px, 100%);
+  max-height: min(760px, 92vh);
+  gap: 16px;
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--app-font-ui);
+}
+
+.project-session-dialog__header,
+.project-session-dialog footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.project-session-dialog h2,
+.project-session-dialog p {
+  margin: 0;
+}
+
+.project-session-dialog label {
+  display: grid;
+  gap: 6px;
+}
+
+.project-session-dialog input:not([type='radio']),
+.project-session-dialog select,
+.project-session-dialog textarea {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-dark);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.project-session-dialog fieldset {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.project-session-dialog fieldset label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.project-session-dialog__path {
+  overflow-wrap: anywhere;
+  color: var(--color-text-muted);
+}
+
+.project-session-dialog__error {
+  color: var(--color-danger);
+}
+
+.project-session-dialog footer {
+  justify-content: flex-end;
+}
+
+.project-session-dialog button {
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-btn-bg);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.project-session-dialog button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

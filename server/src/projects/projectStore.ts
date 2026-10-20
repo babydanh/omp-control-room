@@ -279,7 +279,10 @@ export class ProjectStore {
       const parent = findParentList(this.state.projects, nodeId);
       const index = parent?.findIndex((node) => node.id === nodeId) ?? -1;
       if (parent === null || index < 0 || parent[index]?.type !== expected) throw new Error(`Không tìm thấy ${expected === 'folder' ? 'thư mục' : 'nhóm'}.`);
-      parent.splice(index, 1);
+      const [removed] = parent.splice(index, 1);
+      // A group is only an arrangement: deleting it lifts its children into
+      // its place instead of dropping the folders they hold.
+      if (removed?.type === 'group') parent.splice(index, 0, ...removed.children);
     });
   }
 

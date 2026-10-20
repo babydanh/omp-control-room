@@ -44,8 +44,10 @@ export interface SchedulerItem {
   /** Canonical repo or checkout the item works in; the folder root when the item names none. */
   readonly repo: string;
   readonly role: CompanyRole | undefined;
-  readonly areas: readonly string[];
   readonly readOnly: boolean;
+  readonly areas: readonly string[];
+  /** Keeps the selected checkout as the CLI cwd and locks it while the item is live. */
+  readonly inPlace?: boolean;
   /** Omp subagent the item runs under. Undefined and the default worker (`task`) take any member. */
   readonly agent?: string;
 }
@@ -194,7 +196,7 @@ function decideClaude(item: SchedulerItem, ctx: SchedulerContext): SchedulerDeci
   if (ctx.claudeRunsOpen >= ctx.maxClaudeRuns) {
     return waitWith({ kind: 'capacity', running: ctx.claudeRunsOpen, limit: ctx.maxClaudeRuns });
   }
-  const blocker = conflictWith(item, undefined, ctx);
+  const blocker = conflictWith(item, item.inPlace ? item.repo : undefined, ctx);
   if (blocker !== undefined) return waitWith(blocker);
   return { kind: 'claude', cwd: item.repo, readOnly: item.readOnly };
 }
@@ -239,7 +241,7 @@ function decideAgy(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecisio
   if (ctx.agyRunsOpen >= ctx.maxAgyRuns) {
     return waitWith({ kind: 'capacity', running: ctx.agyRunsOpen, limit: ctx.maxAgyRuns });
   }
-  const blocker = conflictWith(item, undefined, ctx);
+  const blocker = conflictWith(item, item.inPlace ? item.repo : undefined, ctx);
   if (blocker !== undefined) return waitWith(blocker);
   return { kind: 'agy', cwd: item.repo, readOnly: item.readOnly };
 }

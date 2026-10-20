@@ -10,7 +10,8 @@
 
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AgentMenuRequest, WorkItemMenuAction } from '../agentMenu.js';
+import type { ProjectTreeNode } from '../../../../core/src/messages.js';
+import type { AgentMenuRequest, ProjectNodeAction, WorkItemMenuAction } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import { buildPaletteItems, type PaletteActionId, type PaletteItem } from '../commandPalette.js';
 import type { CompanyClient } from '../companyClient.js';
@@ -44,7 +45,9 @@ import { ChangesPage } from '../projects/ChangesPage.js';
 import { LayeredSettingsDialog } from '../projects/LayeredSettingsDialog.js';
 import { NewSessionDialog } from '../projects/NewSessionDialog.js';
 import { projectStore } from '../projects/projectClient.js';
+import { checkoutPathFor, engineForAction, type ProjectSessionEngine } from '../projects/projectNodeTargets.js';
 import { useProjectState } from '../projects/projectStore.js';
+import { COMPANY_ROLES, roleProfile } from '../roleProfiles.js';
 import { startScrollFades } from '../scrollFades.js';
 import {
   type DrawerSubject,
@@ -139,8 +142,9 @@ export function BoardShell({ client }: BoardShellProps) {
   const projects = useProjectState(projectStore);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectSettingsNode, setProjectSettingsNode] = useState<string | null>(null);
-  const [newSessionNode, setNewSessionNode] = useState<string | null>(null);
+  const [newSessionNode, setNewSessionNode] = useState<{ nodeId: string; engine?: ProjectSessionEngine } | null>(null);
   const [selectedCheckoutId, setSelectedCheckoutId] = useState('');
+  const [changesTab, setChangesTab] = useState<'diff' | 'merge'>('diff');
   const state = useCompanyState(client);
   useSessionLogBackfill(client, state);
   const ledger = useLedgerState(ledgerStore);
@@ -401,6 +405,42 @@ export function BoardShell({ client }: BoardShellProps) {
     dismissSheet();
     client.select(selectionForTask(state, taskId));
   }
+
+  function openProjectChanges(checkoutPath: string, tab: 'diff' | 'merge' = 'diff'): void {
+    setSelectedCheckoutId(checkoutPath);
+    setChangesTab(tab);
+    projectStore.requestDiff({ checkout: checkoutPath, scope: 'uncommitted', sha: '' });
+    selectPage('changes');
+  }
+
+  function openProjectSettings(nodeId: string | null): void {
+    setProjectSettingsNode(nodeId);
+    projectStore.requestSettings(nodeId ?? undefined);
+  }
+
+  /** Menu actions that leave the menu: pages and dialogs. Tree edits run in the menu itself. */
+  function runProjectNodeAction(node: ProjectTreeNode, action: ProjectNodeAction): void {
+    if (action === 'changes' || action === 'merge') {
+      const checkout = checkoutPathFor(projects.nodes, node);
+      if (checkout !== null) openProjectChanges(checkout, action === 'merge' ? 'merge' : 'diff');
+      return;
+    }
+    if (action === 'settings') {
+      openProjectSettings(node.id);
+      return;
+    }
+    if (action === 'newSession' || action === 'newSessionOmp' || action === 'newSessionClaude' || action === 'newSessionAgy') {
+      const engine = engineForAction(action);
+      setNewSessionNode({ nodeId: node.id, ...(engine === undefined ? {} : { engine }) });
+    }
+  }
+
+  const globalOmpRoleModels = COMPANY_ROLES.flatMap((role) => {
+    const profile = roleProfile(state, role);
+    return profile === null
+      ? []
+      : [{ role, model: profile.requestedModel, ...(profile.thinking ? { thinking: profile.thinking } : {}) }];
+  });
 
   function openHerdr(paneId: string, tab: HerdrDrawerTab = 'screen'): void {
     setOpened({ kind: 'herdr', paneId });
@@ -731,16 +771,12 @@ export function BoardShell({ client }: BoardShellProps) {
                   }
                 },
                 onCreateNode: (kind, parentId) => projectStore.createNode({ kind, ...(parentId === undefined ? {} : { parentId }), name: kind === 'project' ? 'Dự án mới' : kind === 'group' ? 'Nhóm mới' : 'Thư mục mới' }),
-                onOpenChanges: (checkoutId) => {
-                  setSelectedCheckoutId(checkoutId);
-                  projectStore.requestDiff({ checkout: checkoutId, scope: 'uncommitted', sha: '' });
-                  selectPage('changes');
-                },
-                onOpenSettings: (nodeId) => {
-                  setProjectSettingsNode(nodeId);
-                  projectStore.requestSettings(nodeId ?? undefined);
-                },
-                onNewSession: (nodeId) => setNewSessionNode(nodeId),
+                onOpenChanges: openProjectChanges,
+                onOpenSettings: openProjectSettings,
+                onNewSession: (nodeId, engine) => setNewSessionNode({ nodeId, ...(engine === undefined ? {} : { engine }) }),
+                onOpenSession: selectSession,
+                onMenu: openMenu,
+                store: projectStore,
               }}
               onOpenRoles={() => setRolesOpen(true)}
               onDismiss={dismissSheet}
@@ -814,7 +850,7 @@ export function BoardShell({ client }: BoardShellProps) {
       </div>
       </>
       ) : activePage === 'changes' ? (
-        <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} onClose={() => selectPage('board')} />
+        <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} initialTab={changesTab} onClose={() => selectPage('board')} />
       ) : activePage === 'usage' ? (
         <div key="usage-page" className="company-shell-page flex min-h-0 flex-1 flex-col">
           <UsagePage client={client} />
@@ -836,8 +872,22 @@ export function BoardShell({ client }: BoardShellProps) {
           <AccountsPage />
         </div>
       )}
-      {projectSettingsNode !== null && <LayeredSettingsDialog store={projectStore} nodeId={projectSettingsNode} onClose={() => setProjectSettingsNode(null)} />}
-      {newSessionNode !== null && <NewSessionDialog store={projectStore} nodeId={newSessionNode} onClose={() => setNewSessionNode(null)} />}
+      {projectSettingsNode !== null && (
+        <LayeredSettingsDialog
+          store={projectStore}
+          nodeId={projectSettingsNode}
+          globalOmpRoleModels={globalOmpRoleModels}
+          onClose={() => setProjectSettingsNode(null)}
+        />
+      )}
+      {newSessionNode !== null && (
+        <NewSessionDialog
+          store={projectStore}
+          nodeId={newSessionNode.nodeId}
+          {...(newSessionNode.engine === undefined ? {} : { initialEngine: newSessionNode.engine })}
+          onClose={() => setNewSessionNode(null)}
+        />
+      )}
       {paletteOpen && (
         <CommandPalette
           items={paletteItems}
@@ -867,6 +917,8 @@ export function BoardShell({ client }: BoardShellProps) {
           onWorkItemAction={runWorkItemMenuAction}
           onSelectSquad={selectSquad}
           onSquadRemoved={closeRemovedSquad}
+          projectStore={projectStore}
+          onProjectNodeAction={runProjectNodeAction}
         />
       )}
       <WorkDialogHost

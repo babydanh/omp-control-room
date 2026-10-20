@@ -17,11 +17,29 @@
 
 import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent } from 'react';
 
+import type { ProjectTreeNode } from '../../../core/src/messages.js';
 import { sessionAcceptsWork } from './assigneeOptions.js';
 import type { CompanyDrawerTab } from './companyState.js';
 import type { HerdrDrawerTab } from './herdrView.js';
 import type { IconName } from './iconNames.js';
 import { HOLDS_WORK_REASON, sessionControls, type SessionControlSet } from './sessionActions.js';
+
+export type ProjectNodeAction =
+  | 'newSession'
+  | 'newSessionOmp'
+  | 'newSessionClaude'
+  | 'newSessionAgy'
+  | 'addFolder'
+  | 'createGroup'
+  | 'rename'
+  | 'settings'
+  | 'delete'
+  | 'moveTo'
+  | 'changes'
+  | 'merge'
+  | 'copyPath'
+  | 'copyBranch'
+  | 'removeFolder';
 
 /** A drawer header that opened the menu: whether the drawer is currently maximized. */
 export interface DrawerView {
@@ -49,7 +67,8 @@ export type AgentMenuSubject =
   | { kind: 'squad'; runId: string; workspacePath: string }
   | { kind: 'herdr'; paneId: string; drawer: DrawerView | null }
   | { kind: 'sleeping'; paneId: string; drawer: DrawerView | null }
-  | { kind: 'project'; project: ProjectMenuFacts };
+  | { kind: 'project'; project: ProjectMenuFacts }
+  | { kind: 'projectNode'; node: ProjectTreeNode };
 
 export type SessionControlAction =
   'interrupt' | 'pause' | 'resume' | 'restart' | 'kill' | 'archive' | 'delete';
@@ -88,7 +107,7 @@ export type AgentMenuAction =
   | { kind: 'workItemAction'; action: WorkItemMenuAction }
   | { kind: 'squadAction'; action: SquadRunMenuAction }
   | { kind: 'wake' }
-  | { kind: 'projectNodeAction'; action: 'project' | 'group' | 'folder' | 'repository' | 'worktree' };
+  | { kind: 'projectNodeAction'; action: ProjectNodeAction };
 
 export interface AgentMenuItem {
   /** Stable within one menu: a React key, and how tests find an item. */
@@ -715,6 +734,68 @@ export function projectMenuItems(project: ProjectMenuFacts): AgentMenuItem[] {
           ],
     ),
   ];
+}
+
+/** Project-tree actions; execution stays with the shared context menu. */
+export function projectNodeMenuItems(node: ProjectTreeNode): AgentMenuItem[] {
+  const add = (
+    id: string,
+    label: string,
+    icon: IconName,
+    action: ProjectNodeAction,
+    startsGroup = false,
+    danger = false,
+  ): AgentMenuItem => item({
+    id,
+    label,
+    icon,
+    action: { kind: 'projectNodeAction', action },
+    startsGroup,
+    danger,
+  });
+  switch (node.kind) {
+    case 'project':
+      return [
+        add('new-session', 'Phiên mới', 'plus', 'newSession'),
+        add('add-folder', 'Thêm thư mục…', 'folder', 'addFolder'),
+        add('create-group', 'Tạo nhóm…', 'plus', 'createGroup', true),
+        add('rename', 'Đổi tên…', 'pencil', 'rename', true),
+        add('settings', 'Cài đặt…', 'settings', 'settings'),
+        add('delete', 'Xoá project…', 'trash', 'delete', true, true),
+      ];
+    case 'group':
+      return [
+        add('create-group', 'Tạo nhóm con…', 'plus', 'createGroup'),
+        add('add-folder', 'Thêm thư mục…', 'folder', 'addFolder'),
+        add('rename', 'Đổi tên…', 'pencil', 'rename', true),
+        add('move-to', 'Chuyển tới…', 'folder', 'moveTo'),
+        add('delete', 'Xoá nhóm…', 'trash', 'delete', true, true),
+      ];
+    case 'folder':
+      return [
+        add('new-omp', 'Phiên mới · omp', 'plus', 'newSessionOmp'),
+        add('new-claude', 'Phiên mới · Claude', 'plus', 'newSessionClaude'),
+        add('new-agy', 'Phiên mới · agy', 'plus', 'newSessionAgy'),
+        add('changes', 'Xem thay đổi', 'file-text', 'changes', true),
+        add('settings', 'Cài đặt…', 'settings', 'settings'),
+        add('rename', 'Đổi tên hiển thị…', 'pencil', 'rename'),
+        add('move-to', 'Chuyển tới…', 'folder', 'moveTo'),
+        add('copy-path', 'Sao chép đường dẫn', 'copy', 'copyPath'),
+        add('remove-folder', 'Bỏ khỏi project…', 'trash', 'removeFolder', true, true),
+      ];
+    case 'repository':
+    case 'checkout':
+      return [
+        add('new-session', 'Phiên mới', 'plus', 'newSession'),
+        add('changes', 'Xem thay đổi', 'file-text', 'changes', true),
+        add('merge', 'Thử gộp với…', 'git-branch', 'merge'),
+        add('copy-path', 'Sao chép đường dẫn', 'copy', 'copyPath', true),
+        ...(node.branch === undefined ? [] : [add('copy-branch', 'Sao chép nhánh', 'copy', 'copyBranch')]),
+      ];
+    case 'file-agg':
+    case 'session':
+      return [];
+  }
 }
 
 /** The pane-name rule herdr enforces. The same text is the hint and the refusal. */

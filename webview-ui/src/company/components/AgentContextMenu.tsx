@@ -13,7 +13,7 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { AgentInfo, CompanySessionSummary, HerdrAgent } from '../../../../core/src/company.js';
-import type { HerdrSleepingSession, SquadRun, WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
+import type { HerdrSleepingSession, ProjectTreeNode, SquadRun, WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
 import { isBrowserRuntime } from '../../runtime.js';
 import { serverToken } from '../../transport/serverToken.js';
 import { workingFolder } from '../agentInfoView.js';
@@ -30,6 +30,8 @@ import {
   planningMenuItems,
   type Point,
   projectMenuItems,
+  type ProjectNodeAction,
+  projectNodeMenuItems,
   SESSION_NAME_MAX_LENGTH,
   type SessionControlAction,
   type SessionMenuFacts,
@@ -49,6 +51,8 @@ import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
+import type { ProjectStore } from '../projects/projectStore.js';
+import { canMoveProjectNode } from '../projects/projectTreeView.js';
 import { screenPlainText } from '../screenText.js';
 import { DELETE_CONFIRM_DETAIL, REFUSED_NOTICE, sessionHoldsWork } from '../sessionActions.js';
 import { deleteSessionsInOrder, removalNotice } from '../sessionRemoval.js';
@@ -81,6 +85,8 @@ export interface AgentContextMenuProps {
   ) => void;
   onSelectSquad: (ref: { runId: string; workspacePath: string }) => void;
   onSquadRemoved: (ref: { runId: string; workspacePath: string }) => void;
+  projectStore?: ProjectStore;
+  onProjectNodeAction?: (node: ProjectTreeNode, action: ProjectNodeAction) => void;
 }
 
 /** The actions that ask first. Each names the item that opened the question. */
@@ -90,9 +96,11 @@ type ConfirmKind =
   | 'cancel-prompt'
   | 'clean'
   | 'squad-cancel'
-  | 'squad-remove';
+  | 'squad-remove'
+  | 'project-delete'
+  | 'project-remove-folder';
 
-type MenuMode = 'menu' | 'rename' | 'folder-rename' | ConfirmKind;
+type MenuMode = 'menu' | 'rename' | 'folder-rename' | 'project-rename' | 'project-move' | 'project-create-group' | 'project-add-folder' | ConfirmKind;
 
 interface Notice {
   text: string;
@@ -143,6 +151,7 @@ function actingSessionId(subject: AgentMenuSubject): string | null {
     case 'sleeping':
     case 'squad':
     case 'project':
+    case 'projectNode':
       return null;
   }
 }
@@ -174,6 +183,7 @@ function workAgentOf(
     case 'sleeping':
     case 'squad':
     case 'project':
+    case 'projectNode':
       return null;
   }
 }
@@ -226,6 +236,8 @@ function itemsFor(subject: AgentMenuSubject, facts: MenuFacts): AgentMenuItem[] 
       return facts.sleeping === undefined ? null : sleepingMenuItems(subject.drawer);
     case 'project':
       return projectMenuItems(subject.project);
+    case 'projectNode':
+      return projectNodeMenuItems(subject.node);
   }
 }
 
@@ -274,6 +286,8 @@ function headerLines(
       return { title: sleepingName(facts.sleeping), subtitle: 'Ngủ đông' };
     case 'project':
       return { title: subject.project.name, subtitle: subject.project.path ?? '' };
+    case 'projectNode':
+      return { title: subject.node.name, subtitle: subject.node.path ?? subject.node.branch ?? subject.node.kind };
   }
 }
 
@@ -313,6 +327,8 @@ export function AgentContextMenu({
   onWorkItemAction,
   onSelectSquad,
   onSquadRemoved,
+  projectStore,
+  onProjectNodeAction,
 }: AgentContextMenuProps) {
   const { subject, anchor, returnFocus } = request;
   const sessionId = actingSessionId(subject);
@@ -383,6 +399,7 @@ export function AgentContextMenu({
   const [pending, setPending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState('');
+  const [projectPathDraft, setProjectPathDraft] = useState('');
   const [pendingSquadRemoval, setPendingSquadRemoval] = useState<{
     runId: string;
     workspacePath: string;
@@ -546,6 +563,79 @@ export function AgentContextMenu({
     setNotice({ text: removalNotice(report), failed: report.refused > 0 });
   }
 
+  function nodeAncestor(node: ProjectTreeNode, kind: 'project' | 'group'): string | undefined {
+    if (node.kind === kind) return node.id;
+    const allNodes = projectStore?.getSnapshot().nodes ?? [];
+    let parentId = node.parentId;
+    while (parentId !== undefined) {
+      const parent = allNodes.find((entry) => entry.id === parentId);
+      if (parent === undefined) return undefined;
+      if (parent.kind === kind) return parent.id;
+      parentId = parent.parentId;
+    }
+    return undefined;
+  }
+
+  function executeProjectNodeAction(action: ProjectNodeAction): void {
+    if (subject.kind !== 'projectNode') return;
+    const node = subject.node;
+    if (action === 'copyPath' || action === 'copyBranch') {
+      const text = action === 'copyPath' ? node.path : node.branch;
+      if (text !== undefined) void copyText(text).then((copied) => setNotice({
+        text: copied ? `Đã sao chép: ${text}` : COPY_FAILED_NOTICE,
+        failed: !copied,
+      }));
+      return;
+    }
+    if (action === 'rename') {
+      setDraft(node.name);
+      setMode('project-rename');
+      return;
+    }
+    if (action === 'delete') {
+      setMode('project-delete');
+      return;
+    }
+    if (action === 'removeFolder') {
+      setMode('project-remove-folder');
+      return;
+    }
+    if (action === 'moveTo') {
+      setMode('project-move');
+      return;
+    }
+    if (action === 'createGroup') {
+      setDraft('');
+      setMode('project-create-group');
+      return;
+    }
+    if (action === 'addFolder') {
+      setDraft('');
+      setProjectPathDraft('');
+      setMode('project-add-folder');
+      return;
+    }
+    onProjectNodeAction?.(node, action);
+    onClose();
+  }
+
+  function submitProjectRename(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (subject.kind !== 'projectNode' || draft.trim() === '') return;
+    projectStore?.updateNode({ nodeId: subject.node.id, name: draft.trim() });
+    onClose();
+  }
+
+  function moveProjectNode(targetId: string): void {
+    if (subject.kind !== 'projectNode' || projectStore === undefined) return;
+    const node = subject.node;
+    const allNodes = projectStore.getSnapshot().nodes;
+    const target = allNodes.find((entry) => entry.id === targetId);
+    if (target === undefined || !canMoveProjectNode(allNodes, node.id, target.id)) return;
+    projectStore.moveNode({ nodeId: node.id, parentId: target.id });
+    onClose();
+  }
+
   function confirmSpec(kind: ConfirmKind): ConfirmSpec {
     switch (kind) {
       case 'kill':
@@ -594,6 +684,26 @@ export function AgentContextMenu({
             const handle = client.removeSquad(subject.workspacePath, squadRun.id);
             if (handle.ok) setPendingSquadRemoval(ref);
             track(handle);
+          },
+        };
+      case 'project-delete':
+        return {
+          message: subject.kind === 'projectNode' && subject.node.kind === 'group'
+            ? `Xoá nhóm ${subject.node.name}? Các mục con sẽ chuyển lên cấp trên.`
+            : `Xoá ${subject.kind === 'projectNode' ? subject.node.name : 'project'} khỏi danh sách? Tệp trên đĩa vẫn được giữ.`,
+          label: 'Xoá khỏi danh sách',
+          run: () => {
+            if (subject.kind === 'projectNode') projectStore?.deleteNode(subject.node.id);
+            onClose();
+          },
+        };
+      case 'project-remove-folder':
+        return {
+          message: `Bỏ thư mục ${subject.kind === 'projectNode' ? subject.node.name : ''} khỏi project? Tệp trên đĩa vẫn được giữ.`,
+          label: 'Bỏ khỏi project',
+          run: () => {
+            if (subject.kind === 'projectNode') projectStore?.deleteNode(subject.node.id);
+            onClose();
           },
         };
     }
@@ -732,6 +842,9 @@ export function AgentContextMenu({
         setNotice(null);
         setMode(action.action === 'cancel' ? 'squad-cancel' : 'squad-remove');
         return;
+      case 'projectNodeAction':
+        executeProjectNodeAction(action.action);
+        return;
     }
   }
 
@@ -748,6 +861,25 @@ export function AgentContextMenu({
       return;
     }
     if (sessionId !== null) track(client.renameSession(sessionId, name));
+  }
+
+  function submitProjectNodeCreate(event: FormEvent<HTMLFormElement>): void {
+    event.preventDefault();
+    if (subject.kind !== 'projectNode' || projectStore === undefined) return;
+    const node = subject.node;
+    const projectId = nodeAncestor(node, 'project');
+    if (projectId === undefined) return;
+    const parentId = node.kind === 'group' ? node.id : projectId;
+    if (mode === 'project-create-group' && draft.trim() !== '') {
+      projectStore.createNode({ kind: 'group', parentId, name: draft.trim() });
+      onClose();
+      return;
+    }
+    const folderPath = projectPathDraft.trim();
+    if (mode !== 'project-add-folder' || folderPath === '') return;
+    const name = draft.trim() || folderPath.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || folderPath;
+    projectStore.createNode({ kind: 'folder', parentId, name, path: folderPath });
+    onClose();
   }
 
   function onMenuKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
@@ -778,7 +910,9 @@ export function AgentContextMenu({
     );
   }
   const confirm =
-    mode === 'menu' || mode === 'rename' || mode === 'folder-rename' ? null : confirmSpec(mode);
+    mode === 'menu' || mode === 'rename' || mode === 'folder-rename' || mode === 'project-rename' || mode === 'project-move' || mode === 'project-create-group' || mode === 'project-add-folder'
+      ? null
+      : confirmSpec(mode);
 
   return (
     <div
@@ -803,6 +937,51 @@ export function AgentContextMenu({
           {items.map((entry) => (
             <MenuItemButton key={entry.id} item={entry} onRun={runItem} />
           ))}
+        </div>
+      ) : mode === 'project-create-group' ? (
+        <form onSubmit={submitProjectNodeCreate} className="flex flex-col gap-2 px-3 py-2">
+          <label className="flex flex-col gap-1 text-text-muted">
+            Tên nhóm
+            <input ref={inputRef} autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
+          </label>
+          <div className="flex gap-1">
+            <CompanyButton type="submit" size="sm" disabled={draft.trim() === '' || projectStore === undefined}>Tạo nhóm</CompanyButton>
+            <CompanyButton size="sm" onClick={() => setMode('menu')}>Quay lại</CompanyButton>
+          </div>
+        </form>
+      ) : mode === 'project-add-folder' ? (
+        <form onSubmit={submitProjectNodeCreate} className="flex flex-col gap-2 px-3 py-2">
+          <label className="flex flex-col gap-1 text-text-muted">
+            Đường dẫn thư mục
+            <input ref={inputRef} autoFocus value={projectPathDraft} onChange={(event) => setProjectPathDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
+          </label>
+          <label className="flex flex-col gap-1 text-text-muted">
+            Tên hiển thị (tuỳ chọn)
+            <input value={draft} onChange={(event) => setDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
+          </label>
+          <div className="flex gap-1">
+            <CompanyButton type="submit" size="sm" disabled={projectPathDraft.trim() === '' || projectStore === undefined}>Thêm thư mục</CompanyButton>
+            <CompanyButton size="sm" onClick={() => setMode('menu')}>Quay lại</CompanyButton>
+          </div>
+        </form>
+      ) : mode === 'project-rename' ? (
+        <form onSubmit={submitProjectRename} className="flex flex-col gap-2 px-3 py-2">
+          <label className="flex flex-col gap-1 text-text-muted">
+            Tên hiển thị
+            <input ref={inputRef} autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
+          </label>
+          <div className="flex gap-1">
+            <CompanyButton type="submit" size="sm" disabled={draft.trim() === '' || pending !== null}>Lưu</CompanyButton>
+            <CompanyButton size="sm" onClick={() => setMode('menu')}>Quay lại</CompanyButton>
+          </div>
+        </form>
+      ) : mode === 'project-move' ? (
+        <div className="flex flex-col gap-2 px-3 py-2">
+          <p className="text-text-muted">Chuyển tới project hoặc nhóm</p>
+          {(projectStore?.getSnapshot().nodes ?? [])
+            .filter((node) => (node.kind === 'project' || node.kind === 'group') && subject.kind === 'projectNode' && canMoveProjectNode(projectStore?.getSnapshot().nodes ?? [], subject.node.id, node.id))
+            .map((node) => <CompanyButton key={node.id} size="sm" onClick={() => moveProjectNode(node.id)}>{node.name}</CompanyButton>)}
+          <CompanyButton size="sm" onClick={() => setMode('menu')}>Quay lại</CompanyButton>
         </div>
       ) : mode === 'rename' ? (
         <form onSubmit={submitRename} className="flex flex-col gap-2 px-3 py-2">

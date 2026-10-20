@@ -5763,6 +5763,9 @@ components:
           type: string
           minLength: 1
           maxLength: 2048
+        sourceId:
+          type: string
+          maxLength: 128
 
     LibraryStorageSearchRequest:
       type: object
@@ -5927,6 +5930,9 @@ components:
           format: uuid
         id:
           type: string
+        sourceId:
+          type: string
+          maxLength: 128
         content:
           type: string
         truncated:
@@ -6024,6 +6030,7 @@ components:
           type: array
           items:
             type: string
+            enum: [omp, claude, agents, agy]
         claudeMode:
           type: string
           enum: [on, name-only, user-invocable-only, off]
@@ -6032,6 +6039,44 @@ components:
         sizeBytes:
           type: integer
           minimum: 0
+        preferredSource:
+          type: string
+          enum: [omp, claude, agents, agy]
+        preferredSourceId:
+          type: string
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibrarySkillSource'
+        ignoredTools:
+          type: array
+          items:
+            type: string
+            enum: [omp, claude, agents, agy]
+        hasContentDifferences:
+          type: boolean
+
+    LibrarySkillSource:
+      type: object
+      additionalProperties: false
+      required: [id, tool, location, contentHash, lineCount, ignored]
+      properties:
+        id:
+          type: string
+        tool:
+          type: string
+          enum: [omp, claude, agents, agy]
+        location:
+          type: string
+        contentHash:
+          type: string
+        lineCount:
+          type: integer
+          minimum: 0
+        ignored:
+          type: boolean
+        kind:
+          type: string
 
     LibraryMcpServer:
       type: object
@@ -7947,7 +7992,7 @@ components:
 
     ProjectSettingField:
       type: string
-      enum: [engineLeader, engineJudge, engineWorker, modelLeader, modelJudge, modelWorker, maxParallel, worktreePrepare]
+      enum: [engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxParallel, maxClaudeRuns, maxAgyRuns, worktreePrepare]
 
     ProjectSettingValue:
       anyOf:
@@ -7957,7 +8002,7 @@ components:
           maxLength: 256
         - type: integer
           minimum: 1
-          maximum: 64
+          maximum: 8
         - $ref: '#/components/schemas/ProjectPrepareScript'
 
     ProjectEngine:
@@ -7978,19 +8023,26 @@ components:
         engineWorker:
           type: string
           enum: [omp, claude, agy]
-        modelLeader:
+        claudeModelLeader:
           type: string
           minLength: 1
-        modelJudge:
+          maxLength: 256
+        claudeModelJudge:
           type: string
           minLength: 1
-        modelWorker:
-          type: string
-          minLength: 1
+          maxLength: 256
         maxParallel:
           type: integer
           minimum: 1
-          maximum: 64
+          maximum: 8
+        maxClaudeRuns:
+          type: integer
+          minimum: 1
+          maximum: 4
+        maxAgyRuns:
+          type: integer
+          minimum: 1
+          maximum: 4
         worktreePrepare:
           $ref: '#/components/schemas/ProjectPrepareScript'
 
@@ -8025,16 +8077,19 @@ components:
         engineWorker:
           type: string
           enum: [global, project, folder]
-        modelLeader:
+        claudeModelLeader:
           type: string
           enum: [global, project, folder]
-        modelJudge:
-          type: string
-          enum: [global, project, folder]
-        modelWorker:
+        claudeModelJudge:
           type: string
           enum: [global, project, folder]
         maxParallel:
+          type: string
+          enum: [global, project, folder]
+        maxClaudeRuns:
+          type: string
+          enum: [global, project, folder]
+        maxAgyRuns:
           type: string
           enum: [global, project, folder]
         worktreePrepare:

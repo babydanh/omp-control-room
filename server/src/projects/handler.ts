@@ -21,7 +21,8 @@ import { previewProjectMerge } from './mergePreview.js';
 import { startProjectSession } from './newSession.js';
 import { type ProjectNode, type ProjectState, ProjectStore } from './projectStore.js';
 import { buildProjectTreeSnapshot, type HerdrProjectSession, type ProjectTreeOptions } from './projectTree.js';
-import { clearProjectSettings, getProjectSettings, setProjectSettings } from './settingsLayers.js';
+import type { ProjectModuleDeps, ProjectServices } from './services.js';
+import { clearProjectSettings, getProjectSettings, refreshProjectSettings, setProjectSettings } from './settingsLayers.js';
 
 const FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
 const REQUEST_TYPES: Record<string, true> = {
@@ -52,6 +53,17 @@ export interface ProjectCommandContext {
   readonly tree?: ProjectTreeOptions;
   readonly agents?: Iterable<AgentState>;
   readonly herdrSessions?: () => readonly HerdrProjectSession[];
+  readonly services?: ProjectServices;
+}
+
+/** Module deps for one phase-two command; throws a user error when its service is not wired. */
+function depsFor<S>(
+  store: ProjectStore,
+  context: ProjectCommandContext,
+  services: S | undefined,
+): ProjectModuleDeps<S> {
+  if (services === undefined) throw new LibraryUserError('Chức năng chưa được kết nối.');
+  return { store, loadTree: () => buildTree(store, context), services };
 }
 
 /** Handles project tree, mutations and phase-two commands. Returns false for other messages. */
@@ -150,38 +162,47 @@ async function runProjectRequest(
           await store.moveNode(request.nodeId, target.projectId, target.groupId, request.index);
         }
         send(commandResult(requestId, 'move', true, '', request.nodeId));
+        // A folder that changed Project inherits different values: reapply them.
+        if (context.services?.settings !== undefined) {
+          await refreshProjectSettings(depsFor(store, context, context.services.settings));
+        }
         await sendTreeSnapshot(requestId, send, store, context);
         return;
       }
       case 'projectDiffRequest': {
-        const result = await getProjectDiff(msg as unknown as ProjectDiffRequestMessage);
+        const deps = depsFor(store, context, context.services?.diff);
+        const result = await getProjectDiff(msg as unknown as ProjectDiffRequestMessage, deps);
         send({ ...result, requestId });
         return;
       }
       case 'projectComment':
-        await sendProjectComment(msg as unknown as ProjectCommentMessage);
+        await sendProjectComment(msg as unknown as ProjectCommentMessage, depsFor(store, context, context.services?.comments));
         send(commandResult(requestId, 'comment', true, ''));
         return;
       case 'projectSettingsRequest': {
-        const result = await getProjectSettings(msg as unknown as ProjectSettingsRequestMessage);
+        const deps = depsFor(store, context, context.services?.settings);
+        const result = await getProjectSettings(msg as unknown as ProjectSettingsRequestMessage, deps);
         send({ ...result, requestId });
         return;
       }
       case 'projectSettingsSet':
-        await setProjectSettings(msg as unknown as ProjectSettingsSetMessage);
+        await setProjectSettings(msg as unknown as ProjectSettingsSetMessage, depsFor(store, context, context.services?.settings));
         send(commandResult(requestId, 'settingsSet', true, ''));
         return;
       case 'projectSettingsClear':
-        await clearProjectSettings(msg as unknown as ProjectSettingsClearMessage);
+        await clearProjectSettings(msg as unknown as ProjectSettingsClearMessage, depsFor(store, context, context.services?.settings));
         send(commandResult(requestId, 'settingsClear', true, ''));
         return;
       case 'projectSessionStart': {
-        const result = await startProjectSession(msg as unknown as ProjectSessionStartMessage);
+        const deps = depsFor(store, context, context.services?.session);
+        const result = await startProjectSession(msg as unknown as ProjectSessionStartMessage, deps);
         send({ ...result, requestId });
+        await sendTreeSnapshot(requestId, send, store, context);
         return;
       }
       case 'projectMergePreviewRequest': {
-        const result = await previewProjectMerge(msg as unknown as ProjectMergePreviewRequestMessage);
+        const deps = depsFor(store, context, context.services?.mergePreview);
+        const result = await previewProjectMerge(msg as unknown as ProjectMergePreviewRequestMessage, deps);
         send({ ...result, requestId });
         return;
       }

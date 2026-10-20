@@ -119,6 +119,7 @@ import {
   type WorkItemHerdr,
   type WorkItemLedger,
   type WorkItemWiring,
+  type WorkItemWiringOptions,
 } from './workItems/workItemWiring.js';
 /**
  * The client identity a surface gets when it does not name one: this process's
@@ -195,6 +196,8 @@ export interface WorkspaceCompanyHostOptions {
   readonly herdr?: WorkItemHerdr;
   /** The process ledger's overlap scans and board watch, for conflict checks. Absent: no conflicts. */
   readonly ledger?: WorkItemLedger;
+  /** Runs the folder's effective worktree setup after a squad worktree is created, before its run. */
+  readonly prepareWorktree?: WorkItemWiringOptions['prepareWorktree'];
   readonly runnerCommand?: OmpRunnerCommand;
   readonly extensionPath?: string;
   readonly helperPath?: string;
@@ -1152,6 +1155,7 @@ async function openOwnerCompanyHost(
         }),
       }),
       ledger: options.ledger ?? NO_LEDGER,
+      prepareWorktree: options.prepareWorktree,
     });
     unregisterWorkItems = registerWorkItemService(store.namespaceDir, workItemsWiring.service);
     const director = modelRoles.assignments.director;

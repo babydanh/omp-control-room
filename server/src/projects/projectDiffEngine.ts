@@ -198,7 +198,10 @@ async function untrackedFiles(
     maxBytes: PROJECT_DIFF_MAX_BYTES,
   });
   failOn(listed);
-  const paths = listed.stdout.split('\0').filter(safeRelative);
+  const entries = listed.stdout.split('\0');
+  // Output past the byte cap is cut: the last entry may be half a path, and more files exist.
+  if (listed.truncated) entries.pop();
+  const paths = entries.filter(safeRelative);
   const files: ProjectDiffFile[] = [];
   let left = budget;
   for (const filePath of paths.slice(0, PROJECT_DIFF_MAX_UNTRACKED)) {
@@ -216,6 +219,8 @@ async function untrackedFiles(
     if (file !== undefined) files.push({ ...file, path: filePath, status: file.status === 'binary' ? 'binary' : 'added' });
     if (result.truncated) return { files, truncated: true, reason: PROJECT_DIFF_TEXT.truncated };
   }
+  // Cut by bytes: how many files exist is unknown, so say "too large", not "more than 100".
+  if (listed.truncated) return { files, truncated: true, reason: PROJECT_DIFF_TEXT.truncated };
   if (paths.length > PROJECT_DIFF_MAX_UNTRACKED) {
     return { files, truncated: true, reason: PROJECT_DIFF_TEXT.untrackedCapped };
   }

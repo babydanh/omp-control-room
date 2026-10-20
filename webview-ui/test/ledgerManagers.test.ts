@@ -4,8 +4,10 @@ import type { HerdrAgent, HerdrSleepingSession, LedgerSession } from '../../core
 import {
   checkoutOf,
   ENDED_LIMIT,
+  filterManagerChips,
   type ManagerInput,
   managersByCheckout,
+  normalizeAgentKind,
   panesOf,
   sessionActivityByCheckout,
 } from '../src/company/ledger/ledgerManagers.js';
@@ -203,5 +205,16 @@ describe('panesOf', () => {
         sleptAt: '2026-10-18 09:00:00',
       },
     ]);
+  });
+});
+
+describe('filterManagerChips', () => {
+  it('normalizes tool labels and filters the visible checkout managers', () => {
+    const chips = managersByCheckout(input({
+      sessions: [session('omp'), session('claude', { agentKind: 'Claude Code' }), session('sub', { agentKind: 'sub' })],
+    })).get(BRANCH_KEY) ?? [];
+    expect(normalizeAgentKind('Claude Code')).toBe('claude');
+    expect(filterManagerChips(chips, 'claude').map((chip) => chip.key)).toEqual(['session:claude']);
+    expect(filterManagerChips(chips, 'all')).toHaveLength(3);
   });
 });
