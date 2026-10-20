@@ -231,7 +231,7 @@ export interface WorkItemPorts {
   boardWatching(): boolean;
   /** Claude Code runs: one `claude -p` process per run, started in the item's checkout. */
   readonly claude: ClaudeRuns;
-  /** Antigravity runs: one `agy -p` process per run, started in the item's checkout. */
+  /** Antigravity runs: one `agy` process per run (prompt on stdin), started in the item's checkout. */
   readonly agy: AgyRuns;
   /** Claude Code's auth status, read from `claude auth status` and cached. */
   readonly claudeAuth: ClaudeAuthProbe;
@@ -1253,7 +1253,7 @@ export class WorkItemService {
       if (auto) {
         item.assignee = { kind: decision.kind };
         item.pendingPrompt = this.promptFor(item.text, item.acceptance, item.agent, item.assignee);
-        const cli = decision.kind === 'agy' ? 'Antigravity (agy -p)' : 'Claude Code (claude -p)';
+        const cli = decision.kind === 'agy' ? 'Antigravity (agy)' : 'Claude Code (claude -p)';
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {

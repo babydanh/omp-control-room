@@ -3832,7 +3832,7 @@ components:
         Who a work item goes to. herdr names a herdr pane by paneId. session names an omp session on
         the board by sessionId. new-session opens a fresh omp chat in the item's repo when the item is
         sent. claude runs the item as one Claude Code run (claude -p) in the item's worktree, or in its repo
-        when read-only; agy runs one Antigravity CLI run (agy -p) in the item's worktree or repo when read-only.
+        when read-only; agy runs one Antigravity CLI run (agy, prompt on stdin) in the item's worktree or repo when read-only.
         auto lets the scheduler pick an idle member in the item's repo, or open one, or start a CLI run, when the item is sent, and the item then takes the concrete assignee.
       properties:
         kind:
@@ -4050,7 +4050,7 @@ components:
       additionalProperties: false
       required: [mode, startedAt]
       description: >-
-        The Antigravity CLI run (agy -p) this item is in. While it runs, progress is its latest assistant text.
+        The Antigravity CLI run (agy, prompt on stdin) this item is in. While it runs, progress is its latest assistant text.
         interrupted means the board restarted during the run; the item can be retried in the same checkout.
       properties:
         mode:
