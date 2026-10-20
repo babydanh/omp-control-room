@@ -11,6 +11,7 @@ import {
 import { type GitRepoScan, type GitRunner, type GitRunOptions, readRepo } from '../ledger/git.js';
 import type { LedgerSource, SessionRow } from '../ledger/ledgerDb.js';
 import { normalizeLedgerPath } from '../ledger/ledgerPath.js';
+import { formatLedgerTime } from '../ledger/ledgerTime.js';
 import type { AgentState } from '../types.js';
 import { type Project, type ProjectNode, ProjectStore } from './projectStore.js';
 
@@ -43,7 +44,11 @@ export interface ProjectTreeOptions {
   readonly listRepos?: typeof listFolderRepos;
   /** Repo scan source; the ledger passes its cached scans. Defaults to a fresh read. */
   readonly readRepo?: (repo: string) => Promise<GitRepoScan>;
+  /** Folders and their sessions only, no git: answers at once while the full tree builds. */
+  readonly sessionsOnly?: boolean;
 }
+/** How far back a session's latest intent is looked up for its title. */
+const SESSION_INTENT_WINDOW_MS = 6 * 60 * 60 * 1000;
 function canonicalKey(folder: string): string {
   const resolved = path.resolve(folder);
   return process.platform === 'win32' ? resolved.toLocaleLowerCase('en-US') : resolved;
@@ -76,10 +81,27 @@ function agentKindForLedger(row: SessionRow): ProjectAgentKind {
   return 'omp';
 }
 
-/** The ledger's agent name when it says something; `main` and blanks fall back to the short session id. */
-function titleForLedger(row: SessionRow): string {
+/** A ledger session row with the intent of its latest tool call, when the recent events hold one. */
+type TitledSessionRow = SessionRow & { readonly intent?: string };
+
+/** Agent name when it says something, else what the session is doing now, else the short session id. */
+function titleForLedger(row: TitledSessionRow): string {
   const name = row.agentName?.trim() ?? '';
-  return name !== '' && name !== 'main' ? name : `…${row.sessionId.slice(-8)}`;
+  if (name !== '' && name !== 'main') return name;
+  return row.intent ?? `…${row.sessionId.slice(-8)}`;
+}
+
+/** Latest non-empty intent per session from the last few hours of events. */
+function withIntents(rows: readonly SessionRow[], ledger: LedgerSource): TitledSessionRow[] {
+  const intents = new Map<string, string>();
+  for (const event of ledger.eventRows(formatLedgerTime(Date.now() - SESSION_INTENT_WINDOW_MS))) {
+    const intent = event.intent?.trim();
+    if (intent) intents.set(event.sessionId, intent);
+  }
+  return rows.map((row) => {
+    const intent = intents.get(row.sessionId);
+    return intent === undefined ? row : { ...row, intent };
+  });
 }
 
 function ledgerStatus(row: SessionRow): string {
@@ -373,6 +395,10 @@ async function appendNodes(
     }
 
     output.push({ id: node.id, parentId, kind: 'folder', name: node.name, path: node.path });
+    if (options.sessionsOnly === true) {
+      pushSessions(output, node.id, sessionsForCheckout(node.path, [], ledgerRows, agents, herdrSessions));
+      continue;
+    }
     const listed = options.listRepos === undefined
       ? await reuse(repoLists, canonicalKey(node.path), REPO_LIST_REUSE_MS, () => listFolderRepos(node.path))
       : await options.listRepos(node.path);
@@ -442,22 +468,26 @@ async function appendNodes(
         const nested = scan.worktrees
           .map((other) => other.path)
           .filter((other) => canonicalKey(other) !== canonicalKey(worktree.path) && pathContains(worktree.path, other));
-        for (const session of sessionsForCheckout(worktree.path, nested, ledgerRows, agents, herdrSessions)) {
-          output.push({
-            id: `${session.agentKind}:${session.id}`,
-            parentId: worktree.path,
-            kind: 'session',
-            name: session.title || session.id,
-            engine: session.engine,
-            agentKind: session.agentKind,
-            sessionId: session.id,
-            state: session.status,
-            title: session.title,
-            path: session.cwd,
-          });
-        }
+        pushSessions(output, worktree.path, sessionsForCheckout(worktree.path, nested, ledgerRows, agents, herdrSessions));
       }
     }
+  }
+}
+
+function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: readonly ProjectSessionSnapshot[]): void {
+  for (const session of sessions) {
+    output.push({
+      id: `${session.agentKind}:${session.id}`,
+      parentId,
+      kind: 'session',
+      name: session.title || session.id,
+      engine: session.engine,
+      agentKind: session.agentKind,
+      sessionId: session.id,
+      state: session.status,
+      title: session.title,
+      path: session.cwd,
+    });
   }
 }
 
@@ -466,9 +496,9 @@ export async function buildProjectTreeSnapshot(
   options: ProjectTreeOptions,
 ): Promise<ProjectTreeSnapshot> {
   const state = await store.load();
-  const ledgerRows = options.ledger.sessionRows();
+  const ledgerRows = withIntents(options.ledger.sessionRows(), options.ledger);
   const pendingCheckouts = new Set(options.ledger.pendingRows().map((row) => canonicalKey(row.checkout)));
-  const overlapScans = await (options.overlapScans?.() ?? Promise.resolve([]));
+  const overlapScans = options.sessionsOnly === true ? [] : await (options.overlapScans?.() ?? Promise.resolve([]));
   const agents = [...(options.agents ?? [])];
   const herdrSessions = options.herdrSessions?.() ?? [];
   const nodes: ProjectTreeNode[] = [];

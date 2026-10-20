@@ -16,12 +16,12 @@ import {
 const COLLAPSED_KEY = 'company.projectTree.collapsed.v1';
 const AGENT_KINDS = ['omp', 'sub', 'claude', 'agy', 'herdr', 'board'] as const;
 const AGENT_KIND_CLASS: Readonly<Record<NonNullable<ProjectTreeNode['agentKind']>, string>> = {
-  omp: 'bg-accent/12 text-text',
-  sub: 'bg-warning/12 text-warning',
-  claude: 'bg-status-active/12 text-status-active',
-  agy: 'bg-status-waiting/12 text-status-waiting',
-  herdr: 'bg-raised text-text-muted',
-  board: 'bg-selected text-text',
+  omp: 'text-accent',
+  sub: 'text-warning',
+  claude: 'text-status-active',
+  agy: 'text-status-waiting',
+  herdr: 'text-text-secondary',
+  board: 'text-text',
 };
 const SESSION_STATE_LABEL: Readonly<Record<string, string>> = {
   running: 'đang chạy',
@@ -179,15 +179,19 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
             else onToggleCollapse(node.id);
           }}
           {...menu}
-          className={`touch-target flex min-w-0 flex-1 items-center gap-1.5 rounded px-1 text-left text-xs ${node.kind === 'project' && props.selectedProjectId === node.id ? 'bg-selected text-text' : 'text-text-secondary'}`}
+          className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left text-xs ${node.kind === 'project' && props.selectedProjectId === node.id ? 'bg-selected text-text' : 'text-text-secondary'} ${isSession ? 'py-1' : ''}`}
         >
           {isSession ? (
             <>
-              <span aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${isRunningNode(node) ? 'bg-status-success' : 'bg-text-muted'}`} />
-              {node.agentKind !== undefined && <span className={`shrink-0 rounded px-1 text-2xs ${AGENT_KIND_CLASS[node.agentKind]}`}>{node.agentKind}</span>}
-              <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
-              {branch.where !== undefined && <span className="max-w-20 shrink truncate text-2xs text-text-muted">{branch.where}</span>}
-              {node.state !== undefined && <span className="shrink-0 text-2xs text-text-muted">{SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state}</span>}
+              <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${isRunningNode(node) ? 'bg-status-success' : 'bg-status-permission'}`} />
+              <span className="min-w-0 flex-1 leading-tight">
+                <span className="block truncate text-text">{node.name}</span>
+                <span className="block truncate text-2xs text-text-muted">
+                  {node.agentKind !== undefined && <span className={AGENT_KIND_CLASS[node.agentKind]}>{node.agentKind}</span>}
+                  {branch.where !== undefined && ` · ${branch.where}`}
+                  {node.state !== undefined && ` · ${SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state}`}
+                </span>
+              </span>
             </>
           ) : (
             <>

@@ -510,6 +510,10 @@ async function main(): Promise<void> {
     currentConfig = { port: config.port, token: config.token };
     herdr.start();
     browserReaper.start();
+    // Background: the first board open then finds the git scans cached instead of waiting on them.
+    projects.warm().catch((error: unknown) => {
+      console.warn(`[Pixel Agents] Project tree warm-up failed: ${error instanceof Error ? error.message : String(error)}`);
+    });
     if (args.rotateToken) {
       console.log(
         '[Pixel Agents] Server token rotated: URLs carrying the old token no longer grant access. Open the new URL below on each device.',

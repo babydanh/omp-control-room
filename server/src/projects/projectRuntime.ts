@@ -35,6 +35,8 @@ export interface ProjectRuntime {
   readonly prepareWorktree: ReturnType<typeof createPrepareWorktree>;
   /** Reapplies inherited settings to every open folder's scheduler. */
   refreshSettings(): Promise<void>;
+  /** Reads every folder's repos once so the first board open finds git scans cached. */
+  warm(): Promise<void>;
 }
 
 /** Composition root of the Project tree: one store, one tree loader, every service wired to the real runtime. */
@@ -46,7 +48,7 @@ export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime
     buildProjectTreeSnapshot(store, {
       ledger: ledger.projectTreeSource,
       git: ledger.projectTreeGit,
-      listRepos: async () => [],
+      sessionsOnly: true,
     });
 
   const settings = createProjectSettingsServices({
@@ -72,6 +74,14 @@ export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime
     store,
     prepareWorktree: createPrepareWorktree({ effectivePrepareFor, runProcess }),
     refreshSettings: () => refreshProjectSettings(settingsDeps),
+    warm: async () => {
+      await buildProjectTreeSnapshot(store, {
+        ledger: ledger.projectTreeSource,
+        git: ledger.projectTreeGit,
+        readRepo: (repo) => ledger.repoScan(repo),
+        overlapScans: () => ledger.currentOverlapScans(),
+      });
+    },
     services: {
       settings,
       diff: createProjectDiffServices({ runProcess, ledger: ledger.projectTreeSource }),

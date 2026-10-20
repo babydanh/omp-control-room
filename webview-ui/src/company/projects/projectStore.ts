@@ -99,6 +99,15 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
   }
   function accept(message: ServerMessage): void {
     if (!isProjectServerMessage(message)) return;
+    // The tree is pushed unasked (sessions start and stop) and may come twice per
+    // request (quick, then full): every snapshot is the latest state.
+    if (message.type === 'projectTreeSnapshot') {
+      const pending = { ...state.pending };
+      delete pending[message.requestId];
+      if (latest.get('tree') === message.requestId) latest.delete('tree');
+      commit({ ...state, nodes: message.nodes, pending });
+      return;
+    }
     const request = state.pending[message.requestId];
     if (request === undefined) return;
     const key = latestKey(request);
@@ -106,8 +115,7 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     const pending = { ...state.pending }; delete pending[message.requestId]; latest.delete(key);
     const errors = { ...state.errors };
     if ('reason' in message && message.reason) errors[key] = message.reason; else delete errors[key];
-    if (message.type === 'projectTreeSnapshot') commit({ ...state, nodes: message.nodes, pending, errors });
-    else if (message.type === 'projectDiff') commit({ ...state, diff: message, pending, errors });
+    if (message.type === 'projectDiff') commit({ ...state, diff: message, pending, errors });
     else if (message.type === 'projectSettings') commit({ ...state, settings: message, pending, errors });
     else commit({ ...state, results: { ...state.results, [message.requestId]: message }, pending, errors });
   }

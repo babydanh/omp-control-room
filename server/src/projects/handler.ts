@@ -102,11 +102,10 @@ async function runProjectRequest(
   const store = projectStoreFor(context);
   try {
     switch (msg.type) {
-      case 'projectTreeRequest': {
-        const snapshot = await buildTree(store, context);
-        send({ type: 'projectTreeSnapshot', requestId, nodes: snapshot.nodes });
+      case 'projectTreeRequest':
+        if (context.tree === undefined) throw new LibraryUserError('Không thể tải cây Project vì dữ liệu phiên chưa được kết nối.');
+        await sendTreeSnapshot(requestId, send, store, context, false);
         return;
-      }
       case 'projectNodeCreate': {
         const request = msg as unknown as ProjectNodeCreateMessage;
         let nodeId: string;
@@ -241,15 +240,23 @@ async function runProjectRequest(
 const TREE_REUSE_MS = 3_000;
 const treeBuilds = new WeakMap<ProjectStore, { readonly at: number; readonly build: Promise<ProjectTreeSnapshot> }>();
 
+/** How long a tree request waits for the full build before sending the quick one first. */
+const QUICK_TREE_WAIT_MS = 300;
+
+function treeOptions(context: ProjectCommandContext): ProjectTreeOptions {
+  if (context.tree === undefined) throw new LibraryUserError('Không thể tải cây Project vì dữ liệu phiên chưa được kết nối.');
+  return {
+    ...context.tree,
+    ...(context.agents === undefined ? {} : { agents: context.agents }),
+    ...(context.herdrSessions === undefined ? {} : { herdrSessions: context.herdrSessions }),
+  };
+}
+
 async function buildTree(store: ProjectStore, context: ProjectCommandContext): Promise<ProjectTreeSnapshot> {
   if (context.tree === undefined) throw new LibraryUserError('Không thể tải cây Project vì dữ liệu phiên chưa được kết nối.');
   const recent = treeBuilds.get(store);
   if (recent !== undefined && Date.now() - recent.at < TREE_REUSE_MS) return recent.build;
-  const build = buildProjectTreeSnapshot(store, {
-    ...context.tree,
-    ...(context.agents === undefined ? {} : { agents: context.agents }),
-    ...(context.herdrSessions === undefined ? {} : { herdrSessions: context.herdrSessions }),
-  });
+  const build = buildProjectTreeSnapshot(store, treeOptions(context));
   treeBuilds.set(store, { at: Date.now(), build });
   // A failed build must not be served to the next request.
   build.catch(() => {
@@ -258,17 +265,33 @@ async function buildTree(store: ProjectStore, context: ProjectCommandContext): P
   return build;
 }
 
-/** Sends a fresh snapshot after a change; a reused one would show the tree from before it. */
+/**
+ * Sends the tree. When the full build (git scans) is not ready within a moment,
+ * a folders-and-sessions snapshot goes first so the sidebar never waits on git;
+ * the full one follows. `fresh` drops a reused build: after a change it would
+ * show the tree from before it.
+ */
 async function sendTreeSnapshot(
   requestId: string,
   send: (message: ServerMessage) => void,
   store: ProjectStore,
   context: ProjectCommandContext,
+  fresh = true,
 ): Promise<void> {
   if (context.tree === undefined) return;
-  treeBuilds.delete(store);
-  const snapshot = await buildTree(store, context);
-  send({ type: 'projectTreeSnapshot', requestId, nodes: snapshot.nodes });
+  if (fresh) treeBuilds.delete(store);
+  // Both builds read the agents: an iterator would be spent by the first.
+  const shared: ProjectCommandContext = { ...context, ...(context.agents === undefined ? {} : { agents: [...context.agents] }) };
+  const full = buildTree(store, shared);
+  const early = await Promise.race([
+    full,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), QUICK_TREE_WAIT_MS)),
+  ]);
+  if (early === null) {
+    const quick = await buildProjectTreeSnapshot(store, { ...treeOptions(shared), sessionsOnly: true });
+    send({ type: 'projectTreeSnapshot', requestId, nodes: quick.nodes });
+  }
+  send({ type: 'projectTreeSnapshot', requestId, nodes: (await full).nodes });
 }
 
 interface ProjectNodeTarget {

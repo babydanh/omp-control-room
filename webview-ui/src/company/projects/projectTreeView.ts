@@ -42,7 +42,8 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
     }
     const folder = cursor === undefined ? undefined : branches.get(cursor.id);
     if (folder === undefined) continue;
-    const where = checkout?.branch ?? checkout?.name;
+    // The quick snapshot has no checkouts: the session's own folder name stands in for its branch.
+    const where = checkout?.branch ?? checkout?.name ?? lastPathSegment(node.path);
     folder.children.push({
       node,
       children: [],
@@ -51,6 +52,10 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
     });
   }
   return roots;
+}
+
+function lastPathSegment(value: string | undefined): string | undefined {
+  return value?.split(/[\\/]/).filter((part) => part !== '').pop();
 }
 
 export interface ProjectTreeFilters {

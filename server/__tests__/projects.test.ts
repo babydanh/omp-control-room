@@ -9,6 +9,7 @@ import { openLedgerSource, type SqliteDatabase } from '../src/ledger/ledgerDb.js
 import { normalizeLedgerPath } from '../src/ledger/ledgerPath.js';
 import type { ProcessResult } from '../src/ledger/processRunner.js';
 import { toPathKey } from '../src/pathKey.js';
+import { handleProjectMessage } from '../src/projects/handler.js';
 import { ProjectStore } from '../src/projects/projectStore.js';
 import { buildProjectTreeSnapshot } from '../src/projects/projectTree.js';
 
@@ -222,5 +223,64 @@ describe('buildProjectTreeSnapshot', () => {
       listRepos: async () => [repo, worktree, submodule],
     });
     expect(scanned.sort()).toEqual([path.resolve(repo), path.resolve(submodule)].sort());
+  });
+});
+
+describe('project tree request', () => {
+  it('answers with folders and live sessions first when the git scan is slow, then the full tree', async () => {
+    const root = await makeTempDir();
+    const folder = path.join(root, 'folder');
+    const repo = path.join(folder, 'repo');
+    await fs.mkdir(path.join(repo, '.git'), { recursive: true });
+    const ledgerPath = path.join(root, 'activity.db');
+    await fs.writeFile(ledgerPath, 'temporary-ledger');
+    const database: SqliteDatabase = {
+      prepare: (sql) => ({
+        all: () => sql.includes('FROM sessions') ? [{
+          session_id: 'session-1', pid: 1, cwd: repo, agent_kind: 'main', agent_name: 'main',
+          parent_id: null, started_at: '2026-10-20', last_seen: '2026-10-20', ended_at: null,
+          state: 'working', heartbeat: null,
+        }] : sql.includes('FROM events') ? [{
+          id: 1, ts: '2099-01-01 00:00:00', session_id: 'session-1', kind: 'tool', tool: 'edit', path: null,
+          path_key: null, repo: null, checkout: null, is_main_checkout: 0, branch: null, intent: 'Sửa trang đăng ký',
+        }] : [],
+      }),
+      close: () => undefined,
+    };
+    const ledger = openLedgerSource(ledgerPath, () => database);
+    const git: GitRunner = {
+      async run(_cwd, args) {
+        if (args[0] === 'rev-parse') return processResult();
+        if (args[0] === 'worktree') return processResult(`worktree ${repo}\nHEAD abc\nbranch refs/heads/main\n`);
+        return processResult();
+      },
+    };
+    const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
+    const project = await store.createProject('Test');
+    await store.addFolder(project.id, folder);
+    const sent: Array<{ type: string; nodes?: Array<{ kind: string; parentId?: string; name: string }> }> = [];
+    handleProjectMessage({ type: 'projectTreeRequest', requestId: 'r1' }, (message) => sent.push(message as never), {
+      privileged: true,
+      store,
+      tree: {
+        ledger,
+        git,
+        listRepos: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          return [repo];
+        },
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    const snapshots = sent.filter((message) => message.type === 'projectTreeSnapshot');
+    expect(snapshots).toHaveLength(2);
+    const [quick, full] = snapshots.map((message) => message.nodes ?? []);
+    const folderNode = quick?.find((node) => node.kind === 'folder');
+    expect(quick?.some((node) => node.kind === 'repository')).toBe(false);
+    // The session sits under its folder and is named by what it is doing.
+    expect(quick?.find((node) => node.kind === 'session')).toMatchObject({ parentId: folderNode?.id, name: 'Sửa trang đăng ký' });
+    expect(full?.some((node) => node.kind === 'repository')).toBe(true);
+    ledger.close();
   });
 });
