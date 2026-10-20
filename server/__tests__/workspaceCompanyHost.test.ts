@@ -94,6 +94,7 @@ class FakeRuntime implements CompanyRuntime {
       getModelCatalog: async () => MODEL_CATALOG,
       diagnostics: () => DIAGNOSTICS,
       onPromptSubmitted: async () => undefined,
+      parkSquadSession: async () => false,
       openChatSession: async (input) => {
         this.openedChats.push({ cwd: input.cwd, role: input.role });
         return {

@@ -225,6 +225,8 @@ components:
         - $ref: '#/components/schemas/CompanyWorkItemMarkMessage'
         - $ref: '#/components/schemas/CompanyWorkItemCancelMessage'
         - $ref: '#/components/schemas/CompanyWorkItemDependenciesMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemJudgeMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemCleanWorktreeMessage'
         - $ref: '#/components/schemas/CompanyAgentRoleSetMessage'
         - $ref: '#/components/schemas/CompanySquadSettingsSetMessage'
         # Squad leader (privileged; one leader turn proposes assignments for the team)
@@ -3961,6 +3963,13 @@ components:
               type: string
               minLength: 1
               maxLength: 256
+        judge:
+          $ref: '#/components/schemas/WorkItemJudge'
+        conflicts:
+          $ref: '#/components/schemas/WorkItemConflicts'
+        worktreeRemoved:
+          type: boolean
+          description: True once Dọn worktree removed this item's worktree. Absent otherwise.
         blocker:
           $ref: '#/components/schemas/WorkItemBlocker'
         squadRunId:
@@ -3980,6 +3989,54 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WorkItemEvent'
+
+    WorkItemJudgeVerdict:
+      type: string
+      enum: [pass, fail, need_evidence]
+
+    WorkItemJudge:
+      type: object
+      additionalProperties: false
+      required: [status, followUps]
+      description: >-
+        The judge's state for an item in review. running: a judge turn is in flight. waiting: the judge holds the
+        item until its open conflicts clear. verdict: the last verdict, with its reason. interrupted: the server
+        stopped during a turn, and Chấm lại runs it again. error: the judge turn failed; error says why, and nothing
+        is sent to the agent.
+      properties:
+        status:
+          type: string
+          enum: [running, waiting, verdict, interrupted, error]
+        verdict:
+          $ref: '#/components/schemas/WorkItemJudgeVerdict'
+        reason:
+          type: string
+          maxLength: 2000
+        error:
+          type: string
+          maxLength: 300
+        followUps:
+          type: integer
+          minimum: 0
+          maximum: 2
+          description: Judge-driven follow-ups sent so far. At most 2.
+
+    WorkItemConflicts:
+      type: object
+      additionalProperties: false
+      required: [sequences, main]
+      description: >-
+        Open overlaps the ledger reports for this item's checkout: the #n of each other open item it overlaps, and
+        whether it overlaps the main checkout's dirty files. Empty means none.
+      properties:
+        sequences:
+          type: array
+          maxItems: 20
+          items:
+            type: integer
+            minimum: 0
+        main:
+          type: boolean
 
     AgentRole:
       type: object
@@ -4070,6 +4127,15 @@ components:
             $ref: '#/components/schemas/AgentRole'
         settings:
           $ref: '#/components/schemas/SquadSettings'
+        parkedSessionIds:
+          type: array
+          maxItems: 200
+          description: >-
+            Squad-opened omp sessions the squad parked for being idle. The board shows a parked badge on each.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 4096
         repos:
           type: array
           maxItems: 200
@@ -4284,6 +4350,48 @@ components:
           items:
             type: string
             format: uuid
+
+    CompanyWorkItemJudgeMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id]
+      description: >-
+        Run the judge again on an item in review: after a judge turn was interrupted or failed, or once its
+        conflicts cleared. Refused for any other status.
+      properties:
+        type:
+          const: companyWorkItemJudge
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
+
+    CompanyWorkItemCleanWorktreeMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id]
+      description: >-
+        Remove the isolated worktree of a done item. Refused unless it has no uncommitted changes and its branch is
+        merged into origin/main. Never forced, and it never touches another item's checkout.
+      properties:
+        type:
+          const: companyWorkItemCleanWorktree
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
 
 
     CompanyAgentRoleSetMessage:

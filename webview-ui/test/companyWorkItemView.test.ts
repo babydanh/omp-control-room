@@ -207,6 +207,7 @@ describe('workItemsOf and roleDescriptionFor', () => {
     expect(workItemsOf(state, ACTIVE)).toEqual({
       revision: 0,
       items: [],
+      parkedSessionIds: [],
       roles: [],
       repos: [],
       agents: [],

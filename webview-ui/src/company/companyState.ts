@@ -825,6 +825,7 @@ function applyWorkItems(
         repos: [...(message.repos ?? [])],
         agents: [...(message.agents ?? [])],
         settings: message.settings ?? null,
+        parkedSessionIds: [...(message.parkedSessionIds ?? [])],
       },
     },
   };

@@ -17,6 +17,7 @@ import {
   parseSquadFile,
   parseSquadRows as checkSquadRows,
   requestFromItem,
+  reviewKey,
   rowsOf,
   SQUAD_CONTEXT_RESULT_MAX_CHARS,
   SQUAD_HISTORY_MAX,
@@ -25,6 +26,7 @@ import {
   squadEvent,
   type SquadMember,
   squadProgress,
+  type SquadReview,
   type StoredSquadRun,
   toWireRun,
   warningsOf,
@@ -646,6 +648,37 @@ describe('parseSquadFile', () => {
     ]);
   });
 
+  it('keeps the overlap text of a saved review, and drops a run whose overlap is not text', () => {
+    const itemId = randomUUID();
+    const kept = parseSquadFile({
+      version: 1,
+      revision: 1,
+      runs: [
+        {
+          ...storedRun(),
+          pendingReviews: [{ itemId, at: AT, text: 'Form', conflicts: '#3, checkout chính' }],
+        },
+      ],
+    });
+    expect(kept.dropped).toBe(0);
+    expect(kept.file.runs[0]?.pendingReviews).toEqual([
+      { itemId, at: AT, outcome: 'review', text: 'Form', conflicts: '#3, checkout chính' },
+    ]);
+
+    const dropped = parseSquadFile({
+      version: 1,
+      revision: 1,
+      runs: [
+        {
+          ...storedRun(),
+          pendingReviews: [{ itemId, at: AT, text: 'Form', conflicts: 3 }],
+        },
+      ],
+    });
+    expect(dropped.dropped).toBe(1);
+    expect(dropped.file.runs).toEqual([]);
+  });
+
   it('keeps the finished item a run started from, and reads an older run that has none', () => {
     const itemId = randomUUID();
     const parsed = parseSquadFile({
@@ -697,6 +730,21 @@ describe('squadProgress', () => {
       { status: 'done' },
     ]);
     expect(progress).toEqual({ done: 1, total: 2 });
+  });
+});
+
+describe('reviewKey', () => {
+  it('gives a review with an overlap its own key', () => {
+    const itemId = randomUUID();
+    const plain: SquadReview = { itemId, at: AT, outcome: 'review', text: 'Form' };
+    const overlapping: SquadReview = { ...plain, conflicts: '#3' };
+    expect(reviewKey(overlapping)).not.toBe(reviewKey(plain));
+    expect(reviewKey(overlapping)).not.toBe(reviewKey({ ...overlapping, conflicts: '#5' }));
+  });
+
+  it('keys a review with no overlap by its item and settle time alone', () => {
+    const itemId = randomUUID();
+    expect(reviewKey({ itemId, at: AT })).toBe(`${itemId}@${AT}@`);
   });
 });
 

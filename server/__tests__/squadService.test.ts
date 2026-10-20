@@ -1107,4 +1107,62 @@ describe('SquadService completeness, settles and automatic approval', () => {
     expect(h.runOf(runId)?.history.at(-1)?.message).toContain('Không tự duyệt được đề xuất');
     expect(h.runOf(runId)?.proposal?.status).toBe('pending');
   });
+
+  it('with automatic judging a review that overlaps another item still starts a leader turn', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoJudge = true;
+    const { runId, proposalId } = await approvedRun(h, 'Viết trang');
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    item.conflicts = { sequences: [3], main: false };
+    h.leader.reply(proposal('Gộp việc chồng lấn'));
+    h.workItems.review(item.id, h.stamp(), 'Đã viết');
+    await waitFor(() => h.runOf(runId)?.turns === 2);
+    expect(h.leader.prompts[1]).toContain('conflicts: #3');
+  });
+
+  it('a conflict review settled twice with the same overlap is read once', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoJudge = true;
+    const { runId, proposalId } = await approvedRun(h, 'Viết trang');
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    item.conflicts = { sequences: [3], main: false };
+    h.leader.reply(proposal('Gộp việc chồng lấn'));
+    const at = h.stamp();
+    h.workItems.review(item.id, at, 'Đã viết');
+    h.workItems.review(item.id, at, 'Đã viết');
+    await waitFor(() => h.runOf(runId)?.turns === 2);
+    await letTurnsPass();
+    expect(h.leader.prompts).toHaveLength(2);
+    expect(h.leader.prompts[1]?.match(/conflicts: #3/g)?.length).toBe(1);
+  });
+
+  it('a review settled after its overlap clears starts no leader turn', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoJudge = true;
+    const { runId, proposalId } = await approvedRun(h, 'Viết trang');
+    const [item] = h.itemsOf(proposalId);
+    if (item === undefined) throw new Error('no item');
+    item.conflicts = { sequences: [3], main: false };
+    h.leader.reply(proposal('Gộp việc chồng lấn'));
+    h.workItems.review(item.id, h.stamp(), 'Đã viết');
+    await waitFor(() => h.runOf(runId)?.status === 'proposed' && h.runOf(runId)?.turns === 2);
+    expect(h.leader.prompts[1]).toContain('conflicts: #3');
+
+    const current = h.runOf(runId)?.proposal;
+    if (current === undefined) throw new Error('no proposal');
+    await h.service.approve({
+      requestId: randomUUID(),
+      runId,
+      proposalId: current.id,
+      rows: current.rows,
+    });
+
+    delete item.conflicts;
+    h.workItems.review(item.id, h.stamp(), 'Đã viết');
+    await letTurnsPass();
+    expect(h.leader.prompts).toHaveLength(2);
+    expect(h.runOf(runId)?.turns).toBe(2);
+  });
 });

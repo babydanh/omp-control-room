@@ -18,9 +18,11 @@ import {
   validateRows,
 } from '../squadView.js';
 import { useCommandDialog } from '../useCommandDialog.js';
+import { conflictText } from '../workItemReviewView.js';
 import { blockerChip, blockerSentence } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 import { FolderTag } from './FolderTag.js';
+import { WorkItemReviewChips } from './WorkItemReviewChips.js';
 
 const APPROVE_FALLBACK = 'Chưa duyệt được đề xuất này.';
 const DISMISS_FALLBACK = 'Chưa bỏ được đề xuất này.';
@@ -80,7 +82,7 @@ export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRun
           agents: card.agents,
         });
   const progress = squadProgressView(run.progress);
-  const children = epicChildren(run, card.items);
+  const children = epicChildren(run, card.items, card.parkedSessionIds);
   const head = card.head === '' ? CARD_HEAD_FALLBACK : card.head;
   const note = (proposal?.note ?? run.note ?? '').trim();
   const error = run.status === 'failed' ? run.error?.trim() || 'Đội gặp lỗi.' : null;
@@ -173,6 +175,11 @@ export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRun
                 <span className="line-clamp-2 break-words text-text">{child.head}</span>
               )}
               <ChildBlocker child={child} />
+              <WorkItemReviewChips
+                judge={null}
+                conflictText={conflictText(child.conflicts)}
+                parked={child.parked}
+              />
             </li>
           ))}
         </ul>

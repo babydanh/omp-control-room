@@ -228,7 +228,10 @@ export interface WorkspaceCompanyCoordinatorEffects {
     resumeFile?: string;
     cwd?: string;
     role?: CompanyRole;
+    workstreamKey?: string;
   }) => Promise<CompanySession>;
+  /** Park one squad session that the pool agrees is idle; false when the pool refuses. */
+  readonly parkSquadSession: (sessionId: string) => Promise<boolean>;
   readonly onContractDecision: (contract: Contract, decision: ContractDecision) => Promise<void>;
   readonly onQuestionAnswered: (question: Question, input: QuestionAnswerInput) => Promise<void>;
   /**
@@ -1358,7 +1361,9 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
    * `cwd` and `role` place the new session (see `CompanyCoordinator.openNewChat`);
    * with neither, it is a chat session in the folder root.
    */
-  async openNewChat(input: { cwd?: string; role?: CompanyRole } = {}): Promise<string> {
+  async openNewChat(
+    input: { cwd?: string; role?: CompanyRole; workstreamKey?: string } = {},
+  ): Promise<string> {
     // The guards run under the queue. The effect runs after it, because it
     // commits through this same queue and would wait on itself inside it.
     await this.serialize(async () => {
@@ -1370,8 +1375,21 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     const session = await this.options.effects.openChatSession({
       ...(cwd === undefined ? {} : { cwd }),
       ...(input.role === undefined ? {} : { role: input.role }),
+      ...(input.workstreamKey === undefined ? {} : { workstreamKey: input.workstreamKey }),
     });
     return session.id;
+  }
+
+  /**
+   * Park one idle squad session so its process stops. Guards run under the queue; the effect runs
+   * after it, as for the other session commands. False when the pool refuses.
+   */
+  async parkSquadSession(sessionId: string): Promise<boolean> {
+    await this.serialize(async () => {
+      this.assertOwner();
+      this.assertStarted();
+    });
+    return this.options.effects.parkSquadSession(sessionId);
   }
 
   /**

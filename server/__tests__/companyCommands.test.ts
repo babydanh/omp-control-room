@@ -80,6 +80,7 @@ function fakeCoordinator(overrides: Partial<CompanyCoordinator> = {}): {
     controlSession: track('controlSession'),
     renameSession: track('renameSession'),
     cancelPrompt: track('cancelPrompt'),
+    parkSquadSession: async () => false,
     listOmpSessions: async () => {
       calls.push({ method: 'listOmpSessions', args: [] });
       return { folder: 'C:/workspace', sessions: [] };
@@ -1189,6 +1190,8 @@ describe('company client commands', () => {
         sessions: {
           list: () => [],
           submit: async () => undefined,
+          wake: async () => undefined,
+          park: async () => true,
           openChat: async () => {
             throw new Error('no chat in this test');
           },
@@ -1210,7 +1213,11 @@ describe('company client commands', () => {
             path: path.join(repo, '.worktrees', `squad-${shortId}`),
             branch: `squad-${shortId}`,
           }),
+          remove: async () => 'removed',
         },
+        judge: () => new Promise<string>(() => undefined),
+        overlaps: async () => [],
+        boardWatching: () => false,
       });
       await work.load();
       services = { ...services, workItems: work };

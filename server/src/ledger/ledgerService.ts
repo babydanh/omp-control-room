@@ -92,6 +92,16 @@ export class LedgerService {
     return this.refresh(true);
   }
 
+  /** Overlap scans of the open repos. Reads without marking the ledger watched, so it never keeps itself polling. */
+  async overlapScans(): Promise<readonly LedgerOverlapScan[]> {
+    return (await this.refresh(true)).overlaps;
+  }
+
+  /** Whether a board is looking at the ledger: a subscriber, or a view request within the activity window. */
+  watched(): boolean {
+    return this.isActive();
+  }
+
   /** Registers a snapshot listener and starts the poll. Returns the unsubscribe function. */
   subscribe(listener: LedgerSnapshotListener): () => void {
     this.listeners.add(listener);

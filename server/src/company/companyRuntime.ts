@@ -177,7 +177,12 @@ import {
   SKILL_READ_LOG_PREFIX,
   tallySessionTools,
 } from './sessionLog.js';
-import { sessionHoldsRunner, SessionPool, type SessionRequest } from './sessionPool.js';
+import {
+  isSquadWorkstream,
+  sessionHoldsRunner,
+  SessionPool,
+  type SessionRequest,
+} from './sessionPool.js';
 import type { UsageLedger } from './usageService.js';
 import { discoverVerificationProfiles } from './verificationDiscovery.js';
 import { WorkspaceLockTable } from './workspaceLocks.js';
@@ -563,6 +568,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       diagnostics: () => this.diagnostics(),
       onPromptSubmitted: (prompt, input) => this.onPromptSubmitted(prompt, input),
       openChatSession: (input) => this.openChatSession(input),
+      parkSquadSession: (sessionId) => this.parkSquadSession(sessionId),
       onContractDecision: (contract, decision) => this.onContractDecision(contract, decision),
       onQuestionAnswered: (question, input) => this.onQuestionAnswered(question, input),
       controlSession: (session, action, runEpoch) => this.controlSession(session, action, runEpoch),
@@ -1187,9 +1193,12 @@ class NativeCompanyRuntime implements CompanyRuntime {
     resumeFile?: string;
     cwd?: string;
     role?: CompanyRole;
+    workstreamKey?: string;
   }): Promise<CompanySession> {
     const role = input.role ?? 'chat';
-    const workstreamId = role === 'chat' ? `chat-${randomUUID()}` : `squad-${randomUUID()}`;
+    // A squad names its workstream, so the pool can resume a parked session for the same repo and role.
+    const workstreamId =
+      input.workstreamKey ?? (role === 'chat' ? `chat-${randomUUID()}` : `squad-${randomUUID()}`);
     const session = await this.acquireNewSession(role, workstreamId, input.cwd);
     await this.startRun(session, undefined, true, input.resumeFile);
     return this.state().sessions[session.id] ?? session;
@@ -3457,40 +3466,61 @@ class NativeCompanyRuntime implements CompanyRuntime {
   }
 
   /**
-   * Park a session the pool agrees is done: idle long enough, no active task, no
-   * pending question and no attached terminal. A refusal is ignored, because the
-   * pool is the authority and the sweep only offers.
+   * Park the sessions the pool agrees are done: idle long enough, no active task, no pending
+   * question and no attached terminal. A refusal is ignored, because the pool is the authority and
+   * the sweep only offers. Squad sessions are left to the squad, which parks them on its own timer.
    */
   private async parkIdleSessions(): Promise<void> {
+    for (const session of Object.values(this.state().sessions)) {
+      if (isSquadWorkstream(session.workstreamId)) continue;
+      const run = this.runs.get(session.id);
+      if (run === undefined || run.busy || run.liveTools.size > 0) continue;
+      await this.parkRun(session, run);
+    }
+  }
+
+  /**
+   * Parks one squad session the squad no longer needs, so its process stops and its memory frees.
+   * False when the session is not a live squad session or the pool refuses to park it now.
+   */
+  async parkSquadSession(sessionId: string): Promise<boolean> {
+    const session = this.state().sessions[sessionId];
+    const run = this.runs.get(sessionId);
+    if (session === undefined || run === undefined || !isSquadWorkstream(session.workstreamId)) {
+      return false;
+    }
+    if (run.busy || run.liveTools.size > 0) return false;
+    return this.parkRun(session, run);
+  }
+
+  /** Stops one idle session's process and records it parked, when the pool agrees. */
+  private async parkRun(session: CompanySession, run: ActiveRun): Promise<boolean> {
     const state = this.state();
     const questions = Object.values(state.questions).filter((q) => q.status === 'pending');
     const attached = [...this.runs.values()]
-      .filter((run) => this.gateway.hasViewer(run.sessionId, run.runEpoch))
-      .map((run) => run.sessionId);
-    for (const session of Object.values(state.sessions)) {
-      const run = this.runs.get(session.id);
-      if (run === undefined || run.busy || run.liveTools.size > 0) continue;
-      const decision = this.pool.planPark(session.id, {
-        questions,
-        attachedTerminalSessionIds: attached,
-      });
-      if (!decision.park) continue;
-      await this.stopRun(run, 'the session was idle and parked');
-      const parked: CompanySession = {
-        ...session,
-        status: 'parked',
-        lastUsedAt: this.deps.now(),
-      };
-      await this.commit(
-        [{ entity: 'session', op: 'put', id: session.id, value: parked }],
-        this.state().revision,
-      );
-      this.pool.upsert(parked);
-      this.logEntry(session.id, session.runEpoch, {
-        kind: 'state',
-        text: 'Phiên đã đậu sau thời gian rảnh.',
-      });
-    }
+      .filter((entry) => this.gateway.hasViewer(entry.sessionId, entry.runEpoch))
+      .map((entry) => entry.sessionId);
+    const decision = this.pool.planPark(session.id, {
+      questions,
+      attachedTerminalSessionIds: attached,
+    });
+    if (!decision.park) return false;
+    await this.stopRun(run, 'the session was idle and parked');
+    const parked: CompanySession = {
+      ...session,
+      status: 'parked',
+      lastUsedAt: this.deps.now(),
+    };
+    await this.commit(
+      [{ entity: 'session', op: 'put', id: session.id, value: parked }],
+      this.state().revision,
+    );
+    this.pool.upsert(parked);
+    this.logEntry(session.id, session.runEpoch, {
+      kind: 'state',
+      text: 'Phiên đã đậu sau thời gian rảnh.',
+    });
+    return true;
   }
 
   private onPtyEvent(event: { type: string; sessionId: string; exitCode?: number }): void {

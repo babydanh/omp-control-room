@@ -102,6 +102,8 @@ export interface SquadReview {
   readonly outcome: SquadReviewOutcome;
   readonly text: string;
   readonly result?: string;
+  /** Overlaps of the item's checkout, such as "#3, checkout chính"; the leader plans the merge. */
+  readonly conflicts?: string;
   /** The item's "done when" text, which the leader judges the result against. */
   readonly acceptance?: string;
 }
@@ -312,9 +314,12 @@ export function appendEvent(run: StoredSquadRun, event: SquadEvent): void {
   run.updatedAt = event.at;
 }
 
-/** Stable key for one review: the same item can reach review again, which is a new review. */
-export function reviewKey(review: Pick<SquadReview, 'itemId' | 'at'>): string {
-  return `${review.itemId}@${review.at}`;
+/**
+ * Stable key for one review: the same item can reach review again, or be overlapped again, which
+ * is a new review.
+ */
+export function reviewKey(review: Pick<SquadReview, 'itemId' | 'at' | 'conflicts'>): string {
+  return `${review.itemId}@${review.at}@${review.conflicts ?? ''}`;
 }
 
 /** The assignee's id as the leader writes it: `herdr:<paneId>`, `session:<id>` or `new-session`. */
@@ -746,10 +751,12 @@ function parseReview(value: unknown): SquadReview | null {
   const text = value['text'];
   const result = value['result'];
   const acceptance = value['acceptance'];
+  const conflicts = value['conflicts'];
   const outcome = parseOutcome(value['outcome']);
   if (!isUuid(itemId) || !isTimestamp(at) || typeof text !== 'string') return null;
   if (result !== undefined && typeof result !== 'string') return null;
   if (acceptance !== undefined && typeof acceptance !== 'string') return null;
+  if (conflicts !== undefined && typeof conflicts !== 'string') return null;
   if (outcome === null) return null;
   return {
     itemId,
@@ -758,6 +765,7 @@ function parseReview(value: unknown): SquadReview | null {
     text,
     ...(typeof result === 'string' ? { result } : {}),
     ...(typeof acceptance === 'string' ? { acceptance } : {}),
+    ...(typeof conflicts === 'string' ? { conflicts } : {}),
   };
 }
 
@@ -1293,6 +1301,7 @@ function reviewLines(reviews: readonly SquadReview[]): string[] {
     const lines = [`- [${label}] ${clip(review.text, SQUAD_CONTEXT_TEXT_MAX_CHARS)}`];
     if (review.acceptance !== undefined) lines.push(`  done when: ${review.acceptance}`);
     if (review.result !== undefined) lines.push(`  result: ${review.result}`);
+    if (review.conflicts !== undefined) lines.push(`  conflicts: ${review.conflicts}`);
     return lines;
   });
 }

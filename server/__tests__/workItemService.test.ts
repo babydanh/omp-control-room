@@ -95,6 +95,8 @@ class Fixture {
         submit: async (sessionId, text, mode) => {
           this.submits.push({ sessionId, text, mode });
         },
+        wake: async () => undefined,
+        park: async () => true,
         openChat: async (input) => {
           if (this.poolFull) {
             throw new CompanyError('company_pool_full', 'Đã đủ phiên omp đang chạy.');
@@ -133,7 +135,11 @@ class Fixture {
           this.worktreesMade.push({ repo, shortId });
           return { path: `${repo}/.worktrees/squad-${shortId}`, branch: `squad-${shortId}` };
         },
+        remove: async () => 'removed',
       },
+      judge: () => new Promise<string>(() => undefined),
+      overlaps: async () => [],
+      boardWatching: () => false,
     });
   }
 

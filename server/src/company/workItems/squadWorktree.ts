@@ -164,3 +164,43 @@ function requireOk(result: CommandResult, what: string): void {
   const output = (result.stderr.trim() || result.stdout.trim()).split(/\r?\n/)[0] ?? '';
   throw new Error(output === '' ? `${what} lỗi` : `${what} lỗi: ${output}`);
 }
+
+/** What a cleanup did: the worktree was removed, or it was refused for the reason named. */
+export type WorktreeRemoval = 'removed' | 'dirty' | 'unmerged';
+
+export interface RemoveWorktreeOptions {
+  /** The repo the worktree was made from. */
+  readonly repo: string;
+  readonly worktree: SquadWorktree;
+  /** Full path of git-wt when it is installed; undefined means plain git. */
+  readonly gitWt: string | undefined;
+  readonly run: CommandRunner;
+}
+
+/**
+ * Removes one squad worktree once nothing in it is lost: no uncommitted change, and its branch is
+ * already in origin/main. Never forces. A dirty or unmerged worktree is refused and left as it is.
+ */
+export async function removeSquadWorktree(
+  options: RemoveWorktreeOptions,
+): Promise<WorktreeRemoval> {
+  const { repo, worktree, gitWt, run } = options;
+  const status = await run('git', ['status', '--porcelain'], worktree.path, LIST_TIMEOUT_MS);
+  requireOk(status, 'git status');
+  if (status.stdout.trim() !== '') return 'dirty';
+  const merged = await run(
+    'git',
+    ['merge-base', '--is-ancestor', worktree.branch, 'origin/main'],
+    repo,
+    LIST_TIMEOUT_MS,
+  );
+  // Exit 1 means the branch has commits origin/main lacks; anything else is a failed check.
+  if (merged.code === 1) return 'unmerged';
+  requireOk(merged, 'git merge-base');
+  const removed =
+    gitWt === undefined
+      ? await run('git', ['worktree', 'remove', worktree.path], repo, LIST_TIMEOUT_MS)
+      : await run(gitWt, ['remove', worktree.branch, '-y'], repo, WORKTREE_TIMEOUT_MS);
+  requireOk(removed, gitWt === undefined ? 'git worktree remove' : 'git-wt remove');
+  return 'removed';
+}

@@ -411,6 +411,20 @@ export function workItemCancel(
   return { type: 'companyWorkItemCancel', requestId, workspacePath, id };
 }
 
+/** Judge a review item again, after the judge did not finish. The verdict is a companyCommandResult. */
+export function workItemJudge(requestId: string, workspacePath: string, id: string): ClientMessage {
+  return { type: 'companyWorkItemJudge', requestId, workspacePath, id };
+}
+
+/** Remove the worktree of a done item. The verdict is a companyCommandResult. */
+export function workItemCleanWorktree(
+  requestId: string,
+  workspacePath: string,
+  id: string,
+): ClientMessage {
+  return { type: 'companyWorkItemCleanWorktree', requestId, workspacePath, id };
+}
+
 /** Replace the items a queued work item waits for; an empty list clears them. The verdict is a companyCommandResult. */
 export function workItemDependencies(
   requestId: string,

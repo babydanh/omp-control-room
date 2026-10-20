@@ -124,6 +124,7 @@ function effects(overrides: Partial<Effects> = {}): Effects {
     getModelCatalog: async () => [],
     diagnostics: () => diagnostics,
     onPromptSubmitted: async () => undefined,
+    parkSquadSession: async () => false,
     openChatSession: async () => {
       throw new Error('openChatSession is not used by this test');
     },

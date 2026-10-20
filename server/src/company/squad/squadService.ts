@@ -18,6 +18,7 @@ import type {
   WorkItem,
 } from '../../../../core/src/messages.js';
 import { CompanyError } from '../companyError.js';
+import { describeConflicts } from '../workItems/conflictModel.js';
 import type { WorkItemDraft } from '../workItems/workItemModel.js';
 import { clip, refuseText } from '../workItems/workItemModel.js';
 import {
@@ -552,7 +553,8 @@ export class SquadService {
     if (this.disposed || item.squadRunId === undefined) return;
     const run = this.runForApprovedProposal(item.squadRunId);
     if (run === undefined || FINISHED_STATUSES.includes(run.status)) return;
-    const key = `${item.id}|${item.status}|${item.updatedAt}`;
+    const conflicts = itemConflicts(item);
+    const key = `${item.id}|${item.status}|${item.updatedAt}|${conflicts ?? ''}`;
     if (this.settles.has(key)) return;
     if (this.settles.size >= SETTLE_MEMORY_MAX) {
       const oldest = this.settles.values().next().value;
@@ -561,7 +563,12 @@ export class SquadService {
     this.settles.add(key);
     const snapshot = this.ports.workItems.snapshot();
     const finished = planFinished(run, snapshot.items);
-    const outcome = settleOutcome(item, snapshot.settings.autoJudge, finished);
+    const outcome = settleOutcome(
+      item,
+      snapshot.settings.autoJudge,
+      finished,
+      conflicts !== undefined,
+    );
     if (outcome === undefined) return;
     const result = item.result ?? (item.status === 'failed' ? item.reason : undefined);
     const review: SquadReview = {
@@ -571,6 +578,7 @@ export class SquadService {
       text: clip(item.text, SQUAD_CONTEXT_TEXT_MAX_CHARS),
       ...(item.acceptance === undefined ? {} : { acceptance: item.acceptance }),
       ...(result === undefined ? {} : { result: clip(result, SQUAD_CONTEXT_RESULT_MAX_CHARS) }),
+      ...(conflicts === undefined ? {} : { conflicts }),
     };
     if (run.pendingReviews.some((entry) => reviewKey(entry) === reviewKey(review))) return;
     run.pendingReviews.push(review);
@@ -749,18 +757,27 @@ function leaderFailureMessage(error: unknown): string {
 
 /**
  * What a settled item tells the leader, or undefined when the leader need not read it now. A
- * review is read only when automatic judging is off, since the judge decides it otherwise; a
- * failure is always read; a done item is read when judging is automatic or it finished the plan.
+ * review is read when automatic judging is off or when it overlaps another checkout, since the
+ * leader then plans the merge; the judge decides the rest. A failure is always read; a done item
+ * is read when judging is automatic or it finished the plan.
  */
 function settleOutcome(
   item: WorkItem,
   autoJudge: boolean,
   finished: boolean,
+  conflicted: boolean,
 ): SquadReviewOutcome | undefined {
-  if (item.status === 'review') return autoJudge ? undefined : 'review';
+  if (item.status === 'review') return autoJudge && !conflicted ? undefined : 'review';
   if (item.status === 'failed') return 'failed';
   if (item.status === 'done') return autoJudge || finished ? 'done' : undefined;
   return undefined;
+}
+
+/** The overlaps the board names for an item, such as "#3, checkout chính"; undefined when none. */
+function itemConflicts(item: WorkItem): string | undefined {
+  if (item.conflicts === undefined) return undefined;
+  const names = describeConflicts(item.conflicts);
+  return names.length === 0 ? undefined : names.join(', ');
 }
 
 /** Whether every work item of the run's approved proposals has finished, so the plan is complete. */

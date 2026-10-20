@@ -7,6 +7,7 @@
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardWorkItem } from '../boardView.js';
 import { companyRoleLabel } from '../roleProfiles.js';
+import { conflictText, judgeChipFor } from '../workItemReviewView.js';
 import {
   areaChipsOf,
   blockerChip,
@@ -17,6 +18,7 @@ import {
   workItemKey,
 } from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
+import { WorkItemReviewChips } from './WorkItemReviewChips.js';
 
 export interface WorkItemCardProps {
   card: BoardWorkItem;
@@ -79,6 +81,11 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
           )}
         </span>
       )}
+      <WorkItemReviewChips
+        judge={judgeChipFor(card)}
+        conflictText={conflictText(card.conflicts)}
+        parked={card.parked}
+      />
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         {card.head === '' ? 'Việc chưa có nội dung' : card.head}
       </span>

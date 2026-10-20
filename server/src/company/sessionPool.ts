@@ -85,6 +85,11 @@ export function sessionHoldsRunner(session: CompanySession): boolean {
   return LIVE_STATUSES.has(session.status);
 }
 
+/** Whether a session belongs to a squad: squad workstream ids, whether opened now or before. */
+export function isSquadWorkstream(workstreamId: string): boolean {
+  return workstreamId.startsWith('squad-') || workstreamId.startsWith('squad:');
+}
+
 export const DEFAULT_POOL_LIMITS: PoolLimits = {
   maxRetainedSessions: COMPANY_MAX_RETAINED_SESSIONS,
   maxLiveRunners: COMPANY_MAX_LIVE_RUNNERS,

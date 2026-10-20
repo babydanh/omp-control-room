@@ -85,6 +85,14 @@ describe('LedgerService: polling lifecycle', () => {
     expect(h.schedule.live.size).toBe(0);
     await expect(h.service.getView()).rejects.toThrow('ledger service is disposed');
   });
+
+  it('counts a subscriber as watching the ledger', () => {
+    const h = makeService();
+    expect(h.service.watched()).toBe(false);
+
+    h.service.subscribe(() => {});
+    expect(h.service.watched()).toBe(true);
+  });
 });
 
 describe('LedgerService: broadcasts', () => {
@@ -258,5 +266,17 @@ describe('LedgerService: overlap scans', () => {
       String(LEDGER_OVERLAP_BUDGET_SECONDS),
     ]);
     expect(h.overlap.calls[0].argv).not.toContain('--notify');
+  });
+
+  it('returns the overlap scans without marking the ledger watched', async () => {
+    const h = makeService({ data: { events: [repoEvent()] }, git: TWO_CHECKOUTS });
+
+    const scans = await h.service.overlapScans();
+    expect(scans).toHaveLength(1);
+    expect(scans[0]?.repo).toBe(REPO);
+    expect(h.service.watched()).toBe(false);
+
+    await h.service.getView();
+    expect(h.service.watched()).toBe(true);
   });
 });

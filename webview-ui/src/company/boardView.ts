@@ -23,6 +23,8 @@ import type {
   SquadRun,
   WorkItem,
   WorkItemBlocker,
+  WorkItemConflicts,
+  WorkItemJudge,
   WorkItemStatus,
 } from '../../../core/src/messages.js';
 import { type AgentBoardCard, buildAgentCards } from './agentBoard.js';
@@ -31,6 +33,7 @@ import type { CompanyLaneId } from './constants.js';
 import { COMPANY_LANE_LABELS, COMPANY_LANE_ORDER } from './constants.js';
 import type { FolderIdentity } from './folderIdentity.js';
 import { squadLaneFor, visibleSquadRuns } from './squadView.js';
+import { isParkedAssignee } from './workItemReviewView.js';
 import {
   assigneeLabel,
   laneForWorkItem,
@@ -170,6 +173,12 @@ export interface BoardWorkItem {
   folder: FolderIdentity | null;
   /** The squad run that filed the item, when a squad made it; null otherwise. */
   squadRunId: string | null;
+  /** The judge's verdict on the item; null when no judge has run on it. */
+  judge: WorkItemJudge | null;
+  /** The open items and the main checkout this item overlaps; null when it overlaps none. */
+  conflicts: WorkItemConflicts | null;
+  /** Whether the item's assignee is a parked squad session. */
+  parked: boolean;
 }
 
 /** A squad run card: what the card shows, read from the run the server holds. */
@@ -191,6 +200,8 @@ export interface BoardSquad {
   agents: readonly OmpAgentInfo[];
   /** The folder the run is filed under when every folder is shown; null in folder mode. */
   folder: FolderIdentity | null;
+  /** The omp sessions the server reports as parked, so a squad child on a parked session shows it. */
+  parkedSessionIds: readonly string[];
 }
 
 export interface BoardLane {
@@ -266,6 +277,9 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
     updatedAt: item.updatedAt,
     folder,
     squadRunId: item.squadRunId ?? null,
+    judge: item.judge ?? null,
+    conflicts: item.conflicts ?? null,
+    parked: isParkedAssignee(item.assignee, workItemsOf(state, workspacePath).parkedSessionIds),
   }));
 }
 
@@ -290,6 +304,7 @@ function squadCards(state: CompanyViewState): BoardSquad[] {
       items: work.items,
       repos: work.repos,
       agents: work.agents,
+      parkedSessionIds: work.parkedSessionIds,
       folder,
     });
   }

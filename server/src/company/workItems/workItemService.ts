@@ -23,6 +23,7 @@ import type {
   CompanyRole,
   CompanyWorkItemsMessage,
   HerdrAgent,
+  LedgerOverlapScan,
   OmpAgentInfo,
   SquadSettings,
   WorkItem,
@@ -44,9 +45,24 @@ import {
 } from '../../../../core/src/workItemGraph.js';
 import { CompanyError } from '../companyError.js';
 import { BUNDLED_AGENTS, findAgent } from './agentCatalog.js';
+import {
+  type ConflictReport,
+  conflictsFor,
+  describeConflicts,
+} from './conflictModel.js';
 import { composeDispatchPrompt } from './dispatchPrompt.js';
+import {
+  buildJudgePrompt,
+  decideJudgeAction,
+  JUDGE_NOT_MET_PREFIX,
+  JUDGE_RESULT_MAX_CHARS,
+  type JudgeInput,
+  type JudgeReply,
+  parseJudgeReply,
+  passedMessage,
+} from './judgeModel.js';
 import { GIB, isSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
-import type { SquadWorktree } from './squadWorktree.js';
+import type { SquadWorktree, WorktreeRemoval } from './squadWorktree.js';
 import {
   type AgentObservation,
   assigneeKey,
@@ -59,9 +75,11 @@ import {
   isItemRole,
   isUuid,
   isWorkItemAssignee,
+  JUDGE_ERROR_MAX_CHARS,
   makeEvent,
   normalizeAreas,
   normalizeAssignee,
+  observeAssigneeSession,
   observeHerdrStatus,
   observeSessionStatus,
   occupiesAgent,
@@ -94,10 +112,18 @@ import {
   type SchedulerHold,
   type SchedulerItem,
   type SchedulerMember,
+  squadWorkstreamKey,
 } from './workItemScheduler.js';
 
 /** How many recent request ids are remembered, so a resent command answers the same way. */
 const REQUEST_MEMORY_MAX = 256;
+
+/** How long a squad session may sit idle before the squad parks it to free its memory. */
+const SQUAD_PARK_IDLE_MS = 15 * 60_000;
+/** How often conflicts are re-checked while editing work is open and a client is connected. */
+const CONFLICT_RECHECK_MS = 2 * 60_000;
+/** The maintenance tick: parks idle squad sessions and re-checks conflicts when they are due. */
+const MAINTENANCE_MS = 60_000;
 
 /** One herdr pane, as far as work items care. */
 export interface WorkItemPaneView {
@@ -141,8 +167,16 @@ export interface WorkItemSessions {
     mode: 'chat' | 'company',
     requestId: string,
   ): Promise<void>;
-  /** Opens a new omp chat in `cwd` for `role` and returns its session id. */
-  openChat(input: { readonly cwd: string; readonly role: CompanyRole }): Promise<string>;
+  /** Opens a new omp chat in `cwd` for `role`, under a squad workstream key, and returns its id. */
+  openChat(input: {
+    readonly cwd: string;
+    readonly role: CompanyRole;
+    readonly workstreamKey: string;
+  }): Promise<string>;
+  /** Brings a parked session back so a prompt can reach it. Rejects when the pool refuses. */
+  wake(sessionId: string): Promise<void>;
+  /** Parks an idle session to free its memory. False when the pool refuses now. */
+  park(sessionId: string): Promise<boolean>;
 }
 
 /** What the board can pick from: the folder's repos and its omp agents. */
@@ -160,6 +194,8 @@ export interface WorkItemPersistence {
 /** Creates the isolated git worktree an editing item runs in. Rejects with the reason when it cannot. */
 export interface WorkItemWorktrees {
   create(repo: string, shortId: string): Promise<SquadWorktree>;
+  /** Removes a finished item's worktree. Refuses, never forces, when it is dirty or unmerged. */
+  remove(repo: string, worktree: SquadWorktree): Promise<WorktreeRemoval>;
 }
 
 /** Everything the service reaches outside itself. */
@@ -177,6 +213,12 @@ export interface WorkItemPorts {
   catalog(): Promise<WorkItemCatalog>;
   /** Free memory in bytes, read whenever the scheduler may open a session. */
   freeMemoryBytes(): number;
+  /** Runs one judge turn and resolves with its raw text. Rejects when the turn fails or aborts. */
+  judge(prompt: string, signal: AbortSignal): Promise<string>;
+  /** The ledger's overlap scans, read fresh. Rejects when the ledger cannot answer. */
+  overlaps(): Promise<readonly LedgerOverlapScan[]>;
+  /** Whether a board is looking at the ledger. The conflict check runs only while one is. */
+  boardWatching(): boolean;
 }
 
 /** A command the board sent. The request id makes a resent command harmless. */
@@ -219,6 +261,11 @@ const MESSAGE = {
   priorityInvalid: 'Độ ưu tiên phải từ P0 đến P3.',
   acceptanceTooLong: 'Tiêu chí xong quá dài.',
   badRow: 'Việc chờ trong đề xuất không hợp lệ.',
+  noWorktree: 'Việc này không có worktree đã xong để dọn.',
+  worktreeInUse: 'Một phiên đang làm trong worktree này. Đậu hoặc đóng phiên đó trước.',
+  worktreeDirty: 'Worktree còn thay đổi chưa commit nên chưa dọn.',
+  worktreeUnmerged: 'Nhánh của worktree chưa merge vào origin/main nên chưa dọn.',
+  worktreeRemoved: 'Đã dọn worktree.',
 } as const;
 
 /** Vietnamese refusals for a wait list, by the reason the core check gives. */
@@ -310,6 +357,16 @@ export class WorkItemService {
   /** Items held back with the reason they cannot start yet: the omp pool is full or the worktree failed. */
   private readonly held = new Map<string, WorkItemBlocker>();
   private holdRetryPending = false;
+  /** Judge turns in flight by item id: the run that may still apply, and the handle that aborts it. */
+  private readonly judgeRuns = new Map<string, { runId: number; controller: AbortController }>();
+  private judgeSeq = 0;
+  /** Conflicts per item id, read from the ledger on each check. Kept in memory, not saved. */
+  private readonly conflictReports = new Map<string, ConflictReport>();
+  private conflictRefreshing = false;
+  private lastConflictAt = Number.NEGATIVE_INFINITY;
+  /** When each squad session was first seen idle by this process, by session id. */
+  private readonly idleSince = new Map<string, number>();
+  private maintenanceScheduled = false;
 
   constructor(workspacePath: string, ports: WorkItemPorts) {
     this.workspacePath = workspacePath;
@@ -330,6 +387,7 @@ export class WorkItemService {
     // A running item from before this start gets its grace check again.
     if ([...this.items.values()].some((item) => item.status === 'running'))
       this.scheduleGraceCheck();
+    this.ensureMaintenance();
   }
 
   /** The folder's full state, as the board receives it. */
@@ -345,6 +403,9 @@ export class WorkItemService {
       settings: { ...this.settings },
       repos: [...this.catalog.repos],
       agents: this.catalog.agents.map((agent) => ({ ...agent })),
+      parkedSessionIds: this.squadSessionIds.filter((id) =>
+        view.sessions.some((session) => session.id === id && session.status === 'parked'),
+      ),
     };
   }
 
@@ -457,6 +518,7 @@ export class WorkItemService {
     );
     this.remember(command.requestId, '');
     await this.commitOrRestore(before, command.requestId);
+    this.abortJudge(item);
     await this.reconcileAfterSave();
   }
 
@@ -484,6 +546,7 @@ export class WorkItemService {
     const at = this.iso();
     this.observedBusy.delete(item.id);
     item.status = command.verdict;
+    this.abortJudge(item);
     item.updatedAt = at;
     if (command.verdict === 'done') {
       delete item.reason;
@@ -513,6 +576,52 @@ export class WorkItemService {
       );
     this.held.delete(item.id);
     this.items.delete(item.id);
+    this.remember(command.requestId, '');
+    this.commit();
+    await this.flush();
+  }
+
+  /** "Chấm lại": judges a review item again now. A conflict holds the judge until it clears. */
+  async judgeAgain(command: WorkItemCommand & { id: string }): Promise<void> {
+    if (this.replay(command.requestId) !== undefined) return;
+    const item = this.requireItem(command.id);
+    if (item.status !== 'review') throw new CompanyError('work_item_status', MESSAGE.status);
+    this.remember(command.requestId, '');
+    this.startJudge(item);
+    await this.flush();
+  }
+
+  /**
+   * Removes a done item's worktree once nothing in it is lost. Refused while a live session still
+   * works in it, or when the worktree is dirty or its branch is not merged. Never forced.
+   */
+  async cleanWorktree(command: WorkItemCommand & { id: string }): Promise<void> {
+    if (this.replay(command.requestId) !== undefined) return;
+    const item = this.requireItem(command.id);
+    const worktree = item.worktree;
+    if (item.status !== 'done' || worktree === undefined || item.worktreeRemoved === true)
+      throw new CompanyError('work_item_status', MESSAGE.noWorktree);
+    const path = checkoutKey(worktree.path);
+    const sessions = this.ports.sessions
+      .list()
+      .filter((session) => session.cwd !== undefined && checkoutKey(session.cwd) === path);
+    if (
+      sessions.some(
+        (session) => session.status !== 'parked' && observeSessionStatus(session.status) !== 'gone',
+      )
+    )
+      throw new CompanyError('work_item_status', MESSAGE.worktreeInUse);
+    const outcome = await this.ports.worktrees.remove(item.repo ?? this.workspacePath, worktree);
+    if (outcome === 'dirty') throw new CompanyError('work_item_status', MESSAGE.worktreeDirty);
+    if (outcome === 'unmerged') throw new CompanyError('work_item_status', MESSAGE.worktreeUnmerged);
+    const at = this.iso();
+    item.worktreeRemoved = true;
+    item.updatedAt = at;
+    this.pushEvent(item, makeEvent(at, 'note', MESSAGE.worktreeRemoved));
+    // A parked session on the removed checkout can never run again, so the squad forgets it.
+    const removedSessions = new Set(sessions.map((session) => session.id));
+    this.squadSessionIds = this.squadSessionIds.filter((id) => !removedSessions.has(id));
+    for (const id of removedSessions) this.squadSessionRepos.delete(id);
     this.remember(command.requestId, '');
     this.commit();
     await this.flush();
@@ -626,6 +735,8 @@ export class WorkItemService {
   /** Cancels timers and stops further passes. Callers that already started a pass finish it. */
   dispose(): void {
     this.disposed = true;
+    for (const run of this.judgeRuns.values()) run.controller.abort();
+    this.judgeRuns.clear();
     for (const cancel of this.cancelTimers) cancel();
     this.cancelTimers.clear();
     this.changeListeners.clear();
@@ -1041,7 +1152,11 @@ export class WorkItemService {
       if (cwd === undefined) return;
       let sessionId: string;
       try {
-        sessionId = await this.ports.sessions.openChat({ cwd, role: decision.role });
+      sessionId = await this.ports.sessions.openChat({
+        cwd,
+        role: decision.role,
+        workstreamKey: squadWorkstreamKey(decision.role, cwd),
+      });
       } catch (error) {
         // A full omp runner pool is temporary: the item waits and the next pass tries it again.
         if (error instanceof CompanyError && error.code === 'company_pool_full') {
@@ -1117,7 +1232,12 @@ export class WorkItemService {
 
   /** One item as the board receives it: a queued item carries what it waits on, or why it cannot start. */
   private wire(item: StoredWorkItem, view: FolderView): WorkItem {
-    const wire = toWorkItem(item);
+    const base = toWorkItem(item);
+    const report = this.conflictReports.get(item.id);
+    const wire: WorkItem =
+      report === undefined
+        ? base
+        : { ...base, conflicts: { sequences: [...report.sequences], main: report.main } };
     if (item.status !== 'queued') return wire;
     // Agents are judged by the scheduler below; the dependency check never reads them.
     const blocker = blockerOf(item.dependsOn, (id) => this.dependencyState(item, id), false);
@@ -1213,7 +1333,7 @@ export class WorkItemService {
     const sessions = view.sessions.map((session): SchedulerMember => {
       const assignee: WorkItemAssignee = { kind: 'session', sessionId: session.id };
       const key = assigneeKey(assignee);
-      const observed = observeSessionStatus(session.status);
+      const observed = observeAssigneeSession(session.status, this.squadSessionIds.includes(session.id));
       return {
         key,
         assignee,
@@ -1277,7 +1397,8 @@ export class WorkItemService {
       return pane === undefined ? 'gone' : observeHerdrStatus(pane.status);
     }
     const session = view.sessions.find((entry) => entry.id === assignee.sessionId);
-    return session === undefined ? 'gone' : observeSessionStatus(session.status);
+    if (session === undefined) return 'gone';
+    return observeAssigneeSession(session.status, this.squadSessionIds.includes(session.id));
   }
 
   /** The #n of each listed item, kept on the waiting item so a removed dependency can still be named. */
@@ -1316,6 +1437,9 @@ export class WorkItemService {
       return;
     }
     if (observation !== 'free') return;
+    // A judge that held the item for the user keeps it in needs-input until the user acts.
+    if (item.status === 'needs_input' && item.reason?.startsWith(JUDGE_NOT_MET_PREFIX) === true)
+      return;
     const dispatchedMs = item.dispatchedAt === undefined ? 0 : Date.parse(item.dispatchedAt);
     const elapsed = this.ports.now() - dispatchedMs;
     if (this.observedBusy.has(item.id) || elapsed >= WORK_ITEM_GRACE_MS) await this.complete(item);
@@ -1356,6 +1480,7 @@ export class WorkItemService {
     this.again = true;
     this.commit();
     this.notifySettled(item);
+    this.judgeAfterReview(item);
   }
 
   private async readResult(paneId: string): Promise<string | undefined> {
@@ -1371,6 +1496,7 @@ export class WorkItemService {
     this.observedBusy.delete(item.id);
     this.held.delete(item.id);
     item.status = 'failed';
+    this.abortJudge(item);
     item.updatedAt = at;
     item.reason = clip(reason, WORK_ITEM_REASON_MAX_CHARS);
     this.pushEvent(item, makeEvent(at, 'status', message));
@@ -1427,7 +1553,10 @@ export class WorkItemService {
     }
     if (assignee.kind === 'session') {
       const sessionId = assignee.sessionId ?? '';
-      const role = this.ports.sessions.list().find((entry) => entry.id === sessionId)?.role;
+      const view = this.ports.sessions.list().find((entry) => entry.id === sessionId);
+      // A parked session is brought back first: a prompt sent to it would be refused.
+      if (view?.status === 'parked') await this.ports.sessions.wake(sessionId);
+      const role = view?.role;
       await this.ports.sessions.submit(
         sessionId,
         text,
@@ -1498,5 +1627,263 @@ export class WorkItemService {
   private notifySettled(item: StoredWorkItem): void {
     const settled = toWorkItem(item);
     for (const listener of this.settledListeners) listener(settled);
+  }
+
+  /**
+   * Checks conflicts, then judges a review item when autoJudge is on. The check comes first so the
+   * judge reads current overlaps, and a conflicting item is never passed.
+   */
+  private judgeAfterReview(item: StoredWorkItem): void {
+    if (this.disposed) return;
+    void this.refreshConflicts().then(() => {
+      const current = this.items.get(item.id);
+      if (this.settings.autoJudge && current?.status === 'review') this.startJudge(current);
+    });
+  }
+
+  /**
+   * Starts one judge turn for a review item, or holds it while a conflict stands. A turn already in
+   * flight is never doubled. The caller decides whether automatic judging applies.
+   */
+  private startJudge(item: StoredWorkItem): void {
+    if (this.disposed || item.status !== 'review' || this.judgeRuns.has(item.id)) return;
+    const followUps = item.judge?.followUps ?? 0;
+    if (this.conflictReports.has(item.id)) {
+      item.judge = { status: 'waiting', followUps };
+      this.commit();
+      return;
+    }
+    const runId = ++this.judgeSeq;
+    const controller = new AbortController();
+    this.judgeRuns.set(item.id, { runId, controller });
+    item.judge = { status: 'running', followUps };
+    this.commit();
+    void this.runJudge(item, runId, controller.signal);
+  }
+
+  /** One judge turn. A reply that no longer applies, because the item moved on, is discarded unread. */
+  private async runJudge(item: StoredWorkItem, runId: number, signal: AbortSignal): Promise<void> {
+    let raw: string;
+    try {
+      raw = await this.ports.judge(buildJudgePrompt(this.judgeInput(item)), signal);
+    } catch (error) {
+      if (this.judgeRuns.get(item.id)?.runId === runId) {
+        this.judgeRuns.delete(item.id);
+        this.judgeError(item, describe(error));
+      }
+      return;
+    }
+    if (this.judgeRuns.get(item.id)?.runId !== runId) return;
+    this.judgeRuns.delete(item.id);
+    if (this.items.get(item.id) !== item || item.status !== 'review') return;
+    const parsed = parseJudgeReply(raw);
+    if (!parsed.ok) {
+      this.judgeError(item, parsed.error);
+      return;
+    }
+    this.applyJudgeReply(item, parsed.reply);
+  }
+
+  /** What the judge reads about one review item: its text, its result, and the overlaps it has now. */
+  private judgeInput(item: StoredWorkItem): JudgeInput {
+    const report = this.conflictReports.get(item.id);
+    return {
+      text: item.text,
+      acceptance: item.acceptance,
+      agent: item.agent,
+      role: item.role,
+      readOnly: this.isReadOnly(item.agent),
+      result: item.result === undefined ? undefined : clip(item.result, JUDGE_RESULT_MAX_CHARS),
+      conflicts: report === undefined ? [] : describeConflicts(report),
+      evidenceAsked: item.judgeEvidenceAsked === true,
+    };
+  }
+
+  /** Applies a valid judge reply: pass finishes the item, a follow-up sends the agent back, else the user decides. */
+  private applyJudgeReply(item: StoredWorkItem, reply: JudgeReply): void {
+    const followUps = item.judge?.followUps ?? 0;
+    const action = decideJudgeAction(reply, {
+      followUps,
+      evidenceAsked: item.judgeEvidenceAsked === true,
+    });
+    if (action.kind === 'pass') {
+      if (this.conflictReports.has(item.id)) {
+        item.judge = { status: 'waiting', followUps };
+        this.commit();
+        return;
+      }
+      this.finishByJudge(item, reply.reason);
+      return;
+    }
+    if (action.kind === 'follow_up') {
+      item.judge = {
+        status: 'verdict',
+        verdict: reply.verdict,
+        reason: reply.reason,
+        followUps: followUps + 1,
+      };
+      item.judgeEvidenceAsked = action.evidenceAsked;
+      this.requeue(
+        item,
+        this.promptFor(action.text, item.acceptance, item.agent),
+        'followed_up',
+        clip(`Giám khảo: ${reply.reason}`, WORK_ITEM_REASON_MAX_CHARS),
+      );
+      this.commit();
+      this.scheduleReconcile();
+      return;
+    }
+    item.judge = { status: 'verdict', verdict: reply.verdict, reason: reply.reason, followUps };
+    this.setStatus(item, 'needs_input', clip(action.reason, WORK_ITEM_REASON_MAX_CHARS), action.reason);
+    this.notifySettled(item);
+  }
+
+  /** The judge passed the item: it is done, as if the user had said so, and its dependents may start. */
+  private finishByJudge(item: StoredWorkItem, reason: string): void {
+    const at = this.iso();
+    item.judge = { status: 'verdict', verdict: 'pass', reason, followUps: item.judge?.followUps ?? 0 };
+    item.status = 'done';
+    item.updatedAt = at;
+    delete item.reason;
+    this.pushEvent(item, makeEvent(at, 'status', passedMessage(reason)));
+    this.commit();
+    this.notifySettled(item);
+    this.scheduleReconcile();
+  }
+
+  /** The judge failed or sent an unusable reply. The item stays in review and nothing is sent. */
+  private judgeError(item: StoredWorkItem, message: string): void {
+    const error = clip(message, JUDGE_ERROR_MAX_CHARS);
+    item.judge = { status: 'error', followUps: item.judge?.followUps ?? 0, error };
+    this.pushEvent(item, makeEvent(this.iso(), 'note', `Giám khảo lỗi: ${error}`));
+    this.commit();
+  }
+
+  /** Stops a judge turn in flight. A settled item drops its judge state; an open one is marked interrupted. */
+  private abortJudge(item: StoredWorkItem): void {
+    this.judgeRuns.get(item.id)?.controller.abort();
+    this.judgeRuns.delete(item.id);
+    const judge = item.judge;
+    if (judge === undefined || (judge.status !== 'running' && judge.status !== 'waiting')) return;
+    if (isFinished(item.status)) delete item.judge;
+    else item.judge = { ...judge, status: 'interrupted' };
+  }
+
+  /**
+   * Reads the ledger's overlaps for the open editing items and records each item's conflicts. A new
+   * or cleared conflict is noted on the item; a review item that gained one is reported to the squad.
+   * A review item whose judge waited on a conflict is judged once that conflict clears. An unreadable
+   * ledger keeps the last answer.
+   */
+  private async refreshConflicts(): Promise<void> {
+    if (this.conflictRefreshing || this.disposed) return;
+    const open = [...this.items.values()].filter(
+      (item) =>
+        (item.status === 'running' || item.status === 'needs_input' || item.status === 'review') &&
+        !this.isReadOnly(item.agent),
+    );
+    let scans: readonly LedgerOverlapScan[];
+    this.conflictRefreshing = true;
+    try {
+      if (open.length > 0) this.lastConflictAt = this.ports.now();
+      scans = open.length === 0 ? [] : await this.ports.overlaps();
+    } catch {
+      return;
+    } finally {
+      this.conflictRefreshing = false;
+    }
+    const checkouts = open.map((item) => ({
+      sequence: item.sequence,
+      checkout: item.worktree?.path ?? item.repo ?? this.workspacePath,
+    }));
+    const found = conflictsFor(scans, checkouts);
+    const at = this.iso();
+    const changed: StoredWorkItem[] = [];
+    for (const item of open) {
+      const report = found.get(item.sequence);
+      const before = this.conflictReports.get(item.id);
+      const was = before === undefined ? [] : describeConflicts(before);
+      const now = report === undefined ? [] : describeConflicts(report);
+      if (was.join(', ') === now.join(', ')) continue;
+      if (report === undefined) this.conflictReports.delete(item.id);
+      else this.conflictReports.set(item.id, report);
+      const note = now.length === 0 ? 'Hết xung đột.' : `Xung đột với ${now.join(', ')}.`;
+      this.pushEvent(item, makeEvent(at, 'note', note));
+      if (item.status === 'review') {
+        item.updatedAt = at;
+        // A conflict holds the judge. A judge already running checks the conflict when it replies.
+        if (report !== undefined && this.settings.autoJudge && item.judge?.status !== 'running')
+          item.judge = { status: 'waiting', followUps: item.judge?.followUps ?? 0 };
+      }
+      changed.push(item);
+    }
+    const openIds = new Set(open.map((item) => item.id));
+    for (const id of [...this.conflictReports.keys()]) {
+      if (!openIds.has(id)) this.conflictReports.delete(id);
+    }
+    if (changed.length > 0) this.commit();
+    for (const item of changed) {
+      if (item.status === 'review') this.notifySettled(item);
+    }
+    for (const item of open) {
+      if (
+        item.status === 'review' &&
+        item.judge?.status === 'waiting' &&
+        !this.conflictReports.has(item.id)
+      )
+        this.startJudge(item);
+    }
+  }
+
+  /**
+   * Parks each squad session that has sat idle for SQUAD_PARK_IDLE_MS with no queued, running or
+   * waiting item on it. The pool may still refuse; the session is tried again on a later tick.
+   */
+  private async parkIdleSquadSessions(): Promise<void> {
+    const sessions = this.ports.sessions.list();
+    const now = this.ports.now();
+    for (const id of this.squadSessionIds) {
+      const session = sessions.find((entry) => entry.id === id);
+      const busy = [...this.items.values()].some(
+        (item) =>
+          item.assignee.kind === 'session' &&
+          item.assignee.sessionId === id &&
+          (item.status === 'queued' || item.status === 'running' || item.status === 'needs_input'),
+      );
+      if (session?.status !== 'idle' || busy) {
+        this.idleSince.delete(id);
+        continue;
+      }
+      const since = this.idleSince.get(id) ?? now;
+      this.idleSince.set(id, since);
+      if (now - since < SQUAD_PARK_IDLE_MS) continue;
+      if (!(await this.ports.sessions.park(id))) continue;
+      this.idleSince.delete(id);
+      this.ports.publish(this.snapshot());
+    }
+  }
+
+  /** Starts the maintenance tick once. Each tick parks idle squad sessions and re-checks conflicts. */
+  private ensureMaintenance(): void {
+    if (this.maintenanceScheduled || this.disposed) return;
+    this.maintenanceScheduled = true;
+    const cancel = this.ports.schedule(() => {
+      this.cancelTimers.delete(cancel);
+      this.maintenanceScheduled = false;
+      this.ensureMaintenance();
+      void this.maintain();
+    }, MAINTENANCE_MS);
+    this.cancelTimers.add(cancel);
+  }
+
+  private async maintain(): Promise<void> {
+    if (this.disposed) return;
+    try {
+      await this.parkIdleSquadSessions();
+      const due = this.ports.now() - this.lastConflictAt >= CONFLICT_RECHECK_MS;
+      if (due && this.ports.boardWatching()) await this.refreshConflicts();
+    } catch {
+      // A failed tick changes nothing it did not commit; the next tick tries again.
+    }
   }
 }

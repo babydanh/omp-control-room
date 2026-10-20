@@ -76,6 +76,7 @@ export const COMPANY_HOST_COMMANDS = {
   decideContract: 'company.contract.decide',
   answerQuestion: 'company.question.answer',
   controlSession: 'company.session.control',
+  parkSquadSession: 'company.session.parkSquad',
   renameSession: 'company.session.rename',
   promptCancel: 'company.prompt.cancel',
   ompSessions: 'company.omp.sessions',
@@ -678,15 +679,26 @@ export class CompanyFollowerProxy {
         return sessionId;
       },
 
-      async openNewChat(input: { cwd?: string; role?: CompanyRole } = {}): Promise<string> {
+      async openNewChat(
+        input: { cwd?: string; role?: CompanyRole; workstreamKey?: string } = {},
+      ): Promise<string> {
         const value = await proxy.send(COMPANY_HOST_COMMANDS.openNewChat, {
           ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
           ...(input.role === undefined ? {} : { role: input.role }),
+          ...(input.workstreamKey === undefined ? {} : { workstreamKey: input.workstreamKey }),
         });
         if (!isFrameObject(value)) throw hostError('owner_protocol_error');
         const sessionId = value['sessionId'];
         if (typeof sessionId !== 'string') throw hostError('owner_protocol_error');
         return sessionId;
+      },
+
+      async parkSquadSession(sessionId: string): Promise<boolean> {
+        const value = await proxy.send(COMPANY_HOST_COMMANDS.parkSquadSession, { id: sessionId });
+        if (!isFrameObject(value) || typeof value['parked'] !== 'boolean') {
+          throw hostError('owner_protocol_error');
+        }
+        return value['parked'];
       },
 
       async updateSettings(roleProfiles: Record<string, RoleProfile>): Promise<void> {

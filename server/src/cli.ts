@@ -324,6 +324,7 @@ async function main(): Promise<void> {
       helperPath: path.join(distRoot, COMPANY_PTY_HOST_FILENAME),
       extensionPath: path.join(distRoot, COMPANY_OMP_BRIDGE_FILENAME),
       herdr,
+      ledger: { overlapScans: () => ledger.overlapScans(), watched: () => ledger.watched() },
     },
     recents: {
       read: readRecentCompanyWorkspaces,

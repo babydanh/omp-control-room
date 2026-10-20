@@ -108,8 +108,10 @@ import { type SquadWiring, startSquad } from './squad/squadWiring.js';
 import { UsageLedger } from './usageService.js';
 import type { PrerequisiteCheck } from './verificationRunner.js';
 import {
+  NO_LEDGER,
   startWorkItems,
   type WorkItemHerdr,
+  type WorkItemLedger,
   type WorkItemWiring,
 } from './workItems/workItemWiring.js';
 
@@ -186,6 +188,8 @@ export interface WorkspaceCompanyHostOptions {
   readonly onMessage: (msg: ServerMessage) => void;
   /** Process-level herdr link for work items; absent when herdr is not linked. */
   readonly herdr?: WorkItemHerdr;
+  /** The process ledger's overlap scans and board watch, for conflict checks. Absent: no conflicts. */
+  readonly ledger?: WorkItemLedger;
   readonly runnerCommand?: OmpRunnerCommand;
   readonly extensionPath?: string;
   readonly helperPath?: string;
@@ -772,13 +776,25 @@ export function createCompanyHostDispatcher(
       case COMPANY_HOST_COMMANDS.openNewChat: {
         const cwd = readOptionalBoundedString(body, 'cwd', MAX_FILE_PATH_LENGTH);
         const role = readOptionalRole(body);
+        const workstreamKey = readOptionalBoundedString(body, 'workstreamKey', MAX_ID_LENGTH);
+        // Only a squad may name its workstream; the key decides which parked session it reuses.
+        if (workstreamKey !== undefined && !workstreamKey.startsWith('squad:')) {
+          throw companyHostError('command_invalid');
+        }
         const sessionId = await withCompanyCode(() =>
           options.coordinator().openNewChat({
             ...(cwd === undefined ? {} : { cwd }),
             ...(role === undefined ? {} : { role }),
+            ...(workstreamKey === undefined ? {} : { workstreamKey }),
           }),
         );
         return { sessionId };
+      }
+
+      case COMPANY_HOST_COMMANDS.parkSquadSession: {
+        const id = readBoundedString(body, 'id', MAX_ID_LENGTH);
+        const parked = await withCompanyCode(() => options.coordinator().parkSquadSession(id));
+        return { parked };
       }
 
       case COMPANY_HOST_COMMANDS.updateSettings: {
@@ -1102,6 +1118,17 @@ async function openOwnerCompanyHost(
       herdr: options.herdr,
       coordinator,
       publish,
+      judge: createOmpLeaderRunner({
+        command: hostModelRolesCommand(options),
+        cwd: store.workspacePath,
+        model: modelRoles.assignments.judge.model,
+        thinking:
+          modelRoles.assignments.judge.thinking === ''
+            ? null
+            : modelRoles.assignments.judge.thinking,
+        label: 'Giám khảo',
+      }),
+      ledger: options.ledger ?? NO_LEDGER,
     });
     const director = modelRoles.assignments.director;
     squadWiring = await startSquad({

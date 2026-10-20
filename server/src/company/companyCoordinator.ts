@@ -212,7 +212,17 @@ export interface CompanyCoordinator {
    * inside the folder); `role` defaults to chat. Approvals still answer for the
    * folder root.
    */
-  openNewChat(input?: { cwd?: string; role?: CompanyRole }): Promise<string>;
+  openNewChat(input?: {
+    cwd?: string;
+    role?: CompanyRole;
+    workstreamKey?: string;
+  }): Promise<string>;
+
+  /**
+   * Park one idle squad session so its process stops. False when the pool refuses now: the session
+   * is busy, has a pending question, or is attached to a terminal. Other sessions never park here.
+   */
+  parkSquadSession(sessionId: string): Promise<boolean>;
 
   /**
    * Open a saved OMP session as a chat session in this workspace and return its

@@ -44,6 +44,8 @@ export interface FolderWorkItems {
   agents: OmpAgentInfo[];
   /** The folder's squad settings; null until the server has sent them. */
   settings: SquadSettings | null;
+  /** The omp sessions the server reports as parked. An item whose assignee is one shows a badge. */
+  parkedSessionIds: string[];
 }
 
 /** Names one work item. Ids are unique within a folder, so the folder is part of the name. */
@@ -448,7 +450,17 @@ export function workItemKey(ref: WorkItemRef): string {
 /** One folder's work items; an empty list when the server has sent none for that folder. */
 export function workItemsOf(state: CompanyViewState, workspacePath: string): FolderWorkItems {
   const held: FolderWorkItems | undefined = state.workItems[workspacePath];
-  return held ?? { revision: 0, items: [], roles: [], repos: [], agents: [], settings: null };
+  return (
+    held ?? {
+      revision: 0,
+      items: [],
+      roles: [],
+      repos: [],
+      agents: [],
+      settings: null,
+      parkedSessionIds: [],
+    }
+  );
 }
 
 /** The work item a reference names, or undefined when the folder no longer holds it. */

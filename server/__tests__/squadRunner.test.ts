@@ -144,6 +144,7 @@ describe('execLeaderProcess', () => {
       args: ['-e', 'process.stdout.write("ok " + process.argv.length)', 'a b;c'],
       cwd: process.cwd(),
       timeoutMs: 20_000,
+      who: 'Đội trưởng',
       signal: new AbortController().signal,
     });
     expect(stdout.startsWith('ok ')).toBe(true);
@@ -158,6 +159,7 @@ describe('execLeaderProcess', () => {
         args: ['-e', 'for (;;) {}'],
         cwd: process.cwd(),
         timeoutMs: 300,
+        who: 'Đội trưởng',
         signal: new AbortController().signal,
       }),
     ).rejects.toThrow('quá lâu');

@@ -539,6 +539,18 @@ export class CompanyClient {
     return this.command((requestId) => commands.workItemCancel(requestId, workspacePath, id));
   }
 
+  /** Judge a review item again. The verdict is a companyCommandResult. */
+  judgeWorkItem(workspacePath: string, id: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.workItemJudge(requestId, workspacePath, id));
+  }
+
+  /** Remove the worktree of a done item. The verdict is a companyCommandResult. */
+  cleanWorkItemWorktree(workspacePath: string, id: string): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.workItemCleanWorktree(requestId, workspacePath, id),
+    );
+  }
+
   /**
    * Replace the items a queued work item waits for; an empty list clears them. The verdict is a
    * companyCommandResult.

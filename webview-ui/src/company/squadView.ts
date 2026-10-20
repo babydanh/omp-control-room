@@ -19,6 +19,7 @@ import type {
   WorkItem,
   WorkItemAssignee,
   WorkItemBlocker,
+  WorkItemConflicts,
   WorkItemStatus,
 } from '../../../core/src/messages.js';
 import { SQUAD_DEFAULT_AGENT } from '../../../core/src/squadCompleteness.js';
@@ -38,6 +39,7 @@ import type { FolderIdentity } from './folderIdentity.js';
 import { showsAllFolders } from './folderIdentity.js';
 import { foldersInView } from './folderView.js';
 import { areasFromText } from './squadPlanCheck.js';
+import { isParkedAssignee } from './workItemReviewView.js';
 import {
   statusWordVi,
   WORK_ITEM_AREAS_MAX,
@@ -477,6 +479,10 @@ export interface EpicChild {
   statusLabel: string;
   /** What holds the item while it waits, as the server reports it; undefined when nothing does. */
   blocker: WorkItemBlocker | undefined;
+  /** The overlaps with other open items and the main checkout; undefined when there are none. */
+  conflicts: WorkItemConflicts | undefined;
+  /** Whether the child's assignee is a parked squad session. */
+  parked: boolean;
   waits: EpicWait[];
 }
 
@@ -493,7 +499,11 @@ function waitOn(dependency: WorkItem | undefined): EpicWait {
  * `Chờ #3` while the dependency is open, `#3 xong` or `#3 bị lỗi` once it is settled, and
  * `Chờ việc đã gỡ` when the folder no longer holds it.
  */
-export function epicChildren(run: Pick<SquadRun, 'id'>, items: readonly WorkItem[]): EpicChild[] {
+export function epicChildren(
+  run: Pick<SquadRun, 'id'>,
+  items: readonly WorkItem[],
+  parkedSessionIds: readonly string[] = [],
+): EpicChild[] {
   const byId = new Map(items.map((item) => [item.id, item] as const));
   return items
     .filter((item) => item.squadRunId === run.id)
@@ -505,6 +515,8 @@ export function epicChildren(run: Pick<SquadRun, 'id'>, items: readonly WorkItem
       status: item.status,
       statusLabel: statusWordVi(item.status),
       blocker: item.blocker,
+      conflicts: item.conflicts,
+      parked: isParkedAssignee(item.assignee, parkedSessionIds),
       waits: item.dependsOn.map((id) => waitOn(byId.get(id))),
     }));
 }

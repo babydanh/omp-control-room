@@ -17,6 +17,12 @@ import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { useNow } from '../useNow.js';
 import {
+  conflictText,
+  isParkedAssignee,
+  judgeChipFor,
+  worktreeOffer,
+} from '../workItemReviewView.js';
+import {
   assigneeLabel,
   blockerSentence,
   dependencyChoices,
@@ -36,9 +42,18 @@ import {
 import { AssignWorkDialog } from './AssignWorkDialog.js';
 import { CompanyButton } from './CompanyButton.js';
 import { FolderTag } from './FolderTag.js';
+import { WorkItemReviewChips } from './WorkItemReviewChips.js';
 
 /** The commands a panel sends. Each one falls back to its own notice when the server gives none. */
-type PanelAction = 'verdict' | 'cancel' | 'followUp' | 'assign' | 'dependencies' | 'squad';
+type PanelAction =
+  | 'verdict'
+  | 'cancel'
+  | 'followUp'
+  | 'assign'
+  | 'dependencies'
+  | 'squad'
+  | 'judge'
+  | 'cleanWorktree';
 
 const FALLBACK_NOTICE: Readonly<Record<PanelAction, string>> = {
   verdict: 'Không đánh dấu được việc này.',
@@ -47,6 +62,8 @@ const FALLBACK_NOTICE: Readonly<Record<PanelAction, string>> = {
   assign: 'Không giao lại được việc này.',
   dependencies: 'Không lưu được việc chờ.',
   squad: 'Không hỏi được đội trưởng.',
+  judge: 'Không chấm lại được việc này.',
+  cleanWorktree: 'Không dọn được worktree của việc này.',
 };
 
 /** A command the panel sent and is waiting on, by the requestId the client minted. */
@@ -135,6 +152,11 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
   const reason = item.reason?.trim() ? item.reason : null;
   const acceptance = item.acceptance?.trim() || null;
   const needsAttention = status === 'needs_input' || status === 'failed';
+  const judge = judgeChipFor(item);
+  const worktree = worktreeOffer(item);
+  const parked = isParkedAssignee(item.assignee, folderWork.parkedSessionIds);
+  const canRejudge = judge?.rejudge === true;
+  const canCleanWorktree = worktree === 'clean';
 
   // The actions a status allows. The server still decides; these only hide refused moves.
   const canFinish = status !== 'done';
@@ -144,7 +166,14 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
   const canFollowUp = status === 'review' || status === 'failed';
   const canReassign = status === 'queued' || status === 'review' || status === 'failed';
   const canAskLeader = status === 'review' && item.squadRunId === undefined;
-  const hasActions = canFinish || canFail || canCancel || canReassign || canAskLeader;
+  const hasActions =
+    canFinish ||
+    canFail ||
+    canCancel ||
+    canReassign ||
+    canAskLeader ||
+    canRejudge ||
+    canCleanWorktree;
 
   return (
     <div
@@ -186,6 +215,12 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
         <dt className="text-text-muted">Cập nhật</dt>
         <dd className="text-text">{updated ?? '—'}</dd>
       </dl>
+      <WorkItemReviewChips
+        judge={judge}
+        conflictText={conflictText(item.conflicts)}
+        parked={parked}
+        className="px-2.5"
+      />
 
       <p
         data-testid="work-item-text"
@@ -262,6 +297,15 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
               Huỷ
             </CompanyButton>
           )}
+          {canRejudge && (
+            <CompanyButton
+              size="sm"
+              disabled={busy}
+              onClick={() => send('judge', client.judgeWorkItem(workspacePath, id))}
+            >
+              Chấm lại
+            </CompanyButton>
+          )}
           {canReassign && (
             <CompanyButton size="sm" disabled={busy} onClick={openReassign}>
               Giao lại
@@ -272,7 +316,21 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
               Hỏi đội trưởng bước tiếp
             </CompanyButton>
           )}
+          {canCleanWorktree && (
+            <CompanyButton
+              size="sm"
+              disabled={busy}
+              onClick={() => send('cleanWorktree', client.cleanWorkItemWorktree(workspacePath, id))}
+            >
+              Dọn worktree
+            </CompanyButton>
+          )}
         </div>
+      )}
+      {worktree === 'removed' && (
+        <p data-testid="work-item-worktree-removed" className="px-2.5 text-2xs text-text-muted">
+          Worktree đã dọn
+        </p>
       )}
 
       {canFollowUp && (

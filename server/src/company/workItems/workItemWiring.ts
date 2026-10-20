@@ -6,12 +6,19 @@
 import { randomUUID } from 'node:crypto';
 import { freemem, homedir } from 'node:os';
 
-import type { CompanyWorkItemsMessage } from '../../../../core/src/messages.js';
+import type { CompanyWorkItemsMessage, LedgerOverlapScan } from '../../../../core/src/messages.js';
 import type { HerdrLink } from '../../herdr/herdrLink.js';
 import type { CompanyCoordinator } from '../companyCoordinator.js';
+import type { LeaderRunner } from '../squad/squadRunner.js';
 import { loadAgentCatalog } from './agentCatalog.js';
 import { listFolderRepos } from './folderRepos.js';
-import { createSquadWorktree, findOnPath, runCommand } from './squadWorktree.js';
+import {
+  createSquadWorktree,
+  findOnPath,
+  removeSquadWorktree,
+  runCommand,
+} from './squadWorktree.js';
+import { squadWorkstreamKey } from './workItemScheduler.js';
 import {
   type WorkItemCatalog,
   type WorkItemRoster,
@@ -29,7 +36,7 @@ const RESULT_SCREEN_LINES = 40;
 /** The folder's coordinator calls work items make. */
 export type WorkItemCoordinator = Pick<
   CompanyCoordinator,
-  'snapshot' | 'submitPrompt' | 'openNewChat'
+  'snapshot' | 'submitPrompt' | 'openNewChat' | 'parkSquadSession'
 >;
 
 export interface WorkItemWiringOptions {
@@ -40,6 +47,10 @@ export interface WorkItemWiringOptions {
   readonly herdr: WorkItemHerdr | undefined;
   readonly coordinator: WorkItemCoordinator;
   readonly publish: (message: CompanyWorkItemsMessage) => void;
+  /** The judge role's omp runner: one judge turn per call. */
+  readonly judge: LeaderRunner;
+  /** The ledger the conflict check reads overlaps from, and reports whether a board watches it. */
+  readonly ledger: WorkItemLedger;
 }
 
 /** A started service and the way to stop it. */
@@ -47,6 +58,18 @@ export interface WorkItemWiring {
   readonly service: WorkItemService;
   dispose(): void;
 }
+
+/** The ledger the conflict check reads. A host without a ledger has no overlaps to report. */
+export interface WorkItemLedger {
+  overlapScans(): Promise<readonly LedgerOverlapScan[]>;
+  watched(): boolean;
+}
+
+/** The ledger for a host that has none: no overlaps, and no board watching it. */
+export const NO_LEDGER: WorkItemLedger = {
+  overlapScans: () => Promise.resolve([]),
+  watched: () => false,
+};
 
 function rosterFor(herdr: WorkItemHerdr | undefined): WorkItemRoster {
   return {
@@ -91,7 +114,23 @@ function sessionsFor(coordinator: WorkItemCoordinator): WorkItemSessions {
         mode,
       });
     },
-    openChat: (input) => coordinator.openNewChat({ cwd: input.cwd, role: input.role }),
+    openChat: (input) =>
+      coordinator.openNewChat({
+        cwd: input.cwd,
+        role: input.role,
+        workstreamKey: input.workstreamKey,
+      }),
+    park: (sessionId) => coordinator.parkSquadSession(sessionId),
+    wake: async (sessionId) => {
+      const session = coordinator.snapshot().sessions.find((entry) => entry.id === sessionId);
+      if (session?.status !== 'parked' || session.cwd === undefined) return;
+      const reopened = await coordinator.openNewChat({
+        cwd: session.cwd,
+        role: session.role,
+        workstreamKey: squadWorkstreamKey(session.role, session.cwd),
+      });
+      if (reopened !== sessionId) throw new Error('Phiên đã đậu chưa mở lại được.');
+    },
   };
 }
 
@@ -133,7 +172,12 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
           gitWt: findOnPath('git-wt'),
           run: runCommand,
         }),
+      remove: (repo, worktree) =>
+        removeSquadWorktree({ repo, worktree, gitWt: findOnPath('git-wt'), run: runCommand }),
     },
+    judge: (prompt, signal) => options.judge.run(prompt, signal),
+    overlaps: () => options.ledger.overlapScans(),
+    boardWatching: () => options.ledger.watched(),
   });
   await service.load();
   const unsubscribe = options.herdr?.onAgents(() => service.scheduleReconcile());

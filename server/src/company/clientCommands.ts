@@ -286,6 +286,8 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyWorkItemMark',
   'companyWorkItemCancel',
   'companyWorkItemDependencies',
+  'companyWorkItemJudge',
+  'companyWorkItemCleanWorktree',
   'companySquadSettingsSet',
   'companySquadRequest',
   'companySquadApprove',
@@ -328,6 +330,8 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companyWorkItemMark: true,
   companyWorkItemCancel: true,
   companyWorkItemDependencies: true,
+  companyWorkItemJudge: true,
+  companyWorkItemCleanWorktree: true,
   companySquadSettingsSet: true,
   companySquadRequest: true,
   companySquadApprove: true,
@@ -553,6 +557,8 @@ async function run(
       case 'companyWorkItemMark':
       case 'companyWorkItemCancel':
       case 'companyWorkItemDependencies':
+      case 'companyWorkItemJudge':
+      case 'companyWorkItemCleanWorktree':
       case 'companySquadSettingsSet':
       case 'companyAgentRoleSet':
         await workItemCommand(msg, requestId, services, send);
@@ -1263,6 +1269,16 @@ async function workItemCommand(
       return;
     }
     await work.mark({ requestId, id, verdict });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemJudge') {
+    await work.judgeAgain({ requestId, id });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemCleanWorktree') {
+    await work.cleanWorktree({ requestId, id });
     ok(send, requestId);
     return;
   }

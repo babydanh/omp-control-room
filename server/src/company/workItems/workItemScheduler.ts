@@ -111,6 +111,14 @@ export function checkoutKey(path: string): string {
   return path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
 }
 
+/**
+ * The workstream a squad session opens under: one per role and checkout. The pool resumes a parked
+ * session that has the same key, so a squad gets its parked session back for that checkout.
+ */
+export function squadWorkstreamKey(role: CompanyRole, cwd: string): string {
+  return `squad:${role}:${checkoutKey(cwd)}`;
+}
+
 /** Whether a checkout is the repo itself or a folder inside it. Undefined is never inside. */
 export function isInsideRepo(checkout: string | undefined, repo: string): boolean {
   if (checkout === undefined) return false;

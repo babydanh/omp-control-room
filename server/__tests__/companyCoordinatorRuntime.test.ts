@@ -111,6 +111,7 @@ function effects(
       measuredAt: now,
     }),
     onPromptSubmitted: async () => undefined,
+    parkSquadSession: async () => false,
     openChatSession: async () => {
       throw new Error('openChatSession is not used by this test');
     },

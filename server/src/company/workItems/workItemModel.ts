@@ -16,6 +16,8 @@ import type {
   WorkItemAssigneeKind,
   WorkItemEvent,
   WorkItemEventKind,
+  WorkItemJudge,
+  WorkItemJudgeVerdict,
   WorkItemStatus,
   WorkItemVerdict,
 } from '../../../../core/src/messages.js';
@@ -69,6 +71,23 @@ export const WORK_ITEM_REPO_MAX_CHARS = 4096;
 /** Squad-opened session ids kept per folder; the oldest fall off the front. */
 export const SQUAD_SESSIONS_KEPT = 200;
 
+/** The verdicts a judge may return. */
+export const JUDGE_VERDICTS: readonly WorkItemJudgeVerdict[] = ['pass', 'fail', 'need_evidence'];
+/** The states a judge record may be in, as the board shows them. */
+export const JUDGE_STATUSES: readonly WorkItemJudge['status'][] = [
+  'running',
+  'waiting',
+  'verdict',
+  'interrupted',
+  'error',
+];
+/** Judge-driven follow-ups one item may get; the verdict after the last one needs the user. */
+export const JUDGE_MAX_FOLLOW_UPS = 2;
+/** Longest judge reason kept on an item, in characters. */
+export const JUDGE_REASON_MAX_CHARS = 2000;
+/** Longest judge error kept on an item, in characters. */
+export const JUDGE_ERROR_MAX_CHARS = 300;
+
 /** Vietnamese reasons the board shows. The server owns the wording. */
 export const WORK_ITEM_REASON = {
   queued: 'Chờ agent rảnh để nhận việc.',
@@ -91,6 +110,8 @@ export const WORK_ITEM_REASON = {
 export type StoredWorkItem = Omit<WorkItem, 'blocker'> & {
   pendingPrompt: string;
   waitSequences: Record<string, number>;
+  /** Whether the judge's evidence request was already sent. Never leaves the server. */
+  judgeEvidenceAsked?: boolean;
 };
 
 /** One work item to create, as the service API takes it. */
@@ -277,6 +298,15 @@ export function observeSessionStatus(status: string): AgentObservation {
   return 'unknown';
 }
 
+/**
+ * Session status for one assignee. A parked squad session counts as free: a prompt reopens it, so
+ * the team reuses it. Any other parked session is not decided, as before.
+ */
+export function observeAssigneeSession(status: string, squadSession: boolean): AgentObservation {
+  if (status === 'parked' && squadSession) return 'free';
+  return observeSessionStatus(status);
+}
+
 /** Refusal for a prompt's text, or null when the text may be sent. */
 export function refuseText(text: string): 'empty_text' | 'prompt_too_large' | null {
   if (text.trim() === '') return 'empty_text';
@@ -321,6 +351,7 @@ export function toWorkItem(stored: StoredWorkItem): WorkItem {
   };
   delete wire.pendingPrompt;
   delete wire.waitSequences;
+  delete wire.judgeEvidenceAsked;
   return wire as WorkItem;
 }
 
@@ -379,6 +410,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
   const agent =
     typeof value.agent === 'string' && isValidAgentName(value.agent) ? value.agent : undefined;
   const worktree = parseWorktree(value.worktree);
+  const judge = parseJudge(value.judge);
   return {
     id: value.id,
     text: value.text,
@@ -405,6 +437,32 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     areas,
     ...(agent === undefined ? {} : { agent }),
     ...(worktree === undefined ? {} : { worktree }),
+    ...(judge === undefined ? {} : { judge }),
+    judgeEvidenceAsked: value.judgeEvidenceAsked === true,
+    ...(value.worktreeRemoved === true ? { worktreeRemoved: true } : {}),
+  };
+}
+
+/**
+ * Validates a stored judge state. A turn still running when the file was written reads as
+ * interrupted: its result is lost, and the user may judge the item again.
+ */
+function parseJudge(value: unknown): WorkItemJudge | undefined {
+  if (!isRecord(value)) return undefined;
+  const status = JUDGE_STATUSES.find((entry) => entry === value.status);
+  if (status === undefined) return undefined;
+  const verdict = JUDGE_VERDICTS.find((entry) => entry === value.verdict);
+  const followUps = nonNegativeInt(value.followUps);
+  const reason =
+    typeof value.reason === 'string' ? clip(value.reason, JUDGE_REASON_MAX_CHARS) : undefined;
+  const error =
+    typeof value.error === 'string' ? clip(value.error, JUDGE_ERROR_MAX_CHARS) : undefined;
+  return {
+    status: status === 'running' ? 'interrupted' : status,
+    followUps: followUps === null ? 0 : Math.min(followUps, JUDGE_MAX_FOLLOW_UPS),
+    ...(verdict === undefined ? {} : { verdict }),
+    ...(reason === undefined ? {} : { reason }),
+    ...(error === undefined ? {} : { error }),
   };
 }
 
