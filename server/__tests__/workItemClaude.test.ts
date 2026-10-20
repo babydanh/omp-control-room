@@ -11,6 +11,7 @@ import {
   type WorkItemsFile,
 } from '../src/company/workItems/workItemModel.js';
 import { WorkItemService } from '../src/company/workItems/workItemService.js';
+import { FakeAgyRuns } from './fakeAgy.js';
 import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
@@ -21,6 +22,7 @@ const BURST_MS = 1000;
 /** In-memory ports for the service. Claude Code runs are driven by the test through `FakeClaudeRuns`. */
 class Fixture {
   readonly claude = new FakeClaudeRuns();
+  readonly agy = new FakeAgyRuns();
   readonly claudeAuth = new FakeClaudeAuth();
   readonly claudeMcp = new FakeClaudeMcp();
   readonly saves: WorkItemsFile[] = [];
@@ -78,6 +80,7 @@ class Fixture {
       overlaps: async () => [],
       boardWatching: () => false,
       claude: this.claude,
+      agy: this.agy,
       claudeAuth: this.claudeAuth,
       claudeMcp: this.claudeMcp,
     });
@@ -340,12 +343,12 @@ describe('Claude Code runs: follow-ups, restarts and limits', () => {
     expect(f.claude.starts).toHaveLength(2);
   });
 
-  it('takes a claude run for an auto item when claude is preferred', async () => {
+  it('takes a Claude Code run for an auto item when Claude is selected', async () => {
     const f = new Fixture();
     await f.service.load();
     await f.service.setSettings({
       requestId: randomUUID(),
-      settings: { ...SQUAD_SETTINGS_DEFAULT, preferClaude: true },
+      settings: { ...SQUAD_SETTINGS_DEFAULT, engineWorker: 'claude' },
     });
     const id = await f.service.create({
       requestId: randomUUID(),
@@ -354,5 +357,56 @@ describe('Claude Code runs: follow-ups, restarts and limits', () => {
       repo: REPO,
     });
     expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'claude' } });
+  });
+  it('runs an auto item through agy and publishes progress and result', async () => {
+    const f = new Fixture();
+    await f.service.load();
+    await f.service.setSettings({
+      requestId: randomUUID(),
+      settings: { ...SQUAD_SETTINGS_DEFAULT, engineWorker: 'agy', maxAgyRuns: 1 },
+    });
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Tự chọn',
+      assignee: { kind: 'auto' },
+      repo: REPO,
+    });
+
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'running',
+      assignee: { kind: 'agy' },
+      agyRun: { mode: 'edit', pid: 5001 },
+    });
+    expect(f.agy.starts[0]?.input).toEqual({
+      cwd: worktreeOf(id),
+      prompt: expect.stringContaining('Tự chọn'),
+    });
+
+    f.agy.progress('agy-run-1', 'agent_response: Đang làm');
+    await f.elapse(BURST_MS);
+    expect(itemOf(f, id)).toMatchObject({ agyRun: { progress: 'agent_response: Đang làm' } });
+
+    f.agy.finish('agy-run-1', 'Đã xong');
+    await f.elapse(BURST_MS);
+    expect(itemOf(f, id)).toMatchObject({ status: 'review', result: 'Đã xong' });
+  });
+  it('stops the agy worker when the board is disposed', async () => {
+    const f = new Fixture();
+    await f.service.load();
+    await f.service.setSettings({
+      requestId: randomUUID(),
+      settings: { ...SQUAD_SETTINGS_DEFAULT, engineWorker: 'agy' },
+    });
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Dừng khi đóng board',
+      assignee: { kind: 'auto' },
+      repo: REPO,
+    });
+
+    expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'agy' } });
+    f.service.dispose();
+
+    expect(f.agy.killed).toEqual(['agy-run-1']);
   });
 });

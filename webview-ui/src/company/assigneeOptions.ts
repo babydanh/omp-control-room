@@ -15,14 +15,14 @@ import type { CompanyViewState } from './companyState.js';
 import { samePath } from './folderView.js';
 
 export interface AssigneeOption {
-  /** Stable for one assignee: `herdr:<paneId>`, `session:<sessionId>`, `new-session`, `auto`, `claude`. */
+  /** Stable for one assignee: herdr/session ids, new-session, auto, claude, or agy. */
   key: string;
   assignee: WorkItemAssignee;
   /** The name the picker shows. */
   label: string;
   /** A second line the picker may show: a repo and branch, a folder, or a session code. */
   detail?: string;
-  group: 'auto' | 'herdr' | 'session' | 'new' | 'claude';
+  group: 'auto' | 'herdr' | 'session' | 'new' | 'claude' | 'agy';
 }
 
 /** The label of the option that opens a new omp session. */
@@ -40,6 +40,17 @@ export const CLAUDE_OPTION: AssigneeOption = {
   assignee: CLAUDE_ASSIGNEE,
   label: 'Claude Code (claude -p)',
   group: 'claude',
+};
+
+/** The assignee that runs the item with Antigravity CLI. */
+export const AGY_ASSIGNEE: WorkItemAssignee = { kind: 'agy' };
+
+/** The picker row for Antigravity CLI. */
+export const AGY_OPTION: AssigneeOption = {
+  key: assigneeKeyOf(AGY_ASSIGNEE),
+  assignee: AGY_ASSIGNEE,
+  label: 'agy (Antigravity)',
+  group: 'agy',
 };
 
 /** Session states that cannot take work: the session is archived, stopped or has crashed. */
@@ -67,6 +78,8 @@ export function assigneeKeyOf(assignee: WorkItemAssignee): string {
       return 'auto';
     case 'claude':
       return 'claude';
+    case 'agy':
+      return 'agy';
   }
 }
 

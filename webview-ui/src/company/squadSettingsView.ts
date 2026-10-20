@@ -12,11 +12,16 @@ export const SQUAD_COUNT_LIMITS = {
   maxSquadSessions: { min: 0, max: 6 },
 } as const;
 
+/** The bounds of external CLI run counts. The server enforces the same bounds. */
+export const CLI_SETTING_LIMITS = {
+  maxClaudeRuns: { min: 1, max: 4 },
+  maxAgyRuns: { min: 1, max: 4 },
+} as const;
+
 /** The bounds of the Claude Code settings. The server enforces the same bounds. */
 export const CLAUDE_SETTING_LIMITS = {
   /** A model name's length, in characters. */
   modelChars: { min: 1, max: 64 },
-  maxClaudeRuns: { min: 1, max: 4 },
   claudeMaxTurns: { min: 1, max: 200 },
   /** The budget of one run, in US dollars. It need not be a whole number. */
   claudeMaxBudgetUsd: { min: 0.1, max: 50 },
@@ -30,17 +35,21 @@ export const CLAUDE_SETTING_LIMITS = {
 const CLAUDE_TOOL_PATTERN = /^[A-Za-z][A-Za-z0-9_]*(\([^()\n]*\))?$/;
 
 /** The settings as the form holds them. The numbers stay text, so a half-typed value survives. */
+export type SquadEngine = 'omp' | 'claude' | 'agy';
+
 export interface SquadSettingsDraft {
   maxParallel: string;
   maxSquadSessions: string;
   minFreeRamGb: string;
   autoJudge: boolean;
   autoApproveNext: boolean;
-  brain: SquadSettings['brain'];
+  engineLeader: SquadEngine;
+  engineJudge: SquadEngine;
+  engineWorker: SquadEngine;
   claudeModelLeader: string;
   claudeModelJudge: string;
-  preferClaude: boolean;
   maxClaudeRuns: string;
+  maxAgyRuns: string;
   claudeMaxTurns: string;
   claudeMaxBudgetUsd: string;
   claudePermission: SquadSettings['claudePermission'];
@@ -55,9 +64,9 @@ export type SquadSettingsReading =
   | { ok: true; settings: SquadSettings }
   | { ok: false; reason: string };
 
-/** The brain a form choice names. Anything but `claude` is omp, the default brain. */
-export function brainOf(choice: string): SquadSettings['brain'] {
-  return choice === 'claude' ? 'claude' : 'omp';
+/** The engine a form choice names, defaulting safely to omp. */
+export function squadEngineOf(choice: string): SquadEngine {
+  return choice === 'claude' || choice === 'agy' ? choice : 'omp';
 }
 
 /** The permission mode a form choice names. Anything but acceptEdits is auto, the default. */
@@ -72,11 +81,13 @@ export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraf
     minFreeRamGb: String(settings.minFreeRamGb),
     autoJudge: settings.autoJudge,
     autoApproveNext: settings.autoApproveNext,
-    brain: settings.brain,
+    engineLeader: settings.engineLeader,
+    engineJudge: settings.engineJudge,
+    engineWorker: settings.engineWorker,
     claudeModelLeader: settings.claudeModelLeader,
     claudeModelJudge: settings.claudeModelJudge,
-    preferClaude: settings.preferClaude,
     maxClaudeRuns: String(settings.maxClaudeRuns),
+    maxAgyRuns: String(settings.maxAgyRuns),
     claudeMaxTurns: String(settings.claudeMaxTurns),
     claudeMaxBudgetUsd: String(settings.claudeMaxBudgetUsd),
     claudePermission: settings.claudePermission,
@@ -155,12 +166,20 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
       reason: `Model của trọng tài có từ ${models.min} đến ${models.max} ký tự.`,
     };
   }
-  const runs = CLAUDE_SETTING_LIMITS.maxClaudeRuns;
-  const maxClaudeRuns = wholeIn(draft.maxClaudeRuns, runs.min, runs.max);
+  const claudeRuns = CLI_SETTING_LIMITS.maxClaudeRuns;
+  const maxClaudeRuns = wholeIn(draft.maxClaudeRuns, claudeRuns.min, claudeRuns.max);
   if (maxClaudeRuns === null) {
     return {
       ok: false,
-      reason: `Số lần Claude Code chạy cùng lúc là số nguyên từ ${runs.min} đến ${runs.max}.`,
+      reason: `Số lần Claude Code chạy cùng lúc là số nguyên từ ${claudeRuns.min} đến ${claudeRuns.max}.`,
+    };
+  }
+  const agyRuns = CLI_SETTING_LIMITS.maxAgyRuns;
+  const maxAgyRuns = wholeIn(draft.maxAgyRuns, agyRuns.min, agyRuns.max);
+  if (maxAgyRuns === null) {
+    return {
+      ok: false,
+      reason: `Số lượt agy chạy cùng lúc là số nguyên từ ${agyRuns.min} đến ${agyRuns.max}.`,
     };
   }
   const turns = CLAUDE_SETTING_LIMITS.claudeMaxTurns;
@@ -215,11 +234,13 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
       minFreeRamGb,
       autoJudge: draft.autoJudge,
       autoApproveNext: draft.autoApproveNext,
-      brain: draft.brain,
+      engineLeader: draft.engineLeader,
+      engineJudge: draft.engineJudge,
+      engineWorker: draft.engineWorker,
       claudeModelLeader,
       claudeModelJudge,
-      preferClaude: draft.preferClaude,
       maxClaudeRuns,
+      maxAgyRuns,
       claudeMaxTurns,
       claudeMaxBudgetUsd,
       claudePermission: draft.claudePermission,

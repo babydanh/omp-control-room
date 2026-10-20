@@ -13,7 +13,6 @@ import { priorityLabel } from '../../../../core/src/workItemGraph.js';
 import type { WorkItemMenuAction } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import { assigneeOptionsFor } from '../assigneeOptions.js';
-import { claudeInterruptedNote, claudeProgressLine } from '../claudeCodeView.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
@@ -39,6 +38,8 @@ import {
   waitingOnLabel,
   workItemEventLabelVi,
   workItemFolderIdentity,
+  workItemInterruptedNote,
+  workItemProgressLine,
   workItemsOf,
 } from '../workItemView.js';
 import { AssignWorkDialog } from './AssignWorkDialog.js';
@@ -229,8 +230,8 @@ export function WorkItemPanel({
     canRejudge ||
     canCleanWorktree;
 
-  const progress = claudeProgressLine(item);
-  const interrupted = claudeInterruptedNote(item.claudeRun);
+  const progress = workItemProgressLine(item);
+  const interrupted = workItemInterruptedNote(item);
 
   return (
     <div
@@ -261,7 +262,7 @@ export function WorkItemPanel({
           <>
             <dt className="text-text-muted">Tiến độ</dt>
             <dd
-              data-testid="work-item-claude-progress"
+              data-testid="work-item-progress"
               className="whitespace-pre-wrap break-words text-text"
             >
               {progress}
@@ -284,7 +285,7 @@ export function WorkItemPanel({
         <dd className="text-text">{updated ?? '—'}</dd>
       </dl>
       {interrupted !== null && (
-        <p data-testid="work-item-claude-interrupted" className="px-2.5 text-2xs text-warning">
+        <p data-testid="work-item-interrupted" className="px-2.5 text-2xs text-warning">
           {interrupted}
         </p>
       )}

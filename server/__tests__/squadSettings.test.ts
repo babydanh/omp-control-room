@@ -12,11 +12,13 @@ const VALID = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
-  brain: 'omp',
+  engineLeader: 'omp',
+  engineJudge: 'omp',
+  engineWorker: 'omp',
   claudeModelLeader: 'opus',
   claudeModelJudge: 'sonnet',
-  preferClaude: false,
   maxClaudeRuns: 2,
+  maxAgyRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
   claudePermission: 'auto',
@@ -38,7 +40,7 @@ describe('parseSquadSettings', () => {
         minFreeRamGb: 1.5,
         autoJudge: 'yes',
         autoApproveNext: true,
-        brain: 'claude',
+        engineLeader: 'claude',
         claudeModelLeader: 'haiku',
         maxClaudeRuns: 9,
         claudeMaxBudgetUsd: 0.05,
@@ -49,17 +51,35 @@ describe('parseSquadSettings', () => {
       minFreeRamGb: 1.5,
       autoJudge: SQUAD_SETTINGS_DEFAULT.autoJudge,
       autoApproveNext: true,
-      brain: 'claude',
+      engineLeader: 'claude',
+      engineJudge: SQUAD_SETTINGS_DEFAULT.engineJudge,
+      engineWorker: SQUAD_SETTINGS_DEFAULT.engineWorker,
       claudeModelLeader: 'haiku',
       claudeModelJudge: SQUAD_SETTINGS_DEFAULT.claudeModelJudge,
-      preferClaude: SQUAD_SETTINGS_DEFAULT.preferClaude,
       maxClaudeRuns: SQUAD_SETTINGS_DEFAULT.maxClaudeRuns,
+      maxAgyRuns: SQUAD_SETTINGS_DEFAULT.maxAgyRuns,
       claudeMaxTurns: SQUAD_SETTINGS_DEFAULT.claudeMaxTurns,
       claudeMaxBudgetUsd: SQUAD_SETTINGS_DEFAULT.claudeMaxBudgetUsd,
       claudePermission: SQUAD_SETTINGS_DEFAULT.claudePermission,
       claudeAllowedTools: SQUAD_SETTINGS_DEFAULT.claudeAllowedTools,
       claudeWorkerMcp: SQUAD_SETTINGS_DEFAULT.claudeWorkerMcp,
     });
+  });
+  it('migrates legacy engines while preferring valid current fields', () => {
+    expect(parseSquadSettings({ brain: 'claude', preferClaude: true })).toMatchObject({
+      engineLeader: 'claude',
+      engineJudge: 'claude',
+      engineWorker: 'claude',
+    });
+    expect(
+      parseSquadSettings({
+        brain: 'claude',
+        preferClaude: true,
+        engineLeader: 'agy',
+        engineJudge: 'omp',
+        engineWorker: 'agy',
+      }),
+    ).toMatchObject({ engineLeader: 'agy', engineJudge: 'omp', engineWorker: 'agy' });
   });
 
   it('keeps each valid tool pattern in order and drops the invalid ones', () => {
@@ -124,7 +144,7 @@ describe('isSquadSettings', () => {
 
   it('accepts the bounds themselves', () => {
     expect(isSquadSettings({ ...VALID, maxParallel: 8, maxSquadSessions: 0 })).toBe(true);
-    expect(isSquadSettings({ ...VALID, maxParallel: 1, minFreeRamGb: 0 })).toBe(true);
+    expect(isSquadSettings({ ...VALID, maxParallel: 1, minFreeRamGb: 0, maxAgyRuns: 4 })).toBe(true);
   });
 
   it('refuses a value outside a bound, a fraction for a count, or a missing flag', () => {
@@ -134,6 +154,8 @@ describe('isSquadSettings', () => {
     expect(isSquadSettings({ ...VALID, minFreeRamGb: -1 })).toBe(false);
     expect(isSquadSettings({ ...VALID, autoJudge: undefined })).toBe(false);
     expect(isSquadSettings(null)).toBe(false);
+    expect(isSquadSettings({ ...VALID, maxAgyRuns: 0 })).toBe(false);
+    expect(isSquadSettings({ ...VALID, maxAgyRuns: 5 })).toBe(false);
   });
 
   it('refuses an unknown permission mode or a tool pattern that is not one', () => {

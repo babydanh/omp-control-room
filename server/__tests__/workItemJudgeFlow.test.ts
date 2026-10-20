@@ -12,6 +12,7 @@ import {
 import { GIB, SQUAD_SETTINGS_DEFAULT } from '../src/company/workItems/squadSettings.js';
 import { parseWorkItemsFile } from '../src/company/workItems/workItemModel.js';
 import { WorkItemService } from '../src/company/workItems/workItemService.js';
+import { FakeAgyRuns } from './fakeAgy.js';
 import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
@@ -99,6 +100,7 @@ class JudgeFixture {
       overlaps: async () => this.scans,
       boardWatching: () => this.watching,
       claude: new FakeClaudeRuns(),
+      agy: new FakeAgyRuns(),
       claudeAuth: new FakeClaudeAuth(),
       claudeMcp: new FakeClaudeMcp(),
     });

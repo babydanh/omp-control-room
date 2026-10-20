@@ -1,5 +1,5 @@
 ﻿<#
-  Chạy OMP Board như một tiến trình riêng của Windows, không thuộc terminal/herdr/omp nào.
+  Chạy Agent Board như một tiến trình riêng của Windows, không thuộc terminal/herdr/omp nào.
   Lý do: chạy bằng service của omp thì khi herdr hoặc các session omp bị đóng (SIGHUP), board chết theo.
   Ở đây board được tạo qua WMI (Win32_Process.Create) nên không nằm trong cây tiến trình hay job của ai.
 

@@ -44,9 +44,10 @@ import {
   WORK_ITEM_PRIORITY_DEFAULT,
 } from '../../../../core/src/workItemGraph.js';
 import { isArchivedWorkItem } from '../../library/storageHelpers.js';
+import type { AgyRuns, AgyRunView } from '../agyCode/agyRuns.js';
 import type { ClaudeAuthProbe } from '../claudeCode/claudeAuth.js';
 import type { ClaudeMcpSource } from '../claudeCode/claudeMcpSource.js';
-import type { ClaudeRuns,ClaudeRunView } from '../claudeCode/claudeRuns.js';
+import type { ClaudeRuns, ClaudeRunView } from '../claudeCode/claudeRuns.js';
 import { CompanyError } from '../companyError.js';
 import { BUNDLED_AGENTS, findAgent } from './agentCatalog.js';
 import {
@@ -230,6 +231,8 @@ export interface WorkItemPorts {
   boardWatching(): boolean;
   /** Claude Code runs: one `claude -p` process per run, started in the item's checkout. */
   readonly claude: ClaudeRuns;
+  /** Antigravity runs: one `agy -p` process per run, started in the item's checkout. */
+  readonly agy: AgyRuns;
   /** Claude Code's auth status, read from `claude auth status` and cached. */
   readonly claudeAuth: ClaudeAuthProbe;
   /** The user's Claude MCP servers: the names the squad lists, and a worker run's config. */
@@ -382,9 +385,11 @@ export class WorkItemService {
   /** When each squad session was first seen idle by this process, by session id. */
   private readonly idleSince = new Map<string, number>();
   private maintenanceScheduled = false;
-  /** Unsubscribes from Claude Code run changes. Set by load, cleared by dispose. */
+  /** Unsubscribes from CLI run changes. Set by load, cleared by dispose. */
   private unsubscribeClaude: (() => void) | null = null;
-  /** Whether a progress pass is already scheduled for Claude Code run output. */
+  private unsubscribeAgy: (() => void) | null = null;
+  private readonly agyRunIds = new Map<string, string>();
+  /** Whether a progress pass is already scheduled for CLI output. */
   private claudeNotifyPending = false;
 
   constructor(workspacePath: string, ports: WorkItemPorts) {
@@ -403,8 +408,9 @@ export class WorkItemService {
     this.squadSessionRepos = new Map(Object.entries(parsed.file.squadSessionRepos));
     for (const item of parsed.file.items) this.items.set(item.id, item);
     this.unsubscribeClaude = this.ports.claude.onChange(() => this.onClaudeRunChange());
-    // A Claude Code run from before this start has no process the board can follow: its item fails as interrupted.
+    this.unsubscribeAgy = this.ports.agy.onChange(() => this.onClaudeRunChange());
     this.recoverClaudeRuns();
+    this.recoverAgyRuns();
     await this.refreshCatalog();
     // A running item from before this start gets its grace check again.
     if ([...this.items.values()].some((item) => item.status === 'running'))
@@ -534,6 +540,10 @@ export class WorkItemService {
     const before = structuredClone(item);
     item.assignee = normalizeAssignee(command.assignee);
     if (item.assignee.kind !== 'claude') delete item.claudeRun;
+    if (item.assignee.kind !== 'agy') {
+      this.stopAgyRun(item);
+      delete item.agyRun;
+    }
     applyFields(item, fields);
     this.requeue(
       item,
@@ -592,6 +602,7 @@ export class WorkItemService {
     const at = this.iso();
     this.observedBusy.delete(item.id);
     this.stopClaudeRun(item);
+    this.stopAgyRun(item);
     item.status = command.verdict;
     this.abortJudge(item);
     item.updatedAt = at;
@@ -748,7 +759,7 @@ export class WorkItemService {
     await this.reconcileAfterSave();
   }
 
-  /** The folder's squad settings as they stand now. The engine runners read `brain` and the models from it. */
+  /** The folder's squad settings as they stand now. The role-specific engine selects each CLI. */
   currentSettings(): SquadSettings {
     return { ...this.settings };
   }
@@ -795,10 +806,14 @@ export class WorkItemService {
     this.disposed = true;
     this.unsubscribeClaude?.();
     this.unsubscribeClaude = null;
-    // A run still in flight stops with the board; the next start finds its item failed as interrupted.
+    this.unsubscribeAgy?.();
+    this.unsubscribeAgy = null;
+    // Runs still in flight stop with the board; next start finds their items interrupted.
     for (const item of this.items.values()) {
       if (item.assignee.kind === 'claude' && item.claudeRunId !== undefined)
         this.ports.claude.kill(item.claudeRunId);
+      const agyRunId = this.agyRunIds.get(item.id);
+      if (item.assignee.kind === 'agy' && agyRunId !== undefined) this.ports.agy.kill(agyRunId);
     }
     for (const run of this.judgeRuns.values()) run.controller.abort();
     this.judgeRuns.clear();
@@ -1000,7 +1015,12 @@ export class WorkItemService {
    * reachable: a new session opens when it starts, and an auto item picks its agent then.
    */
   private assertReachable(assignee: WorkItemAssignee): void {
-    if (assignee.kind === 'new-session' || assignee.kind === 'auto' || assignee.kind === 'claude')
+    if (
+      assignee.kind === 'new-session' ||
+      assignee.kind === 'auto' ||
+      assignee.kind === 'claude' ||
+      assignee.kind === 'agy'
+    )
       return;
     if (assignee.kind === 'herdr') {
       const roster = this.ports.roster.panes();
@@ -1201,6 +1221,7 @@ export class WorkItemService {
       if (active !== undefined) await this.advance(active, observation);
     }
     this.reconcileClaudeRuns();
+    this.reconcileAgyRuns();
     await this.startQueued(view);
   }
 
@@ -1225,14 +1246,15 @@ export class WorkItemService {
    */
   private async start(item: StoredWorkItem, decision: StartDecision): Promise<void> {
     const auto = item.assignee.kind === 'auto';
-    if (decision.kind === 'claude') {
-      // An editing run gets its own checkout; a read-only run works in the repo itself.
+    if (decision.kind === 'claude' || decision.kind === 'agy') {
+      // Editing runs get their own checkout; read-only runs work in the repo itself.
       const cwd = decision.readOnly ? decision.cwd : await this.isolatedCheckout(item, decision.cwd);
       if (cwd === undefined) return;
       if (auto) {
-        item.assignee = { kind: 'claude' };
+        item.assignee = { kind: decision.kind };
         item.pendingPrompt = this.promptFor(item.text, item.acceptance, item.agent, item.assignee);
-        this.pushEvent(item, makeEvent(this.iso(), 'assigned', 'Tự chọn: Claude Code (claude -p).'));
+        const cli = decision.kind === 'agy' ? 'Antigravity (agy -p)' : 'Claude Code (claude -p)';
+        this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {
       const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
@@ -1289,12 +1311,13 @@ export class WorkItemService {
   private liveAgentKeys(): string[] {
     const keys = new Map<string, number>();
     for (const item of this.sortedItems()) {
-      // A new-session, auto or Claude Code item has no agent pane to judge: a Claude Code run is reconciled by its run.
+      // CLI items have no live pane/session to observe; their run state is reconciled directly.
       if (
         !isLive(item) ||
         item.assignee.kind === 'new-session' ||
         item.assignee.kind === 'auto' ||
-        item.assignee.kind === 'claude'
+        item.assignee.kind === 'claude' ||
+        item.assignee.kind === 'agy'
       )
         continue;
       const key = assigneeKey(item.assignee);
@@ -1403,7 +1426,9 @@ export class WorkItemService {
       minFreeBytes: this.settings.minFreeRamGb * GIB,
       claudeRunsOpen: this.claudeRunsOpen(),
       maxClaudeRuns: this.settings.maxClaudeRuns,
-      preferClaude: this.settings.brain === 'claude' || this.settings.preferClaude,
+      agyRunsOpen: this.agyRunsOpen(),
+      maxAgyRuns: this.settings.maxAgyRuns,
+      engineWorker: this.settings.engineWorker,
     };
   }
 
@@ -1486,8 +1511,8 @@ export class WorkItemService {
 
   /** What the queue knows about the herdr pane or session an item names. */
   private observeAssignee(assignee: WorkItemAssignee, view: FolderView): AgentObservation {
-    // A Claude Code run is reconciled from its run state, never observed as an agent.
-    if (assignee.kind === 'claude') return 'unknown';
+    // CLI runs are reconciled from their run state, never observed as agents.
+    if (assignee.kind === 'claude' || assignee.kind === 'agy') return 'unknown';
     if (assignee.kind === 'new-session' || assignee.kind === 'auto') return 'free';
     if (assignee.kind === 'herdr') {
       if (!view.roster.available) return 'unknown';
@@ -1655,6 +1680,10 @@ export class WorkItemService {
       this.startClaudeRun(item, text);
       return;
     }
+    if (assignee.kind === 'agy') {
+      this.startAgyRun(item, text);
+      return;
+    }
     if (assignee.kind === 'herdr') {
       await this.ports.roster.prompt(assignee.paneId ?? '', text);
       return;
@@ -1681,6 +1710,14 @@ export class WorkItemService {
     let open = 0;
     for (const item of this.items.values()) {
       if (item.assignee.kind === 'claude' && occupiesAgent(item.status)) open += 1;
+    }
+    return open;
+  }
+
+  private agyRunsOpen(): number {
+    let open = 0;
+    for (const item of this.items.values()) {
+      if (item.assignee.kind === 'agy' && occupiesAgent(item.status)) open += 1;
     }
     return open;
   }
@@ -1714,6 +1751,20 @@ export class WorkItemService {
       mode,
       startedAt: this.iso(),
       ...(sessionId === undefined ? {} : { sessionId }),
+    };
+  }
+
+  /** Starts the Antigravity run that carries a dispatched item. */
+  private startAgyRun(item: StoredWorkItem, prompt: string): void {
+    const mode = this.isReadOnly(item.agent) ? 'read' : 'edit';
+    const cwd = mode === 'read' ? (item.repo ?? this.workspacePath) : item.worktree?.path;
+    if (cwd === undefined) throw new Error('Việc này chưa có worktree để Antigravity làm.');
+    const started = this.ports.agy.start({ cwd, prompt });
+    this.agyRunIds.set(item.id, started.runId);
+    item.agyRun = {
+      mode,
+      startedAt: this.iso(),
+      ...(started.pid === undefined ? {} : { pid: started.pid }),
     };
   }
 
@@ -1810,6 +1861,74 @@ export class WorkItemService {
       item.claudeRun.interrupted = true;
     }
     this.fail(item, WORK_ITEM_REASON.claudeInterrupted);
+  }
+
+  private stopAgyRun(item: StoredWorkItem): void {
+    const runId = this.agyRunIds.get(item.id);
+    if (runId !== undefined) {
+      this.ports.agy.kill(runId);
+      this.ports.agy.forget(runId);
+      this.agyRunIds.delete(item.id);
+    }
+    if (item.agyRun !== undefined) {
+      delete item.agyRun.progress;
+      delete item.agyRun.pid;
+    }
+  }
+
+  private recoverAgyRuns(): void {
+    for (const item of this.items.values()) {
+      if (item.assignee.kind !== 'agy' || item.status !== 'running') continue;
+      this.interruptAgy(item);
+    }
+  }
+
+  private reconcileAgyRuns(): void {
+    for (const item of this.items.values()) {
+      if (item.assignee.kind !== 'agy' || item.status !== 'running') continue;
+      const runId = this.agyRunIds.get(item.id);
+      const view = runId === undefined ? undefined : this.ports.agy.view(runId);
+      if (view === undefined) this.interruptAgy(item);
+      else if (view.state === 'running') this.observeAgyRun(item, view);
+      else this.settleAgyRun(item, view);
+    }
+  }
+
+  private observeAgyRun(item: StoredWorkItem, view: AgyRunView): void {
+    const run = item.agyRun;
+    if (run === undefined || view.progress === undefined || view.progress === run.progress) return;
+    run.progress = view.progress;
+    this.ports.publish(this.snapshot());
+  }
+
+  private settleAgyRun(item: StoredWorkItem, view: AgyRunView): void {
+    const runId = this.agyRunIds.get(item.id);
+    if (runId !== undefined) this.ports.agy.forget(runId);
+    this.agyRunIds.delete(item.id);
+    if (item.agyRun !== undefined) {
+      delete item.agyRun.progress;
+      delete item.agyRun.pid;
+    }
+    if (view.state === 'finished') {
+      this.moveToReview(item, view.result === undefined ? undefined : clip(view.result, WORK_ITEM_RESULT_MAX_CHARS), 'Antigravity đã chạy xong.');
+    } else if (view.state === 'timeout') {
+      this.fail(item, 'Antigravity chạy quá lâu nên đã dừng.');
+    } else if (view.state === 'killed') {
+      this.fail(item, WORK_ITEM_REASON.markedFailed);
+    } else {
+      const detail = view.error ?? 'không rõ lý do';
+      this.fail(item, `Antigravity dừng lỗi: ${detail}`, detail);
+    }
+  }
+
+  private interruptAgy(item: StoredWorkItem): void {
+    this.agyRunIds.delete(item.id);
+    if (item.agyRun !== undefined) {
+      delete item.agyRun.progress;
+      delete item.agyRun.pid;
+      item.agyRun.interrupted = true;
+    }
+    this.fail(item, 'Board khởi động lại khi Antigravity đang chạy. Gửi tiếp để chạy lại.');
   }
 
   /** Re-checks the pass once the grace window after a dispatch has passed. */

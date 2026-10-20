@@ -12,6 +12,7 @@ import type {
   HerdrAgent,
   SquadSettings,
   WorkItem,
+  WorkItemAgyRun,
   WorkItemAssignee,
   WorkItemAssigneeKind,
   WorkItemClaudeRun,
@@ -196,6 +197,7 @@ const ASSIGNEE_KINDS: Record<WorkItemAssigneeKind, true> = {
   'new-session': true,
   auto: true,
   claude: true,
+  agy: true,
 };
 const EVENT_KINDS: Record<WorkItemEventKind, true> = {
   created: true,
@@ -229,7 +231,7 @@ function nonNegativeInt(value: unknown): number | null {
   return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-/** Whether a value is an assignee the server can act on: herdr pane, session, new session, auto, or claude. */
+/** Whether a value is an assignee the server can act on: a member, session, CLI, or automatic choice. */
 export function isWorkItemAssignee(value: unknown): value is WorkItemAssignee {
   if (!isRecord(value)) return false;
   if (typeof value.kind !== 'string' || !Object.hasOwn(ASSIGNEE_KINDS, value.kind)) return false;
@@ -251,6 +253,7 @@ export function normalizeAssignee(assignee: WorkItemAssignee): WorkItemAssignee 
   if (assignee.kind === 'session') return { kind: 'session', sessionId: assignee.sessionId ?? '' };
   if (assignee.kind === 'auto') return { kind: 'auto' };
   if (assignee.kind === 'claude') return { kind: 'claude' };
+  if (assignee.kind === 'agy') return { kind: 'agy' };
   return { kind: 'new-session' };
 }
 
@@ -260,6 +263,7 @@ export function assigneeKey(assignee: WorkItemAssignee): string {
   if (assignee.kind === 'session') return `session:${assignee.sessionId ?? ''}`;
   if (assignee.kind === 'auto') return 'auto';
   if (assignee.kind === 'claude') return 'claude';
+  if (assignee.kind === 'agy') return 'agy';
   return 'new-session';
 }
 
@@ -398,6 +402,20 @@ function parseClaudeRun(value: unknown): WorkItemClaudeRun | undefined {
   };
 }
 
+/** Validates a stored Antigravity run. A malformed one is dropped, and its item keeps its status. */
+function parseAgyRun(value: unknown): WorkItemAgyRun | undefined {
+  if (!isRecord(value)) return undefined;
+  const mode = value.mode === 'edit' || value.mode === 'read' ? value.mode : undefined;
+  if (mode === undefined || !isIsoString(value.startedAt)) return undefined;
+  const pid = nonNegativeInt(value.pid);
+  return {
+    mode,
+    startedAt: value.startedAt,
+    ...(pid === null ? {} : { pid }),
+    ...(value.interrupted === true ? { interrupted: true } : {}),
+  };
+}
+
 /** Validates one stored item. Anything that would break the board's invariants is rejected. */
 export function parseStoredItem(value: unknown): StoredWorkItem | null {
   if (!isRecord(value)) return null;
@@ -442,6 +460,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
   const worktree = parseWorktree(value.worktree);
   const judge = parseJudge(value.judge);
   const claudeRun = parseClaudeRun(value.claudeRun);
+  const agyRun = parseAgyRun(value.agyRun);
   return {
     id: value.id,
     text: value.text,
@@ -472,6 +491,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     judgeEvidenceAsked: value.judgeEvidenceAsked === true,
     ...(value.worktreeRemoved === true ? { worktreeRemoved: true } : {}),
     ...(claudeRun === undefined ? {} : { claudeRun }),
+    ...(agyRun === undefined ? {} : { agyRun }),
     ...(typeof value.claudeRunId === 'string' ? { claudeRunId: value.claudeRunId } : {}),
     ...(typeof value.restoredAt === 'string' ? { restoredAt: value.restoredAt } : {}),
     ...(typeof value.claudeRunPid === 'number' ? { claudeRunPid: value.claudeRunPid } : {}),
@@ -539,7 +559,8 @@ export function parseRole(value: unknown): AgentRole | null {
   if (
     !isWorkItemAssignee(value.agent) ||
     value.agent.kind === 'auto' ||
-    value.agent.kind === 'claude'
+    value.agent.kind === 'claude' ||
+    value.agent.kind === 'agy'
   )
     return null;
   if (typeof value.description !== 'string') return null;

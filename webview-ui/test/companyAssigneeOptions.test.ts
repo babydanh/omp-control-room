@@ -6,6 +6,8 @@ import type {
   HerdrSleepingSession,
 } from '../../core/src/messages.js';
 import {
+  AGY_ASSIGNEE,
+  AGY_OPTION,
   assigneeKeyOf,
   assigneeOptionsFor,
   NEW_SESSION_LABEL,
@@ -191,6 +193,15 @@ describe('assignee keys and session acceptance', () => {
     expect(assigneeKeyOf({ kind: 'new-session' })).toBe('new-session');
   });
 
+  it('keys an agy assignee and exposes its Antigravity picker option', () => {
+    expect(assigneeKeyOf(AGY_ASSIGNEE)).toBe('agy');
+    expect(AGY_OPTION).toEqual({
+      key: 'agy',
+      assignee: { kind: 'agy' },
+      label: 'agy (Antigravity)',
+      group: 'agy',
+    });
+  });
   it.each(['busy', 'idle', 'parked', 'paused'])('accepts work in a %s session', (status) => {
     expect(sessionAcceptsWork(status)).toBe(true);
   });

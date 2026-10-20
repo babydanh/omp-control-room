@@ -29,6 +29,7 @@ import {
   type WorkItemSessionView,
 } from '../src/company/workItems/workItemService.js';
 import { LIBRARY_WORK_ITEM_ARCHIVE_AGE_MS } from '../src/library/storageHelpers.js';
+import { FakeAgyRuns } from './fakeAgy.js';
 import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
 const PANE_A = 'wA:p1';
@@ -76,6 +77,7 @@ class Fixture {
   readonly published: CompanyWorkItemsMessage[] = [];
   now = T0;
   readonly claude = new FakeClaudeRuns();
+  readonly agy = new FakeAgyRuns();
   readonly claudeAuth = new FakeClaudeAuth();
   readonly claudeMcp = new FakeClaudeMcp();
   private timers: Timer[] = [];
@@ -145,6 +147,7 @@ class Fixture {
       overlaps: async () => [],
       boardWatching: () => false,
       claude: this.claude,
+      agy: this.agy,
       claudeAuth: this.claudeAuth,
       claudeMcp: this.claudeMcp,
     });

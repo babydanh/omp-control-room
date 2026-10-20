@@ -7,7 +7,6 @@
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardWorkItem } from '../boardView.js';
-import { claudeInterruptedNote, claudeProgressLine } from '../claudeCodeView.js';
 import { companyRoleLabel } from '../roleProfiles.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { conflictText, judgeChipFor } from '../workItemReviewView.js';
@@ -18,7 +17,9 @@ import {
   priorityBadge,
   repoShortName,
   statusWordVi,
+  workItemInterruptedNote,
   workItemKey,
+  workItemProgressLine,
 } from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
 import { WorkItemReviewChips } from './WorkItemReviewChips.js';
@@ -45,8 +46,8 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
   const repoName = card.repo === null ? '' : repoShortName(card.repo);
   const areas = areaChipsOf(card.areas);
   const needsAttention = card.status === 'needs_input' || card.status === 'failed';
-  const progress = claudeProgressLine(card);
-  const interrupted = claudeInterruptedNote(card.claudeRun);
+  const progress = workItemProgressLine(card);
+  const interrupted = workItemInterruptedNote(card);
   return (
     <button
       type="button"
@@ -144,7 +145,7 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
       </span>
       {progress !== null && (
         <span
-          data-testid="work-item-claude-progress"
+          data-testid="work-item-progress"
           title={progress}
           className="block truncate text-2xs text-text-muted"
         >
@@ -153,7 +154,7 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
       )}
       {interrupted !== null && (
         <span
-          data-testid="work-item-claude-interrupted"
+          data-testid="work-item-interrupted"
           className="line-clamp-2 break-words text-2xs text-warning"
         >
           {interrupted}

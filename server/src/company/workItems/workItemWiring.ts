@@ -9,6 +9,7 @@ import { join } from 'node:path';
 
 import type { CompanyWorkItemsMessage, LedgerOverlapScan } from '../../../../core/src/messages.js';
 import type { HerdrLink } from '../../herdr/herdrLink.js';
+import { createAgyRuns } from '../agyCode/agyRuns.js';
 import { loadClaudeAgentNames } from '../claudeCode/claudeAgents.js';
 import { createClaudeAuthProbe } from '../claudeCode/claudeAuth.js';
 import { createClaudeMcpSource } from '../claudeCode/claudeMcpSource.js';
@@ -188,6 +189,7 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     overlaps: () => options.ledger.overlapScans(),
     boardWatching: () => options.ledger.watched(),
     claude: createClaudeRuns({ newRunId: () => randomUUID() }),
+    agy: createAgyRuns({ newRunId: () => randomUUID() }),
     claudeAuth: createClaudeAuthProbe(),
     claudeMcp: createClaudeMcpSource({ configPath: join(homedir(), '.claude.json') }),
   });

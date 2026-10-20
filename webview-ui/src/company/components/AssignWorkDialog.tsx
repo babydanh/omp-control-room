@@ -28,7 +28,13 @@ import {
   WORK_ITEM_DEPENDS_MAX,
   WORK_ITEM_PRIORITY_DEFAULT,
 } from '../../../../core/src/workItemGraph.js';
-import { assigneeKeyOf, type AssigneeOption, AUTO_ASSIGNEE, CLAUDE_OPTION } from '../assigneeOptions.js';
+import {
+  AGY_OPTION,
+  assigneeKeyOf,
+  type AssigneeOption,
+  AUTO_ASSIGNEE,
+  CLAUDE_OPTION,
+} from '../assigneeOptions.js';
 import type { WorkItemCreateOptions, WorkItemFields } from '../companyMessages.js';
 import { companyRoleLabel } from '../roleProfiles.js';
 import { openItemsOf, PRIORITY_CHOICES, waitItemLabel } from '../squadView.js';
@@ -122,8 +128,9 @@ export function AssignWorkDialog({
   const textRef = useRef<HTMLTextAreaElement>(null);
 
   const trimmed = text.trim();
-  const picked =
-    [AUTO_OPTION, CLAUDE_OPTION, ...options].find((option) => option.key === selectedKey) ?? null;
+  const picked = [AUTO_OPTION, CLAUDE_OPTION, AGY_OPTION, ...options].find(
+    (option) => option.key === selectedKey,
+  ) ?? null;
   const assignee: WorkItemAssignee | null = fixedAssignee ?? picked?.assignee ?? null;
   const waitItems: WorkItem[] = scheduling === undefined ? [] : openItemsOf(scheduling.openItems);
   // Only ids the folder still holds as open items can be waited for; a closed one is dropped.
@@ -280,6 +287,7 @@ export function AssignWorkDialog({
                     <div className="flex flex-col gap-0.5">
                       {renderRow(AUTO_OPTION)}
                       {renderRow(CLAUDE_OPTION)}
+                      {renderRow(AGY_OPTION)}
                     </div>
                     {hasAgents ? null : <p className="px-2 text-text-muted">{NO_AGENT_TEXT}</p>}
                     {groups.map((group) => (

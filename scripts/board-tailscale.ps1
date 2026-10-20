@@ -1,5 +1,5 @@
 ﻿<#
-  Mở OMP Board (đang chạy trên máy này) cho các thiết bị trong mạng Tailscale của bạn.
+  Mở Agent Board (đang chạy trên máy này) cho các thiết bị trong mạng Tailscale của bạn.
   Board vẫn chỉ nghe 127.0.0.1; `tailscale serve` nhận HTTPS trong tailnet rồi chuyển về cổng đó,
   nên không lộ ra internet và không cần mở firewall.
 

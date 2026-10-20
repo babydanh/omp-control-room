@@ -10,6 +10,8 @@
 - **Usage page** — a board page shows every omp account's limits (with the reported capacity), the recorded limit history for 1, 7 or 30 days with per-client token burn, and the full token-usage picture: totals, the time series, usage by model, folder and agent type, the cost breakdown, and model performance. Reads run only when the page asks; limits are cached for a minute, history and stats for five minutes, and a forced refresh is limited to one read per 30–60 seconds.
 - **Claude Code worker MCP servers** — the squad settings list the MCP servers defined in your Claude Code config (`~/.claude.json`, top level and this folder's entry) as chips; the ones you pick are the only servers a worker run loads, copied at run time into a temporary file (mode 0600, removed when the run ends) and never logged. A server that writes a credential inline (`headers`, or an env name with TOKEN, KEY, SECRET, PASSWORD, PAT, AUTH or CREDENTIAL) is not offered; `headersHelper` is.
 
+- **Agent Board and per-role CLIs** — The board is now named Agent Board. Squad settings choose omp, Claude Code or agy (Antigravity) independently for the leader, judge and auto-assigned workers, with separate Claude and agy concurrency limits.
+
 ### Changes
 
 - Folders whose directory has gone are no longer listed in the tree, the switcher or the rail. An open folder that disappears stays once as "Thư mục không còn" with a "Gỡ khỏi danh sách" action; the recent list drops missing folders and keeps their display names.

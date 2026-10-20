@@ -3822,7 +3822,7 @@ components:
 
     WorkItemAssigneeKind:
       type: string
-      enum: [herdr, session, new-session, auto, claude]
+      enum: [herdr, session, new-session, auto, claude, agy]
 
     WorkItemAssignee:
       type: object
@@ -3832,8 +3832,8 @@ components:
         Who a work item goes to. herdr names a herdr pane by paneId. session names an omp session on
         the board by sessionId. new-session opens a fresh omp chat in the item's repo when the item is
         sent. claude runs the item as one Claude Code run (claude -p) in the item's worktree, or in its repo
-        when read-only; it names no pane or session. auto lets the scheduler pick an idle member in the item's
-        repo, or open one, or start a claude run, when the item is sent, and the item then takes the concrete assignee.
+        when read-only; agy runs one Antigravity CLI run (agy -p) in the item's worktree or repo when read-only.
+        auto lets the scheduler pick an idle member in the item's repo, or open one, or start a CLI run, when the item is sent, and the item then takes the concrete assignee.
       properties:
         kind:
           $ref: '#/components/schemas/WorkItemAssigneeKind'
@@ -3988,6 +3988,8 @@ components:
               maxLength: 256
         claudeRun:
           $ref: '#/components/schemas/WorkItemClaudeRun'
+        agyRun:
+          $ref: '#/components/schemas/WorkItemAgyRun'
         judge:
           $ref: '#/components/schemas/WorkItemJudge'
         conflicts:
@@ -4043,6 +4045,29 @@ components:
         interrupted:
           type: boolean
 
+    WorkItemAgyRun:
+      type: object
+      additionalProperties: false
+      required: [mode, startedAt]
+      description: >-
+        The Antigravity CLI run (agy -p) this item is in. While it runs, progress is its latest assistant text.
+        interrupted means the board restarted during the run; the item can be retried in the same checkout.
+      properties:
+        mode:
+          type: string
+          enum: [edit, read]
+        startedAt:
+          type: string
+          format: date-time
+        pid:
+          type: integer
+          minimum: 1
+        progress:
+          type: string
+          maxLength: 300
+        interrupted:
+          type: boolean
+
     WorkItemJudge:
       type: object
       additionalProperties: false
@@ -4069,6 +4094,7 @@ components:
           minimum: 0
           maximum: 2
           description: Judge-driven follow-ups sent so far. At most 2.
+
 
     WorkItemConflicts:
       type: object
@@ -4105,12 +4131,13 @@ components:
     SquadSettings:
       type: object
       additionalProperties: false
-      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, brain, claudeModelLeader, claudeModelJudge, preferClaude, maxClaudeRuns, claudeMaxTurns, claudeMaxBudgetUsd, claudePermission, claudeAllowedTools, claudeWorkerMcp]
+      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxClaudeRuns, maxAgyRuns, claudeMaxTurns, claudeMaxBudgetUsd, claudePermission, claudeAllowedTools, claudeWorkerMcp]
       description: >-
-        Per-folder limits for the squad scheduler. maxParallel caps running work items in the folder.
+        Per-folder limits and CLI choices for the squad scheduler. maxParallel caps running work items in the folder.
         maxSquadSessions caps the omp sessions the squad opens. minFreeRamGb is the free memory needed before
-        opening one. autoJudge is read by the judge in a later phase. autoApproveNext approves a leader's follow-up
-        proposal by itself when it has no completeness warning; the first proposal of a run is always left to the user.
+        opening one. engineLeader, engineJudge, and engineWorker select a CLI independently for leader, judge, and
+        automatic worker runs. All three default to omp. autoJudge is read by the judge in a later phase.
+        autoApproveNext approves a leader's follow-up proposal by itself when it has no completeness warning; the first proposal of a run is always left to the user.
       properties:
         maxParallel:
           type: integer
@@ -4128,10 +4155,18 @@ components:
           type: boolean
         autoApproveNext:
           type: boolean
-        brain:
+        engineLeader:
           type: string
-          enum: [omp, claude]
-          description: Which CLI runs the squad leader and the judge. omp is the default; claude runs claude -p.
+          enum: [omp, claude, agy]
+          description: CLI used for squad leader turns. Defaults to omp.
+        engineJudge:
+          type: string
+          enum: [omp, claude, agy]
+          description: CLI used for squad judge turns. Defaults to omp.
+        engineWorker:
+          type: string
+          enum: [omp, claude, agy]
+          description: CLI preferred for automatic worker runs when a suitable idle omp agent is unavailable. Defaults to omp.
         claudeModelLeader:
           type: string
           minLength: 1
@@ -4140,13 +4175,15 @@ components:
           type: string
           minLength: 1
           maxLength: 64
-        preferClaude:
-          type: boolean
-          description: When on, an auto item starts a Claude Code run before it opens a new omp session.
         maxClaudeRuns:
           type: integer
           minimum: 1
           maximum: 4
+        maxAgyRuns:
+          type: integer
+          minimum: 1
+          maximum: 4
+          description: Maximum number of concurrent Antigravity CLI worker runs.
         claudeMaxTurns:
           type: integer
           minimum: 1

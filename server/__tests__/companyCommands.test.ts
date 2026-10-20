@@ -22,6 +22,7 @@ import type { CompanyStore } from '../src/company/companyStore.js';
 import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
 import { parseWorkItemsFile } from '../src/company/workItems/workItemModel.js';
 import { WorkItemService } from '../src/company/workItems/workItemService.js';
+import { FakeAgyRuns } from './fakeAgy.js';
 import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 
 let tempHome: string;
@@ -1220,6 +1221,7 @@ describe('company client commands', () => {
         overlaps: async () => [],
         boardWatching: () => false,
         claude: new FakeClaudeRuns(),
+        agy: new FakeAgyRuns(),
         claudeAuth: new FakeClaudeAuth(),
         claudeMcp: new FakeClaudeMcp(),
       });

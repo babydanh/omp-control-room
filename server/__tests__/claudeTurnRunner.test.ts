@@ -210,31 +210,33 @@ describe('createClaudeTurnRunner', () => {
 
 describe('createEngineRunner', () => {
   it('sends each turn to the engine named when the turn starts', async () => {
-    let engine: 'omp' | 'claude' = 'omp';
-    const ompCalls: string[] = [];
-    const claudeCalls: string[] = [];
-    const omp: LeaderRunner = {
-      run: (prompt) => {
-        ompCalls.push(prompt);
-        return Promise.resolve(`omp: ${prompt}`);
-      },
+    let engine: 'omp' | 'claude' | 'agy' = 'omp';
+    const calls: Record<'omp' | 'claude' | 'agy', string[]> = {
+      omp: [],
+      claude: [],
+      agy: [],
     };
-    const claude: LeaderRunner = {
+    const runnerFor = (name: 'omp' | 'claude' | 'agy'): LeaderRunner => ({
       run: (prompt) => {
-        claudeCalls.push(prompt);
-        return Promise.resolve(`claude: ${prompt}`);
+        calls[name].push(prompt);
+        return Promise.resolve(`${name}: ${prompt}`);
       },
-    };
-    const runner = createEngineRunner({ engine: () => engine, omp, claude });
+    });
+    const runner = createEngineRunner({
+      engine: () => engine,
+      omp: runnerFor('omp'),
+      claude: runnerFor('claude'),
+      agy: runnerFor('agy'),
+    });
     const signal = new AbortController().signal;
 
     expect(await runner.run('một', signal)).toBe('omp: một');
     engine = 'claude';
     expect(await runner.run('hai', signal)).toBe('claude: hai');
+    engine = 'agy';
+    expect(await runner.run('ba', signal)).toBe('agy: ba');
     engine = 'omp';
-    expect(await runner.run('ba', signal)).toBe('omp: ba');
-
-    expect(ompCalls).toEqual(['một', 'ba']);
-    expect(claudeCalls).toEqual(['hai']);
+    expect(await runner.run('bốn', signal)).toBe('omp: bốn');
+    expect(calls).toEqual({ omp: ['một', 'bốn'], claude: ['hai'], agy: ['ba'] });
   });
 });

@@ -209,7 +209,7 @@ export function BoardTopBar({
         phone ? 'flex items-center gap-1.5 px-2 py-1.5' : 'flex items-center gap-3 px-3 py-2'
       }
     >
-      <h1 className={phone ? 'sr-only' : 'shrink-0 text-base text-text'}>OMP Board</h1>
+      <h1 className={phone ? 'sr-only' : 'shrink-0 text-base text-text'}>Agent Board</h1>
       <div className={phone ? 'min-w-0 flex-1' : 'min-w-0'}>
         <WorkspaceSwitcher client={client} state={state} browseRequest={browseRequest} />
       </div>

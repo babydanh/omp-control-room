@@ -78,7 +78,9 @@ function ctx(overrides: Partial<SchedulerContext> = {}): SchedulerContext {
     minFreeBytes: 2 * GIB,
     claudeRunsOpen: 0,
     maxClaudeRuns: 2,
-    preferClaude: false,
+    agyRunsOpen: 0,
+    maxAgyRuns: 2,
+    engineWorker: 'omp',
     ...overrides,
   };
 }
@@ -592,31 +594,60 @@ describe('decideStart: Claude Code runs', () => {
     expect(decision.kind).toBe('wait');
   });
 
-  it('prefers an idle member over a claude run for an auto item', () => {
+  it('prefers an idle member over a CLI run for an auto item', () => {
     const decision = decideStart(
       item({ kind: 'auto' }),
-      ctx({ members: [herdr('p1')], preferClaude: true }),
+      ctx({ members: [herdr('p1')], engineWorker: 'claude' }),
     );
     expect(usedKey(decision)).toBe('herdr:p1');
   });
 
-  it('starts a claude run for an auto item when claude is preferred and a slot is free', () => {
-    expect(decideStart(item({ kind: 'auto' }), ctx({ preferClaude: true }))).toEqual({
+  it('starts a claude run for an auto item when Claude is selected and a slot is free', () => {
+    expect(decideStart(item({ kind: 'auto' }), ctx({ engineWorker: 'claude' }))).toEqual({
       kind: 'claude',
       cwd: REPO,
       readOnly: false,
     });
   });
 
-  it('leaves an auto item to omp when the claude cap is full', () => {
+  it('leaves an auto item to omp when the Claude cap is full', () => {
     const decision = decideStart(
       item({ kind: 'auto' }),
-      ctx({ preferClaude: true, claudeRunsOpen: 2, maxClaudeRuns: 2 }),
+      ctx({ engineWorker: 'claude', claudeRunsOpen: 2, maxClaudeRuns: 2 }),
     );
     expect(decision.kind).toBe('open');
   });
 
-  it('keeps an auto item on omp when claude is not preferred', () => {
+  it('keeps an auto item on omp when the worker engine is omp', () => {
     expect(decideStart(item({ kind: 'auto' }), ctx()).kind).toBe('open');
   });
+
+  it('starts an agy run for an auto item when its slot is free', () => {
+    expect(decideStart(item({ kind: 'auto' }), ctx({ engineWorker: 'agy' }))).toEqual({
+      kind: 'agy',
+      cwd: REPO,
+      readOnly: false,
+    });
+  });
+
+  it('leaves an auto item to omp when the agy cap is full', () => {
+    const decision = decideStart(
+      item({ kind: 'auto' }),
+      ctx({ engineWorker: 'agy', agyRunsOpen: 2, maxAgyRuns: 2 }),
+    );
+    expect(decision.kind).toBe('open');
+  });
+
+  it('waits when an agy auto run conflicts with an editing item', () => {
+    const decision = decideStart(
+      item({ kind: 'auto', areas: ['web/ui'] }),
+      ctx({
+        engineWorker: 'agy',
+        holds: [hold('agy', { sequence: 2, areas: ['web'] })],
+      }),
+    );
+    expect(decision.kind).toBe('wait');
+    expect(blockerOf(decision)).toEqual({ kind: 'area', sequence: 2, area: 'web/ui' });
+  });
+
 });

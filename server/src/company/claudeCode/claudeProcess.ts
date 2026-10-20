@@ -63,6 +63,7 @@ export interface ClaudeKillOptions {
 
 export interface ClaudeTurnInput {
   readonly spawn: ClaudeSpawn;
+  readonly file?: string;
   readonly cwd: string;
   readonly args: readonly string[];
   readonly prompt: string;
@@ -247,7 +248,7 @@ export function runClaudeTurn(input: ClaudeTurnInput): Promise<ClaudeTurnOutcome
     }
     let child: ClaudeChildProcess;
     try {
-      child = input.spawn(CLAUDE_COMMAND, input.args, { cwd: input.cwd });
+      child = input.spawn(input.file ?? CLAUDE_COMMAND, input.args, { cwd: input.cwd });
     } catch (error) {
       resolve({
         exitCode: null,

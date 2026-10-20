@@ -1,23 +1,36 @@
 import { describe, expect, it } from 'vitest';
 
-import type { SquadSettings, WorkItemClaudeRun } from '../../core/src/messages.js';
-import { assigneeKeyOf, CLAUDE_ASSIGNEE, CLAUDE_OPTION } from '../src/company/assigneeOptions.js';
+import type {
+  SquadSettings,
+  WorkItemAgyRun,
+  WorkItemClaudeRun,
+} from '../../core/src/messages.js';
 import {
-  CLAUDE_INTERRUPTED_NOTE,
-  claudeInterruptedNote,
-  claudeProgressLine,
-  claudeStatusLabel,
-} from '../src/company/claudeCodeView.js';
+  AGY_ASSIGNEE,
+  AGY_OPTION,
+  assigneeKeyOf,
+  CLAUDE_ASSIGNEE,
+  CLAUDE_OPTION,
+} from '../src/company/assigneeOptions.js';
+import { claudeStatusLabel } from '../src/company/claudeCodeView.js';
 import { squadClaudeCheck } from '../src/company/companyMessages.js';
 import { applyCompanyMessage } from '../src/company/companyState.js';
 import {
-  brainOf,
   permissionOf,
+  squadEngineOf,
   type SquadSettingsDraft,
   squadSettingsDraftOf,
   squadSettingsFromDraft,
 } from '../src/company/squadSettingsView.js';
-import { assigneeLabel, CLAUDE_ASSIGNEE_LABEL, workItemsOf } from '../src/company/workItemView.js';
+import {
+  AGY_ASSIGNEE_LABEL,
+  assigneeLabel,
+  CLAUDE_ASSIGNEE_LABEL,
+  WORK_ITEM_INTERRUPTED_NOTE,
+  workItemInterruptedNote,
+  workItemProgressLine,
+  workItemsOf,
+} from '../src/company/workItemView.js';
 import { stateFrom } from './companyFixtures.js';
 
 const ACTIVE = 'D:/work/app';
@@ -28,11 +41,13 @@ const SETTINGS: SquadSettings = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
-  brain: 'omp',
+  engineLeader: 'omp',
+  engineJudge: 'omp',
+  engineWorker: 'omp',
   claudeModelLeader: 'opus',
   claudeModelJudge: 'sonnet',
-  preferClaude: false,
   maxClaudeRuns: 2,
+  maxAgyRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
   claudePermission: 'auto',
@@ -80,46 +95,62 @@ describe('the Claude Code assignee option', () => {
   });
 });
 
-describe('claudeInterruptedNote', () => {
-  it('shows the note only for a run the board restart cut short', () => {
-    const interrupted: WorkItemClaudeRun = {
-      mode: 'edit',
-      startedAt: '2026-10-02T10:00:00.000Z',
-      interrupted: true,
-    };
-    const finished: WorkItemClaudeRun = { mode: 'read', startedAt: '2026-10-02T10:00:00.000Z' };
-    expect(claudeInterruptedNote(interrupted)).toBe(CLAUDE_INTERRUPTED_NOTE);
-    expect(CLAUDE_INTERRUPTED_NOTE).toBe(
-      'Bị gián đoạn khi board khởi động lại. Gửi tiếp để tiếp tục.',
-    );
-    expect(claudeInterruptedNote(finished)).toBeNull();
-    expect(claudeInterruptedNote(undefined)).toBeNull();
-    expect(claudeInterruptedNote(null)).toBeNull();
+describe('the agy assignee option', () => {
+  it('is a picker row keyed agy and labels the holder Antigravity', () => {
+    expect(AGY_ASSIGNEE).toEqual({ kind: 'agy' });
+    expect(assigneeKeyOf(AGY_ASSIGNEE)).toBe('agy');
+    expect(AGY_OPTION).toEqual({
+      key: 'agy',
+      assignee: { kind: 'agy' },
+      label: 'agy (Antigravity)',
+      group: 'agy',
+    });
+    expect(AGY_ASSIGNEE_LABEL).toBe('agy (Antigravity)');
+    expect(assigneeLabel(AGY_ASSIGNEE, stateFrom(), ACTIVE)).toBe('agy (Antigravity)');
   });
 });
 
-describe('claudeProgressLine', () => {
-  const run: WorkItemClaudeRun = {
+describe('work item CLI run status', () => {
+  const claudeRun: WorkItemClaudeRun = {
     mode: 'edit',
     startedAt: '2026-10-02T10:00:00.000Z',
     progress: '  Đang sửa workItemView.ts  ',
   };
+  const agyRun: WorkItemAgyRun = {
+    mode: 'edit',
+    startedAt: '2026-10-02T10:00:00.000Z',
+    pid: 91,
+    progress: '  Đang sửa bằng agy  ',
+  };
 
-  it('shows the trimmed progress of a running item', () => {
-    expect(claudeProgressLine({ status: 'running', claudeRun: run })).toBe(
+  it('shows trimmed progress from either CLI only while an item is running', () => {
+    expect(workItemProgressLine({ status: 'running', claudeRun })).toBe(
       'Đang sửa workItemView.ts',
+    );
+    expect(workItemProgressLine({ status: 'running', agyRun })).toBe('Đang sửa bằng agy');
+    expect(workItemProgressLine({ status: 'queued', agyRun })).toBeNull();
+    expect(workItemProgressLine({ status: 'review', claudeRun })).toBeNull();
+  });
+
+  it('shows one restart-interrupted note for either run and none for finished work', () => {
+    expect(workItemInterruptedNote({ claudeRun: { ...claudeRun, interrupted: true } })).toBe(
+      WORK_ITEM_INTERRUPTED_NOTE,
+    );
+    expect(workItemInterruptedNote({ agyRun: { ...agyRun, interrupted: true } })).toBe(
+      WORK_ITEM_INTERRUPTED_NOTE,
+    );
+    expect(workItemInterruptedNote({ claudeRun })).toBeNull();
+    expect(workItemInterruptedNote({ agyRun })).toBeNull();
+    expect(WORK_ITEM_INTERRUPTED_NOTE).toBe(
+      'Bị gián đoạn khi board khởi động lại. Gửi tiếp để tiếp tục.',
     );
   });
 
-  it('shows nothing while the item is not running', () => {
-    expect(claudeProgressLine({ status: 'queued', claudeRun: run })).toBeNull();
-    expect(claudeProgressLine({ status: 'review', claudeRun: run })).toBeNull();
-  });
-
-  it('shows nothing when the run has reported no progress', () => {
-    const blank: WorkItemClaudeRun = { ...run, progress: '   ' };
-    expect(claudeProgressLine({ status: 'running', claudeRun: blank })).toBeNull();
-    expect(claudeProgressLine({ status: 'running' })).toBeNull();
+  it('omits blank progress', () => {
+    expect(
+      workItemProgressLine({ status: 'running', agyRun: { ...agyRun, progress: '  ' } }),
+    ).toBeNull();
+    expect(workItemProgressLine({ status: 'running' })).toBeNull();
   });
 });
 
@@ -133,11 +164,12 @@ describe('squadClaudeCheck', () => {
   });
 });
 
-describe('brainOf', () => {
-  it('names claude only for the claude choice, and omp otherwise', () => {
-    expect(brainOf('claude')).toBe('claude');
-    expect(brainOf('omp')).toBe('omp');
-    expect(brainOf('')).toBe('omp');
+describe('squadEngineOf', () => {
+  it('preserves each known engine and defaults unknown choices to omp', () => {
+    expect(squadEngineOf('claude')).toBe('claude');
+    expect(squadEngineOf('agy')).toBe('agy');
+    expect(squadEngineOf('omp')).toBe('omp');
+    expect(squadEngineOf('')).toBe('omp');
   });
 });
 
@@ -153,11 +185,13 @@ describe('squadSettingsFromDraft for the Claude Code settings', () => {
   it('saves the Claude Code settings, trimming the model names', () => {
     const reading = squadSettingsFromDraft(
       draftWith({
-        brain: 'claude',
+        engineLeader: 'claude',
+        engineJudge: 'claude',
+        engineWorker: 'claude',
         claudeModelLeader: '  opus  ',
         claudeModelJudge: 'sonnet',
-        preferClaude: true,
         maxClaudeRuns: '4',
+        maxAgyRuns: '4',
         claudeMaxTurns: '200',
         claudeMaxBudgetUsd: '0.1',
       }),
@@ -166,10 +200,12 @@ describe('squadSettingsFromDraft for the Claude Code settings', () => {
       ok: true,
       settings: {
         ...SETTINGS,
-        brain: 'claude',
+        engineLeader: 'claude',
+        engineJudge: 'claude',
+        engineWorker: 'claude',
         claudeModelLeader: 'opus',
-        preferClaude: true,
         maxClaudeRuns: 4,
+        maxAgyRuns: 4,
         claudeMaxTurns: 200,
         claudeMaxBudgetUsd: 0.1,
       },

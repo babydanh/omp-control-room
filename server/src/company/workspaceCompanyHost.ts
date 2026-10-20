@@ -46,6 +46,7 @@ import type {
 } from '../../../core/src/company.js';
 import type { ServerMessage, SquadSettings } from '../../../core/src/messages.js';
 import { registerWorkItemService } from '../library/workItemRegistry.js';
+import { createAgyTurnRunner } from './agyCode/agyTurnRunner.js';
 import { createClaudeTurnRunner, createEngineRunner } from './claudeCode/claudeTurnRunner.js';
 import type { CompanyCommandServices, CompanyTerminalGateway } from './clientCommands.js';
 import {
@@ -1127,7 +1128,7 @@ async function openOwnerCompanyHost(
       coordinator,
       publish,
       judge: createEngineRunner({
-        engine: () => squadSettingsNow().brain,
+        engine: () => squadSettingsNow().engineJudge,
         omp: createOmpLeaderRunner({
           command: hostModelRolesCommand(options),
           cwd: store.workspacePath,
@@ -1144,6 +1145,11 @@ async function openOwnerCompanyHost(
           model: () => squadSettingsNow().claudeModelJudge,
           schema: JUDGE_REPLY_SCHEMA,
         }),
+        agy: createAgyTurnRunner({
+          cwd: store.workspacePath,
+          label: 'Giám khảo',
+          schema: JUDGE_REPLY_SCHEMA,
+        }),
       }),
       ledger: options.ledger ?? NO_LEDGER,
     });
@@ -1156,7 +1162,7 @@ async function openOwnerCompanyHost(
       coordinator,
       workItems: workItemsWiring.service,
       leader: createEngineRunner({
-        engine: () => squadSettingsNow().brain,
+        engine: () => squadSettingsNow().engineLeader,
         omp: createOmpLeaderRunner({
           command: hostModelRolesCommand(options),
           cwd: store.workspacePath,
@@ -1167,6 +1173,11 @@ async function openOwnerCompanyHost(
           cwd: store.workspacePath,
           label: 'Trưởng đội',
           model: () => squadSettingsNow().claudeModelLeader,
+          schema: SQUAD_LEADER_REPLY_SCHEMA,
+        }),
+        agy: createAgyTurnRunner({
+          cwd: store.workspacePath,
+          label: 'Trưởng đội',
           schema: SQUAD_LEADER_REPLY_SCHEMA,
         }),
       }),

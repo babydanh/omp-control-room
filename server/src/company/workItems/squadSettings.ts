@@ -9,6 +9,7 @@ import type { SquadSettings } from '../../../../core/src/messages.js';
 import { isClaudeMcpServerName } from '../claudeCode/claudeMcp.js';
 import { isRecord } from '../typeGuards.js';
 
+export type SquadEngine = 'omp' | 'claude' | 'agy';
 /** Bytes in one gibibyte, the unit the RAM threshold is kept in. */
 export const GIB = 1024 ** 3;
 
@@ -51,11 +52,13 @@ export const SQUAD_SETTINGS_DEFAULT: SquadSettings = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
-  brain: 'omp',
+  engineLeader: 'omp',
+  engineJudge: 'omp',
+  engineWorker: 'omp',
   claudeModelLeader: 'opus',
   claudeModelJudge: 'sonnet',
-  preferClaude: false,
   maxClaudeRuns: 2,
+  maxAgyRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
   claudePermission: 'auto',
@@ -69,6 +72,7 @@ export const SQUAD_SETTINGS_BOUNDS = {
   maxSquadSessions: { min: 0, max: 6 },
   minFreeRamGb: { min: 0, max: 256 },
   maxClaudeRuns: { min: 1, max: 4 },
+  maxAgyRuns: { min: 1, max: 4 },
   claudeMaxTurns: { min: 1, max: 200 },
   claudeMaxBudgetUsd: { min: 0.1, max: 50 },
 } as const;
@@ -91,8 +95,8 @@ function isClaudeModel(value: unknown): value is string {
   return typeof value === 'string' && CLAUDE_MODEL_PATTERN.test(value);
 }
 
-function isBrain(value: unknown): value is SquadSettings['brain'] {
-  return value === 'omp' || value === 'claude';
+function isSquadEngine(value: unknown): value is SquadEngine {
+  return value === 'omp' || value === 'claude' || value === 'agy';
 }
 
 function isClaudePermission(value: unknown): value is SquadSettings['claudePermission'] {
@@ -148,6 +152,7 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
     maxSquadSessions,
     minFreeRamGb,
     maxClaudeRuns,
+    maxAgyRuns,
     claudeMaxTurns,
     claudeMaxBudgetUsd,
   } = SQUAD_SETTINGS_BOUNDS;
@@ -157,11 +162,13 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
     isNumberIn(value.minFreeRamGb, minFreeRamGb.min, minFreeRamGb.max) &&
     typeof value.autoJudge === 'boolean' &&
     typeof value.autoApproveNext === 'boolean' &&
-    isBrain(value.brain) &&
+    isSquadEngine(value.engineLeader) &&
+    isSquadEngine(value.engineJudge) &&
+    isSquadEngine(value.engineWorker) &&
     isClaudeModel(value.claudeModelLeader) &&
     isClaudeModel(value.claudeModelJudge) &&
-    typeof value.preferClaude === 'boolean' &&
     isIntegerIn(value.maxClaudeRuns, maxClaudeRuns.min, maxClaudeRuns.max) &&
+    isIntegerIn(value.maxAgyRuns, maxAgyRuns.min, maxAgyRuns.max) &&
     isIntegerIn(value.claudeMaxTurns, claudeMaxTurns.min, claudeMaxTurns.max) &&
     isNumberIn(value.claudeMaxBudgetUsd, claudeMaxBudgetUsd.min, claudeMaxBudgetUsd.max) &&
     isClaudePermission(value.claudePermission) &&
@@ -185,6 +192,7 @@ export function parseSquadSettings(value: unknown): SquadSettings {
     maxSquadSessions,
     minFreeRamGb,
     maxClaudeRuns,
+    maxAgyRuns,
     claudeMaxTurns,
     claudeMaxBudgetUsd,
   } = SQUAD_SETTINGS_BOUNDS;
@@ -205,17 +213,33 @@ export function parseSquadSettings(value: unknown): SquadSettings {
     autoJudge: typeof value.autoJudge === 'boolean' ? value.autoJudge : base.autoJudge,
     autoApproveNext:
       typeof value.autoApproveNext === 'boolean' ? value.autoApproveNext : base.autoApproveNext,
-    brain: isBrain(value.brain) ? value.brain : base.brain,
+    engineLeader: isSquadEngine(value.engineLeader)
+      ? value.engineLeader
+      : value.brain === 'omp' || value.brain === 'claude'
+        ? value.brain
+        : base.engineLeader,
+    engineJudge: isSquadEngine(value.engineJudge)
+      ? value.engineJudge
+      : value.brain === 'omp' || value.brain === 'claude'
+        ? value.brain
+        : base.engineJudge,
     claudeModelLeader: isClaudeModel(value.claudeModelLeader)
       ? value.claudeModelLeader
       : base.claudeModelLeader,
     claudeModelJudge: isClaudeModel(value.claudeModelJudge)
       ? value.claudeModelJudge
       : base.claudeModelJudge,
-    preferClaude: typeof value.preferClaude === 'boolean' ? value.preferClaude : base.preferClaude,
+    engineWorker: isSquadEngine(value.engineWorker)
+      ? value.engineWorker
+      : value.preferClaude === true
+        ? 'claude'
+        : base.engineWorker,
     maxClaudeRuns: isIntegerIn(value.maxClaudeRuns, maxClaudeRuns.min, maxClaudeRuns.max)
       ? value.maxClaudeRuns
       : base.maxClaudeRuns,
+    maxAgyRuns: isIntegerIn(value.maxAgyRuns, maxAgyRuns.min, maxAgyRuns.max)
+      ? value.maxAgyRuns
+      : base.maxAgyRuns,
     claudeMaxTurns: isIntegerIn(value.claudeMaxTurns, claudeMaxTurns.min, claudeMaxTurns.max)
       ? value.claudeMaxTurns
       : base.claudeMaxTurns,

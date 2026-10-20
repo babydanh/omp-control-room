@@ -574,7 +574,7 @@ export function BoardShell({ client }: BoardShellProps) {
         >
           <Icon name="menu" />
         </button>
-        <span className="font-medium">OMP Board</span>
+        <span className="font-medium">Agent Board</span>
         <span className="min-w-0 flex-1 truncate text-right text-sm text-text-secondary">
           {navItems.find((item) => item.page === activePage)?.label ?? 'Bảng việc'}
         </span>
@@ -585,7 +585,7 @@ export function BoardShell({ client }: BoardShellProps) {
         aria-label="Điều hướng"
       >
         <div className={`flex h-10 items-center ${navCollapsed ? 'justify-center' : 'justify-between px-2'}`}>
-          {!navCollapsed && <span className="font-semibold tracking-tight">OMP Board</span>}
+          {!navCollapsed && <span className="font-semibold tracking-tight">Agent Board</span>}
           <button
             type="button"
             aria-label={navCollapsed ? 'Mở rộng điều hướng' : 'Thu gọn điều hướng'}

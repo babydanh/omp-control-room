@@ -16,11 +16,13 @@ const SETTINGS: SquadSettings = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
-  brain: 'omp',
+  engineLeader: 'omp',
+  engineJudge: 'omp',
+  engineWorker: 'omp',
   claudeModelLeader: 'opus',
   claudeModelJudge: 'sonnet',
-  preferClaude: false,
   maxClaudeRuns: 2,
+  maxAgyRuns: 2,
   claudeMaxTurns: 40,
   claudeMaxBudgetUsd: 3,
   claudePermission: 'acceptEdits',
@@ -41,11 +43,13 @@ describe('squadSettingsDraftOf', () => {
       minFreeRamGb: '2',
       autoJudge: true,
       autoApproveNext: false,
-      brain: 'omp',
+      engineLeader: 'omp',
+      engineJudge: 'omp',
+      engineWorker: 'omp',
       claudeModelLeader: 'opus',
       claudeModelJudge: 'sonnet',
-      preferClaude: false,
       maxClaudeRuns: '2',
+      maxAgyRuns: '2',
       claudeMaxTurns: '40',
       claudeMaxBudgetUsd: '3',
       claudePermission: 'acceptEdits',
@@ -78,6 +82,37 @@ describe('squadSettingsFromDraft', () => {
     );
     expect(squadSettingsFromDraft(draftWith({ maxParallel: '1' })).ok).toBe(true);
     expect(squadSettingsFromDraft(draftWith({ maxSquadSessions: '6' })).ok).toBe(true);
+  });
+
+  it('saves each selected engine and the agy concurrency limit', () => {
+    expect(
+      squadSettingsFromDraft(
+        draftWith({
+          engineLeader: 'claude',
+          engineJudge: 'agy',
+          engineWorker: 'agy',
+          maxAgyRuns: '4',
+        }),
+      ),
+    ).toEqual({
+      ok: true,
+      settings: {
+        ...SETTINGS,
+        engineLeader: 'claude',
+        engineJudge: 'agy',
+        engineWorker: 'agy',
+        maxAgyRuns: 4,
+      },
+    });
+  });
+
+  it('refuses an agy run count outside the allowed whole-number range', () => {
+    for (const maxAgyRuns of ['0', '5', '2.5', '']) {
+      expect(squadSettingsFromDraft(draftWith({ maxAgyRuns }))).toEqual({
+        ok: false,
+        reason: 'Số lượt agy chạy cùng lúc là số nguyên từ 1 đến 4.',
+      });
+    }
   });
 
   it('refuses a parallel count outside 1 to 8, or one that is not a whole number', () => {

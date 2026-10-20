@@ -78,6 +78,8 @@ export const AUTO_ASSIGNEE_LABEL = 'Tự chọn agent';
 
 /** The label of the work item assignee that Claude Code runs. */
 export const CLAUDE_ASSIGNEE_LABEL = 'Claude Code';
+/** The label of the work item assignee that runs Antigravity CLI. */
+export const AGY_ASSIGNEE_LABEL = 'agy (Antigravity)';
 
 /** The roles a work item can be filed under, as the create and assign dialogs offer them. */
 export const WORK_ITEM_ROLES: readonly CompanyRole[] = ['chat', 'worker', 'qa', 'advisor', 'judge'];
@@ -180,7 +182,33 @@ export function assigneeLabel(
       return AUTO_ASSIGNEE_LABEL;
     case 'claude':
       return CLAUDE_ASSIGNEE_LABEL;
+    case 'agy':
+      return AGY_ASSIGNEE_LABEL;
   }
+}
+
+/** The note shown when an external CLI run was cut short by a board restart. */
+export const WORK_ITEM_INTERRUPTED_NOTE =
+  'Bị gián đoạn khi board khởi động lại. Gửi tiếp để tiếp tục.';
+
+/** The CLI runs a work item may carry: absent on the server's item, null on a board card. */
+interface CliRuns {
+  claudeRun?: WorkItem['claudeRun'] | null;
+  agyRun?: WorkItem['agyRun'] | null;
+}
+
+/** The note for a work item whose Claude Code or agy run was interrupted by a restart. */
+export function workItemInterruptedNote(item: CliRuns): string | null {
+  return item.claudeRun?.interrupted === true || item.agyRun?.interrupted === true
+    ? WORK_ITEM_INTERRUPTED_NOTE
+    : null;
+}
+
+/** The latest reported progress of a running CLI work item, or null when it has none. */
+export function workItemProgressLine(item: CliRuns & Pick<WorkItem, 'status'>): string | null {
+  if (item.status !== 'running') return null;
+  const progress = (item.agyRun?.progress ?? item.claudeRun?.progress ?? '').trim();
+  return progress === '' ? null : progress;
 }
 
 /**

@@ -92,8 +92,11 @@ export interface SchedulerContext {
   /** Claude Code runs in flight. Each also holds a slot in the folder cap. */
   readonly claudeRunsOpen: number;
   readonly maxClaudeRuns: number;
-  /** Whether an auto item starts a Claude Code run before it opens a new omp session. */
-  readonly preferClaude: boolean;
+  /** Antigravity runs in flight. */
+  readonly agyRunsOpen: number;
+  readonly maxAgyRuns: number;
+  /** CLI used for auto worker assignments. */
+  readonly engineWorker: 'omp' | 'claude' | 'agy';
 }
 
 /** What the service should do with a ready item. */
@@ -114,6 +117,8 @@ export type SchedulerDecision =
    * `cwd`'s repo; a read-only run works in `cwd` itself.
    */
   | { readonly kind: 'claude'; readonly cwd: string; readonly readOnly: boolean }
+  /** Start one Antigravity CLI run, in the repo or an editing worktree. */
+  | { readonly kind: 'agy'; readonly cwd: string; readonly readOnly: boolean }
   | { readonly kind: 'wait'; readonly blocker: WorkItemBlocker; readonly reason: string };
 
 /** Lowercase path key: forward slashes, no trailing slash. Windows paths compare case-insensitively. */
@@ -153,6 +158,7 @@ export function decideStart(item: SchedulerItem, ctx: SchedulerContext): Schedul
   if (ctx.holds.length >= ctx.maxParallel) return capacityWait(ctx);
   if (item.kind === 'new-session') return decideOpen(item, ctx);
   if (item.kind === 'claude') return decideClaude(item, ctx);
+  if (item.kind === 'agy') return decideAgy(item, ctx);
   return decideAuto(item, ctx);
 }
 
@@ -220,10 +226,22 @@ function decideAuto(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecisi
     blocked ??= blocker;
   }
   if (blocked !== undefined) return waitWith(blocked);
-  // With claude preferred, a free claude run slot beats a new omp session; a full cap falls through.
-  if (ctx.preferClaude && ctx.claudeRunsOpen < ctx.maxClaudeRuns) return decideClaude(item, ctx);
+  if (ctx.engineWorker === 'claude' && ctx.claudeRunsOpen < ctx.maxClaudeRuns)
+    return decideClaude(item, ctx);
+  if (ctx.engineWorker === 'agy' && ctx.agyRunsOpen < ctx.maxAgyRuns)
+    return decideAgy(item, ctx);
   const busy = serving.filter((member) => !member.free || held.has(member.key)).length;
   return openOrRefuse(item, ctx, busy);
+}
+
+/** Starts an agy run when its cap has room and no area conflicts. */
+function decideAgy(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecision {
+  if (ctx.agyRunsOpen >= ctx.maxAgyRuns) {
+    return waitWith({ kind: 'capacity', running: ctx.agyRunsOpen, limit: ctx.maxAgyRuns });
+  }
+  const blocker = conflictWith(item, undefined, ctx);
+  if (blocker !== undefined) return waitWith(blocker);
+  return { kind: 'agy', cwd: item.repo, readOnly: item.readOnly };
 }
 
 /**

@@ -6,6 +6,7 @@
 
 import type { LeaderRunner } from '../squad/squadRunner.js';
 import { SquadLeaderError } from '../squad/squadRunner.js';
+import type { SquadEngine } from '../workItems/squadSettings.js';
 import { claudeTurnArgs, clipText, parseTurnOutput } from './claudeCli.js';
 import type {
   ClaudeClearTimer,
@@ -14,7 +15,6 @@ import type {
   ClaudeTurnOutcome,
 } from './claudeProcess.js';
 import { CLAUDE_SPAWN_ENOENT, defaultClaudeSpawn, runClaudeTurn } from './claudeProcess.js';
-
 const TURN_MISSING_MESSAGE =
   'Không tìm thấy Claude Code (lệnh claude). Cài Claude Code rồi thử lại.';
 const TURN_TIMEOUT_MESSAGE = 'Claude Code quá 4 phút chưa trả lời. Thử lại.';
@@ -62,14 +62,14 @@ export function createClaudeTurnRunner(options: ClaudeTurnRunnerOptions): Leader
 
 /** Routes each turn to the engine the settings name when the turn starts. */
 export function createEngineRunner(options: {
-  readonly engine: () => 'omp' | 'claude';
+  readonly engine: () => SquadEngine;
   readonly omp: LeaderRunner;
   readonly claude: LeaderRunner;
+  readonly agy: LeaderRunner;
 }): LeaderRunner {
   return {
     run(prompt, signal) {
-      const runner = options.engine() === 'claude' ? options.claude : options.omp;
-      return runner.run(prompt, signal);
+      return options[options.engine()].run(prompt, signal);
     },
   };
 }

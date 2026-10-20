@@ -22,6 +22,7 @@ import type {
   OmpAgentInfo,
   SquadRun,
   WorkItem,
+  WorkItemAgyRun,
   WorkItemBlocker,
   WorkItemClaudeRun,
   WorkItemConflicts,
@@ -180,8 +181,10 @@ export interface BoardWorkItem {
   conflicts: WorkItemConflicts | null;
   /** Whether the item's assignee is a parked squad session. */
   parked: boolean;
-  /** The Claude Code run on the item; null when no Claude Code run has started on it. */
+  /** The Claude Code run on the item, if any. */
   claudeRun: WorkItemClaudeRun | null;
+  /** The agy run on the item, if any. */
+  agyRun: WorkItemAgyRun | null;
 }
 
 /** A squad run card: what the card shows, read from the run the server holds. */
@@ -284,6 +287,7 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
     conflicts: item.conflicts ?? null,
     parked: isParkedAssignee(item.assignee, workItemsOf(state, workspacePath).parkedSessionIds),
     claudeRun: item.claudeRun ?? null,
+    agyRun: item.agyRun ?? null,
   }));
 }
 

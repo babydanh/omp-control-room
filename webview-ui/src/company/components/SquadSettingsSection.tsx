@@ -11,10 +11,12 @@ import type { ClaudeCodeStatus, SquadSettings } from '../../../../core/src/messa
 import { claudeStatusLabel } from '../claudeCodeView.js';
 import type { CompanyClient } from '../companyClient.js';
 import {
-  brainOf,
   CLAUDE_SETTING_LIMITS,
+  CLI_SETTING_LIMITS,
   permissionOf,
   SQUAD_COUNT_LIMITS,
+  type SquadEngine,
+  squadEngineOf,
   type SquadSettingsDraft,
   squadSettingsDraftOf,
   squadSettingsFromDraft,
@@ -27,9 +29,10 @@ const SAVE_FALLBACK = 'Chưa lưu được cài đặt đội.';
 const FIELD_CLASS =
   'rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-xs text-text disabled:text-text-muted';
 
-const BRAIN_OPTIONS: readonly { value: string; label: string }[] = [
-  { value: 'omp', label: 'omp (mặc định)' },
-  { value: 'claude', label: 'Claude Code (claude -p)' },
+const ENGINE_OPTIONS: readonly { value: SquadEngine; label: string }[] = [
+  { value: 'omp', label: 'omp' },
+  { value: 'claude', label: 'Claude Code' },
+  { value: 'agy', label: 'agy (Antigravity)' },
 ];
 
 const PERMISSION_OPTIONS: readonly { value: string; label: string }[] = [
@@ -104,7 +107,8 @@ function SquadSettingsForm({
   const parallel = SQUAD_COUNT_LIMITS.maxParallel;
   const sessions = SQUAD_COUNT_LIMITS.maxSquadSessions;
   const models = CLAUDE_SETTING_LIMITS.modelChars;
-  const runs = CLAUDE_SETTING_LIMITS.maxClaudeRuns;
+  const claudeRuns = CLI_SETTING_LIMITS.maxClaudeRuns;
+  const agyRuns = CLI_SETTING_LIMITS.maxAgyRuns;
   const turns = CLAUDE_SETTING_LIMITS.claudeMaxTurns;
   const budget = CLAUDE_SETTING_LIMITS.claudeMaxBudgetUsd;
   const tools = CLAUDE_SETTING_LIMITS.claudeAllowedTools;
@@ -170,56 +174,87 @@ function SquadSettingsForm({
         disabled={command.pending}
         onChange={(checked) => setDraft((current) => ({ ...current, autoApproveNext: checked }))}
       />
-      <section aria-labelledby="squad-claude-heading" className="flex flex-col gap-3">
-        <p id="squad-claude-heading" className="text-2xs font-semibold text-text-muted">
-          Claude Code
+      <section aria-labelledby="squad-cli-heading" className="flex flex-col gap-3">
+        <p id="squad-cli-heading" className="text-2xs font-semibold text-text-muted">
+          CLI theo vai trò
         </p>
         <p role="status" data-testid="claude-code-status" className="text-2xs text-text">
           {claudeStatusLabel(claudeStatus)}
         </p>
         <SelectSetting
-          id="squad-setting-brain"
-          label="Bộ não của đội"
-          hint="omp: đội chạy bằng omp như trước. Claude Code: trưởng nhóm và trọng tài chạy qua claude -p."
-          value={draft.brain}
-          options={BRAIN_OPTIONS}
+          id="squad-setting-engine-leader"
+          label="CLI trưởng nhóm"
+          hint="agy dùng model mặc định và quyền trong cấu hình agy."
+          value={draft.engineLeader}
+          options={ENGINE_OPTIONS}
           disabled={command.pending}
-          onChange={(value) => setDraft((current) => ({ ...current, brain: brainOf(value) }))}
+          onChange={(value) =>
+            setDraft((current) => ({ ...current, engineLeader: squadEngineOf(value) }))
+          }
         />
-        <TextSetting
-          id="squad-setting-claude-leader"
-          label="Model của trưởng nhóm"
-          hint={`Tên model Claude, từ ${models.min} đến ${models.max} ký tự. Mặc định: opus.`}
-          value={draft.claudeModelLeader}
+        {draft.engineLeader === 'claude' ? (
+          <TextSetting
+            id="squad-setting-claude-leader"
+            label="Model của trưởng nhóm"
+            hint={`Tên model Claude, từ ${models.min} đến ${models.max} ký tự. Mặc định: opus.`}
+            value={draft.claudeModelLeader}
+            disabled={command.pending}
+            onChange={(value) => setDraft((current) => ({ ...current, claudeModelLeader: value }))}
+          />
+        ) : null}
+        <SelectSetting
+          id="squad-setting-engine-judge"
+          label="CLI trọng tài"
+          hint="agy dùng model mặc định và quyền trong cấu hình agy."
+          value={draft.engineJudge}
+          options={ENGINE_OPTIONS}
           disabled={command.pending}
-          onChange={(value) => setDraft((current) => ({ ...current, claudeModelLeader: value }))}
+          onChange={(value) =>
+            setDraft((current) => ({ ...current, engineJudge: squadEngineOf(value) }))
+          }
         />
-        <TextSetting
-          id="squad-setting-claude-judge"
-          label="Model của trọng tài"
-          hint={`Tên model Claude, từ ${models.min} đến ${models.max} ký tự. Mặc định: sonnet.`}
-          value={draft.claudeModelJudge}
+        {draft.engineJudge === 'claude' ? (
+          <TextSetting
+            id="squad-setting-claude-judge"
+            label="Model của trọng tài"
+            hint={`Tên model Claude, từ ${models.min} đến ${models.max} ký tự. Mặc định: sonnet.`}
+            value={draft.claudeModelJudge}
+            disabled={command.pending}
+            onChange={(value) => setDraft((current) => ({ ...current, claudeModelJudge: value }))}
+          />
+        ) : null}
+        <SelectSetting
+          id="squad-setting-engine-worker"
+          label="CLI nhân viên (việc tự chọn)"
+          hint="agy dùng model và quyền trong cấu hình agy. Claude/agy chỉ chạy khi còn slot; hết slot thì mở phiên omp."
+          value={draft.engineWorker}
+          options={ENGINE_OPTIONS}
           disabled={command.pending}
-          onChange={(value) => setDraft((current) => ({ ...current, claudeModelJudge: value }))}
-        />
-        <ToggleSetting
-          id="squad-setting-prefer-claude"
-          label="Ưu tiên Claude Code cho việc tự chọn"
-          hint="Việc để agent tự chọn sẽ ưu tiên Claude Code trước omp."
-          checked={draft.preferClaude}
-          disabled={command.pending}
-          onChange={(checked) => setDraft((current) => ({ ...current, preferClaude: checked }))}
+          onChange={(value) =>
+            setDraft((current) => ({ ...current, engineWorker: squadEngineOf(value) }))
+          }
         />
         <NumberSetting
           id="squad-setting-max-claude-runs"
           label="Số lần Claude Code chạy cùng lúc"
-          hint={`Từ ${runs.min} đến ${runs.max} lần chạy.`}
+          hint={`Từ ${claudeRuns.min} đến ${claudeRuns.max} lần chạy.`}
           value={draft.maxClaudeRuns}
-          min={runs.min}
-          max={runs.max}
+          min={claudeRuns.min}
+          max={claudeRuns.max}
           step={1}
           disabled={command.pending}
           onChange={(value) => setDraft((current) => ({ ...current, maxClaudeRuns: value }))}
+        />
+        <NumberSetting
+          id="squad-setting-max-agy-runs"
+          label="Số lượt agy chạy cùng lúc"
+          hint={`Từ ${agyRuns.min} đến ${agyRuns.max} lượt chạy.`}
+          value={draft.maxAgyRuns}
+          min={agyRuns.min}
+          max={agyRuns.max}
+          step={1}
+          disabled={command.pending}
+          onChange={(value) => setDraft((current) => ({ ...current, maxAgyRuns: value }))}
         />
         <NumberSetting
           id="squad-setting-claude-max-turns"
