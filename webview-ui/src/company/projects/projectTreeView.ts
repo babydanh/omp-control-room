@@ -55,21 +55,23 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
 
 export interface ProjectTreeFilters {
   agentKind: ProjectTreeNode['agentKind'] | 'all';
-  runningOnly: boolean;
+  /** Hide idle and ended sessions; running ones and ones waiting on you stay. */
+  liveOnly: boolean;
 }
 
-/** Keeps sessions that pass the filters plus their ancestors; with no filter, empty folders stay. */
+/** Filters session rows only: Projects, groups and folders always stay, so a new empty folder is visible. */
 export function filterProjectTree(
   roots: readonly ProjectTreeBranch[],
   filters: ProjectTreeFilters,
 ): ProjectTreeBranch[] {
-  const filtering = filters.agentKind !== 'all' || filters.runningOnly;
   const filterBranch = (branch: ProjectTreeBranch): ProjectTreeBranch | null => {
-    const children = branch.children.map(filterBranch).filter((child): child is ProjectTreeBranch => child !== null);
-    if (branch.node.kind !== 'session') return !filtering || children.length > 0 ? { ...branch, children } : null;
+    if (branch.node.kind !== 'session') {
+      const children = branch.children.map(filterBranch).filter((child): child is ProjectTreeBranch => child !== null);
+      return { ...branch, children };
+    }
     const matched =
       (filters.agentKind === 'all' || branch.node.agentKind === filters.agentKind) &&
-      (!filters.runningOnly || isRunningNode(branch.node));
+      (!filters.liveOnly || isLiveNode(branch.node));
     return matched ? branch : null;
   };
   return roots.map(filterBranch).filter((branch): branch is ProjectTreeBranch => branch !== null);
@@ -88,9 +90,15 @@ export function countSessions(branch: ProjectTreeBranch): { total: number; runni
 }
 
 const RUNNING_STATES: ReadonlySet<string> = new Set(['running', 'busy', 'active', 'working']);
+const WAITING_ON_YOU_STATES: ReadonlySet<string> = new Set(['waiting_input', 'blocked', 'permission']);
 
 export function isRunningNode(node: ProjectTreeNode): boolean {
   return node.kind === 'session' && RUNNING_STATES.has((node.state ?? '').toLowerCase());
+}
+
+/** A session worth showing by default: working now, or stopped waiting for you. */
+export function isLiveNode(node: ProjectTreeNode): boolean {
+  return isRunningNode(node) || (node.kind === 'session' && WAITING_ON_YOU_STATES.has((node.state ?? '').toLowerCase()));
 }
 
 

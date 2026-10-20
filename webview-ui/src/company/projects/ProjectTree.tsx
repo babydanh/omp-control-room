@@ -69,12 +69,13 @@ export function ProjectTree(props: ProjectTreeProps) {
   const { nodes, selectedProjectId, onSelectProject, onCreateNode } = props;
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [agentKind, setAgentKind] = useState<ProjectTreeNode['agentKind'] | 'all'>('all');
-  const [runningOnly, setRunningOnly] = useState(false);
+  // Default view: only sessions that are working or waiting on you; untick to see idle ones too.
+  const [liveOnly, setLiveOnly] = useState(true);
   const tree = useMemo(() => buildAgentTree(nodes), [nodes]);
   const selectedRoots = selectedProjectId === null
     ? tree
     : tree.filter((branch) => branch.node.id === selectedProjectId);
-  const visible = filterProjectTree(selectedRoots, { agentKind, runningOnly });
+  const visible = filterProjectTree(selectedRoots, { agentKind, liveOnly });
   useEffect(() => {
     try {
       window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
@@ -111,7 +112,7 @@ export function ProjectTree(props: ProjectTreeProps) {
           <option value="all">Mọi công cụ</option>
           {AGENT_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
         </select>
-        <label className="flex items-center gap-1"><input type="checkbox" checked={runningOnly} onChange={(event) => setRunningOnly(event.target.checked)} />Đang chạy</label>
+        <label className="flex items-center gap-1" title="Bỏ chọn để xem cả phiên đang rảnh"><input type="checkbox" checked={liveOnly} onChange={(event) => setLiveOnly(event.target.checked)} />Đang hoạt động</label>
       </div>
       <div className="min-h-0 overflow-y-auto">
         {visible.map((branch) => (
@@ -119,7 +120,7 @@ export function ProjectTree(props: ProjectTreeProps) {
         ))}
         {visible.length === 0 && (
           <p className="px-2 py-3 text-2xs text-text-muted">
-            {nodes.length === 0 ? 'Đang tải dự án…' : 'Không có phiên nào khớp bộ lọc.'}
+            {nodes.length === 0 ? 'Đang tải dự án…' : 'Chưa có Project nào.'}
           </p>
         )}
       </div>

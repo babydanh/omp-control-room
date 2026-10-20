@@ -41,19 +41,19 @@ describe('projectTreeView', () => {
     expect(countSessions(roots[0]!)).toEqual({ total: 2, running: 1 });
   });
 
-  it('keeps empty folders without a filter and drops them once a filter is on', () => {
-    const all = filterProjectTree(buildAgentTree(nodes), { agentKind: 'all', runningOnly: false });
-    expect(all[0]?.children.map((child) => child.node.id)).toEqual(['group', 'empty']);
-    const claude = filterProjectTree(buildAgentTree(nodes), { agentKind: 'claude', runningOnly: false });
-    expect(claude.map((entry) => entry.node.id)).toEqual(['project']);
-    expect(claude[0]?.children.map((child) => child.node.id)).toEqual(['group']);
+  it('filters session rows only: folders stay so a new empty folder is always visible', () => {
+    const claude = filterProjectTree(buildAgentTree(nodes), { agentKind: 'claude', liveOnly: false });
+    expect(claude[0]?.children.map((child) => child.node.id)).toEqual(['group', 'empty']);
     expect(claude[0]?.children[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['session']);
+    const agy = filterProjectTree(buildAgentTree(nodes), { agentKind: 'agy', liveOnly: false });
+    expect(agy.map((entry) => entry.node.id)).toEqual(['project', 'other']);
+    expect(agy[0]?.children[0]?.children[0]?.children).toEqual([]);
   });
 
-  it('running filter keeps only running sessions', () => {
-    const running = filterProjectTree(buildAgentTree(nodes), { agentKind: 'all', runningOnly: true });
-    expect(running[0]?.children[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['session']);
-    expect(filterProjectTree(buildAgentTree(nodes), { agentKind: 'agy', runningOnly: false })).toEqual([]);
+  it('live filter hides idle sessions and keeps running ones and ones waiting on you', () => {
+    const waiting = node('waiting', 'session', 'checkout', { agentKind: 'claude', state: 'waiting_input' });
+    const live = filterProjectTree(buildAgentTree([...nodes, waiting]), { agentKind: 'all', liveOnly: true });
+    expect(live[0]?.children[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['session', 'waiting']);
   });
 
   it('provides menu actions for each node category', () => {
