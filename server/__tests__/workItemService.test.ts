@@ -28,7 +28,7 @@ import {
   WorkItemService,
   type WorkItemSessionView,
 } from '../src/company/workItems/workItemService.js';
-import { FakeClaudeAuth, FakeClaudeRuns } from './fakeClaude.js';
+import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
 const PANE_A = 'wA:p1';
@@ -77,6 +77,7 @@ class Fixture {
   now = T0;
   readonly claude = new FakeClaudeRuns();
   readonly claudeAuth = new FakeClaudeAuth();
+  readonly claudeMcp = new FakeClaudeMcp();
   private timers: Timer[] = [];
   readonly service: WorkItemService;
 
@@ -145,6 +146,7 @@ class Fixture {
       boardWatching: () => false,
       claude: this.claude,
       claudeAuth: this.claudeAuth,
+      claudeMcp: this.claudeMcp,
     });
   }
 

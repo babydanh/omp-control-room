@@ -12,7 +12,7 @@ import {
 import { GIB, SQUAD_SETTINGS_DEFAULT } from '../src/company/workItems/squadSettings.js';
 import { parseWorkItemsFile } from '../src/company/workItems/workItemModel.js';
 import { WorkItemService } from '../src/company/workItems/workItemService.js';
-import { FakeClaudeAuth, FakeClaudeRuns } from './fakeClaude.js';
+import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
 const WORKSPACE = '/work/folder';
@@ -100,6 +100,7 @@ class JudgeFixture {
       boardWatching: () => this.watching,
       claude: new FakeClaudeRuns(),
       claudeAuth: new FakeClaudeAuth(),
+      claudeMcp: new FakeClaudeMcp(),
     });
   }
 

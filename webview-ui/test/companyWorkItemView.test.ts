@@ -48,6 +48,7 @@ const SETTINGS: SquadSettings = {
   claudeMaxBudgetUsd: 3,
   claudePermission: 'auto',
   claudeAllowedTools: [],
+  claudeWorkerMcp: [],
 };
 
 function item(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {
@@ -86,6 +87,7 @@ function withWorkItems(
     repos: [],
     agents: [],
     settings: SETTINGS,
+    claudeMcpServers: [],
   }).state;
 }
 
@@ -218,6 +220,7 @@ describe('workItemsOf and roleDescriptionFor', () => {
       items: [],
       parkedSessionIds: [],
       claudeStatus: null,
+      claudeMcpServers: [],
       roles: [],
       repos: [],
       agents: [],

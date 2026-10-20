@@ -44,6 +44,8 @@ export interface SquadSettingsSectionProps {
   settings: SquadSettings | null;
   /** The folder's last Claude Code check; null until a snapshot carries one. */
   claudeStatus: ClaudeCodeStatus | null;
+  /** The server names the user's Claude config defines for this folder, sorted. */
+  claudeMcpServers: string[];
 }
 
 /** The squad settings, closed by default. The form re-mounts when the server's values change. */
@@ -52,6 +54,7 @@ export function SquadSettingsSection({
   workspacePath,
   settings,
   claudeStatus,
+  claudeMcpServers,
 }: SquadSettingsSectionProps) {
   return (
     <details
@@ -73,6 +76,7 @@ export function SquadSettingsSection({
           workspacePath={workspacePath}
           settings={settings}
           claudeStatus={claudeStatus}
+          claudeMcpServers={claudeMcpServers}
         />
       )}
     </details>
@@ -84,6 +88,7 @@ interface SquadSettingsFormProps {
   workspacePath: string;
   settings: SquadSettings;
   claudeStatus: ClaudeCodeStatus | null;
+  claudeMcpServers: string[];
 }
 
 function SquadSettingsForm({
@@ -91,6 +96,7 @@ function SquadSettingsForm({
   workspacePath,
   settings,
   claudeStatus,
+  claudeMcpServers,
 }: SquadSettingsFormProps) {
   const command = useCommandDialog(client);
   const [draft, setDraft] = useState<SquadSettingsDraft>(() => squadSettingsDraftOf(settings));
@@ -255,6 +261,15 @@ function SquadSettingsForm({
           value={draft.claudeAllowedTools}
           disabled={command.pending}
           onChange={(value) => setDraft((current) => ({ ...current, claudeAllowedTools: value }))}
+        />
+        <WorkerMcpSetting
+          id="squad-setting-claude-worker-mcp"
+          names={claudeMcpServers}
+          selected={draft.claudeWorkerMcp}
+          disabled={command.pending}
+          onChange={(selected) =>
+            setDraft((current) => ({ ...current, claudeWorkerMcp: selected }))
+          }
         />
       </section>
       {reading.ok ? null : (
@@ -458,5 +473,61 @@ function ToggleSetting({ id, label, hint, checked, disabled, onChange }: ToggleS
         {hint}
       </p>
     </div>
+  );
+}
+
+interface WorkerMcpSettingProps {
+  id: string;
+  /** The server names the user's Claude config defines for this folder. */
+  names: readonly string[];
+  /** The names the squad has chosen. One the config no longer defines still shows, to clear. */
+  selected: readonly string[];
+  disabled: boolean;
+  onChange(selected: string[]): void;
+}
+
+/** The MCP servers a worker run may load, as toggle chips. Nothing is chosen by default. */
+function WorkerMcpSetting({ id, names, selected, disabled, onChange }: WorkerMcpSettingProps) {
+  const missing = selected.filter((name) => !names.includes(name));
+  const shown = [...names, ...missing];
+  const hintId = `${id}-hint`;
+
+  function toggle(name: string): void {
+    const next = selected.includes(name)
+      ? selected.filter((entry) => entry !== name)
+      : [...selected, name];
+    onChange(next);
+  }
+
+  return (
+    <fieldset className="flex flex-col gap-1.5" disabled={disabled} aria-describedby={hintId}>
+      <legend className="text-2xs font-semibold text-text-muted">
+        Máy chủ MCP cho việc chạy Claude Code
+      </legend>
+      <p id={hintId} className="text-2xs text-text-muted">
+        Chỉ máy chủ được chọn mới được nạp khi chạy việc, không nạp máy chủ khác trong cấu hình.
+        Máy chủ có token ghi thẳng trong cấu hình (headers, hoặc biến môi trường như TOKEN, KEY,
+        SECRET) không hiện ở đây. Mặc định: không máy chủ nào.
+      </p>
+      {shown.length === 0 ? (
+        <p className="text-2xs text-text-muted">
+          Không tìm thấy máy chủ MCP nào trong cấu hình Claude Code trên máy này.
+        </p>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {shown.map((name) => (
+            <button
+              key={name}
+              type="button"
+              aria-pressed={selected.includes(name)}
+              className="company-toggle touch-target max-w-full truncate text-xs"
+              onClick={() => toggle(name)}
+            >
+              {missing.includes(name) ? `${name} (không còn dùng được)` : name}
+            </button>
+          ))}
+        </div>
+      )}
+    </fieldset>
   );
 }

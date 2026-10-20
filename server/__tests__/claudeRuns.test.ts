@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { claudeRunArgs } from '../src/company/claudeCode/claudeCli.js';
 import {
@@ -10,6 +11,7 @@ import {
 } from '../src/company/claudeCode/claudeRuns.js';
 
 const SESSION = '6f1c2b1e-0000-4000-8000-000000000001';
+const MCP_CONFIG = '{"mcpServers":{"github":{"command":"gh-mcp"}}}';
 const START: ClaudeRunStart = {
   cwd: 'V:/repo/wt',
   prompt: 'Sửa lỗi',
@@ -20,8 +22,24 @@ const START: ClaudeRunStart = {
   resume: false,
   maxTurns: 40,
   maxBudgetUsd: 3,
+  mcpConfig: MCP_CONFIG,
 };
 const RUN_MISSING = 'Không tìm thấy lệnh claude. Cài Claude Code rồi chạy lại.';
+
+/** Config files the tests' runs wrote. Removed after each test, so an open run leaves no file. */
+const configPaths = new Set<string>();
+
+afterEach(() => {
+  for (const path of configPaths) rmSync(path, { force: true });
+  configPaths.clear();
+});
+
+/** Records the config path a fake spawn was given, so the cleanup above can remove it. */
+function remember(args: readonly string[]): void {
+  const at = args.indexOf('--mcp-config');
+  const path = at < 0 ? undefined : args[at + 1];
+  if (path !== undefined) configPaths.add(path);
+}
 
 class FakeStdin extends EventEmitter {
   readonly chunks: string[] = [];
@@ -84,6 +102,15 @@ interface SpawnCall {
   readonly cwd: string;
 }
 
+/** The `--mcp-config` path the first spawn was given. Fails the test when there is none. */
+function mcpConfigPathOf(spawns: readonly SpawnCall[]): string {
+  const argv = spawns[0]?.args ?? [];
+  const at = argv.indexOf('--mcp-config');
+  const path = at < 0 ? undefined : argv[at + 1];
+  if (path === undefined) throw new Error('the first spawn had no --mcp-config path');
+  return path;
+}
+
 function harness(extra: Partial<ClaudeRunsOptions> = {}) {
   const spawns: SpawnCall[] = [];
   const child = new FakeChild(4321);
@@ -93,6 +120,7 @@ function harness(extra: Partial<ClaudeRunsOptions> = {}) {
   const runs = createClaudeRuns({
     spawn: (file, args, options) => {
       spawns.push({ file, args: [...args], cwd: options.cwd });
+      remember(args);
       return child;
     },
     killTree: (pid) => {
@@ -141,6 +169,7 @@ describe('createClaudeRuns start', () => {
           resume: false,
           maxTurns: 40,
           maxBudgetUsd: 3,
+          mcpConfigPath: mcpConfigPathOf(spawns),
         }),
         cwd: 'V:/repo/wt',
       },
@@ -167,6 +196,7 @@ describe('createClaudeRuns start', () => {
       resume: false,
       maxTurns: 40,
       maxBudgetUsd: 3,
+      mcpConfigPath: mcpConfigPathOf(spawns),
     });
     expect(spawns).toEqual([{ file: 'claude', args, cwd: 'V:/repo/wt' }]);
     expect(args).not.toContain('--allowedTools');
@@ -362,5 +392,74 @@ describe('createClaudeRuns forget', () => {
     runs.forget(runId);
     expect(killed).toEqual([4321]);
     expect(runs.view(runId)).toBeUndefined();
+  });
+});
+
+describe('createClaudeRuns MCP config file', () => {
+  it('writes the config to a file the argv names, and removes it when the run finishes', () => {
+    const { runs, child, spawns } = harness();
+    const { runId } = runs.start(START);
+    const path = mcpConfigPathOf(spawns);
+    expect(path).toContain('run-1');
+    expect(readFileSync(path, 'utf8')).toBe(MCP_CONFIG);
+    expect(JSON.stringify(spawns)).not.toContain('gh-mcp');
+    child.stdout.emit('data', Buffer.from(resultLine('xong')));
+    child.emit('close', 0);
+    expect(runs.view(runId)).toMatchObject({ state: 'finished' });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it.runIf(process.platform !== 'win32')('creates the file readable by this user only', () => {
+    const { runs, spawns } = harness();
+    runs.start(START);
+    expect(statSync(mcpConfigPathOf(spawns)).mode & 0o777).toBe(0o600);
+  });
+
+  it('removes the file when the run is killed', () => {
+    const { runs, spawns } = harness();
+    const { runId } = runs.start(START);
+    const path = mcpConfigPathOf(spawns);
+    runs.kill(runId);
+    expect(runs.view(runId)).toMatchObject({ state: 'killed' });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('removes the file when a running run is forgotten', () => {
+    const { runs, spawns } = harness();
+    const { runId } = runs.start(START);
+    const path = mcpConfigPathOf(spawns);
+    runs.forget(runId);
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('removes the file when the run times out', () => {
+    const { runs, spawns, timers } = harness();
+    const { runId } = runs.start(START);
+    const path = mcpConfigPathOf(spawns);
+    timers.fire();
+    expect(runs.view(runId)).toMatchObject({ state: 'timeout' });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('removes the file when the process reports an error', () => {
+    const { runs, child, spawns } = harness();
+    const { runId } = runs.start(START);
+    const path = mcpConfigPathOf(spawns);
+    child.emit('error', Object.assign(new Error('spawn claude EACCES'), { code: 'EACCES' }));
+    expect(runs.view(runId)).toMatchObject({ state: 'failed' });
+    expect(existsSync(path)).toBe(false);
+  });
+
+  it('removes the file when spawn throws at once', () => {
+    const seen: SpawnCall[] = [];
+    const { runs } = harness({
+      spawn: (file, args, options) => {
+        seen.push({ file, args: [...args], cwd: options.cwd });
+        throw Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' });
+      },
+    });
+    const { runId } = runs.start(START);
+    expect(runs.view(runId)).toMatchObject({ state: 'failed', error: RUN_MISSING });
+    expect(existsSync(mcpConfigPathOf(seen))).toBe(false);
   });
 });

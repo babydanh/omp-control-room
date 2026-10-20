@@ -37,6 +37,7 @@ const SETTINGS: SquadSettings = {
   claudeMaxBudgetUsd: 3,
   claudePermission: 'auto',
   claudeAllowedTools: ['Bash(git status*)', 'Bash(npm run *)'],
+  claudeWorkerMcp: ['github'],
 };
 
 /** The draft the form holds once a person has changed the given fields of the saved settings. */
@@ -213,6 +214,16 @@ describe('squadSettingsFromDraft for the Claude Code settings', () => {
     const many = Array.from({ length: 33 }, (_, index) => `Bash(cmd${index}*)`).join('\n');
     expect(squadSettingsFromDraft(draftWith({ claudeAllowedTools: many })).ok).toBe(false);
   });
+
+  it('reads the chosen MCP servers back, and refuses a list longer than 32 or a blank name', () => {
+    expect(squadSettingsFromDraft(draftWith({ claudeWorkerMcp: ['docs'] }))).toMatchObject({
+      ok: true,
+      settings: { claudeWorkerMcp: ['docs'] },
+    });
+    const many = Array.from({ length: 33 }, (_, index) => `server-${index}`);
+    expect(squadSettingsFromDraft(draftWith({ claudeWorkerMcp: many })).ok).toBe(false);
+    expect(squadSettingsFromDraft(draftWith({ claudeWorkerMcp: [''] })).ok).toBe(false);
+  });
 });
 
 describe('the folder Claude Code status in work items', () => {
@@ -230,6 +241,7 @@ describe('the folder Claude Code status in work items', () => {
       repos: [],
       agents: [],
       settings: SETTINGS,
+      claudeMcpServers: [],
       claudeStatus: { state: 'signed_in' },
     }).state;
     expect(workItemsOf(state, ACTIVE).claudeStatus).toEqual({ state: 'signed_in' });
@@ -245,6 +257,7 @@ describe('the folder Claude Code status in work items', () => {
       repos: [],
       agents: [],
       settings: SETTINGS,
+      claudeMcpServers: [],
     }).state;
     const answered = applyCompanyMessage(first, {
       type: 'companyWorkItems',
@@ -255,6 +268,7 @@ describe('the folder Claude Code status in work items', () => {
       repos: [],
       agents: [],
       settings: SETTINGS,
+      claudeMcpServers: [],
       claudeStatus: { state: 'missing' },
     }).state;
     expect(workItemsOf(answered, ACTIVE).claudeStatus).toEqual({ state: 'missing' });
@@ -271,6 +285,7 @@ describe('the folder Claude Code status in work items', () => {
       repos: [],
       agents: [],
       settings: SETTINGS,
+      claudeMcpServers: [],
       claudeStatus: { state: 'signed_out' },
     }).state;
     const newer = applyCompanyMessage(held, {
@@ -282,8 +297,39 @@ describe('the folder Claude Code status in work items', () => {
       repos: [],
       agents: [],
       settings: SETTINGS,
+      claudeMcpServers: [],
     }).state;
     expect(workItemsOf(newer, ACTIVE).claudeStatus).toEqual({ state: 'signed_out' });
     expect(workItemsOf(newer, ACTIVE).revision).toBe(2);
+  });
+});
+
+describe('the MCP server names in work items', () => {
+  it('stores the names a snapshot carries, even under a repeated revision', () => {
+    const first = applyCompanyMessage(stateFrom(), {
+      type: 'companyWorkItems',
+      workspacePath: ACTIVE,
+      revision: 1,
+      items: [],
+      roles: [],
+      repos: [],
+      agents: [],
+      settings: SETTINGS,
+      claudeMcpServers: ['docs'],
+    }).state;
+    expect(workItemsOf(first, ACTIVE).claudeMcpServers).toEqual(['docs']);
+    const renamed = applyCompanyMessage(first, {
+      type: 'companyWorkItems',
+      workspacePath: ACTIVE,
+      revision: 1,
+      items: [],
+      roles: [],
+      repos: [],
+      agents: [],
+      settings: SETTINGS,
+      claudeMcpServers: ['docs', 'github'],
+    }).state;
+    expect(workItemsOf(renamed, ACTIVE).claudeMcpServers).toEqual(['docs', 'github']);
+    expect(workItemsOf(renamed, ACTIVE).revision).toBe(1);
   });
 });

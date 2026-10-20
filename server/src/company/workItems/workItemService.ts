@@ -44,6 +44,7 @@ import {
   WORK_ITEM_PRIORITY_DEFAULT,
 } from '../../../../core/src/workItemGraph.js';
 import type { ClaudeAuthProbe } from '../claudeCode/claudeAuth.js';
+import type { ClaudeMcpSource } from '../claudeCode/claudeMcpSource.js';
 import type { ClaudeRuns,ClaudeRunView } from '../claudeCode/claudeRuns.js';
 import { CompanyError } from '../companyError.js';
 import { BUNDLED_AGENTS, findAgent } from './agentCatalog.js';
@@ -230,6 +231,8 @@ export interface WorkItemPorts {
   readonly claude: ClaudeRuns;
   /** Claude Code's auth status, read from `claude auth status` and cached. */
   readonly claudeAuth: ClaudeAuthProbe;
+  /** The user's Claude MCP servers: the names the squad lists, and a worker run's config. */
+  readonly claudeMcp: ClaudeMcpSource;
 }
 
 /** A command the board sent. The request id makes a resent command harmless. */
@@ -420,6 +423,7 @@ export class WorkItemService {
       roles: this.roles.map((role) => ({ ...role, agent: { ...role.agent } })),
       settings: { ...this.settings },
       claudeStatus: this.ports.claudeAuth.current(),
+      claudeMcpServers: this.ports.claudeMcp.names([this.workspacePath, ...this.catalog.repos]),
       repos: [...this.catalog.repos],
       agents: this.catalog.agents.map((agent) => ({ ...agent })),
       parkedSessionIds: this.squadSessionIds.filter((id) =>
@@ -1676,6 +1680,10 @@ export class WorkItemService {
       permission: this.settings.claudePermission,
       allowedTools: this.settings.claudeAllowedTools,
       maxBudgetUsd: this.settings.claudeMaxBudgetUsd,
+      mcpConfig: this.ports.claudeMcp.configFor(
+        item.repo ?? this.workspacePath,
+        this.settings.claudeWorkerMcp,
+      ),
     });
     item.claudeRunId = started.runId;
     if (started.pid === undefined) delete item.claudeRunPid;

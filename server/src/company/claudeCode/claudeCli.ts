@@ -28,6 +28,8 @@ export interface ClaudeRunArgs {
   readonly agent?: string;
   readonly maxTurns: number;
   readonly maxBudgetUsd: number;
+  /** The `--mcp-config` file the run loads, and only it. Its JSON never goes in argv. */
+  readonly mcpConfigPath: string;
 }
 
 /** One event read from a stream-json line. */
@@ -86,7 +88,8 @@ export const CLAUDE_DENIED_TOOLS: readonly string[] = [
 /**
  * The argv for one item run. An editing run starts in its permission mode and may use the allowed
  * tools without asking; a read-only run only plans and gets no allowlist. Permission prompts are
- * off, so a run never waits on a person. The prompt goes on stdin.
+ * off, so a run never waits on a person. The run loads only the MCP servers in its config file, so
+ * the user's other servers stay out. The prompt goes on stdin.
  */
 export function claudeRunArgs(args: ClaudeRunArgs): string[] {
   const edit = args.mode === 'edit';
@@ -103,6 +106,9 @@ export function claudeRunArgs(args: ClaudeRunArgs): string[] {
     String(args.maxTurns),
     '--max-budget-usd',
     String(args.maxBudgetUsd),
+    '--strict-mcp-config',
+    '--mcp-config',
+    args.mcpConfigPath,
     '--disallowedTools',
     ...CLAUDE_DENIED_TOOLS,
     // --allowedTools reads its values up to the next flag, so the flags after it start with `--`.
@@ -116,7 +122,8 @@ export function claudeRunArgs(args: ClaudeRunArgs): string[] {
  * The argv for one leader or judge turn: print mode, no tools, no saved session, and one answer
  * checked against the schema. Two turns allow for a structured-output retry. The prompt goes on stdin.
  * `--tools ""` only removes built-in tools; MCP tools stay unless the turn also loads no MCP server
- * (`--strict-mcp-config` with an empty config) and denies every `mcp__` tool.
+ * (`--strict-mcp-config` with an empty config) and denies every `mcp__` tool. `--disable-slash-commands`
+ * turns off skills and commands, which a one-answer turn never uses.
  */
 export function claudeTurnArgs(input: {
   readonly model: string;
@@ -132,6 +139,7 @@ export function claudeTurnArgs(input: {
     '--disallowedTools',
     'mcp__*',
     '--no-session-persistence',
+    '--disable-slash-commands',
     '--output-format',
     'json',
     '--json-schema',

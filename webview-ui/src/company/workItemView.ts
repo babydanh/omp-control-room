@@ -49,6 +49,8 @@ export interface FolderWorkItems {
   parkedSessionIds: string[];
   /** The last Claude Code install and sign-in check the server sent for this folder; null until one arrives. */
   claudeStatus: ClaudeCodeStatus | null;
+  /** The MCP server names the user's Claude config defines for this folder, sorted. */
+  claudeMcpServers: string[];
 }
 
 /** Names one work item. Ids are unique within a folder, so the folder is part of the name. */
@@ -468,6 +470,7 @@ export function workItemsOf(state: CompanyViewState, workspacePath: string): Fol
       settings: null,
       parkedSessionIds: [],
       claudeStatus: null,
+      claudeMcpServers: [],
     }
   );
 }

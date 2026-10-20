@@ -5,11 +5,13 @@
 
 import { randomUUID } from 'node:crypto';
 import { freemem, homedir } from 'node:os';
+import { join } from 'node:path';
 
 import type { CompanyWorkItemsMessage, LedgerOverlapScan } from '../../../../core/src/messages.js';
 import type { HerdrLink } from '../../herdr/herdrLink.js';
 import { loadClaudeAgentNames } from '../claudeCode/claudeAgents.js';
 import { createClaudeAuthProbe } from '../claudeCode/claudeAuth.js';
+import { createClaudeMcpSource } from '../claudeCode/claudeMcpSource.js';
 import { createClaudeRuns } from '../claudeCode/claudeRuns.js';
 import type { CompanyCoordinator } from '../companyCoordinator.js';
 import type { LeaderRunner } from '../squad/squadRunner.js';
@@ -187,6 +189,7 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     boardWatching: () => options.ledger.watched(),
     claude: createClaudeRuns({ newRunId: () => randomUUID() }),
     claudeAuth: createClaudeAuthProbe(),
+    claudeMcp: createClaudeMcpSource({ configPath: join(homedir(), '.claude.json') }),
   });
   await service.load();
   const unsubscribe = options.herdr?.onAgents(() => service.scheduleReconcile());

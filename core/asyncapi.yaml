@@ -4084,7 +4084,7 @@ components:
     SquadSettings:
       type: object
       additionalProperties: false
-      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, brain, claudeModelLeader, claudeModelJudge, preferClaude, maxClaudeRuns, claudeMaxTurns, claudeMaxBudgetUsd, claudePermission, claudeAllowedTools]
+      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, brain, claudeModelLeader, claudeModelJudge, preferClaude, maxClaudeRuns, claudeMaxTurns, claudeMaxBudgetUsd, claudePermission, claudeAllowedTools, claudeWorkerMcp]
       description: >-
         Per-folder limits for the squad scheduler. maxParallel caps running work items in the folder.
         maxSquadSessions caps the omp sessions the squad opens. minFreeRamGb is the free memory needed before
@@ -4151,6 +4151,17 @@ components:
           description: >-
             Tool patterns an editing Claude Code run may use without asking, passed as --allowedTools, such as
             Bash(git status*). Read-only runs get none.
+        claudeWorkerMcp:
+          type: array
+          maxItems: 32
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: >-
+            Names of the MCP servers a Claude Code worker run loads, copied from the user's Claude config. Every
+            other server is left out of the run. Empty by default, so a worker run loads no MCP server.
 
     ClaudeCodeStatus:
       type: object
@@ -4191,7 +4202,7 @@ components:
     CompanyWorkItemsMessage:
       type: object
       additionalProperties: false
-      required: [type, workspacePath, revision, items, roles, settings, repos, agents]
+      required: [type, workspacePath, revision, items, roles, settings, repos, agents, claudeMcpServers]
       description: >-
         One folder's work items and agent role notes, sent in full after every change to them and in
         answer to a snapshot request. A message replaces the folder's earlier one when its revision is newer.
@@ -4217,6 +4228,16 @@ components:
           $ref: '#/components/schemas/SquadSettings'
         claudeStatus:
           $ref: '#/components/schemas/ClaudeCodeStatus'
+        claudeMcpServers:
+          type: array
+          maxItems: 200
+          description: >-
+            Names of the MCP servers the user's Claude config defines at the top level and for this folder's
+            paths. The squad settings list them as chips. Names only: server entries never leave the server.
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
         parkedSessionIds:
           type: array
           maxItems: 200

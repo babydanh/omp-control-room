@@ -22,6 +22,8 @@ export const CLAUDE_SETTING_LIMITS = {
   claudeMaxBudgetUsd: { min: 0.1, max: 50 },
   /** How many tool patterns an editing run may allow, and how long each may be. */
   claudeAllowedTools: { maxCount: 32, maxChars: 120 },
+  /** How many MCP servers a worker run may load, and how long each name may be. */
+  claudeWorkerMcp: { maxCount: 32, maxChars: 64 },
 } as const;
 
 /** A tool pattern `--allowedTools` takes: a tool name, optionally with one parenthesised argument. */
@@ -44,6 +46,8 @@ export interface SquadSettingsDraft {
   claudePermission: SquadSettings['claudePermission'];
   /** One tool pattern per line, as the form shows them. */
   claudeAllowedTools: string;
+  /** The MCP servers a worker run loads: the names the form's chips have chosen. */
+  claudeWorkerMcp: string[];
 }
 
 /** The outcome of reading a draft: the settings to save, or the reason they cannot be saved. */
@@ -77,6 +81,7 @@ export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraf
     claudeMaxBudgetUsd: String(settings.claudeMaxBudgetUsd),
     claudePermission: settings.claudePermission,
     claudeAllowedTools: settings.claudeAllowedTools.join('\n'),
+    claudeWorkerMcp: [...settings.claudeWorkerMcp],
   };
 }
 
@@ -189,6 +194,19 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
       reason: `Quyền công cụ "${badTool}" không hợp lệ. Mỗi dòng là một quyền, ví dụ Bash(git status*) hoặc Edit.`,
     };
   }
+  const mcpLimits = CLAUDE_SETTING_LIMITS.claudeWorkerMcp;
+  if (draft.claudeWorkerMcp.length > mcpLimits.maxCount) {
+    return {
+      ok: false,
+      reason: `Máy chủ MCP cho Claude Code có tối đa ${mcpLimits.maxCount} máy chủ.`,
+    };
+  }
+  const badServer = draft.claudeWorkerMcp.find(
+    (name) => name.length < 1 || name.length > mcpLimits.maxChars,
+  );
+  if (badServer !== undefined) {
+    return { ok: false, reason: `Tên máy chủ MCP có từ 1 đến ${mcpLimits.maxChars} ký tự.` };
+  }
   return {
     ok: true,
     settings: {
@@ -206,6 +224,7 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
       claudeMaxBudgetUsd,
       claudePermission: draft.claudePermission,
       claudeAllowedTools,
+      claudeWorkerMcp: [...draft.claudeWorkerMcp],
     },
   };
 }

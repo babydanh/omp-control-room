@@ -21,6 +21,7 @@ const VALID = {
   claudeMaxBudgetUsd: 3,
   claudePermission: 'auto',
   claudeAllowedTools: ['Bash(git status*)', 'Bash(npm run *)'],
+  claudeWorkerMcp: ['github'],
 };
 
 describe('parseSquadSettings', () => {
@@ -57,6 +58,7 @@ describe('parseSquadSettings', () => {
       claudeMaxBudgetUsd: SQUAD_SETTINGS_DEFAULT.claudeMaxBudgetUsd,
       claudePermission: SQUAD_SETTINGS_DEFAULT.claudePermission,
       claudeAllowedTools: SQUAD_SETTINGS_DEFAULT.claudeAllowedTools,
+      claudeWorkerMcp: SQUAD_SETTINGS_DEFAULT.claudeWorkerMcp,
     });
   });
 
@@ -92,6 +94,27 @@ describe('parseSquadSettings', () => {
     parseSquadSettings(undefined).claudeAllowedTools.push('Edit');
     expect(SQUAD_SETTINGS_DEFAULT.claudeAllowedTools).not.toContain('Edit');
   });
+
+  it('keeps valid, unique MCP server names and drops the rest', () => {
+    expect(
+      parseSquadSettings({ claudeWorkerMcp: ['github', 'github', '', 42, 'x'.repeat(65), 'docs'] })
+        .claudeWorkerMcp,
+    ).toEqual(['github', 'docs']);
+  });
+
+  it('defaults the worker MCP list to none, and to none when the stored value is not a list', () => {
+    expect(parseSquadSettings(undefined).claudeWorkerMcp).toEqual([]);
+    expect(parseSquadSettings({ claudeWorkerMcp: 'github' }).claudeWorkerMcp).toEqual([]);
+  });
+
+  it('caps the worker MCP list at 32 names and gives each caller its own copy', () => {
+    const many = Array.from({ length: 40 }, (_, index) => `server-${index}`);
+    const kept = parseSquadSettings({ claudeWorkerMcp: many }).claudeWorkerMcp;
+    expect(kept).toHaveLength(32);
+    expect(kept[0]).toBe('server-0');
+    parseSquadSettings(undefined).claudeWorkerMcp.push('github');
+    expect(SQUAD_SETTINGS_DEFAULT.claudeWorkerMcp).toEqual([]);
+  });
 });
 
 describe('isSquadSettings', () => {
@@ -125,5 +148,14 @@ describe('isSquadSettings', () => {
     expect(isSquadSettings({ ...VALID, claudeAllowedTools: [] })).toBe(true);
     const many = Array.from({ length: 33 }, (_, index) => `Bash(cmd${index}*)`);
     expect(isSquadSettings({ ...VALID, claudeAllowedTools: many })).toBe(false);
+  });
+
+  it('accepts an empty MCP list and refuses names that are not strings, too long, or repeated', () => {
+    expect(isSquadSettings({ ...VALID, claudeWorkerMcp: [] })).toBe(true);
+    expect(isSquadSettings({ ...VALID, claudeWorkerMcp: ['github', 'github'] })).toBe(false);
+    expect(isSquadSettings({ ...VALID, claudeWorkerMcp: [''] })).toBe(false);
+    expect(isSquadSettings({ ...VALID, claudeWorkerMcp: ['x'.repeat(65)] })).toBe(false);
+    expect(isSquadSettings({ ...VALID, claudeWorkerMcp: [42] })).toBe(false);
+    expect(isSquadSettings({ ...VALID, claudeWorkerMcp: undefined })).toBe(false);
   });
 });

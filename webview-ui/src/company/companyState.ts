@@ -814,11 +814,20 @@ function applyWorkItems(
   const key = folderKeyOf(message);
   const held: FolderWorkItems | undefined = state.workItems[key];
   if (held !== undefined && message.revision <= held.revision) {
-    // A repeated revision adds nothing, except the Claude Code check the board asked for.
-    if (message.claudeStatus === undefined) return state;
+    // A repeated revision adds nothing, except a new Claude Code check or changed MCP names.
+    const servers = [...(message.claudeMcpServers ?? [])];
+    const mcpChanged = JSON.stringify(held.claudeMcpServers) !== JSON.stringify(servers);
+    if (message.claudeStatus === undefined && !mcpChanged) return state;
     return {
       ...state,
-      workItems: { ...state.workItems, [key]: { ...held, claudeStatus: message.claudeStatus } },
+      workItems: {
+        ...state.workItems,
+        [key]: {
+          ...held,
+          claudeStatus: message.claudeStatus ?? held.claudeStatus,
+          claudeMcpServers: servers,
+        },
+      },
     };
   }
   return {
@@ -834,6 +843,7 @@ function applyWorkItems(
         settings: message.settings ?? null,
         parkedSessionIds: [...(message.parkedSessionIds ?? [])],
         claudeStatus: message.claudeStatus ?? held?.claudeStatus ?? null,
+        claudeMcpServers: [...(message.claudeMcpServers ?? [])],
       },
     },
   };

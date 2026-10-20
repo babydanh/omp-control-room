@@ -6,6 +6,7 @@
  */
 
 import type { SquadSettings } from '../../../../core/src/messages.js';
+import { isClaudeMcpServerName } from '../claudeCode/claudeMcp.js';
 import { isRecord } from '../typeGuards.js';
 
 /** Bytes in one gibibyte, the unit the RAM threshold is kept in. */
@@ -59,6 +60,7 @@ export const SQUAD_SETTINGS_DEFAULT: SquadSettings = {
   claudeMaxBudgetUsd: 3,
   claudePermission: 'auto',
   claudeAllowedTools: [...CLAUDE_ALLOWED_TOOLS_DEFAULT],
+  claudeWorkerMcp: [],
 };
 
 /** Inclusive bounds the contract allows for each numeric setting. */
@@ -73,6 +75,9 @@ export const SQUAD_SETTINGS_BOUNDS = {
 
 /** How many tool patterns a folder may allow, and how long each may be. */
 export const CLAUDE_ALLOWED_TOOL_LIMITS = { maxCount: 32, maxLength: 120 } as const;
+
+/** How many MCP servers a worker run may load: the most the squad keeps. */
+export const CLAUDE_WORKER_MCP_LIMITS = { maxCount: 32 } as const;
 
 function isIntegerIn(value: unknown, min: number, max: number): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value >= min && value <= max;
@@ -117,6 +122,24 @@ function parseAllowedTools(value: unknown, fallback: readonly string[]): string[
   return items.filter(isClaudeAllowedTool).slice(0, CLAUDE_ALLOWED_TOOL_LIMITS.maxCount);
 }
 
+/** Whether a worker's MCP server list is in range: a count limit, names only, none repeated. */
+function isClaudeWorkerMcp(value: unknown): value is string[] {
+  return (
+    Array.isArray(value) &&
+    value.length <= CLAUDE_WORKER_MCP_LIMITS.maxCount &&
+    value.every(isClaudeMcpServerName) &&
+    new Set(value).size === value.length
+  );
+}
+
+/** Keeps each valid stored server name once, in order; anything but a list keeps none. */
+function parseWorkerMcp(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const items: unknown[] = value;
+  const names = [...new Set(items.filter(isClaudeMcpServerName))];
+  return names.slice(0, CLAUDE_WORKER_MCP_LIMITS.maxCount);
+}
+
 /** Whether a command's settings are complete and in range. */
 export function isSquadSettings(value: unknown): value is SquadSettings {
   if (!isRecord(value)) return false;
@@ -142,14 +165,21 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
     isIntegerIn(value.claudeMaxTurns, claudeMaxTurns.min, claudeMaxTurns.max) &&
     isNumberIn(value.claudeMaxBudgetUsd, claudeMaxBudgetUsd.min, claudeMaxBudgetUsd.max) &&
     isClaudePermission(value.claudePermission) &&
-    isClaudeAllowedTools(value.claudeAllowedTools)
+    isClaudeAllowedTools(value.claudeAllowedTools) &&
+    isClaudeWorkerMcp(value.claudeWorkerMcp)
   );
 }
 
 /** Reads a stored settings object, keeping each valid field and defaulting the rest. */
 export function parseSquadSettings(value: unknown): SquadSettings {
   const base = SQUAD_SETTINGS_DEFAULT;
-  if (!isRecord(value)) return { ...base, claudeAllowedTools: [...base.claudeAllowedTools] };
+  if (!isRecord(value)) {
+    return {
+      ...base,
+      claudeAllowedTools: [...base.claudeAllowedTools],
+      claudeWorkerMcp: [...base.claudeWorkerMcp],
+    };
+  }
   const {
     maxParallel,
     maxSquadSessions,
@@ -200,5 +230,6 @@ export function parseSquadSettings(value: unknown): SquadSettings {
       ? value.claudePermission
       : base.claudePermission,
     claudeAllowedTools: parseAllowedTools(value.claudeAllowedTools, base.claudeAllowedTools),
+    claudeWorkerMcp: parseWorkerMcp(value.claudeWorkerMcp),
   };
 }

@@ -22,7 +22,7 @@ import type { CompanyStore } from '../src/company/companyStore.js';
 import { SessionLog, sessionLogDirectory } from '../src/company/sessionLog.js';
 import { parseWorkItemsFile } from '../src/company/workItems/workItemModel.js';
 import { WorkItemService } from '../src/company/workItems/workItemService.js';
-import { FakeClaudeAuth, FakeClaudeRuns } from './fakeClaude.js';
+import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 
 let tempHome: string;
 vi.mock('os', async () => {
@@ -1221,6 +1221,7 @@ describe('company client commands', () => {
         boardWatching: () => false,
         claude: new FakeClaudeRuns(),
         claudeAuth: new FakeClaudeAuth(),
+        claudeMcp: new FakeClaudeMcp(),
       });
       await work.load();
       services = { ...services, workItems: work };

@@ -2,7 +2,8 @@
  * Runs Claude Code in stream-json mode for one work item at a time and tracks each run for the
  * board. Output is read line by line and only the latest progress and the final result are kept,
  * so a long run never grows memory. Every run ends once: exit, error, timeout, or kill all go
- * through the same end path, which clears the timer and notifies listeners.
+ * through the same end path, which clears the timer, removes the run's config file, and
+ * notifies listeners.
  */
 
 import {
@@ -12,6 +13,11 @@ import {
   clipText,
   parseStreamLine,
 } from './claudeCli.js';
+import {
+  newClaudeMcpConfigPath,
+  removeClaudeMcpConfigFile,
+  writeClaudeMcpConfigFile,
+} from './claudeMcpFile.js';
 import {
   type ClaudeChildProcess,
   type ClaudeClearTimer,
@@ -43,6 +49,7 @@ const RUN_MISSING_MESSAGE = 'Không tìm thấy lệnh claude. Cài Claude Code 
 const RUN_TIMEOUT_MESSAGE = 'Claude Code chạy quá lâu và đã bị dừng.';
 const RUN_NO_RESULT_MESSAGE = 'Claude Code kết thúc nhưng không trả về kết quả.';
 const RUN_ERROR_RESULT_MESSAGE = 'Claude Code gặp lỗi.';
+const RUN_MCP_FILE_MESSAGE = 'Không ghi được tệp cấu hình MCP tạm cho lượt chạy này.';
 
 export type ClaudeRunState = 'running' | 'finished' | 'failed' | 'timeout' | 'killed';
 
@@ -57,6 +64,8 @@ export interface ClaudeRunStart {
   readonly agent?: string;
   readonly maxTurns: number;
   readonly maxBudgetUsd: number;
+  /** The MCP servers the run loads, as the `--mcp-config` JSON. Kept in a file, never in argv. */
+  readonly mcpConfig: string;
 }
 
 export interface ClaudeRunView {
@@ -102,6 +111,8 @@ interface RunEntry {
   error: string | undefined;
   child: ClaudeChildProcess | undefined;
   timer: ClaudeTimerHandle | undefined;
+  /** The run's `--mcp-config` file, removed once the run ends. */
+  mcpConfigPath: string | undefined;
   /** The stream's result event, once it arrived. */
   ended: { readonly isError: boolean; readonly resultText: string } | undefined;
 }
@@ -126,7 +137,10 @@ export function createClaudeRuns(options: ClaudeRunsOptions): ClaudeRuns {
     else entry.child?.kill();
   }
 
-  /** Ends a running run once: clears its timer, drops its process, and notifies. */
+  /**
+   * Ends a running run once: clears its timer, removes its config file, drops its process, and
+   * notifies.
+   */
   function end(
     entry: RunEntry,
     state: ClaudeRunState,
@@ -135,6 +149,8 @@ export function createClaudeRuns(options: ClaudeRunsOptions): ClaudeRuns {
     if (entry.state !== 'running') return;
     if (entry.timer !== undefined) clearTimer(entry.timer);
     entry.timer = undefined;
+    if (entry.mcpConfigPath !== undefined) removeClaudeMcpConfigFile(entry.mcpConfigPath);
+    entry.mcpConfigPath = undefined;
     entry.child = undefined;
     entry.state = state;
     entry.result = outcome.result;
@@ -223,9 +239,19 @@ export function createClaudeRuns(options: ClaudeRunsOptions): ClaudeRuns {
         error: undefined,
         child: undefined,
         timer: undefined,
+        mcpConfigPath: undefined,
         ended: undefined,
       };
       runs.set(runId, entry);
+      const mcpConfigPath = newClaudeMcpConfigPath(runId);
+      entry.mcpConfigPath = mcpConfigPath;
+      try {
+        writeClaudeMcpConfigFile(mcpConfigPath, input.mcpConfig);
+      } catch {
+        // Any partly written file is removed by end(), with every other failure.
+        end(entry, 'failed', { error: RUN_MCP_FILE_MESSAGE });
+        return { runId };
+      }
       let child: ClaudeChildProcess;
       try {
         child = spawn(
@@ -239,6 +265,7 @@ export function createClaudeRuns(options: ClaudeRunsOptions): ClaudeRuns {
             agent: input.agent,
             maxTurns: input.maxTurns,
             maxBudgetUsd: input.maxBudgetUsd,
+            mcpConfigPath,
           }),
           { cwd: input.cwd },
         );

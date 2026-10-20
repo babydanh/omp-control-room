@@ -16,6 +16,7 @@ import {
 
 const SESSION = '6f1c2b1e-0000-4000-8000-000000000001';
 const SCHEMA_JSON = '{"type":"object"}';
+const MCP_CONFIG_PATH = 'C:/Temp/pixel-agents-claude-mcp-run-1.json';
 
 /** Edit-run arguments with the usual values filled in; a test overrides only what it varies. */
 const BASE_RUN: ClaudeRunArgs = {
@@ -26,6 +27,7 @@ const BASE_RUN: ClaudeRunArgs = {
   resume: false,
   maxTurns: 40,
   maxBudgetUsd: 3,
+  mcpConfigPath: MCP_CONFIG_PATH,
 };
 
 const DEFAULT_TOOLS = ['Bash(git status*)', 'Bash(npm run *)'];
@@ -45,6 +47,9 @@ describe('claudeRunArgs', () => {
       '40',
       '--max-budget-usd',
       '3',
+      '--strict-mcp-config',
+      '--mcp-config',
+      MCP_CONFIG_PATH,
       '--disallowedTools',
       'Bash(git push*)',
       'Bash(git reset --hard*)',
@@ -159,6 +164,27 @@ describe('claudeRunArgs', () => {
       }
     }
   });
+
+  it('loads the servers in the config file, through --strict-mcp-config before the denied tools', () => {
+    for (const mode of ['edit', 'read'] as const) {
+      const args = claudeRunArgs({ ...BASE_RUN, mode, mcpConfigPath: MCP_CONFIG_PATH });
+      const at = args.indexOf('--strict-mcp-config');
+      expect(at).toBeGreaterThan(-1);
+      expect(args.slice(at, at + 3)).toEqual([
+        '--strict-mcp-config',
+        '--mcp-config',
+        MCP_CONFIG_PATH,
+      ]);
+      expect(args[at + 3]).toBe('--disallowedTools');
+    }
+  });
+
+  it('passes the config file path, never its JSON, and keeps the user setting source', () => {
+    const args = claudeRunArgs({ ...BASE_RUN, mcpConfigPath: MCP_CONFIG_PATH });
+    expect(args[args.indexOf('--mcp-config') + 1]).toBe(MCP_CONFIG_PATH);
+    expect(args.join(' ')).not.toContain('mcpServers');
+    expect(args).not.toContain('--setting-sources');
+  });
 });
 
 describe('claudeTurnArgs', () => {
@@ -173,6 +199,7 @@ describe('claudeTurnArgs', () => {
       '--disallowedTools',
       'mcp__*',
       '--no-session-persistence',
+      '--disable-slash-commands',
       '--output-format',
       'json',
       '--json-schema',

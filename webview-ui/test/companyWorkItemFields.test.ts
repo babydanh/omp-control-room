@@ -32,6 +32,7 @@ const SETTINGS = {
   claudeMaxBudgetUsd: 3,
   claudePermission: 'auto' as const,
   claudeAllowedTools: [] as string[],
+  claudeWorkerMcp: [] as string[],
 };
 
 function workItem(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {
@@ -158,6 +159,7 @@ describe('companyWorkItems ingest of repos, agents, settings and areas', () => {
       repos: ['D:/work/app', 'D:/work/app-wt'],
       agents: [{ name: 'reviewer', description: 'Rà soát mã', readOnly: true, source: 'bundled' }],
       settings: SETTINGS,
+      claudeMcpServers: [],
     }).state;
     const held = workItemsOf(state, ACTIVE);
     expect(held.repos).toEqual(['D:/work/app', 'D:/work/app-wt']);
@@ -179,6 +181,7 @@ describe('companyWorkItems ingest of repos, agents, settings and areas', () => {
     expect(held.repos).toEqual([]);
     expect(held.agents).toEqual([]);
     expect(held.settings).toBeNull();
+    expect(held.claudeMcpServers).toEqual([]);
     expect(held.items[0]?.areas).toEqual([]);
   });
 });

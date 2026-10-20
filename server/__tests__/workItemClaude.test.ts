@@ -11,7 +11,7 @@ import {
   type WorkItemsFile,
 } from '../src/company/workItems/workItemModel.js';
 import { WorkItemService } from '../src/company/workItems/workItemService.js';
-import { FakeClaudeAuth, FakeClaudeRuns } from './fakeClaude.js';
+import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
 const REPO = '/work/folder/app';
@@ -22,6 +22,7 @@ const BURST_MS = 1000;
 class Fixture {
   readonly claude = new FakeClaudeRuns();
   readonly claudeAuth = new FakeClaudeAuth();
+  readonly claudeMcp = new FakeClaudeMcp();
   readonly saves: WorkItemsFile[] = [];
   readonly worktreesMade: string[] = [];
   now = T0;
@@ -78,6 +79,7 @@ class Fixture {
       boardWatching: () => false,
       claude: this.claude,
       claudeAuth: this.claudeAuth,
+      claudeMcp: this.claudeMcp,
     });
   }
 

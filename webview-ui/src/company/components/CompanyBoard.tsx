@@ -104,6 +104,7 @@ export interface CompanyBoardProps {
     workspacePath: string;
     settings: SquadSettings | null;
     claudeStatus: ClaudeCodeStatus | null;
+    claudeMcpServers: string[];
   } | null;
 }
 
@@ -596,6 +597,7 @@ export function CompanyBoard({
             workspacePath={squadFolder.workspacePath}
             settings={squadFolder.settings}
             claudeStatus={squadFolder.claudeStatus}
+            claudeMcpServers={squadFolder.claudeMcpServers}
           />
         </div>
       )}

@@ -25,6 +25,7 @@ const SETTINGS: SquadSettings = {
   claudeMaxBudgetUsd: 3,
   claudePermission: 'acceptEdits',
   claudeAllowedTools: ['Bash(git status*)', 'Edit'],
+  claudeWorkerMcp: ['github'],
 };
 
 /** The draft the form holds once a person has changed the given fields of the saved settings. */
@@ -49,7 +50,14 @@ describe('squadSettingsDraftOf', () => {
       claudeMaxBudgetUsd: '3',
       claudePermission: 'acceptEdits',
       claudeAllowedTools: 'Bash(git status*)\nEdit',
+      claudeWorkerMcp: ['github'],
     });
+  });
+
+  it('copies the chosen MCP servers, so changing the draft leaves the settings alone', () => {
+    const draft = squadSettingsDraftOf(SETTINGS);
+    draft.claudeWorkerMcp.push('docs');
+    expect(SETTINGS.claudeWorkerMcp).toEqual(['github']);
   });
 });
 

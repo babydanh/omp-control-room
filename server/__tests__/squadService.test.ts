@@ -102,6 +102,7 @@ class FakeWorkItems implements SquadWorkItems {
     claudeMaxBudgetUsd: 3,
     claudePermission: 'auto',
     claudeAllowedTools: [],
+    claudeWorkerMcp: [],
   };
   /** The folder's repos: the paths a row may name. */
   readonly repos: string[] = [REPO_APP];
@@ -123,6 +124,7 @@ class FakeWorkItems implements SquadWorkItems {
       settings: { ...this.settings },
       repos: [...this.repos],
       agents: structuredClone(this.agents),
+      claudeMcpServers: [],
     };
   }
 

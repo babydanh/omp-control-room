@@ -149,6 +149,7 @@ export function BoardShell({ client }: BoardShellProps) {
           workspacePath: squadPath,
           settings: workItemsOf(state, squadPath).settings,
           claudeStatus: workItemsOf(state, squadPath).claudeStatus,
+          claudeMcpServers: workItemsOf(state, squadPath).claudeMcpServers,
         };
   const ledgerBoardSessions = useMemo(() => boardSessionIndex(state.sessions), [state.sessions]);
   const ledgerPanes = useMemo(
