@@ -121,6 +121,8 @@ export type StoredWorkItem = Omit<WorkItem, 'blocker'> & {
   claudeRunId?: string;
   /** The process id of that run, kept so a restart can stop a run that outlived the board. */
   claudeRunPid?: number;
+  /** The last time an archived work item was restored to the board. */
+  restoredAt?: string;
 };
 
 /** One work item to create, as the service API takes it. */
@@ -406,8 +408,8 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
   const sequence = nonNegativeInt(value.sequence);
   if (sequence === null) return null;
   if (!isIsoString(value.createdAt) || !isIsoString(value.updatedAt)) return null;
+  if (value.restoredAt !== undefined && !isIsoString(value.restoredAt)) return null;
   if (value.dispatchedAt !== undefined && !isIsoString(value.dispatchedAt)) return null;
-  if (value.reason !== undefined && typeof value.reason !== 'string') return null;
   if (value.result !== undefined && typeof value.result !== 'string') return null;
   if (value.squadRunId !== undefined && !isUuid(value.squadRunId)) return null;
   if (value.acceptance !== undefined && typeof value.acceptance !== 'string') return null;
@@ -471,6 +473,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     ...(value.worktreeRemoved === true ? { worktreeRemoved: true } : {}),
     ...(claudeRun === undefined ? {} : { claudeRun }),
     ...(typeof value.claudeRunId === 'string' ? { claudeRunId: value.claudeRunId } : {}),
+    ...(typeof value.restoredAt === 'string' ? { restoredAt: value.restoredAt } : {}),
     ...(typeof value.claudeRunPid === 'number' ? { claudeRunPid: value.claudeRunPid } : {}),
   };
 }

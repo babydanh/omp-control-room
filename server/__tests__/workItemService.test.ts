@@ -28,8 +28,8 @@ import {
   WorkItemService,
   type WorkItemSessionView,
 } from '../src/company/workItems/workItemService.js';
+import { LIBRARY_WORK_ITEM_ARCHIVE_AGE_MS } from '../src/library/storageHelpers.js';
 import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
-
 const T0 = Date.parse('2026-05-01T08:00:00.000Z');
 const PANE_A = 'wA:p1';
 const PANE_B = 'wA:p2';
@@ -496,6 +496,24 @@ describe('WorkItemService: commands', () => {
     await expect(
       f.service.mark({ requestId: randomUUID(), id, verdict: 'done' }),
     ).rejects.toMatchObject({ code: 'work_item_status' });
+  });
+
+  it('hides old finished items from the board and restores them through the service store', async () => {
+    const f = await openFixture();
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Lưu trữ',
+      assignee: { kind: 'new-session' },
+    });
+    await f.service.mark({ requestId: randomUUID(), id, verdict: 'done' });
+    f.now += LIBRARY_WORK_ITEM_ARCHIVE_AGE_MS + 1;
+
+    expect(f.service.snapshot().items).toHaveLength(0);
+    expect(f.service.archivedItems().map((item) => item.id)).toEqual([id]);
+    await f.service.restore(id);
+
+    expect(f.service.snapshot().items.map((item) => item.id)).toEqual([id]);
+    expect(f.saves.at(-1)?.items.find((item) => item.id === id)?.restoredAt).toBe(new Date(f.now).toISOString());
   });
 
   it('saves and clears role notes, and refuses a new-session role or an overlong one', async () => {

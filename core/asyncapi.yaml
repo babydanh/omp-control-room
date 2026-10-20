@@ -157,6 +157,18 @@ components:
         - $ref: '#/components/schemas/LedgerTimelineMessage'
         - $ref: '#/components/schemas/LedgerFileDiffMessage'
         - $ref: '#/components/schemas/LedgerCommandResultMessage'
+        # Library (privileged; accounts, storage, skills and MCP)
+        - $ref: '#/components/schemas/LibraryAccountsSnapshot'
+        - $ref: '#/components/schemas/LibrarySkillsSnapshot'
+        - $ref: '#/components/schemas/LibraryMcpSnapshot'
+        - $ref: '#/components/schemas/LibraryStorageSearchResult'
+        - $ref: '#/components/schemas/LibrarySkillPreview'
+        - $ref: '#/components/schemas/LibraryCommandResult'
+        # Native terminal (per-session attachments only)
+        - $ref: '#/components/schemas/TerminalAttachedMessage'
+        - $ref: '#/components/schemas/TerminalSnapshotMessage'
+        - $ref: '#/components/schemas/TerminalDataMessage'
+        - $ref: '#/components/schemas/TerminalClosedMessage'
         # Native terminal (per-session attachments only)
         - $ref: '#/components/schemas/TerminalAttachedMessage'
         - $ref: '#/components/schemas/TerminalSnapshotMessage'
@@ -240,6 +252,13 @@ components:
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
         - $ref: '#/components/schemas/LedgerFileDiffRequestMessage'
         - $ref: '#/components/schemas/LedgerSendMessage'
+        # Library (privileged; pages and commands)
+        - $ref: '#/components/schemas/LibrarySnapshotRequest'
+        - $ref: '#/components/schemas/LibrarySkillPreviewRequest'
+        - $ref: '#/components/schemas/LibraryStorageSearchRequest'
+        - $ref: '#/components/schemas/LibraryWorkItemRestore'
+        - $ref: '#/components/schemas/LibraryAccountLogin'
+        - $ref: '#/components/schemas/LibraryMcpCheckRequest'
         # Herdr (privileged; drives the user's herdr server)
         - $ref: '#/components/schemas/HerdrReadMessage'
         - $ref: '#/components/schemas/HerdrPromptMessage'
@@ -5615,6 +5634,368 @@ components:
           maxItems: 20
           items:
             type: string
+
+    LibrarySnapshotRequest:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, section]
+      properties:
+        type:
+          const: librarySnapshotRequest
+        requestId:
+          type: string
+          format: uuid
+        section:
+          type: string
+          enum: [accounts, storage, skills, mcp]
+        refresh:
+          type: boolean
+          default: false
+
+    LibrarySkillPreviewRequest:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, id]
+      properties:
+        type:
+          const: librarySkillPreviewRequest
+        requestId:
+          type: string
+          format: uuid
+        id:
+          type: string
+          minLength: 1
+          maxLength: 2048
+
+    LibraryStorageSearchRequest:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, kind]
+      properties:
+        type:
+          const: libraryStorageSearchRequest
+        requestId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [workItems, sessions, openViking, proofs]
+        query:
+          type: string
+          maxLength: 200
+        repo:
+          type: string
+          maxLength: 1024
+        agentType:
+          type: string
+          enum: [main, sub, claude, agy]
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        refresh:
+          type: boolean
+          default: false
+
+    LibraryWorkItemRestore:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workItemId]
+      properties:
+        type:
+          const: libraryWorkItemRestore
+        requestId:
+          type: string
+          format: uuid
+        workItemId:
+          type: string
+          minLength: 1
+          maxLength: 128
+
+    LibraryAccountLogin:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, tool]
+      properties:
+        type:
+          const: libraryAccountLogin
+        requestId:
+          type: string
+          format: uuid
+        tool:
+          type: string
+          enum: [claude, agy, omp]
+        provider:
+          type: string
+          minLength: 1
+          maxLength: 128
+
+    LibraryMcpCheckRequest:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, name]
+      properties:
+        type:
+          const: libraryMcpCheckRequest
+        requestId:
+          type: string
+          format: uuid
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    LibraryAccountsSnapshot:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, accounts]
+      properties:
+        type:
+          const: libraryAccountsSnapshot
+        requestId:
+          type: string
+          format: uuid
+        accounts:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibraryAccount'
+        reason:
+          type: string
+
+    LibrarySkillsSnapshot:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, skills]
+      properties:
+        type:
+          const: librarySkillsSnapshot
+        requestId:
+          type: string
+          format: uuid
+        skills:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibrarySkill'
+        reason:
+          type: string
+
+    LibraryMcpSnapshot:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, servers]
+      properties:
+        type:
+          const: libraryMcpSnapshot
+        requestId:
+          type: string
+          format: uuid
+        servers:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibraryMcpServer'
+        reason:
+          type: string
+
+    LibraryStorageSearchResult:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, kind, results]
+      properties:
+        type:
+          const: libraryStorageSearchResult
+        requestId:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [workItems, sessions, openViking, proofs]
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibraryStorageResult'
+        reason:
+          type: string
+
+    LibrarySkillPreview:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, id, content, truncated]
+      properties:
+        type:
+          const: librarySkillPreview
+        requestId:
+          type: string
+          format: uuid
+        id:
+          type: string
+        content:
+          type: string
+        truncated:
+          type: boolean
+        reason:
+          type: string
+
+    LibraryCommandResult:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, command, ok]
+      properties:
+        type:
+          const: libraryCommandResult
+        requestId:
+          type: string
+          format: uuid
+        command:
+          type: string
+          enum: [restoreWorkItem, login, checkMcp]
+        ok:
+          type: boolean
+        reason:
+          type: string
+          description: Vietnamese refusal or failure reason when ok is false.
+        target:
+          type: string
+
+    LibraryAccount:
+      type: object
+      additionalProperties: false
+      required: [tool, loggedIn]
+      properties:
+        tool:
+          type: string
+          enum: [claude, agy, omp]
+        loggedIn:
+          type: boolean
+        authMethod:
+          type: string
+        subscriptionType:
+          type: string
+        orgName:
+          type: string
+        email:
+          type: string
+        modelCount:
+          type: integer
+          minimum: 0
+        providers:
+          type: array
+          items:
+            type: string
+        credentials:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibraryCredential'
+        updatedAt:
+          type: string
+          format: date-time
+        reason:
+          type: string
+          description: Vietnamese reason when this source could not be read; other sources stay independent.
+    LibraryCredential:
+      type: object
+      additionalProperties: false
+      required: [provider, credentialType, disabled, updatedAt]
+      properties:
+        provider:
+          type: string
+        credentialType:
+          type: string
+        disabled:
+          type: boolean
+        disabledCause:
+          type: string
+        updatedAt:
+          type: string
+        blockedUntilMs:
+          type: number
+
+
+    LibrarySkill:
+      type: object
+      additionalProperties: false
+      required: [id, name, description, tools, claudeMode, sizeBytes]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        tools:
+          type: array
+          items:
+            type: string
+        claudeMode:
+          type: string
+          enum: [on, name-only, user-invocable-only, off]
+        plugin:
+          type: string
+        sizeBytes:
+          type: integer
+          minimum: 0
+
+    LibraryMcpServer:
+      type: object
+      additionalProperties: false
+      required: [name, tools, transport, status]
+      properties:
+        name:
+          type: string
+        tools:
+          type: array
+          items:
+            type: string
+            enum: [omp, claude, agy]
+        transport:
+          type: string
+          enum: [stdio, http, sse]
+        commandName:
+          type: string
+        endpoint:
+          type: string
+        status:
+          type: string
+          enum: [connected, error, unchecked]
+
+    LibraryStorageResult:
+      type: object
+      additionalProperties: false
+      required: [id, kind, title]
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [workItems, sessions, openViking, proofs]
+        title:
+          type: string
+        description:
+          type: string
+        repo:
+          type: string
+        assignee:
+          type: string
+        status:
+          type: string
+        cwd:
+          type: string
+        timestamp:
+          type: string
+        editedFileCount:
+          type: integer
+          minimum: 0
+        transcriptPath:
+          type: string
+        uri:
+          type: string
+        score:
+          type: number
+        proofUrl:
+          type: string
+        mediaType:
+          type: string
 
     LedgerView:
       type: object

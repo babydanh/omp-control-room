@@ -1,3 +1,6 @@
+import { createReadStream } from 'node:fs';
+import { extname } from 'node:path';
+
 import fastifyCors from '@fastify/cors';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
@@ -18,12 +21,18 @@ import { CompanyClientGate } from './company/egress.js';
 import type { UsageControl } from './company/usagePage.js';
 import {
   HOOK_API_PREFIX,
+  LIBRARY_ACCESS_DENIED_REASON,
+  LIBRARY_PROOF_DEFAULT_MEDIA_TYPE,
+  LIBRARY_PROOF_MEDIA_TYPE_BY_EXTENSION,
+  LIBRARY_PROOF_NOT_FOUND_REASON,
+  LIBRARY_PROOF_ROUTE,
   MAX_HOOK_BODY_SIZE,
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
 import type { LedgerService } from './ledger/ledgerService.js';
+import { resolveProofPath } from './library/storage.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
 import { registerTerminalRoutes } from './terminal/terminalRoutes.js';
 import type { AgentState } from './types.js';
@@ -131,6 +140,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
   registerHealthRoute(app);
   registerHookRoute(app, options);
   registerWebSocketRoute(app, options, allowedHostnames);
+  registerLibraryProofRoute(app, options.token);
   registerTerminalRoutes(app, {
     token: options.token,
     allowedHostnames,
@@ -154,6 +164,24 @@ function registerHealthRoute(app: FastifyInstance): void {
     uptime: Math.floor((Date.now() - startTime) / 1000),
     pid: process.pid,
   }));
+}
+
+function registerLibraryProofRoute(app: FastifyInstance, token: string): void {
+  app.get<{ Params: { proofId: string } }>(LIBRARY_PROOF_ROUTE, async (request, reply) => {
+    if (!bearerTokenValid(request.headers.authorization, token)) {
+      return reply.code(401).send({ error: LIBRARY_ACCESS_DENIED_REASON });
+    }
+
+    try {
+      const proofPath = await resolveProofPath(request.params.proofId);
+      return reply.type(
+        LIBRARY_PROOF_MEDIA_TYPE_BY_EXTENSION[extname(proofPath).toLowerCase()] ??
+        LIBRARY_PROOF_DEFAULT_MEDIA_TYPE,
+      ).send(createReadStream(proofPath));
+    } catch {
+      return reply.code(404).send({ error: LIBRARY_PROOF_NOT_FOUND_REASON });
+    }
+  });
 }
 
 // ── Hook Events ────────────────────────────────────────────────

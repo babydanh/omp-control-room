@@ -43,6 +43,7 @@ import {
   WORK_ITEM_ACCEPTANCE_MAX_CHARS,
   WORK_ITEM_PRIORITY_DEFAULT,
 } from '../../../../core/src/workItemGraph.js';
+import { isArchivedWorkItem } from '../../library/storageHelpers.js';
 import type { ClaudeAuthProbe } from '../claudeCode/claudeAuth.js';
 import type { ClaudeMcpSource } from '../claudeCode/claudeMcpSource.js';
 import type { ClaudeRuns,ClaudeRunView } from '../claudeCode/claudeRuns.js';
@@ -414,7 +415,9 @@ export class WorkItemService {
   /** The folder's full state, as the board receives it. */
   snapshot(): CompanyWorkItemsMessage {
     const view = this.view();
-    const items = this.sortedItems().map((item) => this.wire(item, view));
+    const items = this.sortedItems()
+      .filter((item) => !isArchivedWorkItem(item, this.ports.now()))
+      .map((item) => this.wire(item, view));
     return {
       type: 'companyWorkItems',
       workspacePath: this.workspacePath,
@@ -436,6 +439,25 @@ export class WorkItemService {
   get(id: string): WorkItem | undefined {
     const item = this.items.get(id);
     return item === undefined ? undefined : this.wire(item, this.view());
+  }
+
+  /** Archived items as the board would otherwise receive them. */
+  archivedItems(): WorkItem[] {
+    const view = this.view();
+    return this.sortedItems()
+      .filter((item) => isArchivedWorkItem(item, this.ports.now()))
+      .map((item) => this.wire(item, view));
+  }
+
+  /** Returns an archived item to the board and persists the restoration timestamp. */
+  async restore(id: string): Promise<void> {
+    const item = this.items.get(id);
+    if (item === undefined || !isArchivedWorkItem(item, this.ports.now())) {
+      throw new CompanyError('work_item_not_found', 'Không tìm thấy việc đã lưu trữ.');
+    }
+    item.restoredAt = this.iso();
+    this.commit();
+    await this.flush();
   }
 
   /** The item with this #n, while it is still open: queued, running, waiting on input, or in review. */

@@ -29,6 +29,7 @@ import { hostDirectory } from './hostDirectory.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
 import { handleLedgerMessage } from './ledger/handler.js';
 import type { LedgerService } from './ledger/ledgerService.js';
+import { handleLibraryMessage } from './library/handler.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
@@ -186,6 +187,14 @@ export function handleClientMessage(
         companyViewMode: ctx.companyViewMode,
       },
     )
+  ) {
+    return;
+  }
+
+  if (
+    handleLibraryMessage(msg, (message) => send(message as unknown as Record<string, unknown>), {
+      privileged: ctx.privileged === true,
+    })
   ) {
     return;
   }

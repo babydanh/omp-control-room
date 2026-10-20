@@ -8,7 +8,7 @@
  * menu; the surfaces keep only their content controls.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
@@ -16,18 +16,30 @@ import { buildPaletteItems, type PaletteActionId, type PaletteItem } from '../co
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { startNewChat } from '../composerRouting.js';
-import { COMPANY_RAIL_WIDTH_PX } from '../constants.js';
+import {
+  COMPANY_NAV_COLLAPSED_WIDTH_PX,
+  COMPANY_NAV_EXPANDED_WIDTH_PX,
+  COMPANY_NAV_MOBILE_MAX_PX,
+  COMPANY_NAV_TRANSITION_MS,
+  COMPANY_PAGE_TRANSITION_MS,
+  COMPANY_RAIL_WIDTH_PX,
+} from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
 import { folderIdentityOf, foldersWaitingForSnapshot, showsAllFolders } from '../folderIdentity.js';
 import type { FolderFocusInput } from '../folderView.js';
 import type { HerdrDrawerTab } from '../herdrView.js';
+import type { IconName } from '../iconNames.js';
 import { sidebarPresentation } from '../layoutMode.js';
 import { ledgerStore } from '../ledger/ledgerClient.js';
 import { panesOf } from '../ledger/ledgerManagers.js';
 import { boardSessionIndex } from '../ledger/ledgerMapping.js';
 import { useLedgerState } from '../ledger/ledgerStore.js';
 import { LedgerView } from '../ledger/LedgerView.js';
+import { AccountsPage } from '../library/AccountsPage.js';
+import { McpPage } from '../library/McpPage.js';
+import { SkillsPage } from '../library/SkillsPage.js';
+import { StoragePage } from '../library/StoragePage.js';
 import { startScrollFades } from '../scrollFades.js';
 import {
   type DrawerSubject,
@@ -49,7 +61,7 @@ import {
 import { useCompanyState } from '../useCompanyState.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useSessionLogBackfill } from '../useSessionLogBackfill.js';
-import { openUsagePage } from '../useUsageRoute.js';
+import { closeUsagePage, openUsagePage, useUsageRoute } from '../useUsageRoute.js';
 import { workItemsOf } from '../workItemView.js';
 import { AgentContextMenu } from './AgentContextMenu.js';
 import { AgentRail } from './AgentRail.js';
@@ -59,10 +71,12 @@ import { BoardTopBar } from './BoardTopBar.js';
 import { CommandPalette } from './CommandPalette.js';
 import { CompanyBoard } from './CompanyBoard.js';
 import { DetailDrawer } from './DetailDrawer.js';
+import { Icon } from './Icon.js';
 import { PromptComposer } from './PromptComposer.js';
 import { RolesDialog } from './RolesDialog.js';
 import { ShortcutsSheet } from './ShortcutsSheet.js';
 import { TerminalPreviewProvider } from './TerminalPreview.js';
+import { UsagePage } from './usage/UsagePage.js';
 import { WorkDialogHost, type WorkDialogRequest } from './WorkDialogHost.js';
 
 /**
@@ -74,6 +88,26 @@ function browserStorage(): Storage | null {
     return window.localStorage;
   } catch {
     return null;
+  }
+}
+
+type ShellPage = 'board' | 'ledger' | 'usage' | 'storage' | 'skills' | 'mcp' | 'accounts';
+
+const NAV_COLLAPSED_KEY = 'company.nav.collapsed.v1';
+
+function readNavCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(NAV_COLLAPSED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function writeNavCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(NAV_COLLAPSED_KEY, String(collapsed));
+  } catch {
+    // A refused store only means the navigation shape is not remembered.
   }
 }
 
@@ -100,8 +134,14 @@ export function BoardShell({ client }: BoardShellProps) {
   const state = useCompanyState(client);
   useSessionLogBackfill(client, state);
   const ledger = useLedgerState(ledgerStore);
-  const [ledgerOpen, setLedgerOpen] = useState(false);
-  const ledgerShown = ledgerOpen && ledger.privileged === true;
+  const usageRouteOpen = useUsageRoute();
+  const [activePage, setActivePage] = useState<ShellPage>(() => usageRouteOpen ? 'usage' : 'board');
+  const [navCollapsed, setNavCollapsed] = useState(readNavCollapsed);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [mobileViewport, setMobileViewport] = useState(
+    () => window.matchMedia(`(max-width: ${COMPANY_NAV_MOBILE_MAX_PX}px)`).matches,
+  );
+  const ledgerShown = activePage === 'ledger' && ledger.privileged === true;
   const ledgerAvailable = ledger.privileged === true;
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
@@ -125,6 +165,55 @@ export function BoardShell({ client }: BoardShellProps) {
   const closeMenu = useCallback(() => setMenu(null), []);
   const [workDialog, setWorkDialog] = useState<WorkDialogRequest | null>(null);
   const mode = useLayoutMode();
+
+  useEffect(() => {
+    const query = window.matchMedia(`(max-width: ${COMPANY_NAV_MOBILE_MAX_PX}px)`);
+    const update = () => setMobileViewport(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  useEffect(() => {
+    writeNavCollapsed(navCollapsed);
+  }, [navCollapsed]);
+
+  useEffect(() => {
+    if (usageRouteOpen) setActivePage('usage');
+    else setActivePage((page) => page === 'usage' ? 'board' : page);
+  }, [usageRouteOpen]);
+
+  useEffect(() => {
+    if (!ledgerAvailable && activePage === 'ledger') setActivePage('board');
+  }, [activePage, ledgerAvailable]);
+
+  useEffect(() => {
+    if (!mobileNavOpen || !mobileViewport) return undefined;
+    function closeOnEscape(event: KeyboardEvent): void {
+      if (matchShortcut('board.escape', event)) setMobileNavOpen(false);
+    }
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [mobileNavOpen, mobileViewport]);
+
+  function selectPage(page: ShellPage): void {
+    if (page === 'usage') {
+      if (!usageRouteOpen) openUsagePage();
+    } else if (usageRouteOpen) {
+      closeUsagePage();
+    }
+    if (page !== 'board' && page !== 'usage' && !ledgerAvailable) return;
+    setActivePage(page);
+    setMobileNavOpen(false);
+    setOpened(null);
+  }
+
+  function toggleActiveLedgerPage(): void {
+    selectPage(activePage === 'ledger' ? 'board' : 'ledger');
+  }
+  // The keydown listener below is registered once per ledger availability; it reads the
+  // current toggle through this ref so it never acts on a stale active page.
+  const toggleLedgerRef = useRef(toggleActiveLedgerPage);
+  toggleLedgerRef.current = toggleActiveLedgerPage;
   const sidebarCollapsed = mode === 'phone' ? !sheetOpen : prefs.collapsed;
   const sidebar = sidebarPresentation(mode, sidebarCollapsed);
   // The width the sidebar (or its rail) takes in the row beside the board. A sidebar that
@@ -197,8 +286,8 @@ export function BoardShell({ client }: BoardShellProps) {
   // Diagnostics are a live measurement of processes the user owns: asked for
   // once the board is on screen, never polled in the background.
   useEffect(() => {
-    client.requestDiagnostics();
-  }, [client]);
+    if (activePage === 'board') client.requestDiagnostics();
+  }, [activePage, client]);
 
   // Scroll areas draw no scrollbar; an edge with more content beyond it fades instead.
   useEffect(() => startScrollFades(), []);
@@ -237,7 +326,7 @@ export function BoardShell({ client }: BoardShellProps) {
         setOpened((current) => (current?.kind === 'files' ? null : { kind: 'files' }));
       } else if (id === 'board.ledger' && ledgerAvailable) {
         event.preventDefault();
-        setLedgerOpen((open) => !open);
+        toggleLedgerRef.current();
       }
     }
     window.addEventListener('keydown', onKeyDown);
@@ -369,7 +458,7 @@ export function BoardShell({ client }: BoardShellProps) {
         else setPrefs((current) => ({ ...current, collapsed: false }));
         return;
       case 'open-git-tree':
-        if (ledger.privileged === true) setLedgerOpen(true);
+        if (ledgerAvailable) selectPage('ledger');
         return;
       case 'open-files':
         setOpened({ kind: 'files' });
@@ -381,7 +470,7 @@ export function BoardShell({ client }: BoardShellProps) {
         setRolesOpen(true);
         return;
       case 'open-usage':
-        openUsagePage();
+        selectPage('usage');
         return;
       case 'show-shortcuts':
         setShortcutsOpen(true);
@@ -391,11 +480,115 @@ export function BoardShell({ client }: BoardShellProps) {
 
   const boardAreaRef = useRef<HTMLDivElement>(null);
 
+  const navItems: { page: ShellPage; label: string; icon: IconName; group: string }[] = [
+    { page: 'board', label: 'Bảng việc', icon: 'list', group: 'Không gian làm việc' },
+    ...(ledgerAvailable
+      ? [{ page: 'ledger' as const, label: 'Cây git', icon: 'git-branch' as const, group: 'Không gian làm việc' }]
+      : []),
+    { page: 'usage', label: 'Sử dụng', icon: 'bar-chart', group: 'Không gian làm việc' },
+    ...(ledgerAvailable
+      ? [
+          { page: 'storage' as const, label: 'Lưu trữ', icon: 'archive' as const, group: 'Thư viện' },
+          { page: 'skills' as const, label: 'Kho skill', icon: 'list' as const, group: 'Thư viện' },
+          { page: 'mcp' as const, label: 'MCP', icon: 'terminal' as const, group: 'Thư viện' },
+          { page: 'accounts' as const, label: 'Tài khoản', icon: 'users' as const, group: 'Cài đặt' },
+        ]
+      : []),
+  ];
+
+  function renderNavItems(collapsed: boolean) {
+    let previousGroup = '';
+    return navItems.map((item) => {
+      const showGroup = !collapsed && item.group !== previousGroup;
+      previousGroup = item.group;
+      return (
+        <div key={item.page} className="flex flex-col">
+          {showGroup && (
+            <p className="px-3 pb-1 pt-4 text-2xs font-medium uppercase tracking-wider text-text-muted">
+              {item.group}
+            </p>
+          )}
+          <button
+            type="button"
+            title={collapsed ? item.label : undefined}
+            aria-current={activePage === item.page ? 'page' : undefined}
+            onClick={() => selectPage(item.page)}
+            className={`flex min-h-10 items-center gap-3 rounded-(--company-radius-sm) px-3 text-left text-sm transition-colors duration-150 hover:bg-hover motion-reduce:transition-none ${activePage === item.page ? 'bg-selected text-text' : 'text-text-secondary'} ${collapsed ? 'justify-center px-0' : ''}`}
+          >
+            <Icon name={item.icon} className="shrink-0" />
+            {!collapsed && <span className="truncate">{item.label}</span>}
+          </button>
+        </div>
+      );
+    });
+  }
+
   return (
     <div
-      className="company-ui flex h-full w-full flex-col overflow-hidden bg-bg"
+      className="company-ui company-shell-root flex h-full w-full flex-col overflow-hidden bg-bg"
       data-testid="company-workspace"
+      style={{
+        paddingLeft: mobileViewport ? 0 : navCollapsed ? COMPANY_NAV_COLLAPSED_WIDTH_PX : COMPANY_NAV_EXPANDED_WIDTH_PX,
+        '--company-nav-transition': `${COMPANY_NAV_TRANSITION_MS}ms`,
+        '--company-page-transition': `${COMPANY_PAGE_TRANSITION_MS}ms`,
+      } as CSSProperties}
     >
+      <header className="company-nav-mobile items-center gap-3 border-b border-hairline bg-panel px-3 py-2">
+        <button
+          type="button"
+          aria-label={mobileNavOpen ? 'Đóng điều hướng' : 'Mở điều hướng'}
+          aria-expanded={mobileNavOpen}
+          onClick={() => setMobileNavOpen((open) => !open)}
+          className="company-icon-btn touch-target shrink-0"
+        >
+          <Icon name="menu" />
+        </button>
+        <span className="font-medium">OMP Board</span>
+        <span className="min-w-0 flex-1 truncate text-right text-sm text-text-secondary">
+          {navItems.find((item) => item.page === activePage)?.label ?? 'Bảng việc'}
+        </span>
+      </header>
+      <aside
+        className="company-nav-desktop company-nav-rail fixed inset-y-0 left-0 z-40 flex-col border-r border-hairline bg-panel p-2"
+        style={{ width: navCollapsed ? COMPANY_NAV_COLLAPSED_WIDTH_PX : COMPANY_NAV_EXPANDED_WIDTH_PX }}
+        aria-label="Điều hướng"
+      >
+        <div className={`flex h-10 items-center ${navCollapsed ? 'justify-center' : 'justify-between px-2'}`}>
+          {!navCollapsed && <span className="font-semibold tracking-tight">OMP Board</span>}
+          <button
+            type="button"
+            aria-label={navCollapsed ? 'Mở rộng điều hướng' : 'Thu gọn điều hướng'}
+            aria-expanded={!navCollapsed}
+            onClick={() => setNavCollapsed((collapsed) => !collapsed)}
+            className="company-icon-btn touch-target shrink-0"
+          >
+            <Icon name={navCollapsed ? 'chevron-right' : 'chevron-left'} />
+          </button>
+        </div>
+        <nav className="mt-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto" aria-label="Trang">
+          {renderNavItems(navCollapsed)}
+        </nav>
+      </aside>
+      {mobileViewport && mobileNavOpen && (
+        <>
+          <button
+            type="button"
+            aria-label="Đóng điều hướng"
+            onClick={() => setMobileNavOpen(false)}
+            className="fixed inset-0 z-40 cursor-default bg-black/40"
+          />
+          <nav
+            className="fixed inset-x-0 top-12 z-50 max-h-[calc(100dvh-3rem)] overflow-y-auto border-b border-hairline bg-panel p-3 shadow-lg"
+            aria-label="Trang"
+          >
+            {renderNavItems(false)}
+          </nav>
+        </>
+      )}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      {activePage === 'board' || activePage === 'ledger' ? (
+      <>
+      <div key={activePage} className="company-shell-page flex min-h-0 flex-1 flex-col">
       <BoardTopBar
         state={state}
         client={client}
@@ -406,12 +599,12 @@ export function BoardShell({ client }: BoardShellProps) {
         onToggleFiles={toggleFiles}
         ledgerAvailable={ledgerAvailable}
         ledgerOpen={ledgerShown}
-        onToggleLedger={() => setLedgerOpen((open) => !open)}
+        onToggleLedger={toggleActiveLedgerPage}
         isMac={IS_MAC}
         onOpenPalette={() => setPaletteOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         onOpenRoles={() => setRolesOpen(true)}
-        onOpenUsage={openUsagePage}
+        onOpenUsage={() => selectPage('usage')}
         browseRequest={browseRequest}
       />
       {state.needsSnapshot && (
@@ -496,7 +689,7 @@ export function BoardShell({ client }: BoardShellProps) {
               panes={ledgerPanes}
               onOpenHerdr={openHerdr}
               onOpenSleeping={openSleeping}
-              onClose={() => setLedgerOpen(false)}
+              onClose={() => selectPage('board')}
             />
           ) : (
             <CompanyBoard
@@ -543,6 +736,29 @@ export function BoardShell({ client }: BoardShellProps) {
         </div>
       </TerminalPreviewProvider>
       {!composerHidden && <PromptComposer client={client} />}
+      </div>
+      </>
+      ) : activePage === 'usage' ? (
+        <div key="usage-page" className="company-shell-page flex min-h-0 flex-1 flex-col">
+          <UsagePage client={client} />
+        </div>
+      ) : activePage === 'storage' ? (
+        <div key="storage-page" className="company-shell-page flex min-h-0 flex-1 flex-col">
+          <StoragePage />
+        </div>
+      ) : activePage === 'skills' ? (
+        <div key="skills-page" className="company-shell-page flex min-h-0 flex-1 flex-col">
+          <SkillsPage />
+        </div>
+      ) : activePage === 'mcp' ? (
+        <div key="mcp-page" className="company-shell-page flex min-h-0 flex-1 flex-col">
+          <McpPage />
+        </div>
+      ) : (
+        <div key="accounts-page" className="company-shell-page flex min-h-0 flex-1 flex-col">
+          <AccountsPage />
+        </div>
+      )}
       {paletteOpen && (
         <CommandPalette
           items={paletteItems}
@@ -578,5 +794,6 @@ export function BoardShell({ client }: BoardShellProps) {
         onClose={() => setWorkDialog(null)}
       />
     </div>
+      </div>
   );
 }

@@ -215,10 +215,52 @@
     --color-idle: #9a9aa6;
     /* Caution: a node or session that needs a look but is not broken. Yellow, apart from the amber accent. */
     --color-caution: #f6d54a;
-    /* Corner radii: 6px for controls and chips, 10px for cards and rows, 14px for lanes. */
     --company-radius-sm: 6px;
     --company-radius-md: 10px;
     --company-radius-lg: 14px;
+    --company-nav-transition: 180ms;
+    --company-page-transition: 180ms;
+  }
+
+  .company-shell-root {
+    transition: padding var(--company-nav-transition) cubic-bezier(.33,1,.68,1);
+  }
+
+  .company-nav-mobile {
+    display: none;
+  }
+
+  .company-nav-rail {
+    width: var(--company-nav-width, 224px);
+    transition: width var(--company-nav-transition) cubic-bezier(.33,1,.68,1);
+  }
+
+  .company-shell-page {
+    animation: company-page-enter var(--company-page-transition) cubic-bezier(.33,1,.68,1) both;
+  }
+
+  @keyframes company-page-enter {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .company-shell-root,
+    .company-nav-rail,
+    .company-shell-page {
+      animation: none;
+      transition: none;
+    }
+  }
+
+  @media (max-width: 768px) {
+    .company-nav-desktop { display: none; }
+    .company-nav-mobile { display: flex; }
+  }
+
+  @media (min-width: 769px) {
+    .company-nav-desktop { display: flex; }
+    .company-nav-mobile { display: none; }
   }
 
   /* The office canvas and its overlays draw over the artwork, so they keep the

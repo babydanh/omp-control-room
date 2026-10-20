@@ -45,6 +45,7 @@ import type {
   SubmitPromptInput,
 } from '../../../core/src/company.js';
 import type { ServerMessage, SquadSettings } from '../../../core/src/messages.js';
+import { registerWorkItemService } from '../library/workItemRegistry.js';
 import { createClaudeTurnRunner, createEngineRunner } from './claudeCode/claudeTurnRunner.js';
 import type { CompanyCommandServices, CompanyTerminalGateway } from './clientCommands.js';
 import {
@@ -118,7 +119,6 @@ import {
   type WorkItemLedger,
   type WorkItemWiring,
 } from './workItems/workItemWiring.js';
-
 /**
  * The client identity a surface gets when it does not name one: this process's
  * own UI client. Only that client is privileged unless the host is given an
@@ -1045,6 +1045,7 @@ async function openOwnerCompanyHost(
   let coordinator: WorkspaceCompanyCoordinator | null = null;
   let broker: CompanyBrokerHandle | null = null;
   let disposed = false;
+  let unregisterWorkItems: (() => void) | null = null;
   let workItemsWiring: WorkItemWiring | null = null;
   let squadWiring: SquadWiring | null = null;
   const publish = (message: ServerMessage): void => {
@@ -1146,6 +1147,7 @@ async function openOwnerCompanyHost(
       }),
       ledger: options.ledger ?? NO_LEDGER,
     });
+    unregisterWorkItems = registerWorkItemService(store.namespaceDir, workItemsWiring.service);
     const director = modelRoles.assignments.director;
     squadWiring = await startSquad({
       workspacePath: store.workspacePath,
@@ -1173,6 +1175,8 @@ async function openOwnerCompanyHost(
   } catch (error) {
     // Reverse order, and always: a half-composed owner would hold the lock and
     // refuse every command sent to it.
+    unregisterWorkItems?.();
+    unregisterWorkItems = null;
     await runStep(cleanup, async () => {
       await runtime?.dispose();
     });
@@ -1216,6 +1220,8 @@ async function openOwnerCompanyHost(
       disposed = true;
       const steps: { failure?: unknown } = {};
       await runStep(steps, async () => ownerSquad.dispose());
+      unregisterWorkItems?.();
+      unregisterWorkItems = null;
       await runStep(steps, async () => ownerWorkItems.dispose());
       await runStep(steps, async () => ownerCoordinator.dispose());
       await runStep(steps, async () => ownerBroker.dispose());

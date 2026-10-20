@@ -188,3 +188,31 @@ export const PALETTE_COUNT = 6;
  *  clientMessageHandler to guard saveAgentSeats payloads from a remote or
  *  hand-edited source corrupting the stored values with out-of-range values. */
 export const HUE_SHIFT_MAX_DEG = 360;
+
+// ── Board Library ──────────────────────────────────────────────
+export const LIBRARY_FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
+export const LIBRARY_PROOF_ROUTE = '/api/library/proofs/:proofId';
+export const LIBRARY_REQUEST_TYPES: Record<string, true> = {
+  librarySnapshotRequest: true,
+  librarySkillPreviewRequest: true,
+  libraryStorageSearchRequest: true,
+  libraryWorkItemRestore: true,
+  libraryAccountLogin: true,
+  libraryMcpCheckRequest: true,
+};
+export const LIBRARY_ACCESS_DENIED_REASON = 'Không có quyền truy cập.';
+export const LIBRARY_PROOF_NOT_FOUND_REASON = 'Không tìm thấy tệp minh chứng.';
+export const LIBRARY_PROOF_MEDIA_TYPE_BY_EXTENSION: Record<string, string> = {
+  '.gif': 'image/gif',
+  '.html': 'text/html; charset=utf-8',
+  '.jpeg': 'image/jpeg',
+  '.jpg': 'image/jpeg',
+  '.json': 'application/json',
+  '.mp4': 'video/mp4',
+  '.png': 'image/png',
+  '.webm': 'video/webm',
+  '.webp': 'image/webp',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+};
+export const LIBRARY_PROOF_DEFAULT_MEDIA_TYPE = 'application/octet-stream';
+export const LIBRARY_OPERATION_FAILED_REASON = 'Không thể hoàn thành yêu cầu Thư viện.';
