@@ -7,12 +7,16 @@
     powershell -ExecutionPolicy Bypass -File scripts\board-start.ps1            # bật (bỏ qua nếu đang chạy)
     powershell -ExecutionPolicy Bypass -File scripts\board-start.ps1 -Restart   # tắt rồi bật lại (sau khi build bản mới)
     powershell -ExecutionPolicy Bypass -File scripts\board-start.ps1 -Stop      # tắt
-  Log: %LOCALAPPDATA%\omp-control-room\board.log (có in token, giữ trên máy này).
+    ... -RotateToken   # thay token mới trước khi bật: mọi link cũ (mọi máy) hết quyền
+    ... -Open          # mở board trong trình duyệt, token đọc thẳng từ file, không in ra màn hình/log
+  Log: %LOCALAPPDATA%\omp-control-room\board.log (token được giấu, không có trong log).
 #>
 param(
   [int]$Port = 3197,
   [switch]$Restart,
-  [switch]$Stop
+  [switch]$Stop,
+  [switch]$RotateToken,
+  [switch]$Open
 )
 $ErrorActionPreference = 'Stop'
 
@@ -43,16 +47,29 @@ function StopBoard {
   Write-Host "Đã tắt board (pid $owner)."
 }
 
+function OpenBoard {
+  if (-not $Open) { return }
+  # The privileged URL carries the persisted token; build it here and hand it to the
+  # browser only, so it never reaches the console, the log or a shell history.
+  $tokenFile = Join-Path $env:USERPROFILE '.pixel-agents\standalone-token'
+  if (-not (Test-Path $tokenFile)) { throw "Chưa có file token $tokenFile." }
+  $token = (Get-Content -Raw -Path $tokenFile).Trim()
+  Start-Process "http://127.0.0.1:$Port/?token=$([Uri]::EscapeDataString($token))"
+  Write-Host 'Đã mở board trong trình duyệt.'
+}
+
 if ($Stop) { StopBoard; exit 0 }
-if ($Restart) { StopBoard }
-elseif (ListenerPid) { Write-Host "Board đã chạy ở cổng $Port (pid $(ListenerPid))."; exit 0 }
+# A running board keeps the token it started with, so a rotation needs a restart.
+if ($Restart -or $RotateToken) { StopBoard }
+elseif (ListenerPid) { Write-Host "Board đã chạy ở cổng $Port (pid $(ListenerPid))."; OpenBoard; exit 0 }
 
 if (-not (Test-Path $cli)) { throw "Chưa có $cli. Chạy npm run build trước." }
 $node = (Get-Command node -ErrorAction Stop).Source
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 Add-Content -Path $log -Value "`n==== $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') bật board cổng $Port ===="
 
-$command = "cmd.exe /d /c `"`"$node`" `"$cli`" --port $Port --hide-token >> `"$log`" 2>&1`""
+$rotate = if ($RotateToken) { ' --rotate-token' } else { '' }
+$command = "cmd.exe /d /c `"`"$node`" `"$cli`" --port $Port --hide-token$rotate >> `"$log`" 2>&1`""
 $startup = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }
 $result = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{
   CommandLine = $command
@@ -64,3 +81,5 @@ if ($result.ReturnValue -ne 0) { throw "Windows không tạo được tiến tr�
 for ($i = 0; $i -lt 120 -and -not (ListenerPid); $i++) { Start-Sleep -Milliseconds 500 }
 if (-not (ListenerPid)) { throw "Board chưa nghe cổng $Port sau 60 giây. Xem log: $log" }
 Write-Host "Board đang chạy ở http://127.0.0.1:$Port (pid $(ListenerPid)). Log: $log" -ForegroundColor Green
+
+OpenBoard
