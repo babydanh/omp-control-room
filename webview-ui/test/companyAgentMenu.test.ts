@@ -17,6 +17,7 @@ import {
   sessionMenuItems,
   sessionNameProblem,
   sleepingMenuItems,
+  squadRunMenuItems,
   taskCardMenuItems,
   workItemCardMenuItems,
 } from '../src/company/agentMenu.js';
@@ -495,6 +496,42 @@ describe('work item actions in the agent menu', () => {
       'copy-work-text',
     ]);
 });
+});
+
+describe('squad run actions in the agent menu', () => {
+  const facts = {
+    runId: 'run-1',
+    request: 'Build the feature',
+    status: 'planning' as const,
+    hasProposal: false,
+    privileged: true,
+  };
+
+  it.each([
+    ['planning', false, ['squad-open', 'squad-cancel']],
+    ['proposed', true, ['squad-open', 'squad-approve', 'squad-dismiss', 'squad-cancel']],
+    ['proposed', false, ['squad-open', 'squad-cancel']],
+    ['working', false, ['squad-open', 'squad-cancel']],
+    ['done', false, ['squad-open', 'squad-remove']],
+    ['dismissed', false, ['squad-open', 'squad-remove']],
+    ['stopped', false, ['squad-open', 'squad-remove']],
+    ['failed', false, ['squad-open', 'squad-retry', 'squad-remove']],
+  ] as const)('selects valid actions for a %s run', (status, hasProposal, expected) => {
+    const items = squadRunMenuItems({ ...facts, status, hasProposal });
+    const ids = items.map((entry) => entry.id);
+    expect(ids.slice(0, expected.length)).toEqual(expected);
+    expect(ids).toContain('copy-squad-run-code');
+    expect(ids).toContain('copy-squad-request');
+  });
+
+  it('offers only read-only actions without permission', () => {
+    const items = squadRunMenuItems({ ...facts, privileged: false });
+    expect(items.map((entry) => entry.id)).toEqual([
+      'squad-open',
+      'copy-squad-run-code',
+      'copy-squad-request',
+    ]);
+  });
 });
 
 describe('herdrNameProblem', () => {

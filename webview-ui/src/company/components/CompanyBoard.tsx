@@ -553,6 +553,7 @@ export function CompanyBoard({
                 }
                 client={client}
                 onOpen={() => onOpenSquad({ runId: card.runId, workspacePath: card.workspacePath })}
+                onMenu={onMenu}
               />
             ))}
             {lane.agents.map((agent, index) => (

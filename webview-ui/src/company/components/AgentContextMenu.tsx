@@ -13,7 +13,7 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { AgentInfo, CompanySessionSummary, HerdrAgent } from '../../../../core/src/company.js';
-import type { HerdrSleepingSession, WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
+import type { HerdrSleepingSession, SquadRun, WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
 import { isBrowserRuntime } from '../../runtime.js';
 import { serverToken } from '../../transport/serverToken.js';
 import { workingFolder } from '../agentInfoView.js';
@@ -36,6 +36,7 @@ import {
   sessionMenuItems,
   sessionNameProblem,
   sleepingMenuItems,
+  squadRunMenuItems,
   taskCardMenuItems,
   workItemCardMenuItems,
   type WorkItemMenuAction,
@@ -51,6 +52,7 @@ import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrVi
 import { screenPlainText } from '../screenText.js';
 import { DELETE_CONFIRM_DETAIL, REFUSED_NOTICE, sessionHoldsWork } from '../sessionActions.js';
 import { deleteSessionsInOrder, removalNotice } from '../sessionRemoval.js';
+import { findSquadRun, squadStatusLabel } from '../squadView.js';
 import { sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
 import { judgeChipFor, worktreeOffer } from '../workItemReviewView.js';
 import { findWorkItem, statusWordVi } from '../workItemView.js';
@@ -77,10 +79,18 @@ export interface AgentContextMenuProps {
     ref: { id: string; workspacePath: string },
     action: WorkItemMenuAction,
   ) => void;
+  onSelectSquad: (ref: { runId: string; workspacePath: string }) => void;
+  onSquadRemoved: (ref: { runId: string; workspacePath: string }) => void;
 }
 
 /** The actions that ask first. Each names the item that opened the question. */
-type ConfirmKind = 'kill' | 'delete' | 'cancel-prompt' | 'clean';
+type ConfirmKind =
+  | 'kill'
+  | 'delete'
+  | 'cancel-prompt'
+  | 'clean'
+  | 'squad-cancel'
+  | 'squad-remove';
 
 type MenuMode = 'menu' | 'rename' | 'folder-rename' | ConfirmKind;
 
@@ -103,6 +113,7 @@ interface MenuFacts {
   sleeping: HerdrSleepingSession | undefined;
   task: { code: string; title: string; status: string } | undefined;
   workItem: WorkItem | undefined;
+  squadRun: SquadRun | undefined;
   prompt: { preview: string } | undefined;
   folder: string | null;
   taskContractId: string | null;
@@ -130,6 +141,7 @@ function actingSessionId(subject: AgentMenuSubject): string | null {
     case 'workItem':
     case 'herdr':
     case 'sleeping':
+    case 'squad':
     case 'project':
       return null;
   }
@@ -160,6 +172,7 @@ function workAgentOf(
     case 'workItem':
     case 'planning':
     case 'sleeping':
+    case 'squad':
     case 'project':
       return null;
   }
@@ -191,6 +204,17 @@ function itemsFor(subject: AgentMenuSubject, facts: MenuFacts): AgentMenuItem[] 
         canJudge: judgeChipFor(workItem)?.rejudge === true,
         canCleanWorktree: worktreeOffer(workItem) === 'clean',
         canAskLeader: workItem.status === 'review' && workItem.squadRunId === undefined,
+      });
+    }
+    case 'squad': {
+      const run = facts.squadRun;
+      if (run === undefined) return null;
+      return squadRunMenuItems({
+        runId: run.id,
+        request: run.request,
+        status: run.status,
+        hasProposal: run.proposal !== undefined,
+        privileged: CONNECTION_PRIVILEGED,
       });
     }
     case 'planning':
@@ -229,6 +253,12 @@ function headerLines(
       return {
         title: `#${facts.workItem.sequence} · ${facts.workItem.text}`,
         subtitle: statusWordVi(facts.workItem.status),
+      };
+    case 'squad':
+      if (facts.squadRun === undefined) return { title: 'Lượt Đội không còn', subtitle: '' };
+      return {
+        title: `Đội · ${facts.squadRun.id}`,
+        subtitle: squadStatusLabel(facts.squadRun.status),
       };
     case 'planning':
       return { title: 'Prompt đang lập kế hoạch', subtitle: facts.prompt?.preview ?? '' };
@@ -281,6 +311,8 @@ export function AgentContextMenu({
   onToggleProject,
   onWorkDialog,
   onWorkItemAction,
+  onSelectSquad,
+  onSquadRemoved,
 }: AgentContextMenuProps) {
   const { subject, anchor, returnFocus } = request;
   const sessionId = actingSessionId(subject);
@@ -299,6 +331,10 @@ export function AgentContextMenu({
   const workItem =
     subject.kind === 'workItem'
       ? findWorkItem(state, { id: subject.id, workspacePath: subject.workspacePath })
+      : undefined;
+  const squadRun =
+    subject.kind === 'squad'
+      ? findSquadRun(state, { runId: subject.runId, workspacePath: subject.workspacePath })
       : undefined;
   const prompt =
     subject.kind === 'planning'
@@ -329,6 +365,7 @@ export function AgentContextMenu({
     task,
     prompt,
     workItem,
+    squadRun,
     folder,
     taskContractId:
       task !== undefined && task.contractId in state.contracts ? task.contractId : null,
@@ -346,6 +383,10 @@ export function AgentContextMenu({
   const [pending, setPending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState('');
+  const [pendingSquadRemoval, setPendingSquadRemoval] = useState<{
+    runId: string;
+    workspacePath: string;
+  } | null>(null);
 
   const sessionKnown = session !== undefined;
   const paneKnown = agent !== undefined;
@@ -426,12 +467,14 @@ export function AgentContextMenu({
     const outcome = state.commandResults[pending];
     if (outcome === undefined) return;
     if (outcome.ok) {
+      if (pendingSquadRemoval !== null) onSquadRemoved(pendingSquadRemoval);
       onClose();
       return;
     }
     setPending(null);
+    setPendingSquadRemoval(null);
     setNotice({ text: outcome.message ?? outcome.errorCode ?? REFUSED_NOTICE, failed: true });
-  }, [pending, state.commandResults, onClose]);
+  }, [pending, state.commandResults, onClose, onSquadRemoved, pendingSquadRemoval]);
 
   function track(handle: CompanyCommandHandle): void {
     const failure = failureNotice(handle, NOT_SENT_NOTICE);
@@ -468,6 +511,10 @@ export function AgentContextMenu({
         return workItem === undefined ? null : `#${workItem.sequence}`;
       case 'workItemText':
         return workItem?.text ?? null;
+      case 'squadRunCode':
+        return squadRun?.id ?? null;
+      case 'squadRequest':
+        return squadRun?.request ?? null;
       case 'path':
         return subject.kind === 'project' ? subject.project.path : null;
       case 'screen': {
@@ -526,6 +573,28 @@ export function AgentContextMenu({
           message: `Xoá ${cleanIds.length} phiên lỗi của ${header.title}? ${DELETE_CONFIRM_DETAIL}`,
           label: 'Xoá các phiên',
           run: () => void runClean(cleanIds),
+        };
+      case 'squad-cancel':
+        return {
+          message: 'Huỷ lượt Đội này? Các việc đã tạo từ đề xuất được duyệt vẫn tiếp tục.',
+          label: 'Huỷ lượt',
+          run: () => {
+            if (subject.kind === 'squad' && squadRun !== undefined) {
+              track(client.cancelSquad(subject.workspacePath, squadRun.id));
+            }
+          },
+        };
+      case 'squad-remove':
+        return {
+          message: 'Xoá lượt Đội khỏi bảng? Các việc đã tạo vẫn được giữ.',
+          label: 'Xoá khỏi bảng',
+          run: () => {
+            if (subject.kind !== 'squad' || squadRun === undefined) return;
+            const ref = { runId: squadRun.id, workspacePath: subject.workspacePath };
+            const handle = client.removeSquad(subject.workspacePath, squadRun.id);
+            if (handle.ok) setPendingSquadRemoval(ref);
+            track(handle);
+          },
         };
     }
   }
@@ -636,6 +705,32 @@ export function AgentContextMenu({
           );
         }
         onClose();
+        return;
+      case 'squadAction':
+        if (subject.kind !== 'squad' || squadRun === undefined) return;
+        if (action.action === 'open' || action.action === 'approve') {
+          onSelectSquad({ runId: squadRun.id, workspacePath: subject.workspacePath });
+          onClose();
+          return;
+        }
+        if (action.action === 'dismiss') {
+          if (squadRun.proposal !== undefined) {
+            track(
+              client.dismissSquad(
+                subject.workspacePath,
+                squadRun.id,
+                squadRun.proposal.id,
+              ),
+            );
+          }
+          return;
+        }
+        if (action.action === 'retry') {
+          track(client.retrySquad(subject.workspacePath, squadRun.id));
+          return;
+        }
+        setNotice(null);
+        setMode(action.action === 'cancel' ? 'squad-cancel' : 'squad-remove');
         return;
     }
   }

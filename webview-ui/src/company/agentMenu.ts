@@ -46,6 +46,7 @@ export type AgentMenuSubject =
   | { kind: 'task'; taskId: string; sessionId: string | null; drawer: DrawerView | null }
   | { kind: 'workItem'; id: string; workspacePath: string }
   | { kind: 'planning'; promptId: string; sessionId: string | null }
+  | { kind: 'squad'; runId: string; workspacePath: string }
   | { kind: 'herdr'; paneId: string; drawer: DrawerView | null }
   | { kind: 'sleeping'; paneId: string; drawer: DrawerView | null }
   | { kind: 'project'; project: ProjectMenuFacts };
@@ -60,6 +61,8 @@ export type CopyWhat =
   | 'taskCode'
   | 'workItemCode'
   | 'workItemText'
+  | 'squadRunCode'
+  | 'squadRequest'
   | 'path'
   | 'screen';
 
@@ -83,6 +86,7 @@ export type AgentMenuAction =
   | { kind: 'assignWork' }
   | { kind: 'describeRole' }
   | { kind: 'workItemAction'; action: WorkItemMenuAction }
+  | { kind: 'squadAction'; action: SquadRunMenuAction }
   | { kind: 'wake' };
 
 export interface AgentMenuItem {
@@ -152,6 +156,15 @@ export interface WorkItemMenuFacts {
   canJudge: boolean;
   canCleanWorktree: boolean;
   canAskLeader: boolean;
+}
+export type SquadRunMenuAction = 'open' | 'approve' | 'dismiss' | 'retry' | 'cancel' | 'remove';
+
+export interface SquadRunMenuFacts {
+  runId: string;
+  request: string;
+  status: 'planning' | 'proposed' | 'working' | 'done' | 'dismissed' | 'failed' | 'stopped';
+  hasProposal: boolean;
+  privileged: boolean;
 }
 
 /** Short hint shown beside a refused delete. The full reason is the row's tooltip. */
@@ -471,6 +484,87 @@ export function workItemCardMenuItems(work: WorkItemMenuFacts): AgentMenuItem[] 
       label: 'Sao chép nội dung',
       icon: 'copy',
       action: { kind: 'copy', what: 'workItemText' },
+    }),
+  );
+  return items;
+}
+/** The valid actions and identity copies for one squad run. */
+export function squadRunMenuItems(run: SquadRunMenuFacts): AgentMenuItem[] {
+  const items: AgentMenuItem[] = [
+    item({
+      id: 'squad-open',
+      label: 'Xem chi tiết',
+      icon: 'eye',
+      action: { kind: 'squadAction', action: 'open' },
+    }),
+  ];
+  if (run.privileged) {
+    if (run.status === 'proposed' && run.hasProposal) {
+      items.push(
+        item({
+          id: 'squad-approve',
+          label: 'Duyệt đề xuất…',
+          icon: 'check',
+          action: { kind: 'squadAction', action: 'approve' },
+        }),
+        item({
+          id: 'squad-dismiss',
+          label: 'Bỏ đề xuất',
+          icon: 'x-circle',
+          action: { kind: 'squadAction', action: 'dismiss' },
+        }),
+      );
+    }
+    if (run.status === 'failed') {
+      items.push(
+        item({
+          id: 'squad-retry',
+          label: 'Thử lại',
+          icon: 'refresh',
+          action: { kind: 'squadAction', action: 'retry' },
+        }),
+      );
+    }
+    if (run.status === 'planning' || run.status === 'proposed' || run.status === 'working') {
+      items.push(
+        item({
+          id: 'squad-cancel',
+          label: 'Huỷ lượt',
+          icon: 'stop',
+          action: { kind: 'squadAction', action: 'cancel' },
+          danger: true,
+        }),
+      );
+    }
+    if (
+      run.status === 'done' ||
+      run.status === 'dismissed' ||
+      run.status === 'stopped' ||
+      run.status === 'failed'
+    ) {
+      items.push(
+        item({
+          id: 'squad-remove',
+          label: 'Xoá khỏi bảng',
+          icon: 'trash',
+          action: { kind: 'squadAction', action: 'remove' },
+          danger: true,
+        }),
+      );
+    }
+  }
+  items.push(
+    item({
+      id: 'copy-squad-run-code',
+      label: 'Sao chép mã lượt',
+      icon: 'copy',
+      action: { kind: 'copy', what: 'squadRunCode' },
+    }),
+    item({
+      id: 'copy-squad-request',
+      label: 'Sao chép nội dung yêu cầu',
+      icon: 'copy',
+      action: { kind: 'copy', what: 'squadRequest' },
     }),
   );
   return items;

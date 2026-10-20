@@ -426,6 +426,20 @@ export function BoardShell({ client }: BoardShellProps) {
     setOpened(null);
     client.select({ sessionId: null, taskId: null, tab: null });
   }
+  function selectSquad(ref: { runId: string; workspacePath: string }): void {
+    setOpened({ kind: 'squad', ...ref });
+    dismissSheet();
+  }
+
+  function closeRemovedSquad(ref: { runId: string; workspacePath: string }): void {
+    if (
+      opened?.kind === 'squad' &&
+      opened.runId === ref.runId &&
+      opened.workspacePath === ref.workspacePath
+    ) {
+      closeDrawer();
+    }
+  }
 
   function toggleFiles(): void {
     setOpened((current) => (current?.kind === 'files' ? null : { kind: 'files' }));
@@ -813,6 +827,8 @@ export function BoardShell({ client }: BoardShellProps) {
           onToggleProject={toggleProject}
           onWorkDialog={setWorkDialog}
           onWorkItemAction={runWorkItemMenuAction}
+          onSelectSquad={selectSquad}
+          onSquadRemoved={closeRemovedSquad}
         />
       )}
       <WorkDialogHost
