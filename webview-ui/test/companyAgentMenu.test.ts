@@ -18,6 +18,7 @@ import {
   sessionNameProblem,
   sleepingMenuItems,
   taskCardMenuItems,
+  workItemCardMenuItems,
 } from '../src/company/agentMenu.js';
 import { copyText } from '../src/company/clipboard.js';
 import {
@@ -450,6 +451,50 @@ describe('work item actions in the agent menu', () => {
 
     expect(items.map((item) => item.id)).toContain('assign-work');
   });
+  it.each([
+    ['queued', ['work-open', 'work-assign', 'work-done', 'work-failed', 'work-cancel']],
+    [
+      'review',
+      ['work-open', 'work-assign', 'work-follow-up', 'work-done', 'work-failed', 'work-squad'],
+    ],
+    ['failed', ['work-open', 'work-assign', 'work-follow-up', 'work-done']],
+    ['done', ['work-open']],
+  ] as const)('selects valid actions for a %s work item', (status, expected) => {
+    const items = workItemCardMenuItems({
+      id: 'work-1',
+      sequence: 1,
+      text: 'Build the feature',
+      status,
+      privileged: true,
+      canJudge: false,
+      canCleanWorktree: false,
+      canAskLeader: status === 'review',
+    });
+    const ids = items.map((entry) => entry.id);
+
+    expect(ids.slice(0, expected.length)).toEqual(expected);
+    expect(ids).toContain('copy-work-code');
+    expect(ids).toContain('copy-work-text');
+  });
+
+  it('offers only read-only identity and detail actions when the connection lacks permission', () => {
+    const items = workItemCardMenuItems({
+      id: 'work-1',
+      sequence: 1,
+      text: 'Build the feature',
+      status: 'queued',
+      privileged: false,
+      canJudge: true,
+      canCleanWorktree: true,
+      canAskLeader: true,
+    });
+
+    expect(items.map((entry) => entry.id)).toEqual([
+      'work-open',
+      'copy-work-code',
+      'copy-work-text',
+    ]);
+});
 });
 
 describe('herdrNameProblem', () => {

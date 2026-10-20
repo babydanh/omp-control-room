@@ -535,7 +535,10 @@ export function CompanyBoard({
                   selectedWorkItem.id === card.id &&
                   selectedWorkItem.workspacePath === card.workspacePath
                 }
-                onOpen={() => onOpenWorkItem({ id: card.id, workspacePath: card.workspacePath })}
+                onMenu={onMenu}
+                onOpen={() =>
+                  onOpenWorkItem({ id: card.id, workspacePath: card.workspacePath })
+                }
               />
             ))}
             {lane.squads.map((card, index) => (

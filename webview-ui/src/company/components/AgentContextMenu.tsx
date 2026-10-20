@@ -13,7 +13,7 @@ import type { FormEvent, KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 import type { AgentInfo, CompanySessionSummary, HerdrAgent } from '../../../../core/src/company.js';
-import type { HerdrSleepingSession, WorkItemAssignee } from '../../../../core/src/messages.js';
+import type { HerdrSleepingSession, WorkItem, WorkItemAssignee } from '../../../../core/src/messages.js';
 import { isBrowserRuntime } from '../../runtime.js';
 import { serverToken } from '../../transport/serverToken.js';
 import { workingFolder } from '../agentInfoView.js';
@@ -37,6 +37,8 @@ import {
   sessionNameProblem,
   sleepingMenuItems,
   taskCardMenuItems,
+  workItemCardMenuItems,
+  type WorkItemMenuAction,
   type WorkMenuFacts,
 } from '../agentMenu.js';
 import { pendingQuestionSessionIds, sleepingName } from '../agentSidebarView.js';
@@ -50,6 +52,8 @@ import { screenPlainText } from '../screenText.js';
 import { DELETE_CONFIRM_DETAIL, REFUSED_NOTICE, sessionHoldsWork } from '../sessionActions.js';
 import { deleteSessionsInOrder, removalNotice } from '../sessionRemoval.js';
 import { sessionStatusLabel, taskStatusLabel } from '../statusLabels.js';
+import { judgeChipFor, worktreeOffer } from '../workItemReviewView.js';
+import { findWorkItem, statusWordVi } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
 import { FolderNameDialog } from './FolderNameDialog.js';
@@ -69,6 +73,10 @@ export interface AgentContextMenuProps {
   onToggleMaximize: () => void;
   onToggleProject: (key: string) => void;
   onWorkDialog: (request: WorkDialogRequest) => void;
+  onWorkItemAction: (
+    ref: { id: string; workspacePath: string },
+    action: WorkItemMenuAction,
+  ) => void;
 }
 
 /** The actions that ask first. Each names the item that opened the question. */
@@ -94,6 +102,7 @@ interface MenuFacts {
   agent: HerdrAgent | undefined;
   sleeping: HerdrSleepingSession | undefined;
   task: { code: string; title: string; status: string } | undefined;
+  workItem: WorkItem | undefined;
   prompt: { preview: string } | undefined;
   folder: string | null;
   taskContractId: string | null;
@@ -118,6 +127,7 @@ function actingSessionId(subject: AgentMenuSubject): string | null {
     case 'task':
     case 'planning':
       return subject.sessionId;
+    case 'workItem':
     case 'herdr':
     case 'sleeping':
     case 'project':
@@ -147,6 +157,7 @@ function workAgentOf(
     case 'task':
       if (session === undefined) return null;
       return { assignee: { kind: 'session', sessionId: session.id }, label: sessionLabelOf(session) };
+    case 'workItem':
     case 'planning':
     case 'sleeping':
     case 'project':
@@ -168,6 +179,20 @@ function itemsFor(subject: AgentMenuSubject, facts: MenuFacts): AgentMenuItem[] 
         facts.sessionFacts,
         subject.drawer,
       );
+    case 'workItem': {
+      const workItem = facts.workItem;
+      if (workItem === undefined) return null;
+      return workItemCardMenuItems({
+        id: workItem.id,
+        sequence: workItem.sequence,
+        text: workItem.text,
+        status: workItem.status,
+        privileged: CONNECTION_PRIVILEGED,
+        canJudge: judgeChipFor(workItem)?.rejudge === true,
+        canCleanWorktree: worktreeOffer(workItem) === 'clean',
+        canAskLeader: workItem.status === 'review' && workItem.squadRunId === undefined,
+      });
+    }
     case 'planning':
       return facts.prompt === undefined ? null : planningMenuItems(facts.session !== undefined);
     case 'herdr':
@@ -197,6 +222,13 @@ function headerLines(
       return {
         title: `${facts.task.code} · ${facts.task.title}`,
         subtitle: taskStatusLabel(facts.task.status),
+      };
+    case 'workItem':
+      if (facts.workItem === undefined)
+        return { title: 'Việc không còn trên bảng', subtitle: '' };
+      return {
+        title: `#${facts.workItem.sequence} · ${facts.workItem.text}`,
+        subtitle: statusWordVi(facts.workItem.status),
       };
     case 'planning':
       return { title: 'Prompt đang lập kế hoạch', subtitle: facts.prompt?.preview ?? '' };
@@ -248,6 +280,7 @@ export function AgentContextMenu({
   onToggleMaximize,
   onToggleProject,
   onWorkDialog,
+  onWorkItemAction,
 }: AgentContextMenuProps) {
   const { subject, anchor, returnFocus } = request;
   const sessionId = actingSessionId(subject);
@@ -263,6 +296,10 @@ export function AgentContextMenu({
       ? state.herdr.sleeping.find((entry) => entry.paneId === subject.paneId)
       : undefined;
   const task = subject.kind === 'task' ? state.tasks[subject.taskId] : undefined;
+  const workItem =
+    subject.kind === 'workItem'
+      ? findWorkItem(state, { id: subject.id, workspacePath: subject.workspacePath })
+      : undefined;
   const prompt =
     subject.kind === 'planning'
       ? state.prompts.find((entry) => entry.id === subject.promptId)
@@ -291,6 +328,7 @@ export function AgentContextMenu({
     sleeping,
     task,
     prompt,
+    workItem,
     folder,
     taskContractId:
       task !== undefined && task.contractId in state.contracts ? task.contractId : null,
@@ -426,6 +464,10 @@ export function AgentContextMenu({
         return paneId;
       case 'taskCode':
         return task?.code ?? null;
+      case 'workItemCode':
+        return workItem === undefined ? null : `#${workItem.sequence}`;
+      case 'workItemText':
+        return workItem?.text ?? null;
       case 'path':
         return subject.kind === 'project' ? subject.project.path : null;
       case 'screen': {
@@ -583,6 +625,15 @@ export function AgentContextMenu({
             agent: workAgent.assignee,
             label: workAgent.label,
           });
+        }
+        onClose();
+        return;
+      case 'workItemAction':
+        if (subject.kind === 'workItem') {
+          onWorkItemAction(
+            { id: subject.id, workspacePath: subject.workspacePath },
+            action.action,
+          );
         }
         onClose();
         return;

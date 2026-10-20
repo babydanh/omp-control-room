@@ -47,6 +47,12 @@ import {
   workItemFolderIdentity,
 } from './workItemView.js';
 
+/** Actions available for a run, as pure status rules shared by the board and its tests. */
+export function squadRunActions(status: SquadRunStatus): { cancel: boolean; remove: boolean } {
+  const finished = status === 'done' || status === 'dismissed' || status === 'stopped' || status === 'failed';
+  return { cancel: !finished, remove: finished };
+}
+
 /** A folder's squad runs as the server last sent them, with the revision that sent them. */
 export interface FolderSquad {
   revision: number;

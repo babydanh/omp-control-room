@@ -154,6 +154,8 @@ export type ClientMessage =
   | CompanySquadRequestMessage
   | CompanySquadApproveMessage
   | CompanySquadDismissMessage
+  | CompanySquadCancelMessage
+  | CompanySquadRemoveMessage
   | CompanySquadRetryMessage
   | CompanySquadClaudeCheckMessage
   | LedgerViewRequestMessage
@@ -2637,6 +2639,20 @@ export interface CompanySquadDismissMessage {
   proposalId: string;
 }
 
+export interface CompanySquadCancelMessage {
+  type: 'companySquadCancel';
+  requestId: string;
+  workspacePath: string;
+  runId: string;
+}
+
+export interface CompanySquadRemoveMessage {
+  type: 'companySquadRemove';
+  requestId: string;
+  workspacePath: string;
+  runId: string;
+}
+
 export interface CompanySquadRetryMessage {
   type: 'companySquadRetry';
   requestId: string;
@@ -2658,10 +2674,10 @@ export interface LedgerViewRequestMessage {
 export interface LedgerTimelineRequestMessage {
   type: 'ledgerTimelineRequest';
   requestId: string;
-  windowMinutes: AnonymousSchema_1466;
+  windowMinutes: AnonymousSchema_1474;
 }
 
-export type AnonymousSchema_1466 = 15 | 60 | 360 | 1440;
+export type AnonymousSchema_1474 = 15 | 60 | 360 | 1440;
 
 export interface LedgerFileDiffRequestMessage {
   type: 'ledgerFileDiffRequest';
@@ -2680,11 +2696,11 @@ export interface LedgerSendMessage {
 export interface LibrarySnapshotRequest {
   type: 'librarySnapshotRequest';
   requestId: string;
-  section: AnonymousSchema_1477;
+  section: AnonymousSchema_1485;
   refresh?: boolean;
 }
 
-export type AnonymousSchema_1477 = 'accounts' | 'storage' | 'skills' | 'mcp';
+export type AnonymousSchema_1485 = 'accounts' | 'storage' | 'skills' | 'mcp';
 
 export interface LibrarySkillPreviewRequest {
   type: 'librarySkillPreviewRequest';
@@ -2695,18 +2711,18 @@ export interface LibrarySkillPreviewRequest {
 export interface LibraryStorageSearchRequest {
   type: 'libraryStorageSearchRequest';
   requestId: string;
-  kind: AnonymousSchema_1484;
+  kind: AnonymousSchema_1492;
   query?: string;
   repo?: string;
-  agentType?: AnonymousSchema_1487;
+  agentType?: AnonymousSchema_1495;
   from?: string;
   to?: string;
   refresh?: boolean;
 }
 
-export type AnonymousSchema_1484 = 'workItems' | 'sessions' | 'openViking' | 'proofs';
+export type AnonymousSchema_1492 = 'workItems' | 'sessions' | 'openViking' | 'proofs';
 
-export type AnonymousSchema_1487 = 'main' | 'sub' | 'claude' | 'agy';
+export type AnonymousSchema_1495 = 'main' | 'sub' | 'claude' | 'agy';
 
 export interface LibraryWorkItemRestore {
   type: 'libraryWorkItemRestore';
@@ -2717,11 +2733,11 @@ export interface LibraryWorkItemRestore {
 export interface LibraryAccountLogin {
   type: 'libraryAccountLogin';
   requestId: string;
-  tool: AnonymousSchema_1496;
+  tool: AnonymousSchema_1504;
   provider?: string;
 }
 
-export type AnonymousSchema_1496 = 'claude' | 'agy' | 'omp';
+export type AnonymousSchema_1504 = 'claude' | 'agy' | 'omp';
 
 export interface LibraryMcpCheckRequest {
   type: 'libraryMcpCheckRequest';
@@ -2811,11 +2827,11 @@ export interface UsageLimitsRequestMessage {
 export interface UsageHistoryRequestMessage {
   type: 'usageHistoryRequest';
   requestId: string;
-  days: AnonymousSchema_1537;
+  days: AnonymousSchema_1545;
   force?: boolean;
 }
 
-export type AnonymousSchema_1537 = 1 | 7 | 30;
+export type AnonymousSchema_1545 = 1 | 7 | 30;
 
 export interface UsageStatsRequestMessage {
   type: 'usageStatsRequest';

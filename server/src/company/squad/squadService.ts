@@ -60,6 +60,8 @@ const SETTLE_MEMORY_MAX = 512;
 
 /** Run statuses that count as finished: they can be pruned and hold no turn. */
 const FINISHED_STATUSES: readonly string[] = ['done', 'dismissed', 'stopped'];
+/** Finished runs that may be removed; failures are finished for removal but not for pruning. */
+const REMOVABLE_STATUSES: readonly string[] = [...FINISHED_STATUSES, 'failed'];
 
 /** The work item calls a squad makes. The work item service satisfies this. */
 export interface SquadWorkItems {
@@ -137,6 +139,9 @@ const MESSAGE = {
   itemNotFound: 'Không tìm thấy việc đó.',
   itemNotReviewable:
     'Chỉ hỏi đội trưởng bước tiếp từ việc đã xong (đang chờ duyệt) và không thuộc đội nào.',
+  cancelNotActive: 'Chỉ huỷ được lượt chưa kết thúc.',
+  cancelled: 'Đã huỷ lượt. Các việc đã tạo từ đề xuất được duyệt vẫn tiếp tục.',
+  removeNotFinished: 'Hãy huỷ lượt này trước khi xoá.',
 } as const;
 
 /** One folder's squad runs, their proposals, and the leader turns that produce them. */
@@ -156,8 +161,8 @@ export class SquadService {
   private readonly settles = new Set<string>();
   /** The last leader turn queued per run. Turns of one run run one after another. */
   private readonly turnQueue = new Map<string, Promise<void>>();
-  /** Leader processes in flight, so dispose can stop them. */
-  private readonly controllers = new Set<AbortController>();
+  /** Leader processes in flight, by run, so one run can be cancelled without stopping another. */
+  private readonly controllers = new Map<string, AbortController>();
   private readonly unsubscribes: (() => void)[] = [];
   private disposed = false;
 
@@ -379,11 +384,44 @@ export class SquadService {
     }
     this.scheduleTurn(run.id);
   }
+  /** Cancels an unfinished run and its own in-flight leader turn. */
+  async cancel(command: SquadCommand & { runId: string }): Promise<void> {
+    if (this.answers.has(command.requestId)) return;
+    const run = this.requireRun(command.runId);
+    if (FINISHED_STATUSES.includes(run.status) || run.status === 'failed')
+      throw new CompanyError('squad_status', MESSAGE.cancelNotActive);
+    this.controllers.get(run.id)?.abort();
+    for (const proposal of run.proposals) {
+      if (proposal.status === 'pending') proposal.status = 'dismissed';
+    }
+    run.pendingReviews = [];
+    run.status = 'stopped';
+    delete run.error;
+    delete run.note;
+    const at = this.iso();
+    appendEvent(run, squadEvent(at, 'stopped', MESSAGE.cancelled));
+    this.remember(command.requestId, run.id);
+    this.commit();
+    await this.flush();
+  }
+
+  /** Removes a finished run without changing any work item. */
+  async remove(command: SquadCommand & { runId: string }): Promise<void> {
+    if (this.answers.has(command.requestId)) return;
+    const run = this.requireRun(command.runId);
+    if (!REMOVABLE_STATUSES.includes(run.status))
+      throw new CompanyError('squad_status', MESSAGE.removeNotFinished);
+    this.runs.delete(run.id);
+    this.remember(command.requestId, run.id);
+    this.commit();
+    await this.flush();
+  }
+
 
   /** Stops the leader processes and the listeners. Turns that were in flight are not saved. */
   dispose(): void {
     this.disposed = true;
-    for (const controller of this.controllers) controller.abort();
+    for (const controller of this.controllers.values()) controller.abort();
     this.controllers.clear();
     for (const unsubscribe of this.unsubscribes) unsubscribe();
     this.unsubscribes.length = 0;
@@ -441,7 +479,7 @@ export class SquadService {
       return;
     }
     const controller = new AbortController();
-    this.controllers.add(controller);
+    this.controllers.set(run.id, controller);
     try {
       const reviews = run.pendingReviews.slice();
       const snapshot = this.ports.workItems.snapshot();
@@ -468,13 +506,19 @@ export class SquadService {
       );
       const checked = parseLeaderReply(output, members, catalog, openSequences);
       if (!checked.ok) throw new SquadLeaderError(checked.message);
-      if (this.disposed) return;
+      if (this.disposed || this.runs.get(runId) !== run || FINISHED_STATUSES.includes(run.status))
+        return;
       this.applyReply(run, checked.value, reviews);
     } catch (error) {
-      if (this.disposed) return;
+      if (
+        this.disposed ||
+        this.runs.get(runId) !== run ||
+        FINISHED_STATUSES.includes(run.status)
+      )
+        return;
       this.failRun(run, leaderFailureMessage(error));
     } finally {
-      this.controllers.delete(controller);
+      if (this.controllers.get(runId) === controller) this.controllers.delete(runId);
     }
   }
 

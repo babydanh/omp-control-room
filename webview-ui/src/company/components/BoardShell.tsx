@@ -10,7 +10,7 @@
 
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import type { AgentMenuRequest } from '../agentMenu.js';
+import type { AgentMenuRequest, WorkItemMenuAction } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import { buildPaletteItems, type PaletteActionId, type PaletteItem } from '../commandPalette.js';
 import type { CompanyClient } from '../companyClient.js';
@@ -163,7 +163,24 @@ export function BoardShell({ client }: BoardShellProps) {
     setMenu((current) => ({ ...request, token: (current?.token ?? 0) + 1 }));
   }, []);
   const closeMenu = useCallback(() => setMenu(null), []);
+  function runWorkItemMenuAction(
+    ref: { id: string; workspacePath: string },
+    action: WorkItemMenuAction,
+  ): void {
+    setOpened({ kind: 'workItem', ...ref });
+    if (action === 'open') return;
+    setWorkItemAction((current) => ({
+      ref,
+      action,
+      token: (current?.token ?? 0) + 1,
+    }));
+  }
   const [workDialog, setWorkDialog] = useState<WorkDialogRequest | null>(null);
+  const [workItemAction, setWorkItemAction] = useState<{
+    ref: { id: string; workspacePath: string };
+    action: Exclude<WorkItemMenuAction, 'open'>;
+    token: number;
+  } | null>(null);
   const mode = useLayoutMode();
 
   useEffect(() => {
@@ -732,6 +749,16 @@ export function BoardShell({ client }: BoardShellProps) {
             onPrefsChange={setDrawerPrefs}
             sidebarWidth={sidebarFootprint}
             onMenu={openMenu}
+            workItemAction={
+              opened?.kind === 'workItem' &&
+              workItemAction?.ref.id === opened.id &&
+              workItemAction.ref.workspacePath === opened.workspacePath
+                ? { action: workItemAction.action, token: workItemAction.token }
+                : null
+            }
+            onWorkItemActionHandled={(token) =>
+              setWorkItemAction((current) => (current?.token === token ? null : current))
+            }
           />
         </div>
       </TerminalPreviewProvider>
@@ -785,6 +812,7 @@ export function BoardShell({ client }: BoardShellProps) {
           onToggleMaximize={toggleDrawerMaximized}
           onToggleProject={toggleProject}
           onWorkDialog={setWorkDialog}
+          onWorkItemAction={runWorkItemMenuAction}
         />
       )}
       <WorkDialogHost

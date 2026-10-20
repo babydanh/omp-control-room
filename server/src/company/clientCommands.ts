@@ -292,6 +292,8 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySquadRequest',
   'companySquadApprove',
   'companySquadDismiss',
+  'companySquadCancel',
+  'companySquadRemove',
   'companySquadRetry',
   'companySquadClaudeCheck',
   'companyAgentRoleSet',
@@ -337,6 +339,8 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companySquadRequest: true,
   companySquadApprove: true,
   companySquadDismiss: true,
+  companySquadCancel: true,
+  companySquadRemove: true,
   companySquadRetry: true,
   companySquadClaudeCheck: true,
   companyAgentRoleSet: true,
@@ -569,6 +573,8 @@ async function run(
       case 'companySquadRequest':
       case 'companySquadApprove':
       case 'companySquadDismiss':
+      case 'companySquadCancel':
+      case 'companySquadRemove':
       case 'companySquadRetry':
         await squadCommand(msg, requestId, services, send);
         return;
@@ -1368,6 +1374,16 @@ async function squadCommand(
   }
   if (msg.type === 'companySquadDismiss') {
     await squad.dismiss({ requestId, runId, proposalId: stringField(msg, 'proposalId') ?? '' });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companySquadCancel') {
+    await squad.cancel({ requestId, runId });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companySquadRemove') {
+    await squad.remove({ requestId, runId });
     ok(send, requestId);
     return;
   }

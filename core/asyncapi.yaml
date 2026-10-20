@@ -245,6 +245,8 @@ components:
         - $ref: '#/components/schemas/CompanySquadRequestMessage'
         - $ref: '#/components/schemas/CompanySquadApproveMessage'
         - $ref: '#/components/schemas/CompanySquadDismissMessage'
+        - $ref: '#/components/schemas/CompanySquadCancelMessage'
+        - $ref: '#/components/schemas/CompanySquadRemoveMessage'
         - $ref: '#/components/schemas/CompanySquadRetryMessage'
         - $ref: '#/components/schemas/CompanySquadClaudeCheckMessage'
         # Ledger (privileged; read-only views and one message command)
@@ -4920,6 +4922,44 @@ components:
       properties:
         type:
           const: companySquadRetry
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        runId:
+          type: string
+          format: uuid
+
+    CompanySquadCancelMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, runId]
+      description: Cancel an unfinished squad run. Approved work items continue independently.
+      properties:
+        type:
+          const: companySquadCancel
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        runId:
+          type: string
+          format: uuid
+
+    CompanySquadRemoveMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, runId]
+      description: Remove a finished squad run from the folder's board and persisted squad file. Work items are unchanged.
+      properties:
+        type:
+          const: companySquadRemove
         requestId:
           type: string
           format: uuid

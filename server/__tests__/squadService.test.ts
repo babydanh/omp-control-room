@@ -261,8 +261,17 @@ class FakePersistence implements SquadPersistence {
 
 /** Replies are queued; each turn takes the next one. An Error reply makes the turn fail. */
 class FakeLeader implements LeaderRunner {
+  private deferred: Promise<string> | null = null;
   readonly prompts: string[] = [];
   private readonly replies: (string | Error)[] = [];
+
+  defer(): (value: string) => void {
+    let resolve: (value: string) => void = () => {};
+    this.deferred = new Promise<string>((done) => {
+      resolve = done;
+    });
+    return resolve;
+  }
 
   reply(value: string | Error): void {
     this.replies.push(value);
@@ -270,6 +279,11 @@ class FakeLeader implements LeaderRunner {
 
   async run(prompt: string): Promise<string> {
     this.prompts.push(prompt);
+    const deferred = this.deferred;
+    if (deferred !== null) {
+      this.deferred = null;
+      return deferred;
+    }
     const next = this.replies.shift();
     if (next === undefined) throw new Error('no reply queued');
     if (next instanceof Error) throw next;
@@ -587,6 +601,91 @@ describe('SquadService turns', () => {
     expect(h.leader.prompts).toHaveLength(1);
   });
 });
+
+describe('SquadService cancellation and removal', () => {
+  it('cancels only the run in flight and ignores its late leader reply', async () => {
+    const h = new Harness();
+    const resolveLeader = h.leader.defer();
+    const cancelledRun = await h.service.request({ requestId: randomUUID(), text: 'Huỷ tôi' });
+    await waitFor(() => h.leader.prompts.length === 1);
+    h.leader.reply(proposal('Việc vẫn chạy'));
+    const otherRun = await h.service.request({ requestId: randomUUID(), text: 'Giữ tôi' });
+    await waitFor(() => h.runOf(otherRun)?.status === 'proposed');
+    const requestId = randomUUID();
+    await h.service.cancel({ requestId, runId: cancelledRun });
+    const cancelled = h.runOf(cancelledRun);
+    expect(cancelled?.status).toBe('stopped');
+    expect(cancelled?.history.at(-1)?.message).toContain('Đã huỷ');
+    expect(h.runOf(otherRun)?.status).toBe('proposed');
+    resolveLeader(proposal('Trả lời muộn'));
+    await letTurnsPass();
+    expect(h.runOf(cancelledRun)?.status).toBe('stopped');
+    expect(h.runOf(cancelledRun)?.proposal).toBeUndefined();
+    const revision = h.service.snapshot().revision;
+    await h.service.cancel({ requestId, runId: cancelledRun });
+    expect(h.service.snapshot().revision).toBe(revision);
+  });
+
+  it('refuses to cancel a finished run', async () => {
+    const h = new Harness();
+    h.leader.reply(DONE_REPLY);
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn tất' });
+    await waitFor(() => h.runOf(runId)?.status === 'done');
+    const error = await rejectionOf(h.service.cancel({ requestId: randomUUID(), runId }));
+    expect((error as CompanyError).code).toBe('squad_status');
+  });
+
+  it('removes a done run from the snapshot and persisted file without deleting work items', async () => {
+    const h = new Harness();
+    const { runId, proposalId } = await approvedRun(h, 'Viết form');
+    const item = h.itemsOf(proposalId)[0];
+    if (item === undefined) throw new Error('no approved item');
+    h.leader.reply(DONE_REPLY);
+    h.workItems.review(item.id, h.stamp(), 'Việc đã xong');
+    await waitFor(() => h.runOf(runId)?.status === 'done');
+    const requestId = randomUUID();
+    await h.service.remove({ requestId, runId });
+    expect(h.runOf(runId)).toBeUndefined();
+    expect(h.persistence.saves.at(-1)?.runs.some((run) => run.id === runId)).toBe(false);
+    expect(h.workItems.get(item.id)).toBeDefined();
+    const revision = h.service.snapshot().revision;
+    await h.service.remove({ requestId, runId });
+    expect(h.service.snapshot().revision).toBe(revision);
+  });
+
+  it('refuses to remove an active run with the Vietnamese cancellation instruction', async () => {
+    const h = new Harness();
+    const resolveLeader = h.leader.defer();
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Đang làm' });
+    await waitFor(() => h.leader.prompts.length === 1);
+    const error = await rejectionOf(h.service.remove({ requestId: randomUUID(), runId }));
+    expect((error as CompanyError).message).toBe('Hãy huỷ lượt này trước khi xoá.');
+    await h.service.cancel({ requestId: randomUUID(), runId });
+    resolveLeader(DONE_REPLY);
+  });
+
+  it('removes a failed run without making failure cancellable', async () => {
+    const h = new Harness();
+    h.leader.reply('không phải JSON');
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Lỗi' });
+    await waitFor(() => h.runOf(runId)?.status === 'failed');
+    const cancelled = await rejectionOf(h.service.cancel({ requestId: randomUUID(), runId }));
+    expect((cancelled as CompanyError).code).toBe('squad_status');
+    await h.service.remove({ requestId: randomUUID(), runId });
+    expect(h.runOf(runId)).toBeUndefined();
+  });
+  it('keeps an approved work item when its squad run is cancelled', async () => {
+    const h = new Harness();
+    const { runId, proposalId } = await approvedRun(h, 'Viết form');
+    const item = h.itemsOf(proposalId)[0];
+    if (item === undefined) throw new Error('no approved item');
+    await h.service.cancel({ requestId: randomUUID(), runId });
+    expect(h.workItems.get(item.id)).toEqual(item);
+    expect(h.runOf(runId)?.status).toBe('stopped');
+  });
+
+});
+
 
 describe('SquadService restart', () => {
   it('marks a turn that was in flight as failed, and retry asks again', async () => {

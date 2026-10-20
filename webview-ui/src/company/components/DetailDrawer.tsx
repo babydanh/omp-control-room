@@ -26,6 +26,7 @@ import {
   type AgentMenuSubject,
   agentMenuTriggers,
   type DrawerView,
+  type WorkItemMenuAction,
 } from '../agentMenu.js';
 import { sleepingName } from '../agentSidebarView.js';
 import type { BoardCard, BoardLane } from '../boardView.js';
@@ -93,11 +94,16 @@ export interface DetailDrawerProps {
   sidebarWidth: number;
   /** Opens the menu the header's subject offers. */
   onMenu: (request: AgentMenuRequest) => void;
+  workItemAction: {
+    action: Exclude<WorkItemMenuAction, 'open'>;
+    token: number;
+  } | null;
+  onWorkItemActionHandled: (token: number) => void;
 }
 
 type ContentProps = Omit<
   DetailDrawerProps,
-  'subject' | 'onClose' | 'prefs' | 'onPrefsChange' | 'sidebarWidth'
+  'subject' | 'prefs' | 'onPrefsChange' | 'sidebarWidth'
 > & {
   subject: DrawerSubject;
 };
@@ -275,7 +281,7 @@ export function DetailDrawer({
       )}
       <WrapLinesContext.Provider value={prefs.wrapLines}>
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">
-          <DrawerContent {...rest} subject={retained} />
+          <DrawerContent {...rest} subject={retained} onClose={onClose} />
         </div>
       </WrapLinesContext.Provider>
     </aside>
@@ -340,6 +346,8 @@ function DrawerContent(props: ContentProps) {
           state={state}
           workspacePath={subject.workspacePath}
           id={subject.id}
+          actionRequest={props.workItemAction}
+          onActionHandled={props.onWorkItemActionHandled}
         />
       );
     case 'squad':
@@ -350,6 +358,7 @@ function DrawerContent(props: ContentProps) {
           state={state}
           workspacePath={subject.workspacePath}
           runId={subject.runId}
+          onRemoved={props.onClose}
         />
       );
     case 'files':

@@ -25,6 +25,7 @@ import {
   type SquadCatalog,
   type SquadDraftRow,
   squadEventLabel,
+  squadRunActions,
   squadStatusLabel,
   toggleRowDependency,
   validateRows,
@@ -33,22 +34,28 @@ import { useCommandDialog } from '../useCommandDialog.js';
 import { useNow } from '../useNow.js';
 import { workItemsOf } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
+import { ConfirmAction } from './ConfirmAction.js';
 import { SquadPlanRow, type SquadRowChange } from './SquadPlanRow.js';
-
 const APPROVE_FALLBACK = 'Chưa duyệt được đề xuất này.';
 const DISMISS_FALLBACK = 'Chưa bỏ được đề xuất này.';
 const RETRY_FALLBACK = 'Chưa thử lại được việc này.';
+const CANCEL_FALLBACK = 'Chưa huỷ được lượt này.';
+const REMOVE_FALLBACK = 'Chưa xoá được lượt này.';
 
 export interface SquadRunPanelProps {
   client: CompanyClient;
   state: CompanyViewState;
   workspacePath: string;
   runId: string;
+  onRemoved: () => void;
 }
 
-export function SquadRunPanel({ client, state, workspacePath, runId }: SquadRunPanelProps) {
+
+export function SquadRunPanel({ client, state, workspacePath, runId, onRemoved }: SquadRunPanelProps) {
   const now = useNow();
+  const [confirming, setConfirming] = useState<'cancel' | 'remove' | null>(null);
   const command = useCommandDialog(client);
+  const removeCommand = useCommandDialog(client, onRemoved);
   const run = findSquadRun(state, { runId, workspacePath });
   if (run === undefined) {
     return <p className="text-xs text-text-muted">Đội này không còn trong thư mục.</p>;
@@ -57,7 +64,15 @@ export function SquadRunPanel({ client, state, workspacePath, runId }: SquadRunP
   const progress = progressLabel(run.progress);
   const note = (run.note ?? '').trim();
   const error = run.status === 'failed' ? run.error?.trim() || 'Đội gặp lỗi.' : null;
-
+  const actions = squadRunActions(run.status);
+  const cancelRun = (): void => {
+    void command.run(client.cancelSquad(workspacePath, run.id), CANCEL_FALLBACK);
+    setConfirming(null);
+  };
+  const removeRun = (): void => {
+    void removeCommand.run(client.removeSquad(workspacePath, run.id), REMOVE_FALLBACK);
+    setConfirming(null);
+  };
   const retry = (): void => {
     void command.run(client.retrySquad(workspacePath, run.id), RETRY_FALLBACK);
   };
@@ -85,6 +100,9 @@ export function SquadRunPanel({ client, state, workspacePath, runId }: SquadRunP
         <p className="whitespace-pre-wrap break-words text-text-muted">{note}</p>
       )}
       {error !== null && <p className="whitespace-pre-wrap break-words text-warning">{error}</p>}
+      {removeCommand.notice !== null && (
+        <p className="text-2xs text-warning">{removeCommand.notice}</p>
+      )}
       {command.notice !== null && <p className="text-2xs text-warning">{command.notice}</p>}
       {run.status === 'failed' && (
         <div className="flex flex-wrap gap-1.5">
@@ -92,6 +110,34 @@ export function SquadRunPanel({ client, state, workspacePath, runId }: SquadRunP
             Thử lại
           </CompanyButton>
         </div>
+      )}
+      {(actions.cancel || actions.remove) && (
+        <div className="flex flex-wrap gap-1.5">
+          {actions.cancel && (
+            <CompanyButton size="sm" disabled={command.pending} onClick={() => setConfirming('cancel')}>
+              Huỷ lượt
+            </CompanyButton>
+          )}
+          {actions.remove && (
+            <CompanyButton
+              size="sm"
+              disabled={command.pending || removeCommand.pending}
+              onClick={() => setConfirming('remove')}
+            >
+              Xoá khỏi bảng
+            </CompanyButton>
+          )}
+        </div>
+      )}
+      {confirming !== null && (
+        <ConfirmAction
+          message={confirming === 'cancel' ? 'Huỷ lượt Đội này? Việc đã duyệt vẫn tiếp tục.' : 'Xoá lượt Đội khỏi bảng? Việc đã tạo vẫn được giữ.'}
+          confirmLabel={confirming === 'cancel' ? 'Huỷ lượt' : 'Xoá khỏi bảng'}
+          danger
+          disabled={command.pending || removeCommand.pending}
+          onConfirm={confirming === 'cancel' ? cancelRun : removeRun}
+          onCancel={() => setConfirming(null)}
+        />
       )}
       <section aria-label="Lịch sử">
         <h3 className="mb-1 text-2xs font-semibold text-text-muted">Lịch sử</h3>

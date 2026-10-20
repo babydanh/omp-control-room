@@ -44,6 +44,7 @@ export interface ProjectMenuFacts {
 export type AgentMenuSubject =
   | { kind: 'session'; sessionId: string; drawer: DrawerView | null }
   | { kind: 'task'; taskId: string; sessionId: string | null; drawer: DrawerView | null }
+  | { kind: 'workItem'; id: string; workspacePath: string }
   | { kind: 'planning'; promptId: string; sessionId: string | null }
   | { kind: 'herdr'; paneId: string; drawer: DrawerView | null }
   | { kind: 'sleeping'; paneId: string; drawer: DrawerView | null }
@@ -52,7 +53,15 @@ export type AgentMenuSubject =
 export type SessionControlAction =
   'interrupt' | 'pause' | 'resume' | 'restart' | 'kill' | 'archive' | 'delete';
 
-export type CopyWhat = 'cwd' | 'sessionCode' | 'paneId' | 'taskCode' | 'path' | 'screen';
+export type CopyWhat =
+  | 'cwd'
+  | 'sessionCode'
+  | 'paneId'
+  | 'taskCode'
+  | 'workItemCode'
+  | 'workItemText'
+  | 'path'
+  | 'screen';
 
 export type AgentMenuAction =
   | { kind: 'sessionTab'; tab: CompanyDrawerTab }
@@ -73,6 +82,7 @@ export type AgentMenuAction =
   | { kind: 'cleanErrored' }
   | { kind: 'assignWork' }
   | { kind: 'describeRole' }
+  | { kind: 'workItemAction'; action: WorkItemMenuAction }
   | { kind: 'wake' };
 
 export interface AgentMenuItem {
@@ -120,6 +130,28 @@ export interface TaskMenuFacts {
   code: string;
   /** The task's Contract when the board holds it; null when it does not. */
   contractId: string | null;
+}
+
+export type WorkItemMenuAction =
+  | 'open'
+  | 'assign'
+  | 'followUp'
+  | 'done'
+  | 'failed'
+  | 'cancel'
+  | 'judge'
+  | 'cleanWorktree'
+  | 'askLeader';
+
+export interface WorkItemMenuFacts {
+  id: string;
+  sequence: number;
+  text: string;
+  status: 'queued' | 'running' | 'needs_input' | 'review' | 'done' | 'failed';
+  privileged: boolean;
+  canJudge: boolean;
+  canCleanWorktree: boolean;
+  canAskLeader: boolean;
 }
 
 /** Short hint shown beside a refused delete. The full reason is the row's tooltip. */
@@ -330,6 +362,118 @@ export function taskCardMenuItems(
   const own = taskMenuItems(task);
   if (session === null) return [...own, ...withGroupStart(maximizeItems(drawer))];
   return [...own, ...withGroupStart(sessionMenuItems(session, drawer))];
+}
+
+/** The valid controls for one work item card, followed by its identity copies. */
+export function workItemCardMenuItems(work: WorkItemMenuFacts): AgentMenuItem[] {
+  const items: AgentMenuItem[] = [
+    item({
+      id: 'work-open',
+      label: 'Xem chi tiết',
+      icon: 'eye',
+      action: { kind: 'workItemAction', action: 'open' },
+    }),
+  ];
+  if (work.privileged) {
+    if (work.status === 'queued' || work.status === 'review' || work.status === 'failed') {
+      items.push(
+        item({
+          id: 'work-assign',
+          label: 'Giao lại',
+          icon: 'send',
+          action: { kind: 'workItemAction', action: 'assign' },
+        }),
+      );
+    }
+    if (work.status === 'review' || work.status === 'failed') {
+      items.push(
+        item({
+          id: 'work-follow-up',
+          label: 'Hỏi tiếp',
+          icon: 'send',
+          action: { kind: 'workItemAction', action: 'followUp' },
+        }),
+      );
+    }
+    if (work.status !== 'done') {
+      items.push(
+        item({
+          id: 'work-done',
+          label: 'Đánh dấu xong',
+          icon: 'check',
+          action: { kind: 'workItemAction', action: 'done' },
+        }),
+      );
+    }
+    if (['queued', 'running', 'needs_input', 'review'].includes(work.status)) {
+      items.push(
+        item({
+          id: 'work-failed',
+          label: 'Đánh dấu thất bại',
+          icon: 'x-circle',
+          action: { kind: 'workItemAction', action: 'failed' },
+          danger: true,
+        }),
+      );
+    }
+    if (work.status === 'queued') {
+      items.push(
+        item({
+          id: 'work-cancel',
+          label: 'Huỷ việc',
+          icon: 'stop',
+          action: { kind: 'workItemAction', action: 'cancel' },
+          danger: true,
+        }),
+      );
+    }
+    if (work.canJudge) {
+      items.push(
+        item({
+          id: 'work-judge',
+          label: 'Chạy giám khảo',
+          icon: 'check',
+          action: { kind: 'workItemAction', action: 'judge' },
+        }),
+      );
+    }
+    if (work.canCleanWorktree) {
+      items.push(
+        item({
+          id: 'work-clean',
+          label: 'Dọn worktree',
+          icon: 'trash',
+          action: { kind: 'workItemAction', action: 'cleanWorktree' },
+          danger: true,
+        }),
+      );
+    }
+    if (work.canAskLeader) {
+      items.push(
+        item({
+          id: 'work-squad',
+          label: 'Hỏi đội trưởng bước tiếp',
+          icon: 'send',
+          action: { kind: 'workItemAction', action: 'askLeader' },
+        }),
+      );
+    }
+  }
+  items.push(
+    item({
+      id: 'copy-work-code',
+      label: 'Sao chép mã việc',
+      icon: 'copy',
+      action: { kind: 'copy', what: 'workItemCode' },
+    }),
+    item({
+      id: 'copy-work-text',
+      label: 'Sao chép nội dung',
+      icon: 'copy',
+      action: { kind: 'copy', what: 'workItemText' },
+    }),
+  );
+  return items;
 }
 
 /**

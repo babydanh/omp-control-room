@@ -489,6 +489,16 @@ export function squadRetry(requestId: string, workspacePath: string, runId: stri
   return { type: 'companySquadRetry', requestId, workspacePath, runId };
 }
 
+/** Cancel an unfinished squad run. Approved work items continue independently. */
+export function squadCancel(requestId: string, workspacePath: string, runId: string): ClientMessage {
+  return { type: 'companySquadCancel', requestId, workspacePath, runId };
+}
+
+/** Remove a finished squad run from the board without changing its work items. */
+export function squadRemove(requestId: string, workspacePath: string, runId: string): ClientMessage {
+  return { type: 'companySquadRemove', requestId, workspacePath, runId };
+}
+
 /**
  * Save one folder's squad settings. A request id seen before saves nothing new. The verdict is a
  * companyCommandResult.

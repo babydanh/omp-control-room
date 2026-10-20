@@ -4,10 +4,12 @@
  * drawer on the item, which carries the actions.
  */
 
+import type { AgentMenuRequest } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardWorkItem } from '../boardView.js';
 import { claudeInterruptedNote, claudeProgressLine } from '../claudeCodeView.js';
 import { companyRoleLabel } from '../roleProfiles.js';
+import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { conflictText, judgeChipFor } from '../workItemReviewView.js';
 import {
   areaChipsOf,
@@ -28,9 +30,14 @@ export interface WorkItemCardProps {
   now: number;
   selected: boolean;
   onOpen: () => void;
+  onMenu: (request: AgentMenuRequest) => void;
 }
 
-export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCardProps) {
+export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: WorkItemCardProps) {
+  const triggers = useAgentMenuGestures<HTMLButtonElement>(
+    { kind: 'workItem', id: card.id, workspacePath: card.workspacePath },
+    onMenu,
+  );
   const updated = relativeTimeVi(card.updatedAt, now);
   const badge = priorityBadge(card.priority);
   const chip = blockerChip(card);
@@ -45,6 +52,7 @@ export function WorkItemCard({ card, index, now, selected, onOpen }: WorkItemCar
       type="button"
       onClick={onOpen}
       aria-pressed={selected}
+      {...triggers}
       title={`${statusWordVi(card.status)} · ${card.assignee}`}
       data-testid="work-item-card"
       data-work-item-id={card.id}

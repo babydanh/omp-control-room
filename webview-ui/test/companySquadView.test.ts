@@ -33,6 +33,7 @@ import {
   squadEventLabel,
   squadLaneFor,
   squadProgressView,
+  squadRunActions,
   squadRunKey,
   squadStatusLabel,
   toggleRowDependency,
@@ -135,6 +136,18 @@ describe('squad lanes', () => {
   ])('shows a %s run in the %s lane', (status, lane) => {
     expect(squadLaneFor(run({ status }))).toBe(lane);
   });
+});
+
+describe('squad run actions', () => {
+  it.each<SquadRunStatus>(['planning', 'proposed', 'working'])(
+    'offers cancellation for an unfinished %s run',
+    (status) => expect(squadRunActions(status)).toEqual({ cancel: true, remove: false }),
+  );
+
+  it.each<SquadRunStatus>(['done', 'dismissed', 'stopped', 'failed'])(
+    'offers removal for a finished %s run',
+    (status) => expect(squadRunActions(status)).toEqual({ cancel: false, remove: true }),
+  );
 });
 
 describe('squad labels', () => {

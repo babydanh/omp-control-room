@@ -4,6 +4,8 @@
  * are commands the server answers; the card moves only when the server says so.
  */
 
+import { useState } from 'react';
+
 import type { WorkItemStatus } from '../../../../core/src/messages.js';
 import type { BoardSquad } from '../boardView.js';
 import type { CompanyClient } from '../companyClient.js';
@@ -13,6 +15,7 @@ import {
   openSequencesOf,
   rowsFromProposal,
   squadProgressView,
+  squadRunActions,
   squadRunKey,
   squadStatusLabel,
   validateRows,
@@ -21,6 +24,7 @@ import { useCommandDialog } from '../useCommandDialog.js';
 import { conflictText } from '../workItemReviewView.js';
 import { blockerChip, blockerSentence } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
+import { ConfirmAction } from './ConfirmAction.js';
 import { FolderTag } from './FolderTag.js';
 import { WorkItemReviewChips } from './WorkItemReviewChips.js';
 
@@ -71,6 +75,18 @@ export interface SquadRunCardProps {
 
 export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRunCardProps) {
   const { run } = card;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirming, setConfirming] = useState<'cancel' | 'remove' | null>(null);
+  const [longPress, setLongPress] = useState<ReturnType<typeof setTimeout> | null>(null);
+  const actions = squadRunActions(run.status);
+  function executeRunAction(): void {
+    if (confirming === 'cancel')
+      void command.run(client.cancelSquad(card.workspacePath, card.runId), 'Chưa huỷ được lượt này.');
+    if (confirming === 'remove')
+      void command.run(client.removeSquad(card.workspacePath, card.runId), 'Chưa xoá được lượt này.');
+    setConfirming(null);
+    setMenuOpen(false);
+  }
   const command = useCommandDialog(client);
   const busy = command.pending;
   const proposal = run.status === 'proposed' ? run.proposal : undefined;
@@ -115,6 +131,24 @@ export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRun
       data-lane={card.lane}
       data-index={index}
       className="company-card company-work-card flex w-full min-w-0 flex-col gap-1 p-2"
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenuOpen(true);
+      }}
+      onKeyDown={(event) => {
+        if (event.shiftKey && event.key === 'F10') {
+          event.preventDefault();
+          setMenuOpen(true);
+        }
+      }}
+      onPointerDown={(event) => {
+        if (event.pointerType === 'touch' || event.pointerType === 'pen')
+          setLongPress(setTimeout(() => setMenuOpen(true), 500));
+      }}
+      onPointerUp={() => {
+        if (longPress !== null) clearTimeout(longPress);
+        setLongPress(null);
+      }}
     >
       <button
         type="button"
@@ -206,6 +240,31 @@ export function SquadRunCard({ card, index, selected, client, onOpen }: SquadRun
       {verdict !== null && !verdict.ok && <p className="text-2xs text-warning">{verdict.reason}</p>}
       {error !== null && <p className="line-clamp-3 break-words text-2xs text-warning">{error}</p>}
       {command.notice !== null && <p className="text-2xs text-warning">{command.notice}</p>}
+      {menuOpen && (actions.cancel || actions.remove) && (
+        <div role="menu" aria-label="Thao tác lượt Đội" className="flex gap-1">
+          {actions.cancel && (
+            <CompanyButton size="sm" role="menuitem" onClick={() => setConfirming('cancel')}>
+              Huỷ lượt
+            </CompanyButton>
+          )}
+          {actions.remove && (
+            <CompanyButton size="sm" role="menuitem" onClick={() => setConfirming('remove')}>
+              Xoá khỏi bảng
+            </CompanyButton>
+          )}
+          <CompanyButton size="sm" onClick={() => setMenuOpen(false)}>Đóng</CompanyButton>
+        </div>
+      )}
+      {confirming !== null && (
+        <ConfirmAction
+          message={confirming === 'cancel' ? 'Huỷ lượt Đội này? Việc đã duyệt vẫn tiếp tục.' : 'Xoá lượt Đội khỏi bảng? Việc đã tạo vẫn được giữ.'}
+          confirmLabel={confirming === 'cancel' ? 'Huỷ lượt' : 'Xoá khỏi bảng'}
+          danger
+          disabled={busy}
+          onConfirm={executeRunAction}
+          onCancel={() => setConfirming(null)}
+        />
+      )}
       {proposal !== undefined && (
         <div className="flex flex-wrap gap-1.5">
           <CompanyButton

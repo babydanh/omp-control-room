@@ -6,10 +6,11 @@
  * item moves only when the server says so; the verdict decides the notice shown.
  */
 
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import type { WorkItem, WorkItemEvent } from '../../../../core/src/messages.js';
 import { priorityLabel } from '../../../../core/src/workItemGraph.js';
+import type { WorkItemMenuAction } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import { assigneeOptionsFor } from '../assigneeOptions.js';
 import { claudeInterruptedNote, claudeProgressLine } from '../claudeCodeView.js';
@@ -42,6 +43,7 @@ import {
 } from '../workItemView.js';
 import { AssignWorkDialog } from './AssignWorkDialog.js';
 import { CompanyButton } from './CompanyButton.js';
+import { ConfirmAction } from './ConfirmAction.js';
 import { FolderTag } from './FolderTag.js';
 import { WorkItemReviewChips } from './WorkItemReviewChips.js';
 
@@ -78,15 +80,30 @@ export interface WorkItemPanelProps {
   state: CompanyViewState;
   workspacePath: string;
   id: string;
+  actionRequest: {
+    action: Exclude<WorkItemMenuAction, 'open'>;
+    token: number;
+  } | null;
+  onActionHandled: (token: number) => void;
 }
 
-export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPanelProps) {
+export function WorkItemPanel({
+  client,
+  state,
+  workspacePath,
+  id,
+  actionRequest,
+  onActionHandled,
+}: WorkItemPanelProps) {
   const now = useNow();
   const item = findWorkItem(state, { id, workspacePath });
   const [draft, setDraft] = useState('');
   const [sent, setSent] = useState<SentCommand | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const [reassigning, setReassigning] = useState(false);
+  const [confirming, setConfirming] = useState<'cancel' | 'failed' | 'cleanWorktree' | null>(null);
+  const followUpRef = useRef<HTMLTextAreaElement>(null);
+  const handledActionToken = useRef<number | null>(null);
 
   const outcome = sent === null ? undefined : state.commandResults[sent.requestId];
   const busy = sent !== null && outcome === undefined;
@@ -102,6 +119,31 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
   useEffect(() => {
     if (outcome?.ok === true && sentAction === 'assign') setReassigning(false);
   }, [outcome, sentAction]);
+  useEffect(() => {
+    if (actionRequest === null || actionRequest.token === handledActionToken.current) return;
+    const { action, token } = actionRequest;
+    handledActionToken.current = token;
+    onActionHandled(token);
+    if (action === 'assign') {
+      setLocalNotice(null);
+      setSent(null);
+      setReassigning(true);
+    } else if (action === 'followUp') {
+      followUpRef.current?.focus();
+    } else if (action === 'failed' || action === 'cancel' || action === 'cleanWorktree') {
+      setConfirming(action);
+    } else {
+      const command =
+        action === 'done'
+          ? client.markWorkItem(workspacePath, id, 'done')
+          : action === 'judge'
+            ? client.judgeWorkItem(workspacePath, id)
+            : client.requestSquadFromWorkItem(workspacePath, id);
+      const panelAction: PanelAction = action === 'done' ? 'verdict' : action === 'judge' ? 'judge' : 'squad';
+      setLocalNotice(failureNotice(command, FALLBACK_NOTICE[panelAction]));
+      setSent(command.ok ? { requestId: command.requestId, action: panelAction } : null);
+    }
+  }, [actionRequest, client, id, onActionHandled, workspacePath]);
 
   if (item === undefined) {
     return <p className="p-3 text-2xs text-text-muted">Việc này không còn trong công ty nữa.</p>;
@@ -134,6 +176,17 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
 
   function askLeader(): void {
     send('squad', client.requestSquadFromWorkItem(workspacePath, id));
+  }
+  function confirmDestructive(): void {
+    const action = confirming;
+    setConfirming(null);
+    if (action === 'failed') {
+      send('verdict', client.markWorkItem(workspacePath, id, 'failed'));
+    } else if (action === 'cancel') {
+      send('cancel', client.cancelWorkItem(workspacePath, id));
+    } else if (action === 'cleanWorktree') {
+      send('cleanWorktree', client.cleanWorkItemWorktree(workspacePath, id));
+    }
   }
 
   const status = item.status;
@@ -302,7 +355,7 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
               size="sm"
               className="text-danger"
               disabled={busy}
-              onClick={() => send('verdict', client.markWorkItem(workspacePath, id, 'failed'))}
+              onClick={() => setConfirming('failed')}
             >
               Hỏng
             </CompanyButton>
@@ -312,7 +365,7 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
               size="sm"
               className="text-danger"
               disabled={busy}
-              onClick={() => send('cancel', client.cancelWorkItem(workspacePath, id))}
+              onClick={() => setConfirming('cancel')}
             >
               Huỷ
             </CompanyButton>
@@ -340,11 +393,35 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
             <CompanyButton
               size="sm"
               disabled={busy}
-              onClick={() => send('cleanWorktree', client.cleanWorkItemWorktree(workspacePath, id))}
+              onClick={() => setConfirming('cleanWorktree')}
             >
               Dọn worktree
             </CompanyButton>
           )}
+        </div>
+      )}
+      {confirming !== null && (
+        <div className="mx-2.5 rounded-(--company-radius-sm) bg-well p-2">
+          <ConfirmAction
+            message={
+              confirming === 'cancel'
+                ? 'Huỷ việc này? Việc đang chạy sẽ dừng.'
+                : confirming === 'failed'
+                  ? 'Đánh dấu việc này thất bại?'
+                  : 'Dọn worktree của việc này?'
+            }
+            confirmLabel={
+              confirming === 'cancel'
+                ? 'Huỷ việc'
+                : confirming === 'failed'
+                  ? 'Đánh dấu thất bại'
+                  : 'Dọn worktree'
+            }
+            danger
+            disabled={busy}
+            onConfirm={confirmDestructive}
+            onCancel={() => setConfirming(null)}
+          />
         </div>
       )}
       {worktree === 'removed' && (
@@ -356,6 +433,7 @@ export function WorkItemPanel({ client, state, workspacePath, id }: WorkItemPane
       {canFollowUp && (
         <form aria-label="Gửi tiếp" onSubmit={followUp} className="flex flex-col gap-1.5 px-2.5">
           <textarea
+            ref={followUpRef}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             rows={3}
