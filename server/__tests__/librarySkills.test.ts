@@ -50,6 +50,98 @@ describe('scanSkills', () => {
     expect(skills.some((skill) => skill.name === 'ignored-plugin')).toBe(false);
   });
 
+  it('includes .agents skills and resolves collisions by omp, Claude, agents, then agy priority', async () => {
+    const home = await fixture();
+    await addSkill(path.join(home, '.omp', 'agent', 'skills'), 'shared', '---\nname: shared\ndescription: Native omp\n---\n');
+    await addSkill(path.join(home, '.claude', 'skills'), 'shared', '---\nname: shared\ndescription: Claude\n---\n');
+    await addSkill(path.join(home, '.agents', 'skills'), 'shared', '---\nname: shared\ndescription: agents\n---\n');
+    await addSkill(path.join(home, '.gemini', 'config', 'skills'), 'shared', '---\nname: shared\ndescription: agy\n---\n');
+    await addSkill(path.join(home, '.agents', 'skills'), 'agents-only', '---\nname: agents-only\ndescription: agents only\n---\n');
+
+    const { skills } = await scanSkills(home);
+    expect(skills.find((skill) => skill.name === 'shared')).toMatchObject({
+      tools: ['omp', 'claude', 'agy'],
+      preferredSource: 'omp',
+    });
+    expect(skills.find((skill) => skill.name === 'agents-only')).toMatchObject({
+      tools: ['omp'],
+      preferredSource: 'agents',
+    });
+  });
+
+  it('marks omp ignoredSkills entries without counting them as loaded from omp', async () => {
+    const home = await fixture();
+    await addSkill(path.join(home, '.omp', 'agent', 'skills'), 'native', '---\nname: native\ndescription: Native\n---\n');
+    await addSkill(path.join(home, '.agents', 'skills'), 'blocked', '---\nname: blocked\n---\n');
+    await addSkill(path.join(home, '.omp', 'agent', 'skills'), 'shared', '---\nname: shared\ndescription: OMP\n---\n');
+    await addSkill(path.join(home, '.agents', 'skills'), 'shared', '---\nname: shared\ndescription: agents\n---\n');
+    await mkdir(path.join(home, '.omp', 'agent'), { recursive: true });
+    await writeFile(path.join(home, '.omp', 'agent', 'config.yml'), [
+      'skills:',
+      '  ignoredSkills:',
+      '    - agents/blocked',
+      '    - agents/shared',
+      '',
+    ].join('\n'));
+
+    const { skills } = await scanSkills(home);
+    expect(skills.find((skill) => skill.name === 'blocked')).toMatchObject({
+      tools: [],
+      ignoredTools: ['omp'],
+    });
+    expect(skills.find((skill) => skill.name === 'shared')).toMatchObject({
+      description: 'OMP',
+      tools: ['omp'],
+      ignoredTools: [],
+      preferredSource: 'omp',
+    });
+    expect(skills.find((skill) => skill.name === 'shared')?.sources).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tool: 'agents', ignored: true }),
+    ]));
+    expect(skills.find((skill) => skill.name === 'native')).toMatchObject({ tools: ['omp'] });
+  });
+
+  it('exposes content differences and keeps Claude plugin skills namespaced from regular skills', async () => {
+    const home = await fixture();
+    await addSkill(path.join(home, '.claude', 'skills'), 'brainstorming', '---\nname: brainstorming\ndescription: regular\n---\nregular');
+    await addSkill(path.join(home, '.agents', 'skills'), 'brainstorming', '---\nname: brainstorming\ndescription: agents variant\n---\nother');
+    await addSkill(path.join(home, '.claude', 'plugins', 'cache', 'market', 'superpowers', '1.0.0', 'skills'), 'brainstorming', '---\nname: brainstorming\ndescription: plugin\n---\nplugin');
+    await mkdir(path.join(home, '.claude', 'plugins'), { recursive: true });
+    await writeFile(path.join(home, '.claude', 'settings.json'), JSON.stringify({
+      enabledPlugins: { 'superpowers@market': true },
+    }));
+    await writeFile(path.join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({
+      plugins: { 'superpowers@market': [{ version: '1.0.0' }] },
+    }));
+
+    const result = await scanSkills(home);
+    const regular = result.skills.find((skill) => skill.name === 'brainstorming');
+    const plugin = result.skills.find((skill) => skill.name === 'brainstorming' && skill.plugin === 'superpowers');
+    expect(regular).toMatchObject({
+      hasContentDifferences: true,
+      sources: expect.arrayContaining([
+        expect.objectContaining({ tool: 'claude', contentHash: expect.any(String), lineCount: 5 }),
+        expect.objectContaining({ tool: 'agents', contentHash: expect.any(String), lineCount: 5 }),
+      ]),
+    });
+    expect(plugin).toMatchObject({ plugin: 'superpowers', sources: [{ tool: 'claude', contentHash: expect.any(String) }] });
+    expect(regular?.sources?.[0]?.contentHash).not.toBe(plugin?.sources?.[0]?.contentHash);
+    const agentsVersion = regular?.sources?.find((source) => source.tool === 'agents');
+    await expect(previewSkillFromIndex(regular?.id ?? '', result.paths, agentsVersion?.id))
+      .resolves.toMatchObject({ content: expect.stringContaining('other') });
+
+  });
+  it('discovers claude.ai synced skills below the synced UUID directory', async () => {
+    const home = await fixture();
+    await addSkill(path.join(home, '.claude', 'skills', 'synced'), path.join('account-id', 'docs'), '---\nname: docs\ndescription: Synced docs\n---\n');
+
+    const { skills } = await scanSkills(home);
+    expect(skills.find((skill) => skill.name === 'docs')).toMatchObject({
+      tools: ['claude'],
+      sources: [{ tool: 'claude', kind: 'claude-ai-sync' }],
+    });
+  });
+
   it('parses quoted multiline descriptions, unique-location filtering and stable opaque ids', async () => {
     const home = await fixture();
     await addSkill(path.join(home, '.claude', 'skills'), 'quoted', '---\nname: quoted\ndescription: "A quoted\n  multi-line description"\n---\n');

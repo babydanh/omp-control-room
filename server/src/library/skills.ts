@@ -7,7 +7,7 @@ import type { LibrarySkill } from '../../../core/src/messages.js';
 import { LibraryUserError } from './libraryError.js';
 
 const PREVIEW_LIMIT_BYTES = 64 * 1024;
-const TOOL_ORDER = ['omp', 'claude', 'agy'] as const;
+const TOOL_ORDER = ['omp', 'claude', 'agents', 'agy'] as const;
 type SkillTool = (typeof TOOL_ORDER)[number];
 type ClaudeMode = 'on' | 'name-only' | 'user-invocable-only' | 'off';
 
@@ -16,8 +16,28 @@ interface SkillSource {
   description: string;
   tool: SkillTool;
   path: string;
+  location: string;
   sizeBytes: number;
+  contentHash: string;
+  lineCount: number;
+  sourceId: string;
+  kind?: 'claude-ai-sync';
   plugin?: string;
+}
+
+function isIgnoredSkill(patterns: readonly string[], source: SkillSource): boolean {
+  if (source.tool !== 'omp' && source.tool !== 'agents') return false;
+  const names = source.tool === 'agents'
+    ? [source.name, `agents/${source.name}`]
+    : [source.name];
+  return patterns.some((pattern) => {
+    const regex = new RegExp(`^${pattern.split('').map((character) => {
+      if (character === '*') return '.*';
+      if (character === '?') return '.';
+      return character.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
+    }).join('')}$`, 'i');
+    return names.some((name) => regex.test(name));
+  });
 }
 
 let cachedSkills: LibrarySkill[] | undefined;
@@ -75,7 +95,13 @@ function parseFrontmatter(content: string): { name?: string; description: string
   return { name: name?.trim() || undefined, description: description.trim() };
 }
 
-async function listSkillFiles(root: string, tool: SkillTool, plugin?: string): Promise<SkillSource[]> {
+async function listSkillFiles(
+  root: string,
+  tool: SkillTool,
+  location: string,
+  plugin?: string,
+  kind?: SkillSource['kind'],
+): Promise<SkillSource[]> {
   let entries;
   try {
     entries = await fs.readdir(root, { withFileTypes: true });
@@ -88,18 +114,41 @@ async function listSkillFiles(root: string, tool: SkillTool, plugin?: string): P
     try {
       const stat = await fs.stat(skillPath);
       if (!stat.isFile()) continue;
-      const metadata = parseFrontmatter(await fs.readFile(skillPath, 'utf8'));
-      found.push({
+      const content = await fs.readFile(skillPath, 'utf8');
+      const metadata = parseFrontmatter(content);
+      const source: SkillSource = {
         name: metadata.name ?? entry.name,
         description: metadata.description,
         tool,
         path: skillPath,
+        location,
         sizeBytes: stat.size,
+        contentHash: createHash('sha256').update(content).digest('hex'),
+        lineCount: content.length === 0 ? 0 : content.split(/\r?\n/).length - (/\r?\n$/.test(content) ? 1 : 0),
+        sourceId: '',
         plugin,
-      });
+        kind,
+      };
+      source.sourceId = createHash('sha256').update(`${tool}\0${skillPath}`).digest('hex').slice(0, 24);
+      found.push(source);
     } catch {
       // Ignore an unreadable skill and continue scanning other sources.
     }
+  }
+  return found;
+}
+
+async function listSyncedClaudeSkillFiles(root: string): Promise<SkillSource[]> {
+  let accounts;
+  try {
+    accounts = await fs.readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const found: SkillSource[] = [];
+  for (const account of accounts) {
+    if (!account.isDirectory()) continue;
+    found.push(...await listSkillFiles(path.join(root, account.name), 'claude', 'Claude.ai sync', undefined, 'claude-ai-sync'));
   }
   return found;
 }
@@ -111,6 +160,45 @@ async function readJson(filePath: string): Promise<Record<string, unknown>> {
   } catch {
     return {};
   }
+}
+
+async function readIgnoredSkillPatterns(filePath: string): Promise<string[]> {
+  let content: string;
+  try {
+    content = await fs.readFile(filePath, 'utf8');
+  } catch {
+    return [];
+  }
+  const lines = content.split(/\r?\n/);
+  let inSkills = false;
+  let inIgnoredSkills = false;
+  const patterns: string[] = [];
+  for (const line of lines) {
+    if (/^skills:\s*(?:#.*)?$/.test(line)) {
+      inSkills = true;
+      inIgnoredSkills = false;
+      continue;
+    }
+    if (inSkills && /^  ignoredSkills:\s*(?:#.*)?$/.test(line)) {
+      inIgnoredSkills = true;
+      continue;
+    }
+    const inline = line.match(/^  ignoredSkills:\s*\[(.*)\]\s*(?:#.*)?$/);
+    if (inSkills && inline) {
+      patterns.push(...(inline[1] ?? '').split(',').map((value) => value.trim().replace(/^(["'])(.*)\1$/, '$2')).filter(Boolean));
+      inIgnoredSkills = false;
+      continue;
+    }
+    if (inIgnoredSkills && /^\s{4,}-\s*/.test(line)) {
+      const value = line.replace(/^\s+-\s*/, '').replace(/\s+#.*$/, '').trim();
+      const unquoted = value.replace(/^(["'])(.*)\1$/, '$2');
+      if (unquoted) patterns.push(unquoted);
+      continue;
+    }
+    if (inSkills && line.trim() && !/^\s/.test(line)) inSkills = false;
+    if (inIgnoredSkills && (/^\S/.test(line) || /^  [^\s-]/.test(line))) inIgnoredSkills = false;
+  }
+  return patterns;
 }
 
 function modeForSkill(overrides: Record<string, unknown>, name: string, plugin?: string): ClaudeMode {
@@ -152,6 +240,8 @@ export async function scanSkills(homeDir: string): Promise<{ skills: LibrarySkil
   const sourceRoots = [
     path.join(homeDir, '.omp', 'agent', 'skills'),
     path.join(claudeDir, 'skills'),
+    path.join(homeDir, '.agents', 'skills'),
+    path.join(homeDir, '.agent', 'skills'),
     path.join(homeDir, '.gemini', 'antigravity-cli', 'skills'),
     path.join(homeDir, '.gemini', 'config', 'skills'),
   ];
@@ -165,7 +255,7 @@ export async function scanSkills(homeDir: string): Promise<{ skills: LibrarySkil
   }));
   const sourceIssues: string[] = availableRoots.some(Boolean)
     ? []
-    : ['Không tìm thấy thư mục skill của omp, Claude hoặc agy.'];
+    : ['Không tìm thấy thư mục skill của omp, Claude, agents hoặc agy.'];
   try {
     const settingsContent = await fs.readFile(path.join(claudeDir, 'settings.json'), 'utf8');
     JSON.parse(settingsContent);
@@ -180,11 +270,15 @@ export async function scanSkills(homeDir: string): Promise<{ skills: LibrarySkil
     ? settings.skillOverrides as Record<string, unknown>
     : {};
   const installed = await readJson(path.join(claudeDir, 'plugins', 'installed_plugins.json'));
+  const ignoredPatterns = await readIgnoredSkillPatterns(path.join(homeDir, '.omp', 'agent', 'config.yml'));
   const sources: SkillSource[] = [
-    ...await listSkillFiles(sourceRoots[0], 'omp'),
-    ...await listSkillFiles(sourceRoots[1], 'claude'),
-    ...await listSkillFiles(sourceRoots[2], 'agy'),
-    ...await listSkillFiles(sourceRoots[3], 'agy'),
+    ...await listSkillFiles(sourceRoots[0], 'omp', '.omp/agent/skills'),
+    ...await listSkillFiles(sourceRoots[1], 'claude', '.claude/skills'),
+    ...await listSkillFiles(sourceRoots[2], 'agents', '.agents/skills'),
+    ...await listSkillFiles(sourceRoots[3], 'agents', '.agent/skills'),
+    ...await listSkillFiles(sourceRoots[4], 'agy', '.gemini/antigravity-cli/skills'),
+    ...await listSkillFiles(sourceRoots[5], 'agy', '.gemini/config/skills'),
+    ...await listSyncedClaudeSkillFiles(path.join(claudeDir, 'skills', 'synced')),
   ];
 
   const cacheRoot = path.join(claudeDir, 'plugins', 'cache');
@@ -203,14 +297,15 @@ export async function scanSkills(homeDir: string): Promise<{ skills: LibrarySkil
       }
     }
     for (const version of versions) {
-      sources.push(...await listSkillFiles(path.join(pluginRoot, version, 'skills'), 'claude', plugin));
+      sources.push(...await listSkillFiles(path.join(pluginRoot, version, 'skills'), 'claude', `Claude plugin:${plugin}`, plugin));
     }
   }
   latestSkillsSourceReason = sourceIssues.length ? sourceIssues.join(' ') : undefined;
 
   const grouped = new Map<string, SkillSource[]>();
   for (const source of sources) {
-    const key = source.name.trim().toLocaleLowerCase();
+    const name = source.name.trim().toLocaleLowerCase();
+    const key = source.plugin ? `plugin:${source.plugin.toLocaleLowerCase()}:${name}` : name;
     const group = grouped.get(key);
     if (group) group.push(source);
     else grouped.set(key, [source]);
@@ -218,27 +313,47 @@ export async function scanSkills(homeDir: string): Promise<{ skills: LibrarySkil
   const paths = new Map<string, string>();
   const skills: LibrarySkill[] = [];
   for (const group of grouped.values()) {
-    const id = stableId(group[0].name);
-    const tools = [...new Set(group.map((source) => source.tool))].sort(
+    const plugin = group.find((source) => source.plugin !== undefined)?.plugin;
+    const id = stableId(plugin ? `plugin:${plugin}:${group[0].name}` : group[0].name);
+    const ordered = [...group].sort((left, right) => TOOL_ORDER.indexOf(left.tool) - TOOL_ORDER.indexOf(right.tool));
+    const activeSources = ordered.filter((source) => !isIgnoredSkill(ignoredPatterns, source));
+    const tools = [...new Set(activeSources.map((source) => source.tool === 'agents' ? 'omp' : source.tool))].sort(
       (left, right) => TOOL_ORDER.indexOf(left) - TOOL_ORDER.indexOf(right),
     );
-    const claudeSource = group.find((source) => source.tool === 'claude');
-    const pluginSource = group.find((source) => source.plugin !== undefined);
-    const preferred = group.find((source) => source.tool === 'omp') ?? claudeSource ?? group[0];
+    const ignoredTools = [...new Set(ordered
+      .filter((source) => isIgnoredSkill(ignoredPatterns, source))
+      .map((source) => source.tool === 'agents' ? 'omp' : source.tool)
+      .filter((tool) => !tools.includes(tool)))];
+    const claudeSource = activeSources.find((source) => source.tool === 'claude');
+    const preferred = activeSources[0] ?? ordered[0];
+    const differentContent = new Set(group.map((source) => source.contentHash)).size > 1;
     const skill: LibrarySkill = {
       id,
       name: preferred.name,
       description: preferred.description,
       tools,
-      claudeMode: claudeSource ? modeForSkill(overrides, preferred.name, pluginSource?.plugin) : 'on',
+      claudeMode: claudeSource ? modeForSkill(overrides, preferred.name, plugin) : 'on',
       sizeBytes: preferred.sizeBytes,
-      ...(pluginSource?.plugin ? { plugin: pluginSource.plugin } : {}),
-      
+      preferredSource: activeSources[0]?.tool,
+      preferredSourceId: preferred.sourceId,
+      sources: ordered.map((source) => ({
+        id: source.sourceId,
+        tool: source.tool,
+        location: source.location,
+        contentHash: source.contentHash,
+        lineCount: source.lineCount,
+        ignored: isIgnoredSkill(ignoredPatterns, source),
+        ...(source.kind ? { kind: source.kind } : {}),
+      })),
+      ignoredTools,
+      hasContentDifferences: differentContent,
+      ...(plugin ? { plugin } : {}),
     };
     skills.push(skill);
     paths.set(id, preferred.path);
+    for (const source of ordered) paths.set(`${id}:${source.sourceId}`, source.path);
   }
-  skills.sort((left, right) => left.name.localeCompare(right.name));
+  skills.sort((left, right) => left.name.localeCompare(right.name) || (left.plugin ?? '').localeCompare(right.plugin ?? ''));
   return { skills, paths };
 }
 
@@ -253,14 +368,15 @@ export async function readSkills(refresh: boolean): Promise<LibrarySkill[]> {
 export async function previewSkillFromIndex(
   id: string,
   paths: ReadonlyMap<string, string>,
+  sourceId?: string,
 ): Promise<{ content: string; truncated: boolean }> {
-  const skillPath = paths.get(id);
+  const skillPath = sourceId ? paths.get(`${id}:${sourceId}`) : paths.get(id);
   if (!skillPath) throw new LibraryUserError('Không tìm thấy skill để xem trước.');
   const content = await fs.readFile(skillPath);
   const truncated = content.byteLength > PREVIEW_LIMIT_BYTES;
   return { content: content.subarray(0, PREVIEW_LIMIT_BYTES).toString('utf8'), truncated };
 }
 
-export async function previewSkill(id: string): Promise<{ content: string; truncated: boolean }> {
-  return previewSkillFromIndex(id, skillPaths);
+export async function previewSkill(id: string, sourceId?: string): Promise<{ content: string; truncated: boolean }> {
+  return previewSkillFromIndex(id, skillPaths, sourceId);
 }

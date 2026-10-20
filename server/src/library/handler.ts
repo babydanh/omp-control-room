@@ -64,8 +64,9 @@ async function runLibraryRequest(
       }
       case 'librarySkillPreviewRequest': {
         const id = stringField(msg, 'id');
-        const preview = await skills.previewSkill(id);
-        send({ type: 'librarySkillPreview', requestId, id, ...preview });
+        const sourceId = typeof msg.sourceId === 'string' ? msg.sourceId : undefined;
+        const preview = await skills.previewSkill(id, sourceId);
+        send({ type: 'librarySkillPreview', requestId, id, ...(sourceId ? { sourceId } : {}), ...preview });
         return;
       }
       case 'libraryStorageSearchRequest': {
@@ -112,7 +113,15 @@ function errorMessage(msg: Record<string, unknown>, requestId: string, reason: s
       if (msg.section === 'mcp') return { type: 'libraryMcpSnapshot', requestId, servers: [], reason };
       return { type: 'libraryStorageSearchResult', requestId, kind: 'workItems', results: [], reason };
     case 'librarySkillPreviewRequest':
-      return { type: 'librarySkillPreview', requestId, id: typeof msg.id === 'string' ? msg.id : '', content: '', truncated: false, reason };
+      return {
+        type: 'librarySkillPreview',
+        requestId,
+        id: typeof msg.id === 'string' ? msg.id : '',
+        ...(typeof msg.sourceId === 'string' ? { sourceId: msg.sourceId } : {}),
+        content: '',
+        truncated: false,
+        reason,
+      };
     case 'libraryStorageSearchRequest':
       return {
         type: 'libraryStorageSearchResult',

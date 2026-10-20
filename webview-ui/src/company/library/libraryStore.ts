@@ -61,7 +61,7 @@ export interface LibraryStore {
   accept: (message: ServerMessage) => void;
   requestSnapshot: (section: LibrarySection, refresh?: boolean) => string;
   searchStorage: (kind: LibraryStorageKind, options?: Omit<LibraryStorageSearchRequest, 'type' | 'requestId' | 'kind'>) => string;
-  previewSkill: (id: string) => string;
+  previewSkill: (id: string, sourceId?: string) => string;
   restoreWorkItem: (workItemId: string) => string;
   loginAccount: (tool: LibraryAccountLogin['tool'], provider?: string) => string;
   checkMcp: (name: string) => string;
@@ -108,7 +108,7 @@ function requestKey(request: LibraryRequest): string {
     case 'librarySnapshotRequest':
       return request.section === 'storage' ? 'storage:workItems' : `snapshot:${request.section}`;
     case 'libraryStorageSearchRequest': return `storage:${request.kind}`;
-    case 'librarySkillPreviewRequest': return `skill:${request.id}`;
+    case 'librarySkillPreviewRequest': return `skill:${request.id}:${request.sourceId ?? ''}`;
     case 'libraryWorkItemRestore': return `restore:${request.workItemId}`;
     case 'libraryAccountLogin': return `login:${request.tool}`;
     case 'libraryMcpCheckRequest': return `mcp:${request.name}`;
@@ -129,7 +129,9 @@ function responseMatches(request: LibraryRequest, message: LibraryServerMessage)
         (request.type === 'librarySnapshotRequest' && request.section === 'storage' && message.kind === 'workItems')
       );
     case 'librarySkillPreview':
-      return request.type === 'librarySkillPreviewRequest' && request.id === message.id;
+      return request.type === 'librarySkillPreviewRequest' &&
+        request.id === message.id &&
+        request.sourceId === message.sourceId;
     case 'libraryCommandResult':
       return (
         (request.type === 'libraryWorkItemRestore' && message.command === 'restoreWorkItem') ||
@@ -201,7 +203,12 @@ export function createLibraryStore(options: LibraryStoreOptions): LibraryStore {
         commit({ ...state, storage: { ...state.storage, [message.kind]: message }, pending, errors });
         return;
       case 'librarySkillPreview':
-        commit({ ...state, previews: { ...state.previews, [message.id]: message }, pending, errors });
+        commit({
+          ...state,
+          previews: { ...state.previews, [`${message.id}:${message.sourceId ?? ''}`]: message },
+          pending,
+          errors,
+        });
         return;
       case 'libraryCommandResult':
         commit({ ...state, commandResults: { ...state.commandResults, [message.requestId]: message }, pending, errors });
@@ -220,7 +227,8 @@ export function createLibraryStore(options: LibraryStoreOptions): LibraryStore {
       transmit({ type: 'librarySnapshotRequest', requestId: newRequestId(), section, refresh }),
     searchStorage: (kind, requestOptions = {}) =>
       transmit({ type: 'libraryStorageSearchRequest', requestId: newRequestId(), kind, ...requestOptions }),
-    previewSkill: (id) => transmit({ type: 'librarySkillPreviewRequest', requestId: newRequestId(), id }),
+    previewSkill: (id, sourceId) =>
+      transmit({ type: 'librarySkillPreviewRequest', requestId: newRequestId(), id, sourceId }),
     restoreWorkItem: (workItemId) =>
       transmit({ type: 'libraryWorkItemRestore', requestId: newRequestId(), workItemId }),
     loginAccount: (tool, provider) =>
