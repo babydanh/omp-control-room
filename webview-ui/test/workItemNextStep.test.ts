@@ -5,7 +5,7 @@ import { nextStepFor } from '../src/company/workItemNextStep.js';
 describe('nextStepFor', () => {
   it('asks you to judge again when the judge sent the item back, without its boilerplate prefix', () => {
     const step = nextStepFor({ status: 'needs_input', reason: 'Giám khảo chưa thấy đạt: thiếu bản đồ route', judge: { status: 'verdict', verdict: 'fail', followUps: 2 } }, '', false);
-    expect(step).toEqual({ tone: 'act', title: 'Giám khảo chưa cho đạt', detail: 'thiếu bản đồ route', actions: ['rejudge', 'finish', 'reassign'] });
+    expect(step).toEqual({ tone: 'act', title: 'Giám khảo chưa cho đạt', detail: 'thiếu bản đồ route', actions: ['rejudge', 'finish'] });
   });
 
   it('says who acts while you wait: the queue, the agent, the judge', () => {

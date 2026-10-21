@@ -53,8 +53,9 @@ export function nextStepFor(item: StepItem, waitText: string | null, canClean: b
       }
       return { tone: 'act', title: 'Agent đã xong: bạn xem kết quả', actions: ['finish', 'followUp', 'reassign'] };
     case 'needs_input':
+      // A sent-back item can be judged again or accepted; reassigning it is refused by the server.
       if (judge?.status === 'verdict') {
-        return { tone: 'act', title: 'Giám khảo chưa cho đạt', detail: short(item.reason), actions: ['rejudge', 'finish', 'reassign'] };
+        return { tone: 'act', title: 'Giám khảo chưa cho đạt', detail: short(item.reason), actions: ['rejudge', 'finish'] };
       }
       return { tone: 'act', title: 'Agent đang hỏi bạn', detail: short(item.reason), actions: ['finish'] };
     case 'failed':

@@ -237,8 +237,9 @@ export function WorkItemPanel({
   const progress = workItemProgressLine(item);
   const interrupted = workItemInterruptedNote(item);
   const step = nextStepFor(item, waitText, canCleanWorktree);
-  // The next step's buttons lead; the row below keeps only the moves it does not offer.
-  const inStep = new Set<string>(step.actions);
+  // The next step's buttons lead; the row below keeps only the moves it does not offer. While the
+  // agent or the judge works, the only move left is to stop it ("Hỏng"): no verdict before it ends.
+  const inStep = new Set<string>(step.tone === 'wait' ? ['finish', 'rejudge', 'reassign', 'cleanWorktree'] : step.actions);
   const runStep = (action: NextStepAction): void => {
     if (action === 'rejudge') send('judge', client.judgeWorkItem(workspacePath, id));
     else if (action === 'finish') send('verdict', client.markWorkItem(workspacePath, id, 'done'));

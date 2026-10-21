@@ -26,6 +26,13 @@ export const DEFAULT_AGENT = 'task';
  */
 export type PromptEngine = 'omp' | 'claude' | 'other';
 
+/**
+ * The board's agent names come from omp's catalog. Claude Code names some of the same roles its own
+ * way: omp's read-only `scout` is Claude's `Explore`. A name not listed here is used as it is
+ * (reviewer, security-reviewer and sonic exist on both).
+ */
+const CLAUDE_AGENT_FOR: Readonly<Record<string, string>> = { scout: 'Explore' };
+
 /** What a prompt is composed from. `agent` absent means the default worker. */
 export interface DispatchPromptParts {
   readonly text: string;
@@ -45,7 +52,7 @@ export function composeDispatchPrompt(parts: DispatchPromptParts): string {
   if (parts.agent !== undefined && parts.agent !== '' && parts.agent !== DEFAULT_AGENT) {
     sections.push(
       parts.engine === 'claude'
-        ? `Làm việc này theo vai trò \`${parts.agent}\` trong Claude Code, rồi tổng hợp kết quả và báo lại.`
+        ? `Làm việc này bằng subagent \`${CLAUDE_AGENT_FOR[parts.agent] ?? parts.agent}\` của Claude Code (vai trò ${parts.agent}), rồi tổng hợp kết quả và báo lại.`
         : parts.engine === 'other'
           ? `Làm việc này theo vai trò \`${parts.agent}\`, rồi tổng hợp kết quả và báo lại.`
           : `Làm việc này bằng subagent omp \`${parts.agent}\` (tool task, agent: ${parts.agent}), rồi tổng hợp kết quả và báo lại.`,

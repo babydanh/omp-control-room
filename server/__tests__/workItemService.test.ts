@@ -240,11 +240,11 @@ describe('WorkItemService: dispatch and status', () => {
     const f = await openFixture();
     f.panes.push({ paneId: PANE_A, status: 'idle', kind: 'claude' });
     await f.service.create({ requestId: randomUUID(), text: 'Khảo sát', assignee: herdr(PANE_A), agent: 'scout' });
-    expect(f.prompts[0]?.text).toContain('theo vai trò `scout` trong Claude Code');
+    expect(f.prompts[0]?.text).toContain('subagent `Explore` của Claude Code (vai trò scout)');
     expect(f.prompts[0]?.text).not.toContain('subagent omp');
   });
 
-  it('judges again a sent-back item on the agent reply read afresh', async () => {
+  it('judges again a review item on its saved result: its pane may already run other work', async () => {
     const f = await openFixture();
     f.panes.push({ paneId: PANE_A, status: 'idle' });
     const id = await f.service.create({ requestId: randomUUID(), text: 'Khảo sát', assignee: herdr(PANE_A) });
@@ -256,7 +256,7 @@ describe('WorkItemService: dispatch and status', () => {
     expect(itemOf(f, id).result).toBe('❯');
     f.reply = '## Báo cáo đầy đủ';
     await f.service.judgeAgain({ requestId: randomUUID(), id });
-    expect(itemOf(f, id)).toMatchObject({ status: 'review', result: '## Báo cáo đầy đủ', judge: { status: 'running' } });
+    expect(itemOf(f, id)).toMatchObject({ status: 'review', result: '❯', judge: { status: 'running' } });
   });
 
   it('queues a second item behind a busy agent and sends it when the agent frees up', async () => {

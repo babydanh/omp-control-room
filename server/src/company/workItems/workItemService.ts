@@ -685,11 +685,15 @@ export class WorkItemService {
     const item = this.requireItem(command.id);
     const sentBack = item.status === 'needs_input' && item.judge?.status === 'verdict';
     if (item.status !== 'review' && !sentBack) throw new CompanyError('work_item_status', MESSAGE.status);
-    const paneId = item.assignee.kind === 'herdr' ? item.assignee.paneId : undefined;
-    const fresh = paneId === undefined ? undefined : await this.readResult(paneId);
     this.remember(command.requestId, '');
+    // Only a sent-back item still holds its pane, so the pane's last reply is still this item's.
+    // A review item's pane may already run other work: its saved result stays.
+    const paneId = sentBack && item.assignee.kind === 'herdr' ? item.assignee.paneId : undefined;
+    const fresh = paneId === undefined ? undefined : await this.readResult(paneId);
+    // The user may have marked or removed the item while its reply was read.
+    if (this.items.get(item.id) !== item || (item.status !== 'review' && item.status !== 'needs_input')) return;
     if (fresh !== undefined) item.result = fresh;
-    if (sentBack) {
+    if (item.status === 'needs_input') {
       const at = this.iso();
       item.status = 'review';
       item.reason = WORK_ITEM_REASON.review;

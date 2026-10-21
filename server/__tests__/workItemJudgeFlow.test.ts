@@ -264,6 +264,11 @@ describe('WorkItemService judge flow', () => {
     });
     expect(itemOf(f, id).reason?.startsWith(JUDGE_NOT_MET_PREFIX)).toBe(true);
     expect(f.submits).toHaveLength(3);
+
+    // "Chấm lại" on the sent-back item: it goes back to review and the judge runs again.
+    await f.service.judgeAgain({ requestId: randomUUID(), id });
+    expect(itemOf(f, id)).toMatchObject({ status: 'review', judge: { status: 'running' } });
+    expect(f.judgeTurns).toHaveLength(4);
   });
 
   it('asks for evidence once on need_evidence, and counts a second need_evidence as a fail', async () => {
