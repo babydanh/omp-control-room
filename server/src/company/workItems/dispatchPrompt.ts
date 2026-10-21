@@ -15,7 +15,15 @@ export const SAFE_WORK_BLOCK =
 
 /** The safe-work block for a read-only agent: it reports what it read, and edits nothing. */
 export const SAFE_READ_ONLY_BLOCK =
-  'Việc này chỉ đọc: không sửa file, không push thẳng lên main. Khi xong, báo lại các file đã xem, các lệnh đã chạy và mã thoát của từng lệnh.';
+  'Việc này chỉ đọc: không sửa file, không push thẳng lên main. Khi xong, báo lại kết quả kèm bằng chứng: các file:dòng đã xem, các lệnh đã chạy và mã thoát của từng lệnh.';
+
+/**
+ * Every item runs unattended: the user is not watching the agent, and a question stops the item
+ * until someone answers. The judge reads the report, so the report has to carry the evidence.
+ */
+export const UNATTENDED_BLOCK =
+  'Việc này do Đội giao và chạy không có người trực: không hỏi lại người dùng, không đưa lựa chọn A/B, không dùng tool hỏi (ask), không mở plan chờ duyệt. ' +
+  'Thiếu thông tin thì tự tra trong code; chỗ phải quyết thì chọn hướng an toàn, làm tiếp và ghi rõ giả định trong báo cáo.';
 
 /** The default worker. Naming it adds no subagent line. */
 export const DEFAULT_AGENT = 'task';
@@ -45,7 +53,8 @@ export interface DispatchPromptParts {
 
 /**
  * Composes the prompt for one work item. Order: text, the subagent line (only for an agent other
- * than the default), the safe-work block, then "Xong khi: …" as the last line when there is one.
+ * than the default), the safe-work block, the unattended block, then "Xong khi: …" as the last line
+ * when there is one.
  */
 export function composeDispatchPrompt(parts: DispatchPromptParts): string {
   const sections = [parts.text.trim()];
@@ -58,6 +67,6 @@ export function composeDispatchPrompt(parts: DispatchPromptParts): string {
           : `Làm việc này bằng subagent omp \`${parts.agent}\` (tool task, agent: ${parts.agent}), rồi tổng hợp kết quả và báo lại.`,
     );
   }
-  sections.push(parts.readOnly ? SAFE_READ_ONLY_BLOCK : SAFE_WORK_BLOCK);
+  sections.push(parts.readOnly ? SAFE_READ_ONLY_BLOCK : SAFE_WORK_BLOCK, UNATTENDED_BLOCK);
   return composePrompt(sections.join('\n\n'), parts.acceptance);
 }

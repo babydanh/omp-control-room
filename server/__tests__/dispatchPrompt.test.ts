@@ -4,12 +4,13 @@ import {
   composeDispatchPrompt,
   SAFE_READ_ONLY_BLOCK,
   SAFE_WORK_BLOCK,
+  UNATTENDED_BLOCK,
 } from '../src/company/workItems/dispatchPrompt.js';
 
 describe('composeDispatchPrompt', () => {
-  it('composes the text and the safe-work block, with no acceptance line', () => {
+  it('composes the text, the safe-work block and the unattended block, with no acceptance line', () => {
     expect(composeDispatchPrompt({ text: 'Sửa lỗi đăng nhập', readOnly: false })).toBe(
-      `Sửa lỗi đăng nhập\n\n${SAFE_WORK_BLOCK}`,
+      `Sửa lỗi đăng nhập\n\n${SAFE_WORK_BLOCK}\n\n${UNATTENDED_BLOCK}`,
     );
   });
 
@@ -45,5 +46,13 @@ describe('composeDispatchPrompt', () => {
     expect(prompt).toContain('tool task, agent: scout');
     expect(prompt).toContain(SAFE_READ_ONLY_BLOCK);
     expect(prompt).not.toContain(SAFE_WORK_BLOCK);
+  });
+
+  it('tells every agent, read-only or not, to work without asking, before the acceptance line', () => {
+    for (const readOnly of [true, false]) {
+      const prompt = composeDispatchPrompt({ text: 'Việc', acceptance: 'có báo cáo', readOnly });
+      expect(prompt).toContain(UNATTENDED_BLOCK);
+      expect(prompt.indexOf(UNATTENDED_BLOCK)).toBeLessThan(prompt.indexOf('Xong khi:'));
+    }
   });
 });

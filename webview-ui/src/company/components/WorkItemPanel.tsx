@@ -8,7 +8,7 @@
 
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 
-import type { WorkItem, WorkItemEvent } from '../../../../core/src/messages.js';
+import type { WorkItem, WorkItemAssignee, WorkItemEvent } from '../../../../core/src/messages.js';
 import { withoutTerminalEscapes } from '../../../../core/src/terminalText.js';
 import { priorityLabel } from '../../../../core/src/workItemGraph.js';
 import type { WorkItemMenuAction } from '../agentMenu.js';
@@ -88,6 +88,8 @@ export interface WorkItemPanelProps {
     token: number;
   } | null;
   onActionHandled: (token: number) => void;
+  /** Opens the session or herdr pane holding the item, to watch its live output. */
+  onOpenHolder: (assignee: WorkItemAssignee) => void;
 }
 
 export function WorkItemPanel({
@@ -97,6 +99,7 @@ export function WorkItemPanel({
   id,
   actionRequest,
   onActionHandled,
+  onOpenHolder,
 }: WorkItemPanelProps) {
   const now = useNow();
   const item = findWorkItem(state, { id, workspacePath });
@@ -266,8 +269,18 @@ export function WorkItemPanel({
         <dt className="text-text-muted">Ưu tiên</dt>
         <dd className="text-text">{priorityLabel(item.priority)}</dd>
         <dt className="text-text-muted">Giao cho</dt>
-        <dd className="min-w-0 truncate text-text" data-testid="work-item-assignee">
-          {holder}
+        <dd className="flex min-w-0 items-center gap-2 text-text" data-testid="work-item-assignee">
+          <span className="min-w-0 truncate">{holder}</span>
+          {hasLiveHolder(item.assignee) && (
+            <button
+              type="button"
+              className="company-btn company-btn-sm company-btn-ghost shrink-0"
+              data-testid="work-item-open-holder"
+              onClick={() => onOpenHolder(item.assignee)}
+            >
+              Xem phiên
+            </button>
+          )}
         </dd>
         <dt className="text-text-muted">Thư mục</dt>
         <dd className="min-w-0">
@@ -509,6 +522,14 @@ export function WorkItemPanel({
         />
       )}
     </div>
+  );
+}
+
+/** A holder with a session or pane the drawer can show live: a herdr pane or a board session. */
+function hasLiveHolder(assignee: WorkItemAssignee): boolean {
+  return (
+    (assignee.kind === 'herdr' && (assignee.paneId ?? '') !== '') ||
+    (assignee.kind === 'session' && (assignee.sessionId ?? '') !== '')
   );
 }
 

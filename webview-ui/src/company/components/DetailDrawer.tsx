@@ -78,6 +78,8 @@ export interface DetailDrawerProps {
   lanes: readonly BoardLane[];
   artifactId: string | null;
   onOpen: (subject: OpenedSubject) => void;
+  /** Shows a board session in the drawer, as picking it in the agent list does. */
+  onSelectSession: (sessionId: string) => void;
   onOpenArtifact: (artifactId: string) => void;
   onClearArtifact: () => void;
   onClose: () => void;
@@ -348,6 +350,15 @@ function DrawerContent(props: ContentProps) {
           id={subject.id}
           actionRequest={props.workItemAction}
           onActionHandled={props.onWorkItemActionHandled}
+          onOpenHolder={(assignee) => {
+            if (assignee.kind === 'herdr' && assignee.paneId) {
+              onOpen({ kind: 'herdr', paneId: assignee.paneId });
+              props.onHerdrTab('screen');
+              client.select({ herdrPaneId: assignee.paneId });
+            } else if (assignee.kind === 'session' && assignee.sessionId) {
+              props.onSelectSession(assignee.sessionId);
+            }
+          }}
         />
       );
     case 'squad':

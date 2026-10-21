@@ -571,7 +571,7 @@ export class SquadService {
       appendEvent(run, squadEvent(at, 'proposal', `Đề xuất ${reply.assignments.length} việc.`));
     }
     this.commit();
-    if (proposed !== undefined && this.autoApproves(run, proposed)) {
+    if (proposed !== undefined && this.autoApproves(proposed)) {
       this.approveAutomatically(run, proposed);
     }
   }
@@ -641,14 +641,13 @@ export class SquadService {
   }
 
   /**
-   * Whether a new proposal is a clean next step the board approves on its own: automatic approval
-   * is on, an earlier step is approved, and the proposal carries no completeness warning.
+   * Whether a new proposal is one the board approves on its own: automatic approval is on and the
+   * proposal carries no completeness warning. The first proposal of a run counts too, so a squad with
+   * automatic approval plans and dispatches without waiting on the user.
    */
-  private autoApproves(run: StoredSquadRun, proposal: SquadProposal): boolean {
+  private autoApproves(proposal: SquadProposal): boolean {
     return (
-      this.ports.workItems.snapshot().settings.autoApproveNext &&
-      proposal.warnings.length === 0 &&
-      run.proposals.some((entry) => entry.status === 'approved')
+      this.ports.workItems.snapshot().settings.autoApproveNext && proposal.warnings.length === 0
     );
   }
 

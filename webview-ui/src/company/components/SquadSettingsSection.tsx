@@ -168,8 +168,8 @@ function SquadSettingsForm({
       />
       <ToggleSetting
         id="squad-setting-auto-approve"
-        label="Tự duyệt đề xuất bước tiếp"
-        hint="Đề xuất bước tiếp không có cảnh báo thì tự được duyệt, không chờ bạn."
+        label="Tự duyệt đề xuất của trưởng đội"
+        hint="Đề xuất không có cảnh báo (kể cả đợt đầu) thì tự được duyệt và giao việc luôn, không chờ bạn."
         checked={draft.autoApproveNext}
         disabled={command.pending}
         onChange={(checked) => setDraft((current) => ({ ...current, autoApproveNext: checked }))}

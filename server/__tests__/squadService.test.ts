@@ -1226,6 +1226,31 @@ describe('SquadService completeness, settles and automatic approval', () => {
     expect(h.workItems.creates).toHaveLength(1);
   });
 
+  it('autoApproveNext dispatches a clean first proposal without waiting on the user', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoApproveNext = true;
+    h.leader.reply(CLEAN_REPLY);
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm trang giới thiệu' });
+    await waitFor(() => h.workItems.creates.length === 1);
+    await waitFor(() => h.runOf(runId)?.status === 'working');
+    expect(h.workItems.creates[0]?.drafts).toHaveLength(2);
+    expect(h.runOf(runId)?.proposal?.status).toBe('approved');
+    expect(h.runOf(runId)?.history.some((event) => event.message?.startsWith('Tự duyệt'))).toBe(
+      true,
+    );
+  });
+
+  it('autoApproveNext still leaves a first proposal with a warning for the user', async () => {
+    const h = new Harness();
+    h.workItems.settings.autoApproveNext = true;
+    h.leader.reply(proposal('Viết trang giới thiệu'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm trang giới thiệu' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+    await letTurnsPass();
+    expect(h.runOf(runId)?.proposal?.status).toBe('pending');
+    expect(h.workItems.creates).toHaveLength(0);
+  });
+
   it('a failed automatic approval keeps the proposal pending and says so in the history', async () => {
     const h = new Harness();
     h.workItems.settings.autoApproveNext = true;
