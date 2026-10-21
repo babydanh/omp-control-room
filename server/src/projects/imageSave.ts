@@ -1,0 +1,53 @@
+/**
+ * imageSave: keeps an image pasted or dropped into the prompt box on disk.
+ *
+ * A prompt reaches an agent as text typed into its terminal, so an image travels as
+ * a path the agent can open (omp and Claude Code read images from a path). The file
+ * lands under ~/.pixel-agents/attachments with a name the board picks, never the
+ * one the browser sent, so no input reaches the path.
+ */
+
+import { randomUUID } from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as os from 'node:os';
+import * as path from 'node:path';
+
+import type { ProjectImageSaveMessage } from '../../../core/src/messages.js';
+import { LAYOUT_FILE_DIR } from '../constants.js';
+import { LibraryUserError } from '../library/libraryError.js';
+
+/** Largest image the box keeps, decoded: 10 MiB. */
+export const PROMPT_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
+const EXTENSIONS: Readonly<Record<ProjectImageSaveMessage['mediaType'], string>> = {
+  'image/png': 'png',
+  'image/jpeg': 'jpg',
+  'image/gif': 'gif',
+  'image/webp': 'webp',
+};
+
+export function defaultAttachmentDir(): string {
+  return path.join(os.homedir(), LAYOUT_FILE_DIR, 'attachments');
+}
+
+/** Writes the image and returns its absolute path. */
+export async function savePromptImage(
+  request: Pick<ProjectImageSaveMessage, 'mediaType' | 'dataBase64'>,
+  dir: string = defaultAttachmentDir(),
+  now: Date = new Date(),
+): Promise<string> {
+  const extension = (EXTENSIONS as Readonly<Record<string, string>>)[request.mediaType];
+  if (extension === undefined) throw new LibraryUserError('Chỉ nhận ảnh PNG, JPEG, GIF hoặc WebP.');
+  if (typeof request.dataBase64 !== 'string') throw new LibraryUserError('Dữ liệu ảnh không hợp lệ.');
+  const bytes = Buffer.from(request.dataBase64, 'base64');
+  // Buffer.from drops what is not base64; a payload that does not round-trip is refused.
+  if (bytes.length === 0 || bytes.toString('base64').replace(/=+$/, '') !== request.dataBase64.replace(/=+$/, '')) {
+    throw new LibraryUserError('Dữ liệu ảnh không hợp lệ.');
+  }
+  if (bytes.length > PROMPT_IMAGE_MAX_BYTES) throw new LibraryUserError('Ảnh lớn hơn 10 MB.');
+  await fs.mkdir(dir, { recursive: true });
+  const stamp = now.toISOString().slice(0, 19).replace(/[-:T]/g, '');
+  const file = path.join(dir, `${stamp}-${randomUUID().slice(0, 8)}.${extension}`);
+  await fs.writeFile(file, bytes);
+  return file;
+}

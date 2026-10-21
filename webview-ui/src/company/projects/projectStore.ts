@@ -6,6 +6,8 @@ import type {
   ProjectCommentMessage,
   ProjectDiffMessage,
   ProjectDiffRequestMessage,
+  ProjectImageSavedMessage,
+  ProjectImageSaveMessage,
   ProjectMergePreviewRequestMessage,
   ProjectMergePreviewResultMessage,
   ProjectNodeCreateMessage,
@@ -32,6 +34,7 @@ export type ProjectServerMessage =
   | ProjectSettingsMessage
   | ProjectCommandResultMessage
   | ProjectSessionStartResultMessage
+  | ProjectImageSavedMessage
   | ProjectMergePreviewResultMessage;
 type ProjectRequest =
   | ProjectTreeRequestMessage
@@ -45,6 +48,7 @@ type ProjectRequest =
   | ProjectSettingsClearMessage
   | ProjectSessionStartMessage
   | ProjectSessionStopMessage
+  | ProjectImageSaveMessage
   | ProjectCommentMessage
   | ProjectMergePreviewRequestMessage;
 
@@ -55,7 +59,7 @@ export interface ProjectState {
   diff: ProjectDiffMessage | null;
   settings: ProjectSettingsMessage | null;
   pending: Readonly<Record<string, ProjectRequest>>;
-  results: Readonly<Record<string, ProjectCommandResultMessage | ProjectSessionStartResultMessage | ProjectMergePreviewResultMessage>>;
+  results: Readonly<Record<string, ProjectCommandResultMessage | ProjectSessionStartResultMessage | ProjectMergePreviewResultMessage | ProjectImageSavedMessage>>;
   errors: Readonly<Record<string, string>>;
 }
 export interface ProjectStoreOptions { send: (message: ClientMessage) => void; newRequestId?: () => string; }
@@ -75,12 +79,14 @@ export interface ProjectStore {
   startSession: (input: Omit<ProjectSessionStartMessage, 'type' | 'requestId'>) => string;
   /** Stops a live ledger session: its process tree ends. */
   stopSession: (sessionId: string) => string;
+  /** Saves an image from the prompt box; its result is `projectImageSaved` with the file's path. */
+  saveImage: (input: Omit<ProjectImageSaveMessage, 'type' | 'requestId'>) => string;
   sendComment: (input: Omit<ProjectCommentMessage, 'type' | 'requestId'>) => string;
   previewMerge: (input: Omit<ProjectMergePreviewRequestMessage, 'type' | 'requestId'>) => string;
 }
 
 export function isProjectServerMessage(message: ServerMessage): message is ProjectServerMessage {
-  return message.type === 'projectTreeSnapshot' || message.type === 'projectDiff' || message.type === 'projectSettings' || message.type === 'projectCommandResult' || message.type === 'projectSessionStartResult' || message.type === 'projectMergePreviewResult';
+  return message.type === 'projectTreeSnapshot' || message.type === 'projectDiff' || message.type === 'projectSettings' || message.type === 'projectCommandResult' || message.type === 'projectSessionStartResult' || message.type === 'projectMergePreviewResult' || message.type === 'projectImageSaved';
 }
 
 export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
@@ -140,6 +146,7 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
       case 'projectSettingsClear': return `command:settingsClear:${request.nodeId}:${request.field}`;
       case 'projectSessionStart': return 'sessionStart';
       case 'projectSessionStop': return `command:stop:${request.sessionId}`;
+      case 'projectImageSave': return `image:${request.requestId}`;
       case 'projectComment': return `comment:${request.requestId}`;
       case 'projectMergePreviewRequest': return `merge:${request.repo}:${request.branchA}:${request.branchB}`;
     }
@@ -157,6 +164,7 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     setSetting: (input) => { const req = { ...input, type: 'projectSettingsSet' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     startSession: (input) => { const req = { ...input, type: 'projectSessionStart' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     stopSession: (sessionId) => { const req = { type: 'projectSessionStop' as const, requestId: requestId(), sessionId }; return transmit(req, latestKey(req)); },
+    saveImage: (input) => { const req = { ...input, type: 'projectImageSave' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     sendComment: (input) => { const req = { ...input, type: 'projectComment' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     previewMerge: (input) => { const req = { ...input, type: 'projectMergePreviewRequest' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     clearSetting: (input) => {

@@ -2,6 +2,7 @@ import type {
   ProjectCommandResultMessage,
   ProjectCommentMessage,
   ProjectDiffRequestMessage,
+  ProjectImageSaveMessage,
   ProjectMergePreviewRequestMessage,
   ProjectNodeCreateMessage,
   ProjectNodeDeleteMessage,
@@ -18,6 +19,7 @@ import { LibraryUserError } from '../library/libraryError.js';
 import type { AgentState } from '../types.js';
 import { sendProjectComment } from './comments.js';
 import { getProjectDiff } from './diff.js';
+import { savePromptImage } from './imageSave.js';
 import { previewProjectMerge } from './mergePreview.js';
 import { startProjectSession } from './newSession.js';
 import { type ProjectNode, type ProjectState, ProjectStore } from './projectStore.js';
@@ -45,6 +47,7 @@ const REQUEST_TYPES: Record<string, true> = {
   projectSettingsClear: true,
   projectSessionStart: true,
   projectSessionStop: true,
+  projectImageSave: true,
   projectMergePreviewRequest: true,
 };
 let defaultStore: ProjectStore | undefined;
@@ -222,6 +225,11 @@ async function runProjectRequest(
         send(commandResult(requestId, 'stop', true, ''));
         return;
       }
+      case 'projectImageSave': {
+        const path = await savePromptImage(msg as unknown as ProjectImageSaveMessage);
+        send({ type: 'projectImageSaved', requestId, path });
+        return;
+      }
       case 'projectMergePreviewRequest': {
         const deps = depsFor(store, context, context.services?.mergePreview);
         const result = await previewProjectMerge(msg as unknown as ProjectMergePreviewRequestMessage, deps);
@@ -348,6 +356,7 @@ function commandFor(type: string): ProjectCommandResultMessage['command'] {
     case 'projectComment': return 'comment';
     case 'projectSettingsClear': return 'settingsClear';
     case 'projectSessionStop': return 'stop';
+    case 'projectImageSave': return 'imageSave';
     default: return 'settingsSet';
   }
 }
@@ -375,6 +384,7 @@ function safeReason(type: string): string {
     case 'projectSettingsSet':
     case 'projectSettingsClear': return 'Không thể cập nhật cài đặt Project.';
     case 'projectSessionStop': return 'Không thể tắt phiên.';
+    case 'projectImageSave': return 'Không lưu được ảnh.';
     default: return 'Không thể thực hiện yêu cầu Project.';
   }
 }

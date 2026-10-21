@@ -163,6 +163,7 @@ components:
         - $ref: '#/components/schemas/ProjectSettingsMessage'
         - $ref: '#/components/schemas/ProjectCommandResultMessage'
         - $ref: '#/components/schemas/ProjectSessionStartResultMessage'
+        - $ref: '#/components/schemas/ProjectImageSavedMessage'
         - $ref: '#/components/schemas/ProjectMergePreviewResultMessage'
         # Library (privileged; accounts, storage, skills and MCP)
         - $ref: '#/components/schemas/LibraryClaudeRolesSnapshot'
@@ -275,6 +276,7 @@ components:
         - $ref: '#/components/schemas/ProjectSettingsClearMessage'
         - $ref: '#/components/schemas/ProjectSessionStartMessage'
         - $ref: '#/components/schemas/ProjectSessionStopMessage'
+        - $ref: '#/components/schemas/ProjectImageSaveMessage'
         - $ref: '#/components/schemas/ProjectMergePreviewRequestMessage'
         # Library (privileged; pages and commands)
         - $ref: '#/components/schemas/LibrarySnapshotRequest'
@@ -7811,6 +7813,44 @@ components:
           minLength: 1
           maxLength: 256
 
+    ProjectImageSaveMessage:
+      type: object
+      additionalProperties: false
+      description: >-
+        Saves an image pasted or dropped into the prompt box under
+        ~/.pixel-agents/attachments, so the text sent to an agent can name its path:
+        a terminal carries text, and agents read an image from its path.
+      required: [type, requestId, fileName, mediaType, dataBase64]
+      properties:
+        type:
+          const: projectImageSave
+        requestId:
+          type: string
+          format: uuid
+        fileName:
+          type: string
+          maxLength: 512
+        mediaType:
+          type: string
+          enum: [image/png, image/jpeg, image/gif, image/webp]
+        dataBase64:
+          type: string
+          maxLength: 13981016
+
+    ProjectImageSavedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path]
+      properties:
+        type:
+          const: projectImageSaved
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          description: Absolute path of the saved image.
+
     ProjectSessionStartMessage:
       type: object
       additionalProperties: false
@@ -7916,7 +7956,7 @@ components:
           format: uuid
         command:
           type: string
-          enum: [create, update, delete, move, comment, settingsSet, settingsClear, stop]
+          enum: [create, update, delete, move, comment, settingsSet, settingsClear, stop, imageSave]
         ok:
           type: boolean
         nodeId:

@@ -18,12 +18,14 @@
  *    run (see `squadView.ts`). It needs no selected session, because a squad is folder-level.
  *  - `/new` opens a new omp chat in this folder, with no prompt. `/resume` opens a
  *    picker over the omp sessions saved here. Neither reaches a terminal.
- *  - Attach. OMP's box carries an image picker that the company bridge cannot
- *    reach, so the affordance is gone rather than faked.
+ *  - Images. Paste, drop or pick an image: the server saves it and its path joins the
+ *    text (`promptImages.ts`), since a terminal carries text and agents open images by path.
  */
 
 import {
   type ChangeEvent,
+  type ClipboardEvent,
+  type DragEvent,
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   useEffect,
@@ -51,6 +53,7 @@ import {
 import { sendMenuEntries, type SendMenuEntryId } from '../composerSendMenu.js';
 import { showsAllFolders } from '../folderIdentity.js';
 import { focusFolder, FOLDER_LIST_LOADING_MESSAGE, folderListLoading } from '../folderView.js';
+import { imageFiles } from '../promptImages.js';
 import { isCompanyChord, promptBlockReason, type PromptRoute } from '../promptSubmission.js';
 import { draftAfterSend, herdrAgentFor, sendPrompt } from '../promptTargets.js';
 import { matchShortcut } from '../shortcuts.js';
@@ -62,6 +65,7 @@ import {
 } from '../slashCommands.js';
 import { canStartSquad, type SquadStartVerdict } from '../squadView.js';
 import { useCompanyState } from '../useCompanyState.js';
+import { usePromptImages } from '../usePromptImages.js';
 import { workItemsOf } from '../workItemView.js';
 import { folderLabel, folderLabelFor } from '../workspaces.js';
 import { ComposerSendMenu } from './ComposerSendMenu.js';
@@ -148,6 +152,8 @@ export function PromptComposer({ client }: PromptComposerProps) {
   /** The request of a squad send from this box whose verdict is still pending. */
   const [squadRequest, setSquadRequest] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const images = usePromptImages(client, setNotice);
   /** The height the user dragged the box to, or null when it has never been dragged. */
   const [savedHeight, setSavedHeight] = useState<number | null>(() =>
     readComposerHeight(composerStorage()),
@@ -552,12 +558,49 @@ export function PromptComposer({ client }: PromptComposerProps) {
           value={draft.text}
           onChange={onChange}
           onKeyDown={onKeyDown}
+          onPaste={(event: ClipboardEvent<HTMLTextAreaElement>) => {
+            const pasted = imageFiles(event.clipboardData.files);
+            if (pasted.length === 0) return;
+            event.preventDefault();
+            images.attach(pasted);
+          }}
+          onDragOver={(event: DragEvent<HTMLTextAreaElement>) => {
+            if ([...event.dataTransfer.items].some((item) => item.type.startsWith('image/'))) event.preventDefault();
+          }}
+          onDrop={(event: DragEvent<HTMLTextAreaElement>) => {
+            const dropped = imageFiles(event.dataTransfer.files);
+            if (dropped.length === 0) return;
+            event.preventDefault();
+            images.attach(dropped);
+          }}
           rows={1}
-          placeholder="Nhập tin nhắn · / để gõ lệnh"
+          placeholder="Nhập tin nhắn · / để gõ lệnh · dán hoặc kéo ảnh vào đây"
           aria-label="Tin nhắn"
           data-testid="prompt-input"
           className="min-w-0 flex-1 max-md:basis-full resize-none rounded-[var(--company-radius-md)] border border-border bg-raised px-3 py-2 text-sm leading-5 text-text"
         />
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/gif,image/webp"
+          multiple
+          hidden
+          data-testid="prompt-image-input"
+          onChange={(event: ChangeEvent<HTMLInputElement>) => {
+            images.attach(imageFiles(event.target.files ?? []));
+            event.target.value = '';
+          }}
+        />
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          aria-label="Đính kèm ảnh"
+          title="Đính kèm ảnh (hoặc dán Ctrl+V, kéo thả vào ô)"
+          data-testid="prompt-attach-image"
+          className="touch-target shrink-0 rounded-[var(--company-radius-md)] px-2 py-2 text-sm text-text-muted hover:bg-hover hover:text-text"
+        >
+          {images.saving > 0 ? '…' : '📎'}
+        </button>
         <ComposerSendMenu
           sendLabel={busy ? 'Đang gửi...' : 'Gửi'}
           sendDisabled={blocker !== null || busy || resumeRequest !== null || newSessionWaits}
