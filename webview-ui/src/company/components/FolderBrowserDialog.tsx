@@ -39,8 +39,12 @@ import { Icon } from './Icon.js';
 export interface FolderBrowserDialogProps {
   client: CompanyClient;
   state: CompanyViewState;
-  /** `open` points the board at the chosen folder; `new-session` also starts an omp chat there. */
-  purpose: 'open' | 'new-session';
+  /**
+   * `open` points the board at the chosen folder; `new-session` also starts an omp chat there;
+   * `pick` only hands the path (and the name typed) to `onPick`, for a caller that adds it itself.
+   */
+  purpose: 'open' | 'new-session' | 'pick';
+  onPick?: (path: string, name: string) => void;
   onClose: () => void;
 }
 
@@ -85,7 +89,7 @@ async function refusalOf(
   return failureNotice(await client.waitForCommand(handle), fallback);
 }
 
-export function FolderBrowserDialog({ client, state, purpose, onClose }: FolderBrowserDialogProps) {
+export function FolderBrowserDialog({ client, state, purpose, onPick, onClose }: FolderBrowserDialogProps) {
   const loading = folderListLoading(state);
   // A reply counts only when it answers the latest browse; an older listing is not shown.
   const listing =
@@ -138,7 +142,7 @@ export function FolderBrowserDialog({ client, state, purpose, onClose }: FolderB
   const canCreate = newName.trim() !== '' && createProblem === null;
   const choosable = folderPath !== null && !controlsDisabled && nameProblem === null;
   const waiting = loading || (listing === null && shownNotice === null);
-  const title = purpose === 'new-session' ? 'Chọn thư mục cho phiên mới' : 'Chọn thư mục';
+  const title = purpose === 'new-session' ? 'Chọn thư mục cho phiên mới' : purpose === 'pick' ? 'Chọn thư mục thêm vào Project' : 'Chọn thư mục';
 
   const visible = listing === null ? [] : filterFolderEntries(listing.entries, filter);
   const cursor = Math.min(highlight, Math.max(visible.length - 1, 0));
@@ -214,6 +218,11 @@ export function FolderBrowserDialog({ client, state, purpose, onClose }: FolderB
     if (folderPath === null || controlsDisabled || nameProblem !== null) return;
     const path = folderPath;
     const name = nameValue.trim();
+    if (purpose === 'pick') {
+      onPick?.(path, nameChanged ? name : '');
+      onClose();
+      return;
+    }
     setBusy(true);
     setNotice(null);
     if (nameChanged) {

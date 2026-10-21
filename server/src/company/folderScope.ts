@@ -136,6 +136,15 @@ function isWithin(root: string, target: string): boolean {
 }
 
 /**
+ * Whether `target` belongs to the folder: under the root, or under `<root>.worktrees`, the sibling
+ * directory git-wt makes a repo's worktrees in. A folder that is itself a repo keeps its worktrees
+ * there, outside the root. Both paths are canonical.
+ */
+export function inFolder(root: string, target: string): boolean {
+  return isWithin(root, target) || isWithin(`${root.replace(/[\\/]+$/, '')}.worktrees`, target);
+}
+
+/**
  * The canonical form of a working directory a folder session may run in: an existing directory
  * that is the folder root or lies inside it. Refused with `cwd_invalid` when it is missing or not
  * a directory, and with `cwd_outside_folder` when it lies outside the folder. Containment is
@@ -149,7 +158,7 @@ export async function resolveFolderCwd(
   const canonical = await realpathOrUndefined(cwd, realpath);
   if (canonical === undefined) throw new CompanyError('cwd_invalid', CWD_INVALID_TEXT);
   const root = (await realpathOrUndefined(folderRoot, realpath)) ?? path.resolve(folderRoot);
-  if (!isWithin(root, canonical)) throw new CompanyError('cwd_outside_folder', CWD_OUTSIDE_TEXT);
+  if (!inFolder(root, canonical)) throw new CompanyError('cwd_outside_folder', CWD_OUTSIDE_TEXT);
   const isDirectory = await fs.promises.stat(canonical).then(
     (stat) => stat.isDirectory(),
     () => false,
@@ -170,5 +179,5 @@ export async function canonicalWithinFolder(
 ): Promise<string | undefined> {
   const root = (await realpathOrUndefined(folderRoot, realpath)) ?? path.resolve(folderRoot);
   const canonical = (await realpathOrUndefined(target, realpath)) ?? path.resolve(target);
-  return isWithin(root, canonical) ? canonical : undefined;
+  return inFolder(root, canonical) ? canonical : undefined;
 }

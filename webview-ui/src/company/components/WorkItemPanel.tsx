@@ -214,7 +214,9 @@ export function WorkItemPanel({
   const canCleanWorktree = worktree === 'clean';
 
   // The actions a status allows. The server still decides; these only hide refused moves.
-  const canFinish = status !== 'done';
+  // A queued item has not been sent: a big "done" button there reads as "send" and ends it unrun.
+  // The card menu still offers "Đánh dấu xong" for it.
+  const canFinish = status !== 'done' && status !== 'queued';
   const canFail =
     status === 'queued' || status === 'running' || status === 'needs_input' || status === 'review';
   const canCancel = status === 'queued' || status === 'done' || status === 'failed';
@@ -350,7 +352,7 @@ export function WorkItemPanel({
               disabled={busy}
               onClick={() => send('verdict', client.markWorkItem(workspacePath, id, 'done'))}
             >
-              Xong
+              Đánh dấu xong
             </CompanyButton>
           )}
           {canFail && (

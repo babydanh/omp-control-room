@@ -164,7 +164,8 @@ export function PromptComposer({ client }: PromptComposerProps) {
     state.selection.sessionId === null ? null : (state.sessions[state.selection.sessionId] ?? null);
   const selectedModel = selectedSession?.requestedModel ?? state.selectedModel;
   const herdrTarget = herdrAgentFor(state.selection.herdrPaneId, state.herdr.agents);
-  const busy = draft.pendingSubmit !== null || herdrRequest !== null;
+  // An image still saving has no path in the draft yet: sending now would leave it out.
+  const busy = draft.pendingSubmit !== null || herdrRequest !== null || images.saving > 0;
   const blocker = promptBlockReason(draft);
   // The folder a new session or company prompt goes to. In all mode the composer names it.
   const focus = focusFolder(state);
@@ -625,7 +626,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
           {images.saving > 0 ? '…' : '📎'}
         </button>
         <ComposerSendMenu
-          sendLabel={busy ? 'Đang gửi...' : 'Gửi'}
+          sendLabel={images.saving > 0 ? 'Đang lưu ảnh...' : busy ? 'Đang gửi...' : 'Gửi'}
           sendDisabled={blocker !== null || busy || resumeRequest !== null || newSessionWaits}
           onSend={onSubmitKey}
           entries={sendMenu}

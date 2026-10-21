@@ -287,6 +287,7 @@ const MESSAGE = {
   worktreeDirty: 'Worktree còn thay đổi chưa commit nên chưa dọn.',
   worktreeUnmerged: 'Nhánh của worktree chưa merge vào origin/main nên chưa dọn.',
   worktreeRemoved: 'Đã dọn worktree.',
+  worktreeMaking: 'Đang tạo worktree riêng cho việc này (fetch, checkout, script chuẩn bị); repo lớn có thể mất vài phút. Việc sẽ tự gửi khi xong.',
   worktreeKept:
     'Worktree của việc này còn trên đĩa, xoá việc sẽ mất đường dọn nó. Việc đã xong: bấm "Dọn worktree" trước; việc lỗi: gộp hoặc xoá worktree đó trước rồi mới xoá việc.',
 } as const;
@@ -644,6 +645,23 @@ export class WorkItemService {
       );
     this.held.delete(item.id);
     this.items.delete(item.id);
+    this.remember(command.requestId, '');
+    this.commit();
+    await this.flush();
+  }
+
+  /**
+   * "board report": a note the agent writes about its own item, kept in the item's history. It
+   * changes no status: a note is what the agent says, and the judge still decides.
+   */
+  async note(command: WorkItemCommand & { id: string; text: string }): Promise<void> {
+    if (this.replay(command.requestId) !== undefined) return;
+    const item = this.requireItem(command.id);
+    const text = command.text.trim();
+    if (text === '') throw new CompanyError('work_item_note', 'Nội dung báo cáo trống.');
+    const at = this.iso();
+    item.updatedAt = at;
+    this.pushEvent(item, makeEvent(at, 'note', `Agent báo: ${text}`));
     this.remember(command.requestId, '');
     this.commit();
     await this.flush();
@@ -1974,6 +1992,12 @@ export class WorkItemService {
    */
   private async isolatedCheckout(item: StoredWorkItem, repo: string): Promise<string | undefined> {
     if (item.worktree !== undefined) return item.worktree.path;
+    // Making a worktree of a large repo takes a while (fetch, checkout, setup script): say so.
+    // A retry after a failed attempt says nothing new: the note stays the item's last event.
+    if (item.history.at(-1)?.message !== MESSAGE.worktreeMaking) {
+      this.pushEvent(item, makeEvent(this.iso(), 'note', MESSAGE.worktreeMaking));
+    }
+    this.commit();
     let worktree: SquadWorktree;
     try {
       worktree = await this.ports.worktrees.create(repo, item.id.slice(0, 8));
@@ -2000,6 +2024,9 @@ export class WorkItemService {
     }
     item.worktree = worktree;
     this.commit();
+    // The user marked or cancelled the item while its worktree was made: it is kept on the item, so
+    // "Dọn worktree" still reaches it, and nothing starts.
+    if (this.items.get(item.id) !== item || item.status !== 'queued') return undefined;
     // The worktree must be on disk before its session opens; otherwise a restart would make another.
     if (!(await this.writesLanded())) {
       this.hold(item, { kind: 'worktree', detail: 'không lưu được việc để nhớ worktree' });

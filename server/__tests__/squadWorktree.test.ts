@@ -143,6 +143,22 @@ describe('createSquadWorktree', () => {
     ).rejects.toThrow(`worktree nằm ngoài thư mục của đội (${outside})`);
   });
 
+  it('accepts the sibling `<folder>.worktrees` git-wt uses when the folder is the repo itself, and nothing beside it', async () => {
+    const answer = (placed: string) => recordingRunner((line) => {
+      if (line === 'git fetch origin') return OK;
+      if (line === LIST) return { code: 0, stdout: `worktree ${placed}\nHEAD 2\nbranch refs/heads/squad-${SHORT}\n\n`, stderr: '' };
+      return unexpected(line);
+    }).run;
+    const sibling = `${REPO}.worktrees/squad-${SHORT}`;
+    await expect(
+      createSquadWorktree({ repo: REPO, folderRoot: REPO, shortId: SHORT, gitWt: GIT_WT, run: answer(sibling) }),
+    ).resolves.toEqual({ path: sibling, branch: `squad-${SHORT}` });
+    const lookalike = `${REPO}.worktrees-old/squad-${SHORT}`;
+    await expect(
+      createSquadWorktree({ repo: REPO, folderRoot: REPO, shortId: SHORT, gitWt: GIT_WT, run: answer(lookalike) }),
+    ).rejects.toThrow('worktree nằm ngoài thư mục của đội');
+  });
+
   it('fails when git-wt reports success but no worktree shows the squad branch', async () => {
     const { run } = recordingRunner((line) => {
       if (line === 'git fetch origin' || line === LIST) return OK;

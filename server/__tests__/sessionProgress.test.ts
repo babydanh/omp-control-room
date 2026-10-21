@@ -66,4 +66,17 @@ describe('createTranscriptProgress', () => {
 
     expect(await read(join(dir, 'missing.jsonl'))).toBeUndefined();
   });
+
+  it('reads a long transcript from its tail, and skips a line too long to be a todo list', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'progress-'));
+    const file = join(dir, 'session.jsonl');
+    const old = ompTodoLine([{ content: 'Cũ', status: 'in_progress' }]);
+    const recent = ompTodoLine([{ content: 'Mới', status: 'in_progress' }]);
+    writeFileSync(file, `${old}\n${'x'.repeat(5000)}\n${recent}\n`);
+    const read = createTranscriptProgress({ tailBytes: recent.length + 200, maxLineBytes: 1000 });
+    expect(await read(file)).toEqual({ done: 0, total: 1, current: 'Mới' });
+
+    appendFileSync(file, `${'y'.repeat(3000)}\n${ompTodoLine([{ content: 'Mới', status: 'completed' }])}\n`);
+    expect(await read(file)).toEqual({ done: 1, total: 1 });
+  });
 });

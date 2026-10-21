@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type {
   CompanyWorkItemsMessage,
@@ -71,6 +71,8 @@ class Fixture {
   worktreeError: Error | null = null;
   /** Whether a made worktree's directory is still on disk. */
   worktreeOnDisk = true;
+  /** While set, making a worktree waits on it: a slow `git worktree add`. */
+  worktreeGate: Promise<void> | null = null;
   readonly saves: WorkItemsFile[] = [];
   saveError: Error | null = null;
   repos: string[] = [];
@@ -140,6 +142,7 @@ class Fixture {
       worktrees: {
         create: async (repo, shortId) => {
           if (this.worktreeError !== null) throw this.worktreeError;
+          if (this.worktreeGate !== null) await this.worktreeGate;
           this.worktreesMade.push({ repo, shortId });
           return { path: `${repo}/.worktrees/squad-${shortId}`, branch: `squad-${shortId}` };
         },
@@ -492,6 +495,17 @@ describe('WorkItemService: commands', () => {
     await f.service.mark({ requestId: randomUUID(), id, verdict: 'failed' });
     await f.service.cancel({ requestId: randomUUID(), id });
     expect(f.service.snapshot().items).toEqual([]);
+  });
+
+  it('keeps an agent note in the history without changing the status, and refuses an empty one', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    const id = await f.service.create({ requestId: randomUUID(), text: 'Làm', assignee: herdr(PANE_A) });
+    const before = itemOf(f, id).status;
+    await f.service.note({ requestId: randomUUID(), id, text: '  xong API, đang viết test  ' });
+    expect(itemOf(f, id).status).toBe(before);
+    expect(itemOf(f, id).history.at(-1)).toMatchObject({ kind: 'note', message: 'Agent báo: xong API, đang viết test' });
+    await expect(f.service.note({ requestId: randomUUID(), id, text: ' ' })).rejects.toMatchObject({ code: 'work_item_note' });
   });
 
   it('records a verdict without sending anything to an agent', async () => {
@@ -1315,6 +1329,31 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     });
   });
 
+  it('says the worktree is being made, and keeps it on an item marked done meanwhile without starting it', async () => {
+    const f = await repoFixture();
+    let release = (): void => undefined;
+    f.worktreeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const created = f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa API',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+    });
+    await vi.waitFor(() =>
+      expect(f.service.snapshot().items[0]?.history.some((event) => event.message?.startsWith('Đang tạo worktree'))).toBe(true),
+    );
+    const id = f.service.snapshot().items[0]?.id ?? '';
+    const marked = f.service.mark({ requestId: randomUUID(), id, verdict: 'done' });
+    release();
+    await Promise.all([created, marked]);
+
+    expect(itemOf(f, id)).toMatchObject({ status: 'done', worktree: { path: worktreeOf(id) } });
+    expect(f.openedWith).toEqual([]);
+  });
+
   it('keeps a failed item whose worktree is still on disk, and removes it once the worktree is gone', async () => {
     const f = await repoFixture();
     const id = await f.service.create({
@@ -1373,6 +1412,8 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     f.worktreeError = null;
     await f.elapse(WORK_ITEM_HOLD_RETRY_MS);
     expect(f.worktreesMade).toHaveLength(1);
+    // The retry does not repeat the "making a worktree" note.
+    expect(itemOf(f, id).history.filter((event) => event.message?.startsWith('Đang tạo worktree'))).toHaveLength(1);
     expect(itemOf(f, id)).toMatchObject({
       status: 'running',
       assignee: { kind: 'session', sessionId: 'chat-1' },

@@ -171,6 +171,17 @@ describe('resolveFolderCwd and canonicalWithinFolder', () => {
     });
   });
 
+  it('accepts a worktree under the sibling "<folder>.worktrees" git-wt makes for a folder that is a repo', async () => {
+    const worktree = path.join(scratch, 'Project.worktrees', 'squad-1');
+    await fs.promises.mkdir(worktree, { recursive: true });
+    expect(await resolveFolderCwd(worktree, root)).toBe(await fs.promises.realpath(worktree));
+    expect(await canonicalWithinFolder(worktree, root)).toBe(await fs.promises.realpath(worktree));
+    await fs.promises.mkdir(path.join(scratch, 'Project.worktreesX'));
+    await expect(resolveFolderCwd(path.join(scratch, 'Project.worktreesX'), root)).rejects.toMatchObject({
+      code: 'cwd_outside_folder',
+    });
+  });
+
   it('refuses a path that does not exist and a file that is not a directory', async () => {
     await expect(resolveFolderCwd(path.join(root, 'missing'), root)).rejects.toMatchObject({
       code: 'cwd_invalid',

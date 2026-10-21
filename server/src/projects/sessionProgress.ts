@@ -16,7 +16,12 @@ import { isRecord } from '../company/typeGuards.js';
 export type SessionProgress = NonNullable<ProjectTreeNode['progress']>;
 
 const CHUNK_BYTES = 1024 * 1024;
+/** A transcript first met is read from this far before its end: older todo lists are stale anyway. */
+const TAIL_BYTES = 32 * 1024 * 1024;
+/** A line longer than this is skipped unread (a huge tool output); a todo line is a few KB. */
+const MAX_LINE_BYTES = 8 * 1024 * 1024;
 const MAX_FILES = 200;
+const EMPTY = Buffer.alloc(0);
 const MAX_CURRENT = 400;
 const MAX_BLOCKED = 800;
 
@@ -71,12 +76,45 @@ interface FileState {
   offset: number;
   /** Bytes after the last newline read: a line still being written. */
   carry: Buffer;
+  /** Dropping bytes up to the next newline: the read began mid-line, or the line is too long. */
+  skipping: boolean;
   todo: CompanySessionTodo | undefined;
 }
 
+export interface TranscriptLimits {
+  readonly tailBytes: number;
+  readonly maxLineBytes: number;
+}
+
 /** A reader that remembers how far it read each transcript. */
-export function createTranscriptProgress(): (file: string) => Promise<SessionProgress | undefined> {
+export function createTranscriptProgress(
+  limits: TranscriptLimits = { tailBytes: TAIL_BYTES, maxLineBytes: MAX_LINE_BYTES },
+): (file: string) => Promise<SessionProgress | undefined> {
   const files = new Map<string, FileState>();
+
+  function readLines(state: FileState, chunk: Buffer): void {
+    let bytes = state.carry.length === 0 ? chunk : Buffer.concat([state.carry, chunk]);
+    state.carry = EMPTY;
+    if (state.skipping) {
+      const first = bytes.indexOf(10);
+      if (first < 0) return;
+      bytes = bytes.subarray(first + 1);
+      state.skipping = false;
+    }
+    const end = bytes.lastIndexOf(10);
+    if (end < 0) {
+      if (bytes.length > limits.maxLineBytes) state.skipping = true;
+      else state.carry = bytes;
+      return;
+    }
+    const rest = bytes.subarray(end + 1);
+    if (rest.length > limits.maxLineBytes) state.skipping = true;
+    else state.carry = rest;
+    for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
+      const todo = todoFromTranscriptLine(line);
+      if (todo !== undefined) state.todo = todo;
+    }
+  }
 
   async function readNew(file: string, state: FileState, size: number): Promise<void> {
     const handle = await open(file, 'r');
@@ -87,17 +125,7 @@ export function createTranscriptProgress(): (file: string) => Promise<SessionPro
         const { bytesRead } = await handle.read(chunk, 0, length, state.offset);
         if (bytesRead === 0) break;
         state.offset += bytesRead;
-        const bytes = Buffer.concat([state.carry, chunk.subarray(0, bytesRead)]);
-        const end = bytes.lastIndexOf(10);
-        if (end < 0) {
-          state.carry = bytes;
-          continue;
-        }
-        state.carry = bytes.subarray(end + 1);
-        for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
-          const todo = todoFromTranscriptLine(line);
-          if (todo !== undefined) state.todo = todo;
-        }
+        readLines(state, chunk.subarray(0, bytesRead));
       }
     } finally {
       await handle.close();
@@ -113,9 +141,10 @@ export function createTranscriptProgress(): (file: string) => Promise<SessionPro
       return undefined;
     }
     let state = files.get(file);
-    // A shorter file was rewritten: read it again from the start.
+    // A new file is read from its tail; a shorter file was rewritten and is read again.
     if (state === undefined || size < state.offset) {
-      state = { offset: 0, carry: Buffer.alloc(0), todo: undefined };
+      const offset = Math.max(0, size - limits.tailBytes);
+      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined };
       if (files.size >= MAX_FILES) files.delete(files.keys().next().value ?? '');
       files.set(file, state);
     }

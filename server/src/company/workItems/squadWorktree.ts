@@ -64,7 +64,10 @@ export async function createSquadWorktree(options: SquadWorktreeOptions): Promis
   const path =
     worktreeOnBranch(await listWorktrees(repo, run), branch) ??
     (await addWorktree(options, branch));
-  if (!isInsideRepo(path, folderRoot)) {
+  // git-wt puts a repo's worktrees in the sibling `<repo>.worktrees`: when the folder is the repo
+  // itself, that sibling still belongs to the folder (folderScope.inFolder applies the same rule).
+  const sibling = `${folderRoot.replace(/[\\/]+$/, '')}.worktrees`;
+  if (!isInsideRepo(path, folderRoot) && !isInsideRepo(path, sibling)) {
     throw new Error(`worktree nằm ngoài thư mục của đội (${path})`);
   }
   return { path, branch };

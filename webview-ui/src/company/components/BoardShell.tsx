@@ -934,8 +934,11 @@ export function BoardShell({ client }: BoardShellProps) {
           onClose={() => setNewSessionNode(null)}
           onStarted={({ sessionId, engine, folderPath }) => {
             setNewSessionNode(null);
-            // An omp chat lives in its folder's board; Claude/agy runs show up as work items there.
-            if (engine === 'omp' && folderPath !== undefined) selectWorkspaceSession(folderPath, sessionId);
+            // An omp chat lives in its folder's board; a Claude/agy run is a work item card on that
+            // folder's board, so the board switches there to show it.
+            if (folderPath === undefined) return;
+            if (engine === 'omp') selectWorkspaceSession(folderPath, sessionId);
+            else client.openWorkspace(folderPath);
           }}
         />
       )}
