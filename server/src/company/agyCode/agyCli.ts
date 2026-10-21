@@ -7,12 +7,25 @@ export const AGY_RUN_TIMEOUT_MS = 30 * 60_000;
 
 /**
  * Prompt goes through stdin (`--input-format text`), so there is no `-p`: agy's `-p` takes the next
- * argument as the prompt, and a bare `-p` before another flag exits 2 without running.
+ * argument as the prompt, and a bare `-p` before another flag exits 2 without running. A follow-up
+ * continues the run's conversation (`--conversation <id>`): a fresh run would get the follow-up text
+ * with no task behind it.
  */
-export function agyWorkerArgs(timeoutMs = AGY_RUN_TIMEOUT_MS): string[] {
+export function agyWorkerArgs(timeoutMs = AGY_RUN_TIMEOUT_MS, conversationId?: string): string[] {
   const timeout = timeoutMs === AGY_RUN_TIMEOUT_MS ? '30m' : `${Math.ceil(timeoutMs / 1000)}s`;
-  return ['--output-format', 'stream-json', '--input-format', 'text', '--print-timeout', timeout];
+  return [
+    '--output-format', 'stream-json', '--input-format', 'text', '--print-timeout', timeout,
+    ...(conversationId === undefined ? [] : ['--conversation', conversationId]),
+  ];
 }
+
+/** A tool headless agy refused because its permission rules did not allow it. */
+export interface AgyDeniedAction {
+  /** The permission kind, as a settings.json rule names it (`command`, `write`, ...). */
+  readonly action: string;
+  readonly displayName: string;
+}
+
 export interface AgyResultEvent {
   readonly kind: 'result';
   readonly status: string;
@@ -20,6 +33,7 @@ export interface AgyResultEvent {
   readonly usage?: Record<string, unknown>;
   readonly numTurns?: number;
   readonly error?: string;
+  readonly deniedActions?: readonly AgyDeniedAction[];
 }
 
 export type AgyStreamEvent =
@@ -39,13 +53,12 @@ export function parseAgyStreamLine(line: string): AgyStreamEvent | undefined {
   }
   if (!isRecord(value)) return undefined;
   if (value['event'] === 'init') {
+    // agy 1.x puts conversation_id beside `init`, not in it; both are read.
     const init = value['init'];
-    return {
-      kind: 'init',
-      ...(isRecord(init) && typeof init['conversation_id'] === 'string'
-        ? { conversationId: init['conversation_id'] }
-        : {}),
-    };
+    const id = typeof value['conversation_id'] === 'string'
+      ? value['conversation_id']
+      : isRecord(init) && typeof init['conversation_id'] === 'string' ? init['conversation_id'] : undefined;
+    return { kind: 'init', ...(id === undefined ? {} : { conversationId: id }) };
   }
   if (value['event'] === 'step_update') {
     const update = value['step_update'];
@@ -58,6 +71,12 @@ export function parseAgyStreamLine(line: string): AgyStreamEvent | undefined {
   if (value['event'] === 'result') {
     const result = value['result'];
     if (!isRecord(result)) return undefined;
+    const denied = Array.isArray(result['denied_actions'])
+      ? result['denied_actions'].flatMap((entry): AgyDeniedAction[] =>
+        isRecord(entry) && typeof entry['action'] === 'string'
+          ? [{ action: entry['action'], displayName: typeof entry['display_name'] === 'string' ? entry['display_name'] : entry['action'] }]
+          : [])
+      : [];
     return {
       kind: 'result',
       status: typeof result['status'] === 'string' ? result['status'] : '',
@@ -65,6 +84,7 @@ export function parseAgyStreamLine(line: string): AgyStreamEvent | undefined {
       ...(isRecord(result['usage']) ? { usage: result['usage'] } : {}),
       ...(typeof result['num_turns'] === 'number' ? { numTurns: result['num_turns'] } : {}),
       ...(typeof result['error'] === 'string' ? { error: result['error'] } : {}),
+      ...(denied.length === 0 ? {} : { deniedActions: denied }),
     };
   }
   return undefined;

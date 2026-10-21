@@ -18,6 +18,7 @@ import {
 import {
   AGY_COMMAND,
   AGY_RUN_TIMEOUT_MS,
+  type AgyDeniedAction,
   type AgyResultEvent,
   agyWorkerArgs,
   parseAgyStreamLine,
@@ -34,6 +35,19 @@ const AGY_EMPTY_RESPONSE_MESSAGE =
   'Antigravity không trả lời gì, thường do bị từ chối quyền ghi file hoặc chạy lệnh ở thư mục này. ' +
   'Quyền của agy nằm trong ~/.gemini/antigravity-cli/settings.json.';
 const AGY_MISSING_MESSAGE = 'Không tìm thấy lệnh agy. Cài Antigravity CLI rồi chạy lại.';
+const AGY_SETTINGS_PATH = '~/.gemini/antigravity-cli/settings.json';
+
+/**
+ * The empty-response failure, naming what agy refused when it says so (`denied_actions`):
+ * the permission kind is what a `permissions.allow` rule in its settings names.
+ */
+export function agyDeniedMessage(denied: readonly AgyDeniedAction[]): string {
+  if (denied.length === 0) return AGY_EMPTY_RESPONSE_MESSAGE;
+  const kinds = [...new Set(denied.map((entry) => entry.action))];
+  const names = [...new Set(denied.map((entry) => entry.displayName))].join(', ');
+  // A blanket `command(*)` would let a worker run anything; the rule names the command it needs.
+  return `Antigravity bị chặn quyền ${names} nên không làm được gì. Cho phép đúng lệnh cần chạy trong permissions.allow của ${AGY_SETTINGS_PATH}, dạng ${kinds.map((kind) => `"${kind}(<lệnh>)" hoặc "${kind}(regex:...)"`).join(', ')}.`;
+}
 const RESULT_MAX_CHARS = 4000;
 const ERROR_MAX_CHARS = 300;
 const LINE_MAX_CHARS = 4 * 1024 * 1024;
@@ -44,6 +58,8 @@ export type AgyRunState = 'running' | 'finished' | 'failed' | 'timeout' | 'kille
 export interface AgyRunStart {
   readonly cwd: string;
   readonly prompt: string;
+  /** Continue this agy conversation instead of opening a new one. */
+  readonly conversationId?: string;
 }
 
 export interface AgyRunView {
@@ -54,6 +70,8 @@ export interface AgyRunView {
   readonly progress?: string;
   readonly result?: string;
   readonly error?: string;
+  /** The conversation agy opened (or continued), once its init line arrives. */
+  readonly conversationId?: string;
 }
 
 export interface AgyRuns {
@@ -85,6 +103,7 @@ interface RunEntry {
   child: ClaudeChildProcess | undefined;
   timer: ClaudeTimerHandle | undefined;
   ended: AgyResultEvent | undefined;
+  conversationId: string | undefined;
 }
 
 export function createAgyRuns(options: AgyRunsOptions): AgyRuns {
@@ -135,6 +154,8 @@ export function createAgyRuns(options: AgyRunsOptions): AgyRuns {
       notify();
     } else if (event?.kind === 'result') {
       entry.ended = event;
+    } else if (event?.kind === 'init' && event.conversationId !== undefined) {
+      entry.conversationId = event.conversationId;
     }
   }
 
@@ -143,7 +164,7 @@ export function createAgyRuns(options: AgyRunsOptions): AgyRuns {
     const ended = entry.ended;
     if (code === 0 && ended?.status === 'SUCCESS') {
       const response = ended.response.trim();
-      if (response === '') end(entry, 'failed', undefined, AGY_EMPTY_RESPONSE_MESSAGE);
+      if (response === '') end(entry, 'failed', undefined, agyDeniedMessage(ended.deniedActions ?? []));
       else end(entry, 'finished', clip(response, resultMaxChars));
       return;
     }
@@ -166,10 +187,11 @@ export function createAgyRuns(options: AgyRunsOptions): AgyRuns {
       child: undefined,
       timer: undefined,
       ended: undefined,
+      conversationId: input.conversationId,
     };
     runs.set(runId, entry);
     try {
-      const child = spawn(AGY_COMMAND, agyWorkerArgs(timeoutMs), { cwd: input.cwd });
+      const child = spawn(AGY_COMMAND, agyWorkerArgs(timeoutMs, input.conversationId), { cwd: input.cwd });
       entry.child = child;
       entry.pid = child.pid;
       const lines = createLineSplitter(LINE_MAX_CHARS, (line) => onLine(entry, line));
@@ -215,6 +237,7 @@ export function createAgyRuns(options: AgyRunsOptions): AgyRuns {
         ...(entry.progress === undefined ? {} : { progress: entry.progress }),
         ...(entry.result === undefined ? {} : { result: entry.result }),
         ...(entry.error === undefined ? {} : { error: entry.error }),
+        ...(entry.conversationId === undefined ? {} : { conversationId: entry.conversationId }),
       };
     },
     kill(runId) {

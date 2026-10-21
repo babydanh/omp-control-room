@@ -1761,19 +1761,25 @@ export class WorkItemService {
     };
   }
 
-  /** Starts the Antigravity run that carries a dispatched item. */
+  /**
+   * Starts the Antigravity run that carries a dispatched item. A later run of the same item (a
+   * follow-up, a judge's request) continues the conversation the first run opened, so the agent
+   * keeps the task: a fresh agy run would get the follow-up text alone.
+   */
   private startAgyRun(item: StoredWorkItem, prompt: string): void {
     const mode = this.isReadOnly(item.agent) ? 'read' : 'edit';
     const cwd = mode === 'read' || item.inPlace === true
       ? (item.repo ?? this.workspacePath)
       : item.worktree?.path;
     if (cwd === undefined) throw new Error('Việc này chưa có worktree để Antigravity làm.');
-    const started = this.ports.agy.start({ cwd, prompt });
+    const conversationId = item.agyRun?.conversationId;
+    const started = this.ports.agy.start({ cwd, prompt, ...(conversationId === undefined ? {} : { conversationId }) });
     this.agyRunIds.set(item.id, started.runId);
     item.agyRun = {
       mode,
       startedAt: this.iso(),
       ...(started.pid === undefined ? {} : { pid: started.pid }),
+      ...(conversationId === undefined ? {} : { conversationId }),
     };
   }
 
@@ -1905,9 +1911,12 @@ export class WorkItemService {
 
   private observeAgyRun(item: StoredWorkItem, view: AgyRunView): void {
     const run = item.agyRun;
-    if (run === undefined || view.progress === undefined || view.progress === run.progress) return;
-    run.progress = view.progress;
-    this.ports.publish(this.snapshot());
+    if (run === undefined) return;
+    const conversationChanged = view.conversationId !== undefined && view.conversationId !== run.conversationId;
+    if (conversationChanged) run.conversationId = view.conversationId;
+    const progressChanged = view.progress !== undefined && view.progress !== run.progress;
+    if (progressChanged) run.progress = view.progress;
+    if (conversationChanged || progressChanged) this.ports.publish(this.snapshot());
   }
 
   private settleAgyRun(item: StoredWorkItem, view: AgyRunView): void {
@@ -1917,6 +1926,7 @@ export class WorkItemService {
     if (item.agyRun !== undefined) {
       delete item.agyRun.progress;
       delete item.agyRun.pid;
+      if (view.conversationId !== undefined) item.agyRun.conversationId = view.conversationId;
     }
     if (view.state === 'finished') {
       this.moveToReview(item, view.result === undefined ? undefined : clip(view.result, WORK_ITEM_RESULT_MAX_CHARS), 'Antigravity đã chạy xong.');

@@ -118,6 +118,22 @@ describe('createAgyRuns', () => {
     expect(view?.error).toContain('từ chối quyền');
   });
 
+  it('names the permission agy denied, and the rule that would allow it', () => {
+    const { runs, child, spawns } = harness();
+    runs.start({ cwd: 'V:/repo', prompt: 'Chạy test', conversationId: 'conv-1' });
+    const denied = { status: 'SUCCESS', response: '', denied_actions: [{ action: 'command', display_name: 'RunCommand' }] };
+    child.stdout.emit('data', Buffer.from(`${JSON.stringify({ event: 'init', conversation_id: 'conv-1' })}\n${JSON.stringify({ event: 'result', result: denied })}\n`));
+    child.stdout.emit('end');
+    child.emit('close', 0);
+
+    const view = runs.view('run-1');
+    expect(view?.state).toBe('failed');
+    expect(view?.error).toContain('RunCommand');
+    expect(view?.error).toContain('command(regex:');
+    expect(view?.conversationId).toBe('conv-1');
+    expect(spawns[0]?.args.slice(-2)).toEqual(['--conversation', 'conv-1']);
+  });
+
   it('kills the process tree when the run is cancelled', () => {
     const { runs, killed } = harness();
     runs.start({ cwd: 'V:/repo', prompt: 'Dừng' });

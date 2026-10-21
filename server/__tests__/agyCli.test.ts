@@ -13,14 +13,27 @@ describe('agyWorkerArgs', () => {
       '30m',
     ]);
   });
+
+  it('continues a conversation when one is given', () => {
+    expect(agyWorkerArgs(undefined, 'conv-1').slice(-2)).toEqual(['--conversation', 'conv-1']);
+  });
 });
 
 describe('parseAgyStreamLine', () => {
-  it('reads the init conversation id', () => {
+  it('reads the init conversation id, beside init as agy 1.x writes it or inside it', () => {
+    expect(parseAgyStreamLine(JSON.stringify({ event: 'init', conversation_id: 'chat-2', init: { cwd: 'V:/r' } }))).toEqual({
+      kind: 'init',
+      conversationId: 'chat-2',
+    });
     expect(parseAgyStreamLine(JSON.stringify({ event: 'init', init: { conversation_id: 'chat-1' } }))).toEqual({
       kind: 'init',
       conversationId: 'chat-1',
     });
+  });
+
+  it('reads the actions headless agy denied', () => {
+    const line = JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: '', denied_actions: [{ action: 'command', display_name: 'RunCommand' }] } });
+    expect(parseAgyStreamLine(line)).toMatchObject({ deniedActions: [{ action: 'command', displayName: 'RunCommand' }] });
   });
 
   it('formats step progress from step type and text delta', () => {

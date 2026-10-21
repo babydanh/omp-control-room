@@ -38,6 +38,11 @@ export class FakeAgyRuns implements AgyRuns {
     this.update(runId, { progress: text });
   }
 
+  /** The init line: agy names the conversation the run opened. */
+  conversation(runId: string, conversationId: string): void {
+    this.update(runId, { conversationId });
+  }
+
   finish(runId: string, result: string): void {
     this.update(runId, { state: 'finished', result });
   }

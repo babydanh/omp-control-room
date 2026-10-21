@@ -390,6 +390,24 @@ describe('Claude Code runs: follow-ups, restarts and limits', () => {
     await f.elapse(BURST_MS);
     expect(itemOf(f, id)).toMatchObject({ status: 'review', result: 'Đã xong' });
   });
+  it('continues the agy conversation on a follow-up, so the agent keeps the task', async () => {
+    const f = new Fixture();
+    await f.service.load();
+    await f.service.setSettings({
+      requestId: randomUUID(),
+      settings: { ...SQUAD_SETTINGS_DEFAULT, engineWorker: 'agy', maxAgyRuns: 1 },
+    });
+    const id = await f.service.create({ requestId: randomUUID(), text: 'Sửa lỗi đăng nhập', assignee: { kind: 'auto' }, repo: REPO });
+    f.agy.conversation('agy-run-1', 'conv-1');
+    f.agy.finish('agy-run-1', 'Đã sửa');
+    await f.elapse(BURST_MS);
+    expect(itemOf(f, id)).toMatchObject({ status: 'review', agyRun: { conversationId: 'conv-1' } });
+
+    await f.service.followUp({ requestId: randomUUID(), id, text: 'Nêu file đã sửa và lệnh đã chạy' });
+    expect(f.agy.starts[1]?.input).toMatchObject({ conversationId: 'conv-1', prompt: expect.stringContaining('Nêu file đã sửa') });
+    // The first run had no conversation to continue.
+    expect(f.agy.starts[0]?.input.conversationId).toBeUndefined();
+  });
   it('stops the agy worker when the board is disposed', async () => {
     const f = new Fixture();
     await f.service.load();

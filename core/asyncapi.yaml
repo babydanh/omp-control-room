@@ -4094,6 +4094,12 @@ components:
           maxLength: 300
         interrupted:
           type: boolean
+        conversationId:
+          type: string
+          maxLength: 128
+          description: >-
+            The agy conversation the run opened. A follow-up continues it (`agy --conversation <id>`),
+            so the agent keeps the task it worked on instead of getting the follow-up text alone.
 
     WorkItemJudge:
       type: object
