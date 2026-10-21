@@ -316,3 +316,29 @@ describe('ledger fixture transport', () => {
     expect(store.getSnapshot().timeline?.windowMinutes).toBe(60);
   });
 });
+describe('ledger store: coordination requests', () => {
+  it('sends the new requests and applies their replies', () => {
+    const { store, sent } = harness();
+    store.requestCoordination();
+    store.requestToolUsage(true);
+    expect(sent.slice(-2)).toEqual([
+      { type: 'ledgerCoordinationRequest', requestId: 'r1' },
+      { type: 'ledgerToolUsageRequest', requestId: 'r2', refresh: true },
+    ]);
+    store.accept({ type: 'ledgerCoordination', requestId: 'r1', messages: [], handoffs: [] });
+    store.accept({
+      type: 'ledgerToolUsage',
+      requestId: 'r2',
+      ok: true,
+      running: false,
+      generatedAt: null,
+      days: null,
+      transcripts: {},
+      rows: [],
+      unusedSkills: {},
+      reason: '',
+    });
+    expect(store.getSnapshot().coordination).toEqual({ messages: [], handoffs: [] });
+    expect(store.getSnapshot().toolUsage?.ok).toBe(true);
+  });
+});

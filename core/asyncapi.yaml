@@ -157,6 +157,8 @@ components:
         - $ref: '#/components/schemas/LedgerTimelineMessage'
         - $ref: '#/components/schemas/LedgerFileDiffMessage'
         - $ref: '#/components/schemas/LedgerFileHistoryMessage'
+        - $ref: '#/components/schemas/LedgerCoordinationMessage'
+        - $ref: '#/components/schemas/LedgerToolUsageMessage'
         - $ref: '#/components/schemas/LedgerCommandResultMessage'
         # Project tree (privileged; project, checkout and session data)
         - $ref: '#/components/schemas/ProjectTreeSnapshotMessage'
@@ -265,6 +267,8 @@ components:
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
         - $ref: '#/components/schemas/LedgerFileDiffRequestMessage'
         - $ref: '#/components/schemas/LedgerFileHistoryRequestMessage'
+        - $ref: '#/components/schemas/LedgerCoordinationRequestMessage'
+        - $ref: '#/components/schemas/LedgerToolUsageRequestMessage'
         - $ref: '#/components/schemas/LedgerSendMessage'
         # Project tree (privileged; tree CRUD, diffs, comments, settings and sessions)
         - $ref: '#/components/schemas/ProjectTreeRequestMessage'
@@ -5620,6 +5624,30 @@ components:
           type: string
           format: uuid
 
+    LedgerCoordinationRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: ledgerCoordinationRequest
+        requestId:
+          type: string
+          format: uuid
+
+    LedgerToolUsageRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, refresh]
+      properties:
+        type:
+          const: ledgerToolUsageRequest
+        requestId:
+          type: string
+          format: uuid
+        refresh:
+          type: boolean
+
     LedgerTimelineRequestMessage:
       type: object
       additionalProperties: false
@@ -5716,6 +5744,104 @@ components:
           format: uuid
         timeline:
           $ref: '#/components/schemas/LedgerTimeline'
+    LedgerCoordinationMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, messages, handoffs]
+      properties:
+        type:
+          const: ledgerCoordination
+        requestId:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerAgentMessage'
+        handoffs:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerHandoff'
+
+    LedgerAgentMessage:
+      type: object
+      additionalProperties: false
+      required: [id, ts, toSession, fromSession, relKey, content, delivered, fromKind, fromCwd, toKind, toCwd]
+      properties:
+        id: { type: integer }
+        ts: { type: string }
+        toSession: { type: string }
+        fromSession: { type: [string, 'null'] }
+        relKey: { type: [string, 'null'] }
+        content: { type: string }
+        delivered: { type: integer }
+        fromKind: { type: [string, 'null'] }
+        fromCwd: { type: [string, 'null'] }
+        toKind: { type: [string, 'null'] }
+        toCwd: { type: [string, 'null'] }
+
+    LedgerHandoff:
+      type: object
+      additionalProperties: false
+      required: [worktree, branch, path, modifiedAt, goal, status, openQuestions]
+      properties:
+        worktree: { type: string }
+        branch: { type: [string, 'null'] }
+        path: { type: string }
+        modifiedAt: { type: string }
+        goal: { type: string }
+        status: { type: string }
+        openQuestions: { type: string }
+
+    LedgerToolUsageMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, ok, running, generatedAt, days, transcripts, rows, unusedSkills, reason]
+      properties:
+        type:
+          const: ledgerToolUsage
+        requestId:
+          type: string
+          format: uuid
+        ok: { type: boolean }
+        running: { type: boolean }
+        generatedAt: { type: [string, 'null'] }
+        days: { type: [integer, 'null'] }
+        transcripts:
+          type: object
+          additionalProperties: { type: integer }
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerToolUsageRow'
+        unusedSkills:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+        reason: { type: string }
+
+    LedgerToolUsageRow:
+      type: object
+      additionalProperties: false
+      required: [cli, kind, name, calls, ok, err, sessions, last, topErrors]
+      properties:
+        cli: { type: string }
+        kind: { type: string }
+        name: { type: string }
+        calls: { type: integer }
+        ok: { type: integer }
+        err: { type: integer }
+        sessions: { type: integer }
+        last: { type: [string, 'null'] }
+        topErrors:
+          type: array
+          items:
+            type: array
+            prefixItems: [{ type: string }, { type: integer }]
+            minItems: 2
+            maxItems: 2
+
 
     LedgerFileDiffMessage:
       type: object

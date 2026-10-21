@@ -18,6 +18,8 @@ const LEDGER_REQUEST_TYPES = [
   'ledgerTimelineRequest',
   'ledgerFileDiffRequest',
   'ledgerSendMessage',
+  'ledgerCoordinationRequest',
+  'ledgerToolUsageRequest',
 ];
 
 function collector() {
@@ -198,5 +200,23 @@ describe('handleLedgerMessage: privileged connections', () => {
       'ledgerViewRequest',
       expect.any(Error),
     );
+  });
+  it('dispatches the new privileged ledger requests', async () => {
+    const h = makeService();
+    const { sent, send } = collector();
+    handleLedgerMessage({ type: 'ledgerCoordinationRequest', requestId: 'coord' }, send, {
+      ledger: h.service,
+      privileged: true,
+    });
+    await flushAsync();
+    expect(sent[0]).toMatchObject({ type: 'ledgerCoordination', requestId: 'coord' });
+    sent.length = 0;
+    handleLedgerMessage(
+      { type: 'ledgerToolUsageRequest', requestId: 'usage', refresh: false },
+      send,
+      { ledger: h.service, privileged: true },
+    );
+    await flushAsync();
+    expect(sent[0]).toMatchObject({ type: 'ledgerToolUsage', requestId: 'usage' });
   });
 });

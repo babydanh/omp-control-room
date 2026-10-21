@@ -40,6 +40,16 @@ export function formatClock(ms: number): string {
   return `${hours}:${minutes}`;
 }
 
+/** `DD/MM HH:MM` in local time, for a ledger timestamp or an ISO one; `—` when there is none. */
+export function formatLedgerStamp(ts: string | null): string {
+  const ms = parseLedgerTimestamp(ts);
+  if (ms === null) return '—';
+  const date = new Date(ms);
+  const day = date.getDate().toString().padStart(2, '0');
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  return `${day}/${month} ${formatClock(ms)}`;
+}
+
 /** Vietnamese age of `ts` measured against `reference` (both ledger timestamps). */
 export function formatRelativeTime(ts: string | null, reference: string): string {
   if (ts === null) return 'chưa có';

@@ -91,4 +91,43 @@ describe('openLedgerSource: existing database', () => {
     source.sessionRows();
     expect(opened).toBe(2);
   });
+  it('queries only recent msg notices and joins both session kinds and cwd values', () => {
+    let sql = '';
+    let parameters: (string | number)[] = [];
+    const database: SqliteDatabase = {
+      prepare(query) {
+        sql = query;
+        return {
+          all: (...params) => {
+            parameters = params;
+            return [
+              {
+                id: 1,
+                ts: SINCE,
+                to_session: 'to',
+                from_session: 'from',
+                rel_key: 'msg:1',
+                content: 'hi',
+                delivered: 1,
+                from_kind: 'claude',
+                from_cwd: '/repo/a',
+                to_kind: 'main',
+                to_cwd: '/repo/b',
+              },
+            ];
+          },
+        };
+      },
+      close() {},
+    };
+    const source = openLedgerSource(existingDatabase(), () => database);
+    expect(source.agentMessageRows(SINCE)).toMatchObject([
+      { relKey: 'msg:1', fromKind: 'claude', fromCwd: '/repo/a', toKind: 'main', toCwd: '/repo/b' },
+    ]);
+    expect(sql).toContain("n.rel_key LIKE 'msg:%'");
+    expect(sql).toContain('LEFT JOIN sessions sf');
+    expect(sql).toContain('LEFT JOIN sessions st');
+    expect(sql).toContain('ORDER BY n.ts DESC, n.id DESC LIMIT 200');
+    expect(parameters).toEqual([SINCE]);
+  });
 });

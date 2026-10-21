@@ -16,17 +16,23 @@ import { useSyncExternalStore } from 'react';
 import { TRANSPORT_DISCONNECTED_ERROR } from '../../../../core/src/messageDelivery.js';
 import type {
   ClientMessage,
+  LedgerAgentMessage,
   LedgerCommandResultMessage,
+  LedgerCoordinationMessage,
+  LedgerCoordinationRequestMessage,
   LedgerFileDiffMessage,
   LedgerFileDiffRequestMessage,
   LedgerFileHistoryMessage,
   LedgerFileHistoryRequestMessage,
   LedgerFileTouch,
+  LedgerHandoff,
   LedgerSendMessage,
   LedgerSnapshotMessage,
   LedgerTimeline,
   LedgerTimelineMessage,
   LedgerTimelineRequestMessage,
+  LedgerToolUsageMessage,
+  LedgerToolUsageRequestMessage,
   LedgerView,
   LedgerViewRequestMessage,
   ServerMessage,
@@ -40,6 +46,8 @@ export type LedgerServerMessage =
   | LedgerTimelineMessage
   | LedgerFileDiffMessage
   | LedgerFileHistoryMessage
+  | LedgerCoordinationMessage
+  | LedgerToolUsageMessage
   | LedgerCommandResultMessage;
 
 /** The requests the ledger store sends. */
@@ -48,6 +56,8 @@ export type LedgerRequestMessage =
   | LedgerTimelineRequestMessage
   | LedgerFileDiffRequestMessage
   | LedgerFileHistoryRequestMessage
+  | LedgerCoordinationRequestMessage
+  | LedgerToolUsageRequestMessage
   | LedgerSendMessage;
 
 export type LedgerSend = (message: ClientMessage) => void;
@@ -89,6 +99,8 @@ export interface LedgerLatest {
   timeline: string | null;
   diff: string | null;
   fileHistory: string | null;
+  coordination: string | null;
+  toolUsage: string | null;
 }
 
 export interface LedgerState {
@@ -104,6 +116,9 @@ export interface LedgerState {
   timelineError: string | null;
   diff: LedgerDiffView | null;
   fileHistory: LedgerFileHistoryView | null;
+  coordination: { messages: LedgerAgentMessage[]; handoffs: LedgerHandoff[] } | null;
+  toolUsage: LedgerToolUsageMessage | null;
+  toolUsageError: string | null;
   /** Newest last, capped at SEND_HISTORY_LIMIT. */
   sends: LedgerSendView[];
   latest: LedgerLatest;
@@ -130,8 +145,18 @@ export function createInitialLedgerState(): LedgerState {
     timelineError: null,
     diff: null,
     fileHistory: null,
+    coordination: null,
+    toolUsage: null,
+    toolUsageError: null,
     sends: [],
-    latest: { view: null, timeline: null, diff: null, fileHistory: null },
+    latest: {
+      view: null,
+      timeline: null,
+      diff: null,
+      fileHistory: null,
+      coordination: null,
+      toolUsage: null,
+    },
   };
 }
 
@@ -141,6 +166,8 @@ const LEDGER_SERVER_TYPES: Record<string, true> = {
   ledgerFileDiff: true,
   ledgerFileHistory: true,
   ledgerCommandResult: true,
+  ledgerCoordination: true,
+  ledgerToolUsage: true,
 };
 
 /** True for the ledger replies. The company whitelist does not cover them, so they are routed here. */
@@ -171,10 +198,37 @@ export function reduceLedgerConnect(state: LedgerState, probeRequestId: string):
     connection: state.connection + 1,
     probeRequestId,
     viewError: null,
-    latest: { view: probeRequestId, timeline: null, diff: null, fileHistory: null },
+    latest: {
+      view: probeRequestId,
+      timeline: null,
+      diff: null,
+      fileHistory: null,
+      coordination: null,
+      toolUsage: null,
+    },
   };
 }
 
+function reduceCoordination(state: LedgerState, message: LedgerCoordinationMessage): LedgerState {
+  if (message.requestId !== state.latest.coordination) return state;
+  return {
+    ...state,
+    coordination: { messages: message.messages, handoffs: message.handoffs },
+    privileged: true,
+    latest: { ...state.latest, coordination: null },
+  };
+}
+
+function reduceToolUsage(state: LedgerState, message: LedgerToolUsageMessage): LedgerState {
+  if (message.requestId !== state.latest.toolUsage) return state;
+  return {
+    ...state,
+    toolUsage: message,
+    toolUsageError: message.ok ? null : message.reason,
+    privileged: true,
+    latest: { ...state.latest, toolUsage: null },
+  };
+}
 /** Records an outgoing request as the newest of its kind, before it is sent. */
 export function reduceLedgerRequest(
   state: LedgerState,
@@ -189,6 +243,14 @@ export function reduceLedgerRequest(
         timelineWindow: request.windowMinutes,
         timelineError: null,
         latest: { ...state.latest, timeline: request.requestId },
+      };
+    case 'ledgerCoordinationRequest':
+      return { ...state, latest: { ...state.latest, coordination: request.requestId } };
+    case 'ledgerToolUsageRequest':
+      return {
+        ...state,
+        toolUsageError: null,
+        latest: { ...state.latest, toolUsage: request.requestId },
       };
     case 'ledgerFileDiffRequest': {
       const diff: LedgerDiffView = {
@@ -260,6 +322,12 @@ function settleRefused(state: LedgerState, requestId: string, reason: string): L
         ? null
         : { ...next.fileHistory, status: 'failed', reason };
     next = { ...next, fileHistory, latest: { ...next.latest, fileHistory: null } };
+  }
+  if (state.latest.coordination === requestId) {
+    next = { ...next, latest: { ...next.latest, coordination: null } };
+  }
+  if (state.latest.toolUsage === requestId) {
+    next = { ...next, toolUsageError: reason, latest: { ...next.latest, toolUsage: null } };
   }
   return next;
 }
@@ -369,6 +437,10 @@ export function reduceLedgerMessage(state: LedgerState, message: LedgerServerMes
       return reduceFileDiff(state, message);
     case 'ledgerFileHistory':
       return reduceFileHistory(state, message);
+    case 'ledgerCoordination':
+      return reduceCoordination(state, message);
+    case 'ledgerToolUsage':
+      return reduceToolUsage(state, message);
     case 'ledgerCommandResult':
       return reduceCommandResult(state, message);
   }
@@ -395,6 +467,8 @@ export interface LedgerStore {
   /** Sends `text` to an agent. Returns the request id its result will carry. */
   sendMessage: (sessionId: string, text: string) => string;
   /** Swaps the transport. The dev fixture uses it to answer requests locally. */
+  requestCoordination: () => void;
+  requestToolUsage: (refresh?: boolean) => void;
   setSend: (send: LedgerSend) => void;
 }
 
@@ -452,6 +526,12 @@ export function createLedgerStore(options: LedgerStoreOptions): LedgerStore {
       transmit({ type: 'ledgerSendMessage', requestId: newRequestId(), sessionId, text }),
     requestFileHistory: (path) =>
       transmit({ type: 'ledgerFileHistoryRequest', requestId: newRequestId(), path }),
+    requestCoordination: () => {
+      transmit({ type: 'ledgerCoordinationRequest', requestId: newRequestId() });
+    },
+    requestToolUsage: (refresh = false) => {
+      transmit({ type: 'ledgerToolUsageRequest', requestId: newRequestId(), refresh });
+    },
     setSend: (next) => {
       send = next;
     },

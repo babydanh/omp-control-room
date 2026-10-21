@@ -10,6 +10,7 @@ import { Icon } from '../components/Icon.js';
 import type { FolderFocusInput } from '../folderView.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { ledgerStore } from './ledgerClient.js';
+import { LedgerCoordinationTab } from './LedgerCoordinationTab.js';
 import { LedgerDetailPanel } from './LedgerDetailPanel.js';
 import { databaseLabel, formatClock, parseLedgerTimestamp } from './ledgerFormat.js';
 import { type PaneInput } from './ledgerManagers.js';
@@ -20,15 +21,18 @@ import { type LedgerSelection, resolveSelection } from './ledgerSelection.js';
 import { LedgerSidePanels } from './LedgerSidePanels.js';
 import { type LedgerState, useLedgerState } from './ledgerStore.js';
 import { LedgerTimelineTab } from './LedgerTimelineTab.js';
+import { LedgerToolUsageTab } from './LedgerToolUsageTab.js';
 import { LedgerTreeTab } from './LedgerTreeTab.js';
 
-type LedgerTab = 'overview' | 'graph' | 'timeline';
+type LedgerTab = 'overview' | 'graph' | 'timeline' | 'coordination' | 'toolUsage';
 
-const TABS: readonly LedgerTab[] = ['overview', 'graph', 'timeline'];
+const TABS: readonly LedgerTab[] = ['overview', 'graph', 'timeline', 'coordination', 'toolUsage'];
 const TAB_LABELS: Record<LedgerTab, string> = {
   overview: 'Tổng quan',
   graph: 'Đồ thị nhánh',
   timeline: 'Dòng thời gian',
+  coordination: 'Phối hợp',
+  toolUsage: 'Thống kê tool',
 };
 
 export interface LedgerViewProps {
@@ -179,8 +183,12 @@ export function LedgerView({
                   onOpenSleeping={onOpenSleeping}
                   phone={phone}
                 />
-              ) : (
+              ) : tab === 'timeline' ? (
                 <LedgerTimelineTab ledger={ledger} selection={selection} onSelect={choose} />
+              ) : tab === 'coordination' ? (
+                <LedgerCoordinationTab ledger={ledger} />
+              ) : (
+                <LedgerToolUsageTab ledger={ledger} />
               )}
             </div>
           </div>

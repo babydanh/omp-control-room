@@ -4,6 +4,7 @@
  *   board status              who is working where, and the open work items
  *   board task                the work items that are this session's own
  *   board report <#n> <text>  write a progress note onto work item #n
+ *   board handoff [#n]        print the handoff notes of work item #n's worktree, or of this one
  *   add --json for the raw answer
  *
  * The session names itself by HERDR_PANE_ID and its working directory. The board's port and token
@@ -11,12 +12,13 @@
  * read field by field before it is printed: a board without the agent API answers with its web page.
  */
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import type { WorkItem } from '../../core/src/messages.js';
 import { isRecord } from './company/typeGuards.js';
+import { HANDOFF_MAX_BYTES, type HandoffFile, readHandoffFiles } from './ledger/handoffFiles.js';
 
 export const BOARD_HELP = [
   'board: xem và báo cho Agent Board từ terminal.',
@@ -24,8 +26,10 @@ export const BOARD_HELP = [
   '  board status                  phiên nào đang làm gì ở đâu, và các việc chưa xong trên bảng',
   '  board task                    việc trên bảng giao cho chính phiên này',
   '  board report <#n> <nội dung>  ghi tiến độ vào lịch sử việc #n (không đổi trạng thái)',
+  '  board handoff [#n]            in file bàn giao của worktree việc #n (không có #n: worktree đang đứng)',
   '',
-  'Thêm --json để lấy dữ liệu thô.',
+  'Thêm --json để lấy dữ liệu thô (status, task, report).',
+  'Nhắn agent khác (chạy cả khi board tắt): lane send <mã|all> "<nội dung>"; tin của mình: lane msgs --me.',
 ].join('\n');
 
 const STATUS_LABEL: Record<WorkItem['status'], string> = {
@@ -44,6 +48,7 @@ export type BoardCommand =
   | { readonly kind: 'help' }
   | { readonly kind: 'status' | 'task'; readonly json: boolean }
   | { readonly kind: 'report'; readonly json: boolean; readonly item: string; readonly text: string }
+  | { readonly kind: 'handoff'; readonly item?: string }
   | { readonly kind: 'error'; readonly message: string };
 
 export function parseBoardArgs(argv: readonly string[]): BoardCommand {
@@ -57,6 +62,7 @@ export function parseBoardArgs(argv: readonly string[]): BoardCommand {
     if (item === undefined || text === '') return { kind: 'error', message: 'Cách dùng: board report <#n> <nội dung>' };
     return { kind: 'report', json, item, text };
   }
+  if (command === 'handoff') return rest[0] === undefined ? { kind: 'handoff' } : { kind: 'handoff', item: rest[0] };
   return { kind: 'error', message: `Không có lệnh "${command}".\n\n${BOARD_HELP}` };
 }
 
@@ -260,6 +266,27 @@ export function formatTask(answer: TaskAnswer): string {
   }).join('\n\n');
 }
 
+/** The handoff notes of one worktree, each file whole, or how to start one when there is none. */
+export function formatHandoff(worktree: string, files: readonly HandoffFile[]): string {
+  if (files.length === 0) {
+    return `Không có file bàn giao trong ${worktree} (HANDOFF.md hoặc openspec/changes/<id>/handoff.md).\n` +
+      'Mẫu: ~/.omp/agent/skills/git-worktree-lanes/handoff-template.md';
+  }
+  return files.map((file) => {
+    const when = file.modifiedAt.toLocaleString('vi-VN', { hour12: false });
+    const cut = file.truncated ? `\n… (cắt ở ${HANDOFF_MAX_BYTES / 1024} KB đầu)` : '';
+    return `── ${join(worktree, file.path)} · sửa ${when} ──\n${file.text.trimEnd()}${cut}`;
+  }).join('\n\n');
+}
+
+/** The nearest folder from `cwd` up that holds `.git` (a worktree has a `.git` file); else `cwd`. */
+function worktreeRoot(cwd: string): string {
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, '.git'))) return dir;
+    if (dirname(dir) === dir) return cwd;
+  }
+}
+
 // ── Talking to the board ─────────────────────────────────────────
 
 interface BoardServer {
@@ -303,9 +330,21 @@ export async function runBoard(argv: readonly string[], env: NodeJS.ProcessEnv, 
   const command = parseBoardArgs(argv);
   if (command.kind === 'help') return BOARD_HELP;
   if (command.kind === 'error') throw new Error(command.message);
+  if (command.kind === 'handoff' && command.item === undefined) {
+    const root = worktreeRoot(cwd);
+    return formatHandoff(root, await readHandoffFiles(root));
+  }
   const server = readServer();
   const pane = env['HERDR_PANE_ID'];
   const caller = { cwd, ...(pane ? { pane } : {}) };
+  if (command.kind === 'handoff') {
+    const sequence = Number(command.item?.replace(/^#/, ''));
+    const status = readStatusAnswer(await call(server, `status?${new URLSearchParams(caller).toString()}`));
+    const item = status.workItems.find((entry) => entry.sequence === sequence);
+    if (item === undefined) throw new Error(`Không thấy việc ${command.item} trong các việc chưa xong trên bảng.`);
+    if (item.worktree === undefined) throw new Error(`Việc #${item.sequence} chưa có worktree.`);
+    return formatHandoff(item.worktree.path, await readHandoffFiles(item.worktree.path));
+  }
   if (command.kind === 'report') {
     const answer = await call(server, 'report', {
       method: 'POST',

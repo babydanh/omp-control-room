@@ -7,6 +7,7 @@
 import type { LedgerDatabaseStatus } from '../../core/src/messages.js';
 import type { GitRunner, GitRunOptions } from '../src/ledger/git.js';
 import type {
+  AgentNoticeRow,
   EventRow,
   LedgerFileTouch,
   LedgerSource,
@@ -195,6 +196,7 @@ export interface FakeSourceData {
   events?: EventRow[];
   pending?: PendingRow[];
   notices?: NoticeRow[];
+  agentMessages?: AgentNoticeRow[];
   mainWrites?: EventRow[];
 }
 
@@ -223,6 +225,9 @@ export class FakeLedgerSource implements LedgerSource {
     return [...(this.data.notices ?? [])];
   }
 
+  agentMessageRows(sinceTs: string): AgentNoticeRow[] {
+    return (this.data.agentMessages ?? []).filter((row) => row.ts >= sinceTs);
+  }
   mainWriteRows(sinceTs: string): EventRow[] {
     return (this.data.mainWrites ?? []).filter((row) => row.ts >= sinceTs);
   }

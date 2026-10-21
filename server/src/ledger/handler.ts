@@ -37,6 +37,8 @@ export function handleLedgerMessage(
     case 'ledgerTimelineRequest':
     case 'ledgerFileDiffRequest':
     case 'ledgerFileHistoryRequest':
+    case 'ledgerCoordinationRequest':
+    case 'ledgerToolUsageRequest':
     case 'ledgerSendMessage':
       break;
     default:
@@ -81,6 +83,16 @@ async function runLedgerRequest(
       }
       const timeline = await ledger.timeline(windowMinutes);
       send({ type: 'ledgerTimeline', requestId, timeline });
+      return;
+    }
+    case 'ledgerCoordinationRequest': {
+      const result = await ledger.coordination(requestId);
+      send(result);
+      return;
+    }
+    case 'ledgerToolUsageRequest': {
+      const result = await ledger.toolUsage(requestId, msg.refresh === true);
+      send(result);
       return;
     }
     case 'ledgerFileDiffRequest': {

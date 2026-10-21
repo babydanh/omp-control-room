@@ -12,12 +12,14 @@ import {
   LEDGER_DB_SEGMENTS,
   LEDGER_OVERLAP_SCRIPT_SEGMENTS,
   LEDGER_PYTHON_COMMAND,
+  LEDGER_TOOL_USAGE_FILE_SEGMENTS,
+  LEDGER_TOOL_USAGE_SCRIPT_SEGMENTS,
   LEDGER_WHO_SCRIPT_SEGMENTS,
 } from './constants.js';
 import { createGitRunner } from './git.js';
 import { openLedgerSource } from './ledgerDb.js';
 import { LedgerService } from './ledgerService.js';
-import { runProcess, type ScriptRunner } from './processRunner.js';
+import { type ProcessRunner, runProcess, type ScriptRunner } from './processRunner.js';
 
 export interface LedgerRuntimeOptions {
   /** Extra repo folders to scan, such as the company workspace folders. */
@@ -31,20 +33,35 @@ export function createLedgerService(options: LedgerRuntimeOptions = {}): LedgerS
   const home = os.homedir();
   const dbPath = path.join(home, ...LEDGER_DB_SEGMENTS);
   const overlapScript = path.join(home, ...LEDGER_OVERLAP_SCRIPT_SEGMENTS);
+  const toolUsageScript = path.join(home, ...LEDGER_TOOL_USAGE_SCRIPT_SEGMENTS);
   const whoScript = path.join(home, ...LEDGER_WHO_SCRIPT_SEGMENTS);
   return new LedgerService({
     source: openLedgerSource(dbPath),
     git: createGitRunner(runProcess),
     overlap: pythonRunner(overlapScript),
-    who: pythonRunner(whoScript),
+    who: createWhoRunner(runProcess, whoScript),
     now: Date.now,
     schedule: { setInterval, clearInterval },
     extraRepoPaths: options.extraRepoPaths,
     workspaceFor: options.workspaceFor,
+    toolUsage: pythonRunner(toolUsageScript),
+    toolUsageFile: path.join(home, ...LEDGER_TOOL_USAGE_FILE_SEGMENTS),
   });
 }
 
 /** Runs one of the operator's python scripts. The argv never goes through a shell. */
-function pythonRunner(script: string): ScriptRunner {
-  return (argv, runOptions) => runProcess(LEDGER_PYTHON_COMMAND, [script, ...argv], runOptions);
+function pythonRunner(
+  script: string,
+  env?: NodeJS.ProcessEnv,
+  run: ProcessRunner = runProcess,
+): ScriptRunner {
+  return (argv, runOptions) =>
+    run(LEDGER_PYTHON_COMMAND, [script, ...argv], {
+      ...runOptions,
+      env: { ...runOptions.env, ...env },
+    });
+}
+
+export function createWhoRunner(run: ProcessRunner, script: string): ScriptRunner {
+  return pythonRunner(script, { LANE_SESSION: 'user' }, run);
 }

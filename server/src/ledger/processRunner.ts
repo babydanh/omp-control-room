@@ -17,6 +17,8 @@ export interface ProcessOptions {
   readonly okCodes: readonly number[];
   /** Stdout beyond this many bytes is cut and flagged `truncated`. */
   readonly maxBytes: number;
+  /** Environment overrides merged over the current process environment. */
+  readonly env?: NodeJS.ProcessEnv;
 }
 
 export interface ProcessResult {
@@ -51,6 +53,7 @@ export const runProcess: ProcessRunner = (file, args, options) =>
       windowsHide: true,
       shell: false,
       encoding: 'buffer',
+      env: options.env === undefined ? process.env : { ...process.env, ...options.env },
     };
     execFile(file, [...args], execOptions, (error, stdout, stderr) => {
       resolve(resultOf(error, stdout, stderr, options));

@@ -85,11 +85,19 @@ export interface NoticeRow {
   readonly delivered: number;
 }
 
+export interface AgentNoticeRow extends NoticeRow {
+  readonly fromKind: string | null;
+  readonly fromCwd: string | null;
+  readonly toKind: string | null;
+  readonly toCwd: string | null;
+}
+
 export interface LedgerSource {
   status(): LedgerDatabaseStatus;
   sessionRows(): SessionRow[];
   eventRows(sinceTs: string): EventRow[];
   pendingRows(): PendingRow[];
+  agentMessageRows(sinceTs: string): AgentNoticeRow[];
   noticeRows(): NoticeRow[];
   mainWriteRows(sinceTs: string): EventRow[];
   fileHistory(pathKey: string, sinceTs: string): LedgerFileTouch[];
@@ -154,6 +162,12 @@ const NOTICES_SQL =
   'SELECT id, ts, to_session, from_session, rel_key, content, delivered FROM notices ' +
   'WHERE delivered = 0 ORDER BY ts DESC, id DESC LIMIT ?';
 
+const AGENT_MESSAGES_SQL =
+  'SELECT n.id, n.ts, n.to_session, n.from_session, n.rel_key, n.content, n.delivered, ' +
+  'sf.agent_kind AS from_kind, sf.cwd AS from_cwd, st.agent_kind AS to_kind, st.cwd AS to_cwd ' +
+  'FROM notices n LEFT JOIN sessions sf ON sf.session_id = n.from_session ' +
+  'LEFT JOIN sessions st ON st.session_id = n.to_session ' +
+  "WHERE n.rel_key LIKE 'msg:%' AND n.ts >= ? ORDER BY n.ts DESC, n.id DESC LIMIT 200";
 const FILE_HISTORY_SQL =
   'SELECT e.ts, e.session_id, s.agent_kind, s.agent_name, e.branch, e.checkout, e.tool, e.intent ' +
   'FROM events e LEFT JOIN sessions s ON s.session_id = e.session_id ' +
@@ -192,6 +206,12 @@ class SqliteLedgerSource implements LedgerSource {
   noticeRows(): NoticeRow[] {
     return this.read([], (db) =>
       rowsOf(db.prepare(NOTICES_SQL).all(LEDGER_NOTICES_MAX)).map(noticeRowOf),
+    );
+  }
+
+  agentMessageRows(sinceTs: string): AgentNoticeRow[] {
+    return this.read([], (db) =>
+      rowsOf(db.prepare(AGENT_MESSAGES_SQL).all(sinceTs)).map(agentNoticeRowOf),
     );
   }
 
@@ -346,5 +366,15 @@ function noticeRowOf(row: SqlRow): NoticeRow {
     relKey: textOf(row.rel_key),
     content: requiredText(row.content),
     delivered: numberOf(row.delivered),
+  };
+}
+
+function agentNoticeRowOf(row: SqlRow): AgentNoticeRow {
+  return {
+    ...noticeRowOf(row),
+    fromKind: textOf(row.from_kind),
+    fromCwd: textOf(row.from_cwd),
+    toKind: textOf(row.to_kind),
+    toCwd: textOf(row.to_cwd),
   };
 }

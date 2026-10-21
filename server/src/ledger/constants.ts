@@ -13,6 +13,17 @@ export const LEDGER_DB_SEGMENTS: readonly string[] = ['.omp', 'agent', 'activity
 export const LEDGER_WHO_SCRIPT_SEGMENTS: readonly string[] = ['.omp', 'scripts', 'who.py'];
 /** overlap.py. Always run without `--notify`, which would write into activity.db. */
 export const LEDGER_OVERLAP_SCRIPT_SEGMENTS: readonly string[] = ['.omp', 'scripts', 'overlap.py'];
+export const LEDGER_TOOL_USAGE_SCRIPT_SEGMENTS: readonly string[] = [
+  '.omp',
+  'scripts',
+  'tool-usage.py',
+];
+export const LEDGER_TOOL_USAGE_FILE_SEGMENTS: readonly string[] = [
+  '.omp',
+  'agent',
+  'tool-usage.json',
+];
+export const LEDGER_TOOL_USAGE_TIMEOUT_MS = 180_000;
 export const LEDGER_PYTHON_COMMAND = 'python';
 export const LEDGER_GIT_COMMAND = 'git';
 export const LEDGER_SQLITE_BUSY_TIMEOUT_MS = 5_000;

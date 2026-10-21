@@ -8,9 +8,13 @@
 import { createHash } from 'node:crypto';
 
 import type {
+  LedgerAgentMessage,
+  LedgerCoordinationMessage,
+  LedgerHandoff,
   LedgerOverlapScan,
   LedgerSnapshotMessage,
   LedgerTimeline,
+  LedgerToolUsageMessage,
   LedgerView,
 } from '../../../core/src/messages.js';
 import * as commands from './commands.js';
@@ -21,8 +25,11 @@ import {
   LEDGER_POLL_INTERVAL_MS,
   LEDGER_REPO_CAP,
   LEDGER_SPAM_RULE,
+  LEDGER_TOOL_USAGE_TIMEOUT_MS,
 } from './constants.js';
+import { coordinationMessageContent, handoffSection } from './coordinationText.js';
 import { type GitRepoScan, type GitRunner, readRepo } from './git.js';
+import { readHandoffFiles } from './handoffFiles.js';
 import type { EventRow, LedgerFileTouch, LedgerSource } from './ledgerDb.js';
 import { ledgerPathKey, normalizeLedgerPath } from './ledgerPath.js';
 import { formatLedgerTime } from './ledgerTime.js';
@@ -30,6 +37,7 @@ import { MergeBlockCache } from './mergeBlocks.js';
 import { OverlapScanner } from './overlap.js';
 import type { ScriptRunner } from './processRunner.js';
 import { buildTimeline, type TimelineEvent, timelineEventOf } from './timeline.js';
+import { readToolUsage, toolUsageFailure } from './toolUsage.js';
 import { buildLedgerView, type LedgerRepoInput, viewContentJson } from './view.js';
 
 export interface LedgerFileHistoryOutcome {
@@ -60,6 +68,10 @@ export interface LedgerServiceOptions {
   readonly extraRepoPaths?: () => readonly string[];
   /** The open Company folder that holds a path (deepest match), or undefined. Never rejects. */
   readonly workspaceFor?: (path: string) => Promise<string | undefined>;
+  /** Runs `tool-usage.py`, which rewrites `toolUsageFile`. */
+  readonly toolUsage?: ScriptRunner;
+  /** The statistics file `tool-usage.py` writes; without it the tool usage tab reports why. */
+  readonly toolUsageFile?: string;
 }
 
 interface GitEntry {
@@ -82,6 +94,8 @@ export class LedgerService {
   private refreshCount = 0;
   private appliedCount = 0;
   private disposed = false;
+  private toolUsageError = '';
+  private toolUsagePromise: Promise<void> | null = null;
 
   constructor(private readonly options: LedgerServiceOptions) {
     this.overlap = new OverlapScanner({
@@ -188,6 +202,70 @@ export class LedgerService {
       };
     }
     return { entries };
+  }
+  async coordination(requestId: string): Promise<LedgerCoordinationMessage> {
+    this.touch();
+    const since = formatLedgerTime(this.options.now() - LEDGER_DAY_MS * 7);
+    const messages: LedgerAgentMessage[] = this.options.source
+      .agentMessageRows(since)
+      .map((row) => ({
+        ...row,
+        content: coordinationMessageContent(row.content),
+      }));
+    const view = await this.refresh(true);
+    const worktrees = view.repos.flatMap((repo) => repo.worktrees);
+    const perWorktree = await Promise.all(
+      worktrees.map(async (worktree) =>
+        (await readHandoffFiles(worktree.path)).map((file): LedgerHandoff => ({
+          worktree: worktree.path,
+          branch: worktree.branch,
+          path: file.path,
+          modifiedAt: file.modifiedAt.toISOString(),
+          goal: handoffSection(file.text, 'Mục tiêu'),
+          status: handoffSection(file.text, 'Trạng thái'),
+          openQuestions: handoffSection(file.text, 'Câu hỏi còn mở'),
+        })),
+      ),
+    );
+    return { type: 'ledgerCoordination', requestId, messages, handoffs: perWorktree.flat() };
+  }
+
+  /** The statistics file as it is now; `refresh` starts one regeneration, never two at once. */
+  async toolUsage(requestId: string, refresh: boolean): Promise<LedgerToolUsageMessage> {
+    this.touch();
+    if (refresh && this.options.toolUsage !== undefined && this.toolUsagePromise === null) {
+      this.toolUsageError = '';
+      this.toolUsagePromise = this.runToolUsage().finally(() => {
+        this.toolUsagePromise = null;
+      });
+    }
+    const file = this.options.toolUsageFile;
+    const result =
+      file === undefined
+        ? toolUsageFailure(requestId, 'Board chưa được cấu hình file thống kê.')
+        : await readToolUsage(requestId, file);
+    // While the script runs, keep showing the previous statistics.
+    if (this.toolUsagePromise !== null) return { ...result, running: true };
+    return this.toolUsageError === ''
+      ? result
+      : { ...result, ok: false, reason: this.toolUsageError };
+  }
+
+  private async runToolUsage(): Promise<void> {
+    try {
+      const result = await this.options.toolUsage!([], {
+        timeoutMs: LEDGER_TOOL_USAGE_TIMEOUT_MS,
+        okCodes: [0],
+        maxBytes: 16_384,
+      });
+      this.toolUsageError = result.ok
+        ? ''
+        : result.timedOut
+          ? 'Lệnh tạo thống kê quá thời gian.'
+          : 'Không chạy được lệnh tạo thống kê.';
+    } catch {
+      this.toolUsageError = 'Không chạy được lệnh tạo thống kê.';
+    }
   }
 
   async sendMessage(sessionId: string, text: string): Promise<commands.SendOutcome> {
