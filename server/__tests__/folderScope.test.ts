@@ -171,9 +171,14 @@ describe('resolveFolderCwd and canonicalWithinFolder', () => {
     });
   });
 
-  it('accepts a worktree under the sibling "<folder>.worktrees" git-wt makes for a folder that is a repo', async () => {
+  it('accepts the sibling "<folder>.worktrees" only when the folder is a git repo', async () => {
     const worktree = path.join(scratch, 'Project.worktrees', 'squad-1');
     await fs.promises.mkdir(worktree, { recursive: true });
+    // A plain folder gets no sibling: the path lies outside it.
+    await expect(resolveFolderCwd(worktree, root)).rejects.toMatchObject({ code: 'cwd_outside_folder' });
+    expect(await canonicalWithinFolder(worktree, root)).toBeUndefined();
+
+    await fs.promises.mkdir(path.join(root, '.git'));
     expect(await resolveFolderCwd(worktree, root)).toBe(await fs.promises.realpath(worktree));
     expect(await canonicalWithinFolder(worktree, root)).toBe(await fs.promises.realpath(worktree));
     await fs.promises.mkdir(path.join(scratch, 'Project.worktreesX'));

@@ -157,6 +157,10 @@ describe('createSquadWorktree', () => {
     await expect(
       createSquadWorktree({ repo: REPO, folderRoot: REPO, shortId: SHORT, gitWt: GIT_WT, run: answer(lookalike) }),
     ).rejects.toThrow('worktree nằm ngoài thư mục của đội');
+    // A folder that only holds the repo gets no sibling of its own.
+    await expect(
+      createSquadWorktree({ repo: REPO, folderRoot: FOLDER, shortId: SHORT, gitWt: GIT_WT, run: answer(`${FOLDER}.worktrees/squad-${SHORT}`) }),
+    ).rejects.toThrow('worktree nằm ngoài thư mục của đội');
   });
 
   it('fails when git-wt reports success but no worktree shows the squad branch', async () => {

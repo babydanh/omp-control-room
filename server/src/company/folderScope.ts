@@ -136,12 +136,15 @@ function isWithin(root: string, target: string): boolean {
 }
 
 /**
- * Whether `target` belongs to the folder: under the root, or under `<root>.worktrees`, the sibling
- * directory git-wt makes a repo's worktrees in. A folder that is itself a repo keeps its worktrees
- * there, outside the root. Both paths are canonical.
+ * Whether `target` belongs to the folder: under the root, or, when the root is itself a git repo
+ * (a `.git` directory, or the `.git` file of a worktree), under `<root>.worktrees`, the sibling
+ * directory git-wt makes that repo's worktrees in. A plain folder gets no sibling. Both paths are
+ * canonical; the target was resolved through realpath, so a junction out of the sibling is refused.
  */
 export function inFolder(root: string, target: string): boolean {
-  return isWithin(root, target) || isWithin(`${root.replace(/[\\/]+$/, '')}.worktrees`, target);
+  if (isWithin(root, target)) return true;
+  const sibling = `${root.replace(/[\\/]+$/, '')}.worktrees`;
+  return isWithin(sibling, target) && fs.existsSync(path.join(root, '.git'));
 }
 
 /**

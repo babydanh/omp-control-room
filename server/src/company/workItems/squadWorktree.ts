@@ -12,7 +12,7 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { delimiter, join } from 'node:path';
 
-import { isInsideRepo } from './workItemScheduler.js';
+import { checkoutKey, isInsideRepo } from './workItemScheduler.js';
 
 /** A worktree the squad created for one editing item. */
 export interface SquadWorktree {
@@ -64,10 +64,12 @@ export async function createSquadWorktree(options: SquadWorktreeOptions): Promis
   const path =
     worktreeOnBranch(await listWorktrees(repo, run), branch) ??
     (await addWorktree(options, branch));
-  // git-wt puts a repo's worktrees in the sibling `<repo>.worktrees`: when the folder is the repo
-  // itself, that sibling still belongs to the folder (folderScope.inFolder applies the same rule).
+  // git-wt puts a repo's worktrees in the sibling `<repo>.worktrees`. When the folder is that repo
+  // itself, the sibling belongs to the folder too (folderScope.inFolder applies the same rule);
+  // for a repo inside the folder, the worktree must land inside the folder.
+  const folderIsRepo = checkoutKey(repo) === checkoutKey(folderRoot);
   const sibling = `${folderRoot.replace(/[\\/]+$/, '')}.worktrees`;
-  if (!isInsideRepo(path, folderRoot) && !isInsideRepo(path, sibling)) {
+  if (!isInsideRepo(path, folderRoot) && !(folderIsRepo && isInsideRepo(path, sibling))) {
     throw new Error(`worktree nằm ngoài thư mục của đội (${path})`);
   }
   return { path, branch };
