@@ -1678,6 +1678,11 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     return session?.id ?? null;
   }
 
+  sessionFile(sessionId: string): string | undefined {
+    return Object.values(this.state.sessions).find((candidate) => candidate.id === sessionId)
+      ?.nativeSessionPath;
+  }
+
   diagnostics(): CompanyDiagnostics {
     return this.options.effects.diagnostics();
   }

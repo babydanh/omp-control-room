@@ -193,6 +193,8 @@ export interface WorkItemSessions {
   wake(sessionId: string): Promise<void>;
   /** Parks an idle session to free its memory. False when the pool refuses now. */
   park(sessionId: string): Promise<boolean>;
+  /** The session's last reply from its transcript, the whole final report. Undefined when unknown. */
+  lastReply?(sessionId: string): Promise<string | undefined>;
 }
 
 /** What the board can pick from: the folder's repos and its omp agents. */
@@ -1628,10 +1630,7 @@ export class WorkItemService {
             : WORK_ITEM_REASON.needsInputSession;
         if (item.squadRunId !== undefined && this.ports.isCompactSquadProposal?.(item.squadRunId)) {
           const before = item.status;
-          const screen =
-            item.assignee.kind === 'herdr' && item.assignee.paneId !== undefined
-              ? await this.readResult(item.assignee.paneId)
-              : undefined;
+          const screen = await this.readHolderResult(item);
           if (item.status !== before) return;
           const result = `Agent dừng chờ trả lời: ${screen ?? reason}`;
           item.result = clip(result, WORK_ITEM_RESULT_MAX_CHARS);
@@ -1666,13 +1665,10 @@ export class WorkItemService {
     this.commit();
   }
 
-  /** The agent stopped after working. The item goes to review, with the screen as its result. */
+  /** The agent stopped after working. The item goes to review, with its last reply as the result. */
   private async complete(item: StoredWorkItem): Promise<void> {
     const before = item.status;
-    const result =
-      item.assignee.kind === 'herdr' && item.assignee.paneId !== undefined
-        ? await this.readResult(item.assignee.paneId)
-        : undefined;
+    const result = await this.readHolderResult(item);
     // The user may have acted while the screen was read; only a still-running item moves.
     if (item.status !== before || !occupiesAgent(item.status)) return;
     this.moveToReview(item, result, 'Agent đã dừng.');
@@ -1705,6 +1701,19 @@ export class WorkItemService {
     this.commit();
     this.notifySettled(item);
     this.judgeAfterReview(item);
+  }
+
+  /** The holder's last reply: a herdr pane's transcript or screen, or a board session's transcript. */
+  private async readHolderResult(item: StoredWorkItem): Promise<string | undefined> {
+    const { assignee } = item;
+    if (assignee.kind === 'herdr' && assignee.paneId !== undefined) {
+      return this.readResult(assignee.paneId);
+    }
+    if (assignee.kind !== 'session' || assignee.sessionId === undefined) return undefined;
+    const reply = await this.ports.sessions.lastReply?.(assignee.sessionId).catch(() => undefined);
+    return reply === undefined || reply.trim() === ''
+      ? undefined
+      : clip(reply.trim(), WORK_ITEM_RESULT_MAX_CHARS);
   }
 
   /** The agent's last reply from its transcript when it can be read, else the screen's last lines. */

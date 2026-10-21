@@ -44,7 +44,7 @@ const RESULT_SCREEN_LINES = 40;
 /** The folder's coordinator calls work items make. */
 export type WorkItemCoordinator = Pick<
   CompanyCoordinator,
-  'snapshot' | 'submitPrompt' | 'openNewChat' | 'parkSquadSession'
+  'snapshot' | 'submitPrompt' | 'openNewChat' | 'parkSquadSession' | 'sessionFile'
 >;
 
 export interface WorkItemWiringOptions {
@@ -136,6 +136,10 @@ function sessionsFor(coordinator: WorkItemCoordinator): WorkItemSessions {
         workstreamKey: input.workstreamKey,
       }),
     park: (sessionId) => coordinator.parkSquadSession(sessionId),
+    lastReply: async (sessionId) => {
+      const file = coordinator.sessionFile?.(sessionId);
+      return file === undefined ? undefined : lastAgentReply({ kind: 'omp', sessionFile: file });
+    },
     wake: async (sessionId) => {
       const session = coordinator.snapshot().sessions.find((entry) => entry.id === sessionId);
       if (session?.status !== 'parked' || session.cwd === undefined) return;

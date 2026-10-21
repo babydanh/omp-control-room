@@ -65,6 +65,8 @@ class Fixture {
   screen = '';
   /** The agent's last reply from its transcript; undefined = the transcript is unknown. */
   reply: string | undefined = undefined;
+  /** A board session's last reply from its transcript; undefined = the transcript is unknown. */
+  sessionReply: string | undefined = undefined;
   readonly sessions: WorkItemSessionView[] = [];
   readonly submits: { sessionId: string; text: string; mode: 'chat' | 'company' }[] = [];
   chatsOpened = 0;
@@ -113,6 +115,7 @@ class Fixture {
         },
         wake: async () => undefined,
         park: async () => true,
+        lastReply: async () => this.sessionReply,
         openChat: async (input) => {
           if (this.poolFull) {
             throw new CompanyError('company_pool_full', 'Đã đủ phiên omp đang chạy.');
@@ -1620,6 +1623,49 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       status: 'failed',
       result: 'Agent dừng chờ trả lời: Cần bạn cung cấp URL API.',
     }));
+    stop();
+  });
+
+  it('gives a compact new-session item the session report, and the question when it stops', async () => {
+    const f = await repoFixture();
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const settled: WorkItem[] = [];
+    const stop = f.service.onItemSettled((item) => settled.push(item));
+    const [done, asking] = await f.service.createWorkItems(
+      [
+        { text: 'Sửa API', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' },
+        { text: 'Sửa trang', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' },
+      ],
+      { squadRunId },
+    );
+    if (done === undefined || asking === undefined) throw new Error('expected two work items');
+    await vi.waitFor(() => expect(f.sessions).toHaveLength(2));
+    const [first, second] = f.sessions;
+    if (first === undefined || second === undefined) throw new Error('expected two sessions');
+    f.sessions[0] = { ...first, status: 'busy' };
+    f.sessions[1] = { ...second, status: 'busy' };
+    await f.service.reconcileNow();
+
+    f.sessionReply = 'Đã sửa API: src/api.ts:12, npm test exit 0';
+    f.sessions[0] = { ...first, status: 'idle' };
+    await f.service.reconcileNow();
+    expect(itemOf(f, done)).toMatchObject({
+      status: 'done',
+      result: 'Đã sửa API: src/api.ts:12, npm test exit 0',
+    });
+
+    f.sessionReply = 'Cần URL API của staging?';
+    f.sessions[1] = { ...second, status: 'waiting_input' };
+    await f.service.reconcileNow();
+    expect(itemOf(f, asking)).toMatchObject({
+      status: 'failed',
+      result: 'Agent dừng chờ trả lời: Cần URL API của staging?',
+    });
+    expect(settled.map((item) => item.result)).toEqual([
+      'Đã sửa API: src/api.ts:12, npm test exit 0',
+      'Agent dừng chờ trả lời: Cần URL API của staging?',
+    ]);
     stop();
   });
 

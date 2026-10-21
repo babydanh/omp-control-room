@@ -253,6 +253,9 @@ export interface CompanyCoordinator {
    */
   sessionForNative?(nativeSessionId: string): string | null;
 
+  /** The transcript file of a board session's omp process, or undefined while it has none. */
+  sessionFile?(sessionId: string): string | undefined;
+
   /** Resource measurements for the diagnostics panel. */
   diagnostics(): CompanyDiagnostics;
 
