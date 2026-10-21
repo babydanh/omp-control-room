@@ -2052,6 +2052,7 @@ export interface ProjectTreeSnapshotMessage {
   type: 'projectTreeSnapshot';
   requestId: string;
   nodes: ProjectTreeNode[];
+  partial?: boolean;
 }
 
 export interface ProjectTreeNode {

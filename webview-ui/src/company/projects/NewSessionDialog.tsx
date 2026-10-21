@@ -57,8 +57,8 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
     else if (!candidateRepos.some((repo) => repo.id === repoId)) setRepoId('');
   }, [candidateRepos, repoId]);
 
-  // Repos arrive with the full tree; until any checkout is known the folder's repos are unknown.
-  const reposKnown = state.nodes.some((node) => node.kind === 'checkout');
+  // Repos arrive with the full tree; the quick one lists folders only.
+  const reposKnown = state.treeComplete;
   const plainFolder = target?.kind === 'folder' && reposKnown && candidateRepos.length === 0;
   useEffect(() => {
     if (!plainFolder) return;

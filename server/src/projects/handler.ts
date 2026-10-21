@@ -293,7 +293,7 @@ async function sendTreeSnapshot(
   ]);
   if (early === null) {
     const quick = await buildProjectTreeSnapshot(store, { ...treeOptions(shared), sessionsOnly: true });
-    send({ type: 'projectTreeSnapshot', requestId, nodes: quick.nodes });
+    send({ type: 'projectTreeSnapshot', requestId, nodes: quick.nodes, partial: true });
   }
   send({ type: 'projectTreeSnapshot', requestId, nodes: (await full).nodes });
 }

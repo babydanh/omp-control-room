@@ -48,6 +48,8 @@ type ProjectRequest =
 
 export interface ProjectState {
   nodes: readonly ProjectTreeNode[];
+  /** The nodes come from a full snapshot: repos and worktrees are known, not just folders. */
+  treeComplete: boolean;
   diff: ProjectDiffMessage | null;
   settings: ProjectSettingsMessage | null;
   pending: Readonly<Record<string, ProjectRequest>>;
@@ -79,7 +81,7 @@ export function isProjectServerMessage(message: ServerMessage): message is Proje
 
 export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
   const requestId = options.newRequestId ?? defaultRequestId;
-  let state: ProjectState = { nodes: [], diff: null, settings: null, pending: {}, results: {}, errors: {} };
+  let state: ProjectState = { nodes: [], treeComplete: false, diff: null, settings: null, pending: {}, results: {}, errors: {} };
   const listeners = new Set<() => void>();
   const latest = new Map<string, string>();
   const commit = (next: ProjectState) => { if (next === state) return; state = next; for (const listener of listeners) listener(); };
@@ -105,7 +107,9 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
       const pending = { ...state.pending };
       delete pending[message.requestId];
       if (latest.get('tree') === message.requestId) latest.delete('tree');
-      commit({ ...state, nodes: message.nodes, pending });
+      // A quick snapshot after a full one would hide repos for a moment: keep the full nodes.
+      if (message.partial === true && state.treeComplete) commit({ ...state, pending });
+      else commit({ ...state, nodes: message.nodes, treeComplete: message.partial !== true, pending });
       return;
     }
     const request = state.pending[message.requestId];

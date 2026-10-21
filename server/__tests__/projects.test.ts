@@ -261,7 +261,7 @@ describe('project tree request', () => {
     const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
     const project = await store.createProject('Test');
     await store.addFolder(project.id, folder);
-    const sent: Array<{ type: string; nodes?: Array<{ id: string; kind: string; parentId?: string; name: string }> }> = [];
+    const sent: Array<{ type: string; partial?: boolean; nodes?: Array<{ id: string; kind: string; parentId?: string; name: string }> }> = [];
     handleProjectMessage({ type: 'projectTreeRequest', requestId: 'r1' }, (message) => sent.push(message as never), {
       privileged: true,
       // The board runs session-1 as its own session "board-1".
@@ -280,6 +280,7 @@ describe('project tree request', () => {
 
     const snapshots = sent.filter((message) => message.type === 'projectTreeSnapshot');
     expect(snapshots).toHaveLength(2);
+    expect(snapshots.map((message) => message.partial === true)).toEqual([true, false]);
     const [quick, full] = snapshots.map((message) => message.nodes ?? []);
     const folderNode = quick?.find((node) => node.kind === 'folder');
     expect(quick?.some((node) => node.kind === 'repository')).toBe(false);

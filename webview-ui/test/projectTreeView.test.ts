@@ -71,8 +71,10 @@ describe('projectTreeView', () => {
     // A folder that is not a git repo has no diff to show.
     expect(actions('empty')).not.toContain('changes');
     expect(actions('checkout')).toEqual(expect.arrayContaining(['merge', 'copyBranch']));
-    // Session rows open, show their worktree's changes, and copy their id.
-    expect(actions('session')).toEqual(['openSession', 'changes', 'copySessionId', 'copyPath']);
+    // A session the board does not run offers its changes, not an "open" that goes nowhere.
+    expect(actions('session')).toEqual(['changes', 'copySessionId', 'copyPath']);
+    const boardRun = { ...nodes.find((entry) => entry.id === 'session')!, boardSessionId: 'board-1' };
+    expect(projectNodeMenuItems(boardRun, projectMenuContext(nodes, boardRun))[0]?.label).toBe('Mở phiên');
     expect(checkoutPathFor(nodes, nodes.find((entry) => entry.id === 'session')!)).toBe('/work/repo/.worktrees/feature');
   });
 

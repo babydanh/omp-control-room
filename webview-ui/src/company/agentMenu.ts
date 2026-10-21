@@ -816,7 +816,10 @@ export function projectNodeMenuItems(
       ];
     case 'session':
       return [
-        add('open-session', 'Mở phiên', 'external', 'openSession'),
+        // Only sessions the board can show: one it runs, or a herdr pane. Others have just their changes.
+        ...(node.boardSessionId !== undefined || node.agentKind === 'herdr'
+          ? [add('open-session', 'Mở phiên', 'external', 'openSession')]
+          : []),
         ...changes(true),
         add('copy-session', 'Sao chép mã phiên', 'copy', 'copySessionId', true),
         add('copy-path', 'Sao chép thư mục làm việc', 'copy', 'copyPath'),

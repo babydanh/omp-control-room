@@ -7760,6 +7760,11 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ProjectTreeNode'
+        partial:
+          type: boolean
+          description: >-
+            True for the quick folders-and-sessions snapshot sent before the git scan ends:
+            repos, worktrees and files are not known yet. The full snapshot follows.
 
     ProjectDiffMessage:
       type: object
