@@ -62,6 +62,8 @@ class Fixture {
   readonly prompts: { paneId: string; text: string }[] = [];
   promptError: Error | null = null;
   screen = '';
+  /** The agent's last reply from its transcript; undefined = the transcript is unknown. */
+  reply: string | undefined = undefined;
   readonly sessions: WorkItemSessionView[] = [];
   readonly submits: { sessionId: string; text: string; mode: 'chat' | 'company' }[] = [];
   chatsOpened = 0;
@@ -99,6 +101,7 @@ class Fixture {
           this.prompts.push({ paneId, text });
         },
         screenText: async () => this.screen,
+        lastReply: async () => this.reply,
       },
       sessions: {
         list: () => this.sessions.map((session) => ({ ...session })),
@@ -217,6 +220,19 @@ describe('WorkItemService: dispatch and status', () => {
     f.screen = '\nBước 1\n\nXong\n';
     await f.service.reconcileNow();
     expect(itemOf(f, id)).toMatchObject({ status: 'review', result: 'Bước 1\nXong' });
+  });
+
+  it('takes the agent reply from its transcript over the screen, which holds only the input box', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    const id = await f.service.create({ requestId: randomUUID(), text: 'Khảo sát', assignee: herdr(PANE_A) });
+    f.setPane(PANE_A, 'working');
+    await f.service.reconcileNow();
+    f.setPane(PANE_A, 'idle');
+    f.screen = '❯\n auto mode on';
+    f.reply = '## Báo cáo\n- route POST /api/v1/x';
+    await f.service.reconcileNow();
+    expect(itemOf(f, id)).toMatchObject({ status: 'review', result: '## Báo cáo\n- route POST /api/v1/x' });
   });
 
   it('queues a second item behind a busy agent and sends it when the agent frees up', async () => {

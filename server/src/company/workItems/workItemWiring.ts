@@ -9,6 +9,7 @@ import { freemem, homedir } from 'node:os';
 import { join } from 'node:path';
 
 import type { CompanyWorkItemsMessage, LedgerOverlapScan } from '../../../../core/src/messages.js';
+import { lastAgentReply } from '../../herdr/agentReply.js';
 import type { HerdrLink } from '../../herdr/herdrLink.js';
 import { createAgyRuns } from '../agyCode/agyRuns.js';
 import { loadClaudeAgentNames } from '../claudeCode/claudeAgents.js';
@@ -100,6 +101,10 @@ function rosterFor(herdr: WorkItemHerdr | undefined): WorkItemRoster {
     screenText: async (paneId) => {
       if (herdr === undefined) throw new Error('herdr is not linked');
       return (await herdr.read(paneId, RESULT_SCREEN_LINES)).text;
+    },
+    lastReply: async (paneId) => {
+      const agent = herdr?.snapshot().agents.find((entry) => entry.paneId === paneId);
+      return agent === undefined ? undefined : lastAgentReply(agent);
     },
   };
 }

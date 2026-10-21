@@ -155,6 +155,11 @@ export interface WorkItemRoster {
   prompt(paneId: string, text: string): Promise<void>;
   /** The pane's recent screen text, for a result. Rejects when herdr cannot read it. */
   screenText(paneId: string): Promise<string>;
+  /**
+   * The last reply of the agent in the pane, from its transcript: the whole final report, where the
+   * screen holds only its last lines. Undefined when the transcript is unknown. Absent = no reader.
+   */
+  lastReply?(paneId: string): Promise<string | undefined>;
 }
 
 /** One omp session, as far as work items care. */
@@ -1644,7 +1649,10 @@ export class WorkItemService {
     this.judgeAfterReview(item);
   }
 
+  /** The agent's last reply from its transcript when it can be read, else the screen's last lines. */
   private async readResult(paneId: string): Promise<string | undefined> {
+    const reply = await this.ports.roster.lastReply?.(paneId).catch(() => undefined);
+    if (reply !== undefined && reply.trim() !== '') return clip(reply.trim(), WORK_ITEM_RESULT_MAX_CHARS);
     try {
       return summarizeScreen(await this.ports.roster.screenText(paneId));
     } catch {
