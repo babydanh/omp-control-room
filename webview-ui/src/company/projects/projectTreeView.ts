@@ -171,6 +171,20 @@ export function isRunningNode(node: ProjectTreeNode): boolean {
   return node.kind === 'session' && RUNNING_STATES.has((node.state ?? '').toLowerCase());
 }
 
+/** The session or herdr pane the detail drawer shows, so the tree can point at its row. */
+export interface TreeSelection {
+  readonly sessionId: string | null;
+  readonly paneId: string | null;
+}
+
+/** True when this tree row is the session the drawer shows, by its pane or its board/native id. */
+export function isSelectedSession(node: ProjectTreeNode, selection: TreeSelection): boolean {
+  if (node.kind !== 'session') return false;
+  const pane = node.herdrPaneId ?? (node.agentKind === 'herdr' ? node.sessionId : undefined);
+  if (selection.paneId !== null && pane === selection.paneId) return true;
+  return selection.sessionId !== null && (node.boardSessionId === selection.sessionId || node.sessionId === selection.sessionId);
+}
+
 /**
  * A session that waits on you: its agent says so (waiting for input, a permission), or it stopped
  * with a todo task marked blocked, the way omp asks the user to choose before going on.

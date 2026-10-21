@@ -9,7 +9,7 @@
  */
 
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { HerdrRoster } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
@@ -124,7 +124,12 @@ export function AgentSidebar({
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <ProjectTree {...projectTree} />
         {outside.length > 0 && (
-          <OutsideProjects rows={outside} onOpenHerdr={onOpenHerdr} onOpenSleeping={onOpenSleeping} />
+          <OutsideProjects
+            rows={outside}
+            selectedPaneId={projectTree.selection?.paneId ?? null}
+            onOpenHerdr={onOpenHerdr}
+            onOpenSleeping={onOpenSleeping}
+          />
         )}
       </div>
 
@@ -136,14 +141,26 @@ export function AgentSidebar({
 /** Herdr panes no Project folder holds, folded by default; a click opens the pane or its wake drawer. */
 function OutsideProjects({
   rows,
+  selectedPaneId,
   onOpenHerdr,
   onOpenSleeping,
 }: {
   rows: readonly OutsideHerdrRow[];
+  /** The pane the drawer shows: its row is highlighted, and the folded list opens to show it. */
+  selectedPaneId: string | null;
   onOpenHerdr: (paneId: string) => void;
   onOpenSleeping: (paneId: string) => void;
 }) {
+  const holdsSelected = rows.some((row) => row.paneId === selectedPaneId);
   const [open, setOpen] = useState(false);
+  const selectedRef = useRef<HTMLButtonElement>(null);
+  // The drawer shows one of these panes: open the list, then (once its row exists) scroll to it.
+  useEffect(() => {
+    if (holdsSelected) setOpen(true);
+  }, [holdsSelected, selectedPaneId]);
+  useEffect(() => {
+    if (open && holdsSelected) selectedRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [open, holdsSelected, selectedPaneId]);
   return (
     <section aria-label="Ngoài dự án" className="px-2 py-2">
       <button
@@ -163,9 +180,11 @@ function OutsideProjects({
             <li key={row.paneId}>
               <button
                 type="button"
+                ref={row.paneId === selectedPaneId ? selectedRef : undefined}
+                aria-current={row.paneId === selectedPaneId ? 'true' : undefined}
                 onClick={() => (row.sleeping ? onOpenSleeping(row.paneId) : onOpenHerdr(row.paneId))}
                 title={row.sleeping ? 'Mở để đánh thức' : row.paneId}
-                className="touch-target w-full rounded px-2 py-1 text-left hover:bg-hover"
+                className={`touch-target w-full rounded px-2 py-1 text-left hover:bg-hover ${row.paneId === selectedPaneId ? 'bg-selected' : ''}`}
               >
                 <span className="block truncate text-base text-text">{row.title}</span>
                 <span className="block truncate text-xs text-text-muted">

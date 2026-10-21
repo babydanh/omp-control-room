@@ -809,6 +809,7 @@ export function BoardShell({ client }: BoardShellProps) {
                 onOpenSession: openProjectSession,
                 onMenu: openMenu,
                 store: projectStore,
+                selection: { sessionId: selectedSessionId, paneId: selectedPaneId },
               }}
               onOpenRoles={() => setRolesOpen(true)}
               onDismiss={dismissSheet}

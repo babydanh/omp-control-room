@@ -14,6 +14,7 @@ import {
   countSessions,
   filterProjectTree,
   herdrOutsideProjects,
+  isSelectedSession,
   projectNodeMenuItems,
   sessionActivityCounts,
 } from '../src/company/projects/projectTreeView.js';
@@ -145,6 +146,18 @@ describe('projectTreeView', () => {
     expect(awakePaneOf({ ...omp, state: 'sleeping' })).toBeNull();
     // Not in herdr: the board has no pane to message.
     expect(labels(node('out', 'session', 'checkout', { agentKind: 'omp', state: 'running' }))).not.toContain('Đẩy lên cloud làm tiếp');
+  });
+
+  it('points at the row of the session the drawer shows, by its pane or its board or native id', () => {
+    const joined = node('claude', 'session', 'checkout', { agentKind: 'claude', sessionId: 'abc', herdrPaneId: 'w1:p7' });
+    expect(isSelectedSession(joined, { sessionId: null, paneId: 'w1:p7' })).toBe(true);
+    expect(isSelectedSession(joined, { sessionId: 'abc', paneId: null })).toBe(true);
+    expect(isSelectedSession({ ...joined, boardSessionId: 'board-1' }, { sessionId: 'board-1', paneId: null })).toBe(true);
+    const pane = node('pane', 'session', 'checkout', { agentKind: 'herdr', sessionId: 'w1:p2' });
+    expect(isSelectedSession(pane, { sessionId: null, paneId: 'w1:p2' })).toBe(true);
+    expect(isSelectedSession(joined, { sessionId: null, paneId: 'w1:p2' })).toBe(false);
+    // A folder holding the session is not the session.
+    expect(isSelectedSession(node('f', 'folder'), { sessionId: null, paneId: 'w1:p7' })).toBe(false);
   });
 
   it('opens the herdr pane and the last edited checkout of a session at a folder root', () => {

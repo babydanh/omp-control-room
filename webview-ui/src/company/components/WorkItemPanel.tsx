@@ -549,7 +549,8 @@ function NextStepBanner({ step, busy, onAction }: { step: NextStep; busy: boolea
       {step.actions.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {step.actions.map((action, index) => (
-            <CompanyButton key={action} size="sm" variant={index === 0 ? 'accent' : undefined} className={action === 'remove' ? 'text-danger' : undefined} disabled={busy} onClick={() => onAction(action)}>
+            // Xoá never leads: red text on the accent fill could not be read.
+            <CompanyButton key={action} size="sm" variant={index === 0 && action !== 'remove' ? 'accent' : undefined} className={action === 'remove' ? 'text-danger' : undefined} disabled={busy} onClick={() => onAction(action)}>
               {NEXT_STEP_LABEL[action]}
             </CompanyButton>
           ))}

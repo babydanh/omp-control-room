@@ -1,4 +1,4 @@
-import { type DragEvent, useEffect, useMemo, useState } from 'react';
+import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
@@ -11,8 +11,10 @@ import {
   countSessions,
   filterProjectTree,
   isRunningNode,
+  isSelectedSession,
   type ProjectTreeBranch,
   sessionProgressView,
+  type TreeSelection,
 } from './projectTreeView.js';
 
 const COLLAPSED_KEY = 'company.projectTree.collapsed.v1';
@@ -72,6 +74,8 @@ export interface ProjectTreeProps {
   /** Opens a session row's terminal; the branch carries the Project folder it works under. */
   onOpenSession: (session: ProjectTreeNode, where: { readonly folderPath?: string }) => void;
   onMenu: (request: AgentMenuRequest) => void;
+  /** The session the detail drawer shows; its row is highlighted and scrolled into view. */
+  selection?: TreeSelection;
 }
 
 /** Sidebar: Project → groups → folders → repos → sessions, subagents under theirs. Git and files live on other pages. */
@@ -179,6 +183,12 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
     props.onMenu,
   );
   const isSession = node.kind === 'session';
+  const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
+  const rowRef = useRef<HTMLButtonElement>(null);
+  // The drawer just opened this session: bring its row into view so you see where it sits.
+  useEffect(() => {
+    if (selected) rowRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [selected]);
   const receivesDrop = DROP_KINDS.has(node.kind);
   const counts = isSession ? null : countSessions(branch);
   const progress = isSession ? sessionProgressView(node.progress) : null;
@@ -206,6 +216,8 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           <button type="button" aria-label={isCollapsed ? 'Mở rộng' : 'Thu gọn'} aria-expanded={!isCollapsed} onClick={() => onToggleCollapse(node.id)} className="touch-target size-6 shrink-0 text-base text-text-muted">{isCollapsed ? '›' : '⌄'}</button>
         ) : <span className="w-6 shrink-0" />}
         <button
+          ref={rowRef}
+          aria-current={selected ? 'true' : undefined}
           type="button"
           aria-label={`${node.kind}: ${node.name}`}
           title={isSession ? [node.title, branch.where].filter(Boolean).join(' · ') : node.path ?? node.name}
@@ -215,7 +227,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
             else onToggleCollapse(node.id);
           }}
           {...menu}
-          className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${node.kind === 'project' && props.selectedProjectId === node.id ? 'bg-selected text-text' : 'text-text-secondary'} ${isSession ? 'py-1.5' : 'py-0.5'}`}
+          className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} ${isSession ? 'py-1.5' : 'py-0.5'}`}
         >
           {isSession ? (
             <>
