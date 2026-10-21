@@ -8128,6 +8128,29 @@ components:
             Session rows: the checkouts the session edited in the last few hours, newest
             first, from the ledger. A session at a folder's root works across repos; its
             changes open in the newest of these that has uncommitted lines.
+        progress:
+          type: object
+          additionalProperties: false
+          required: [done, total]
+          description: >-
+            Session rows: the agent's own todo list as its transcript last wrote it (omp todo,
+            Claude Code TodoWrite). Absent when the agent kept no todo list. It is what the
+            agent says, not a check of the work.
+          properties:
+            done:
+              type: integer
+              minimum: 0
+            total:
+              type: integer
+              minimum: 1
+            current:
+              type: string
+              maxLength: 400
+              description: The task in progress, or else the next pending one.
+            blocked:
+              type: string
+              maxLength: 800
+              description: The first blocked task and its reason, joined by a colon.
         state:
           type: string
         title:

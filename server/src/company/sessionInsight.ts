@@ -69,7 +69,8 @@ function readTasks(value: unknown): CompanySessionTodoTask[] | undefined {
   return tasks;
 }
 
-function readTodo(source: Record<string, unknown>): CompanySessionTodo | undefined {
+/** A todo list in the omp shape (`{ phases: [{ name, tasks }] }`), checked and bounded. */
+export function readTodo(source: Record<string, unknown>): CompanySessionTodo | undefined {
   const value = source['phases'];
   if (!Array.isArray(value)) return undefined;
   const phases: CompanySessionTodoPhase[] = [];

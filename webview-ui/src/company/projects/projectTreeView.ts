@@ -148,6 +148,25 @@ export function countSessions(branch: ProjectTreeBranch): { total: number; runni
 const RUNNING_STATES: ReadonlySet<string> = new Set(['running', 'busy', 'active', 'working']);
 const WAITING_ON_YOU_STATES: ReadonlySet<string> = new Set(['waiting_input', 'blocked', 'permission']);
 
+/** A session row's todo progress as the sidebar shows it: "3/7 · 43%", the task in hand, and why it is stuck. */
+export interface SessionProgressView {
+  readonly percent: number;
+  readonly label: string;
+  readonly current?: string;
+  readonly blocked?: string;
+}
+
+export function sessionProgressView(progress: ProjectTreeNode['progress']): SessionProgressView | null {
+  if (progress === undefined || progress.total <= 0) return null;
+  const percent = Math.round((Math.min(progress.done, progress.total) / progress.total) * 100);
+  return {
+    percent,
+    label: `${progress.done}/${progress.total} · ${percent}%`,
+    ...(progress.current === undefined ? {} : { current: progress.current }),
+    ...(progress.blocked === undefined ? {} : { blocked: progress.blocked }),
+  };
+}
+
 export function isRunningNode(node: ProjectTreeNode): boolean {
   return node.kind === 'session' && RUNNING_STATES.has((node.state ?? '').toLowerCase());
 }

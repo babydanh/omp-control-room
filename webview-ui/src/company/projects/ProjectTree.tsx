@@ -12,6 +12,7 @@ import {
   filterProjectTree,
   isRunningNode,
   type ProjectTreeBranch,
+  sessionProgressView,
 } from './projectTreeView.js';
 
 const COLLAPSED_KEY = 'company.projectTree.collapsed.v1';
@@ -180,6 +181,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   const isSession = node.kind === 'session';
   const receivesDrop = DROP_KINDS.has(node.kind);
   const counts = isSession ? null : countSessions(branch);
+  const progress = isSession ? sessionProgressView(node.progress) : null;
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!receivesDrop) return;
     event.preventDefault();
@@ -226,6 +228,21 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                   {children.length > 0 && ` · ${children.length} subagent`}
                   {branch.where !== undefined && ` · ${branch.where}`}
                 </span>
+                {progress !== null && (
+                  <span className="mt-1 block" data-testid="session-progress" title={[progress.current && `Đang: ${progress.current}`, progress.blocked && `Kẹt: ${progress.blocked}`].filter(Boolean).join('\n')}>
+                    <span className="flex items-center gap-2 text-xs text-text-muted">
+                      <span aria-hidden="true" className="h-1 flex-1 overflow-hidden rounded-full bg-well">
+                        <span className="block h-full rounded-full bg-status-success" style={{ width: `${progress.percent}%` }} />
+                      </span>
+                      <span className="shrink-0">{progress.label}</span>
+                    </span>
+                    {progress.blocked !== undefined ? (
+                      <span className="block truncate text-xs text-status-error">Kẹt: {progress.blocked}</span>
+                    ) : progress.current !== undefined && (
+                      <span className="block truncate text-xs text-text-muted">Đang: {progress.current}</span>
+                    )}
+                  </span>
+                )}
               </span>
             </>
           ) : (

@@ -35,6 +35,7 @@ import type { LedgerService } from './ledger/ledgerService.js';
 import { resolveProofPath } from './library/storage.js';
 import { handleProjectMessage, type ProjectCommandContext } from './projects/handler.js';
 import type { HerdrProjectSession } from './projects/projectTree.js';
+import { createTranscriptProgress } from './projects/sessionProgress.js';
 import { processAlive } from './projects/sessionStop.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
 import { registerTerminalRoutes } from './terminal/terminalRoutes.js';
@@ -189,6 +190,9 @@ function registerLibraryProofRoute(app: FastifyInstance, token: string): void {
   });
 }
 
+/** One transcript reader for the process: it remembers how far each transcript was read. */
+const transcriptProgress = createTranscriptProgress();
+
 /** Project tree inputs from the ledger's caches, unless the caller supplied its own. */
 function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandContext, 'tree'> {
   const ledger = options.ledger;
@@ -200,6 +204,7 @@ function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandC
       isAlive: processAlive,
       readRepo: (repo) => ledger.repoScan(repo),
       overlapScans: () => ledger.currentOverlapScans(),
+      sessionProgress: transcriptProgress,
     },
   };
 }
