@@ -50,6 +50,8 @@ export interface ProjectTreeSnapshot {
 export interface ProjectTreeOptions {
   readonly ledger: LedgerSource;
   readonly git: GitRunner;
+  /** Whether a ledger session's process still runs; a session whose process is gone is left out. Unset keeps every live row. */
+  readonly isAlive?: (pid: number) => boolean;
   readonly agents?: Iterable<AgentState>;
   readonly herdrSessions?: () => readonly HerdrProjectSession[];
   readonly overlapScans?: () => Promise<readonly LedgerOverlapScan[]>;
@@ -609,13 +611,22 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
   }
 }
 
+/**
+ * Live ledger rows whose process is gone are dropped: a killed agent never records
+ * its own end, so the ledger would otherwise list it as working.
+ */
+function withoutDeadProcesses(rows: readonly SessionRow[], isAlive: ((pid: number) => boolean) | undefined): readonly SessionRow[] {
+  if (isAlive === undefined) return rows;
+  return rows.filter((row) => row.endedAt !== null || row.pid === null || isAlive(row.pid));
+}
+
 export async function buildProjectTreeSnapshot(
   store: ProjectStore,
   options: ProjectTreeOptions,
 ): Promise<ProjectTreeSnapshot> {
   const state = await store.load();
   const linked = linkHerdrPanes(
-    annotateLedgerRows(options.ledger.sessionRows(), options.ledger, options.boardSessionFor),
+    annotateLedgerRows(withoutDeadProcesses(options.ledger.sessionRows(), options.isAlive), options.ledger, options.boardSessionFor),
     options.herdrSessions?.() ?? [],
   );
   const ledgerRows = linked.rows;

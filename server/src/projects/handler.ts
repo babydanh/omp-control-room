@@ -13,6 +13,7 @@ import type {
   ProjectSettingsSetMessage,
   ServerMessage,
 } from '../../../core/src/messages.js';
+import { killClaudeTree } from '../company/claudeCode/claudeProcess.js';
 import { LibraryUserError } from '../library/libraryError.js';
 import type { AgentState } from '../types.js';
 import { sendProjectComment } from './comments.js';
@@ -27,6 +28,7 @@ import {
   type ProjectTreeSnapshot,
 } from './projectTree.js';
 import type { ProjectModuleDeps, ProjectServices } from './services.js';
+import { processAlive, stopLedgerSession } from './sessionStop.js';
 import { clearProjectSettings, getProjectSettings, refreshProjectSettings, setProjectSettings } from './settingsLayers.js';
 
 const FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
@@ -42,6 +44,7 @@ const REQUEST_TYPES: Record<string, true> = {
   projectSettingsSet: true,
   projectSettingsClear: true,
   projectSessionStart: true,
+  projectSessionStop: true,
   projectMergePreviewRequest: true,
 };
 let defaultStore: ProjectStore | undefined;
@@ -207,6 +210,18 @@ async function runProjectRequest(
         await sendTreeSnapshot(requestId, send, store, context);
         return;
       }
+      case 'projectSessionStop': {
+        if (context.tree === undefined) throw new LibraryUserError('Sổ hoạt động chưa được kết nối.');
+        const ledger = context.tree.ledger;
+        stopLedgerSession(typeof msg.sessionId === 'string' ? msg.sessionId : '', {
+          sessionRows: () => ledger.sessionRows(),
+          isAlive: processAlive,
+          killTree: (pid) => killClaudeTree(pid),
+          selfPid: process.pid,
+        });
+        send(commandResult(requestId, 'stop', true, ''));
+        return;
+      }
       case 'projectMergePreviewRequest': {
         const deps = depsFor(store, context, context.services?.mergePreview);
         const result = await previewProjectMerge(msg as unknown as ProjectMergePreviewRequestMessage, deps);
@@ -332,6 +347,7 @@ function commandFor(type: string): ProjectCommandResultMessage['command'] {
     case 'projectNodeMove': return 'move';
     case 'projectComment': return 'comment';
     case 'projectSettingsClear': return 'settingsClear';
+    case 'projectSessionStop': return 'stop';
     default: return 'settingsSet';
   }
 }
@@ -358,6 +374,7 @@ function safeReason(type: string): string {
     case 'projectComment': return 'Không thể gửi bình luận.';
     case 'projectSettingsSet':
     case 'projectSettingsClear': return 'Không thể cập nhật cài đặt Project.';
+    case 'projectSessionStop': return 'Không thể tắt phiên.';
     default: return 'Không thể thực hiện yêu cầu Project.';
   }
 }

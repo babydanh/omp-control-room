@@ -98,7 +98,8 @@ type ConfirmKind =
   | 'squad-cancel'
   | 'squad-remove'
   | 'project-delete'
-  | 'project-remove-folder';
+  | 'project-remove-folder'
+  | 'project-stop';
 
 type MenuMode = 'menu' | 'rename' | 'folder-rename' | 'project-rename' | 'project-move' | 'project-create-group' | 'project-add-folder' | ConfirmKind;
 
@@ -609,6 +610,10 @@ export function AgentContextMenu({
       setMode('project-delete');
       return;
     }
+    if (action === 'stop') {
+      setMode('project-stop');
+      return;
+    }
     if (action === 'removeFolder') {
       setMode('project-remove-folder');
       return;
@@ -716,6 +721,17 @@ export function AgentContextMenu({
           label: 'Bỏ khỏi project',
           run: () => {
             if (subject.kind === 'projectNode') projectStore?.deleteNode(subject.node.id);
+            onClose();
+          },
+        };
+      case 'project-stop':
+        return {
+          message: `Tắt phiên ${subject.kind === 'projectNode' ? subject.node.name : ''}? Tiến trình agent và các lệnh nó đang chạy dừng ngay; việc chưa lưu của phiên sẽ mất.`,
+          label: 'Tắt phiên',
+          run: () => {
+            if (subject.kind === 'projectNode' && subject.node.sessionId !== undefined) {
+              projectStore?.stopSession(subject.node.sessionId);
+            }
             onClose();
           },
         };

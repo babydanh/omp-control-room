@@ -35,6 +35,7 @@ import type { LedgerService } from './ledger/ledgerService.js';
 import { resolveProofPath } from './library/storage.js';
 import { handleProjectMessage, type ProjectCommandContext } from './projects/handler.js';
 import type { HerdrProjectSession } from './projects/projectTree.js';
+import { processAlive } from './projects/sessionStop.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
 import { registerTerminalRoutes } from './terminal/terminalRoutes.js';
 import type { AgentState } from './types.js';
@@ -196,6 +197,7 @@ function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandC
     tree: {
       ledger: ledger.projectTreeSource,
       git: ledger.projectTreeGit,
+      isAlive: processAlive,
       readRepo: (repo) => ledger.repoScan(repo),
       overlapScans: () => ledger.currentOverlapScans(),
     },

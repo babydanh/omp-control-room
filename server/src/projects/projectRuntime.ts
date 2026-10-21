@@ -13,6 +13,7 @@ import { createPrepareWorktree, createProjectSessionRuntime } from './newSession
 import { ProjectStore } from './projectStore.js';
 import { buildProjectTreeSnapshot, type ProjectTreeSnapshot } from './projectTree.js';
 import type { ProjectModuleDeps, ProjectServices } from './services.js';
+import { processAlive } from './sessionStop.js';
 import {
   createProjectSettingsServices,
   type ProjectSettingsServices,
@@ -88,6 +89,7 @@ export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime
       await buildProjectTreeSnapshot(store, {
         ledger: ledger.projectTreeSource,
         git: ledger.projectTreeGit,
+        isAlive: processAlive,
         readRepo: (repo) => ledger.repoScan(repo),
         overlapScans: () => ledger.currentOverlapScans(),
       });

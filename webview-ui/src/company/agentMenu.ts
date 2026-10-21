@@ -42,7 +42,8 @@ export type ProjectNodeAction =
   | 'removeFolder'
   | 'openSession'
   | 'copySessionId'
-  | 'wake';
+  | 'wake'
+  | 'stop';
 
 /** What a project-tree menu needs beyond the node: whether git rows sit under it, and its folders. */
 export interface ProjectNodeMenuContext {
@@ -827,6 +828,10 @@ export function projectNodeMenuItems(
         ...changes(true),
         add('copy-session', 'Sao chép mã phiên', 'copy', 'copySessionId', true),
         add('copy-path', 'Sao chép thư mục làm việc', 'copy', 'copyPath'),
+        // A ledger session's process can be stopped; a subagent shares its parent's.
+        ...(node.agentKind === 'omp' || node.agentKind === 'claude' || node.agentKind === 'agy'
+          ? [add('stop', 'Tắt phiên…', 'stop', 'stop', true)]
+          : []),
       ];
     case 'file-agg':
       return [];

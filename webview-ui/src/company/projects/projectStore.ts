@@ -14,6 +14,7 @@ import type {
   ProjectNodeUpdateMessage,
   ProjectSessionStartMessage,
   ProjectSessionStartResultMessage,
+  ProjectSessionStopMessage,
   ProjectSettingsClearMessage,
   ProjectSettingsMessage,
   ProjectSettingsRequestMessage,
@@ -43,6 +44,7 @@ type ProjectRequest =
   | ProjectSettingsSetMessage
   | ProjectSettingsClearMessage
   | ProjectSessionStartMessage
+  | ProjectSessionStopMessage
   | ProjectCommentMessage
   | ProjectMergePreviewRequestMessage;
 
@@ -71,6 +73,8 @@ export interface ProjectStore {
   setSetting: (input: Omit<ProjectSettingsSetMessage, 'type' | 'requestId'>) => string;
   clearSetting: (input: Omit<ProjectSettingsClearMessage, 'type' | 'requestId'>) => string;
   startSession: (input: Omit<ProjectSessionStartMessage, 'type' | 'requestId'>) => string;
+  /** Stops a live ledger session: its process tree ends. */
+  stopSession: (sessionId: string) => string;
   sendComment: (input: Omit<ProjectCommentMessage, 'type' | 'requestId'>) => string;
   previewMerge: (input: Omit<ProjectMergePreviewRequestMessage, 'type' | 'requestId'>) => string;
 }
@@ -135,6 +139,7 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
       case 'projectSettingsSet': return `command:settingsSet:${request.nodeId}:${request.field}`;
       case 'projectSettingsClear': return `command:settingsClear:${request.nodeId}:${request.field}`;
       case 'projectSessionStart': return 'sessionStart';
+      case 'projectSessionStop': return `command:stop:${request.sessionId}`;
       case 'projectComment': return `comment:${request.requestId}`;
       case 'projectMergePreviewRequest': return `merge:${request.repo}:${request.branchA}:${request.branchB}`;
     }
@@ -151,6 +156,7 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     moveNode: (input) => { const req = { ...input, type: 'projectNodeMove' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     setSetting: (input) => { const req = { ...input, type: 'projectSettingsSet' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     startSession: (input) => { const req = { ...input, type: 'projectSessionStart' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
+    stopSession: (sessionId) => { const req = { type: 'projectSessionStop' as const, requestId: requestId(), sessionId }; return transmit(req, latestKey(req)); },
     sendComment: (input) => { const req = { ...input, type: 'projectComment' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     previewMerge: (input) => { const req = { ...input, type: 'projectMergePreviewRequest' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     clearSetting: (input) => {

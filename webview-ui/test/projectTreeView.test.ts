@@ -106,8 +106,11 @@ describe('projectTreeView', () => {
     // A folder that is not a git repo has no diff to show.
     expect(actions('empty')).not.toContain('changes');
     expect(actions('checkout')).toEqual(expect.arrayContaining(['merge', 'copyBranch']));
-    // A session the board does not run offers its changes, not an "open" that goes nowhere.
-    expect(actions('session')).toEqual(['changes', 'copySessionId', 'copyPath']);
+    // A session the board does not run offers its changes, not an "open" that goes nowhere; its process can be stopped.
+    expect(actions('session')).toEqual(['changes', 'copySessionId', 'copyPath', 'stop']);
+    // A subagent shares its parent's process: no stop of its own.
+    const sub = node('sub', 'session', 'checkout', { agentKind: 'sub', state: 'running' });
+    expect(projectNodeMenuItems(sub, projectMenuContext([...nodes, sub], sub)).map((entry) => entry.label)).not.toContain('Tắt phiên…');
     const boardRun = { ...nodes.find((entry) => entry.id === 'session')!, boardSessionId: 'board-1' };
     expect(projectNodeMenuItems(boardRun, projectMenuContext(nodes, boardRun))[0]?.label).toBe('Mở phiên');
     expect(checkoutPathFor(nodes, nodes.find((entry) => entry.id === 'session')!)).toBe('/work/repo/.worktrees/feature');

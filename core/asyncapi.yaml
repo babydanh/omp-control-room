@@ -274,6 +274,7 @@ components:
         - $ref: '#/components/schemas/ProjectSettingsSetMessage'
         - $ref: '#/components/schemas/ProjectSettingsClearMessage'
         - $ref: '#/components/schemas/ProjectSessionStartMessage'
+        - $ref: '#/components/schemas/ProjectSessionStopMessage'
         - $ref: '#/components/schemas/ProjectMergePreviewRequestMessage'
         # Library (privileged; pages and commands)
         - $ref: '#/components/schemas/LibrarySnapshotRequest'
@@ -7792,6 +7793,24 @@ components:
         field:
           $ref: '#/components/schemas/ProjectSettingField'
 
+    ProjectSessionStopMessage:
+      type: object
+      additionalProperties: false
+      description: >-
+        Stops a live ledger session the Project tree lists: its process and the processes it
+        started end. A subagent cannot be stopped alone (it shares its parent's process).
+      required: [type, requestId, sessionId]
+      properties:
+        type:
+          const: projectSessionStop
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 256
+
     ProjectSessionStartMessage:
       type: object
       additionalProperties: false
@@ -7897,7 +7916,7 @@ components:
           format: uuid
         command:
           type: string
-          enum: [create, update, delete, move, comment, settingsSet, settingsClear]
+          enum: [create, update, delete, move, comment, settingsSet, settingsClear, stop]
         ok:
           type: boolean
         nodeId:
