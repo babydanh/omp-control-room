@@ -36,6 +36,7 @@ export function handleLedgerMessage(
     case 'ledgerViewRequest':
     case 'ledgerTimelineRequest':
     case 'ledgerFileDiffRequest':
+    case 'ledgerFileHistoryRequest':
     case 'ledgerSendMessage':
       break;
     default:
@@ -94,6 +95,28 @@ async function runLedgerRequest(
         path,
         diff: outcome.diff,
         truncated: outcome.truncated,
+        reason: outcome.reason,
+      });
+      return;
+    }
+    case 'ledgerFileHistoryRequest': {
+      const path = typeof msg.path === 'string' ? msg.path : '';
+      if (path.length === 0) {
+        send({
+          type: 'ledgerFileHistory',
+          requestId,
+          path,
+          entries: [],
+          reason: 'Đường dẫn tệp không hợp lệ.',
+        });
+        return;
+      }
+      const outcome = await ledger.fileHistory(path);
+      send({
+        type: 'ledgerFileHistory',
+        requestId,
+        path,
+        entries: outcome.entries,
         reason: outcome.reason,
       });
       return;

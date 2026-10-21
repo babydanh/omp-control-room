@@ -612,6 +612,7 @@ export function ledgerFixtureView(): LedgerView {
         error: 'overlap.py: không tìm thấy nhánh origin/main',
       },
     ],
+    mergeBlocks: [],
     spamRule: {
       windowMinutes: 5,
       callsPerWindow: 60,

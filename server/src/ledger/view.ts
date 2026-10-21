@@ -7,6 +7,7 @@
 import type {
   LedgerDatabaseStatus,
   LedgerMainWrite,
+  LedgerMergeBlock,
   LedgerOverlapScan,
   LedgerRepo,
   LedgerSession,
@@ -49,6 +50,7 @@ export interface LedgerViewInput {
   readonly mainWrites: readonly EventRow[];
   readonly repos: readonly LedgerRepoInput[];
   readonly overlaps: readonly LedgerOverlapScan[];
+  readonly mergeBlocks?: readonly LedgerMergeBlock[];
   /** The open Company folder per repo or checkout path (keyed by ledgerPathKey), for the ones inside one. */
   readonly folderOf?: ReadonlyMap<string, string>;
 }
@@ -110,6 +112,7 @@ export function buildLedgerView(input: LedgerViewInput): LedgerView {
       })),
     mainWrites: mainWriteViews(input.mainWrites, input.nowMs),
     overlaps: [...input.overlaps],
+    mergeBlocks: [...(input.mergeBlocks ?? [])],
     spamRule: { ...LEDGER_SPAM_RULE },
   };
 }

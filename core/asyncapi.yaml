@@ -156,6 +156,7 @@ components:
         - $ref: '#/components/schemas/LedgerSnapshotMessage'
         - $ref: '#/components/schemas/LedgerTimelineMessage'
         - $ref: '#/components/schemas/LedgerFileDiffMessage'
+        - $ref: '#/components/schemas/LedgerFileHistoryMessage'
         - $ref: '#/components/schemas/LedgerCommandResultMessage'
         # Project tree (privileged; project, checkout and session data)
         - $ref: '#/components/schemas/ProjectTreeSnapshotMessage'
@@ -262,6 +263,7 @@ components:
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
         - $ref: '#/components/schemas/LedgerFileDiffRequestMessage'
+        - $ref: '#/components/schemas/LedgerFileHistoryRequestMessage'
         - $ref: '#/components/schemas/LedgerSendMessage'
         # Project tree (privileged; tree CRUD, diffs, comments, settings and sessions)
         - $ref: '#/components/schemas/ProjectTreeRequestMessage'
@@ -5642,6 +5644,21 @@ components:
           type: string
           minLength: 1
           maxLength: 1024
+    LedgerFileHistoryRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path]
+      properties:
+        type:
+          const: ledgerFileHistoryRequest
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          minLength: 1
+          maxLength: 4096
+
 
     LedgerSendMessage:
       type: object
@@ -5715,6 +5732,48 @@ components:
           type: boolean
         reason:
           type: string
+    LedgerFileHistoryMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, path, entries]
+      properties:
+        type:
+          const: ledgerFileHistory
+        requestId:
+          type: string
+          format: uuid
+        path:
+          type: string
+        entries:
+          type: array
+          maxItems: 200
+          items:
+            $ref: '#/components/schemas/LedgerFileTouch'
+        reason:
+          type: string
+
+    LedgerFileTouch:
+      type: object
+      additionalProperties: false
+      required: [ts, sessionId, agentKind, agentName, branch, checkout, tool, intent]
+      properties:
+        ts:
+          type: string
+          format: date-time
+        sessionId:
+          type: string
+        agentKind:
+          type: [string, 'null']
+        agentName:
+          type: [string, 'null']
+        branch:
+          type: [string, 'null']
+        checkout:
+          type: [string, 'null']
+        tool:
+          type: [string, 'null']
+        intent:
+          type: [string, 'null']
 
     LedgerCommandResultMessage:
       type: object
@@ -6214,7 +6273,7 @@ components:
     LedgerView:
       type: object
       additionalProperties: false
-      required: [generatedAt, database, repos, unscannedFolders, sessions, pending, notices, mainWrites, overlaps, spamRule]
+      required: [generatedAt, database, repos, unscannedFolders, sessions, pending, notices, mainWrites, overlaps, spamRule, mergeBlocks]
       properties:
         generatedAt:
           type: string
@@ -6258,8 +6317,31 @@ components:
           maxItems: 24
           items:
             $ref: '#/components/schemas/LedgerOverlapScan'
+        mergeBlocks:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerMergeBlock'
         spamRule:
           $ref: '#/components/schemas/LedgerSpamRule'
+
+    LedgerMergeBlock:
+      type: object
+      additionalProperties: false
+      required: [repo, branch, at, briefPath, files]
+      properties:
+        repo:
+          type: string
+        branch:
+          type: string
+        at:
+          type: string
+          format: date-time
+        briefPath:
+          type: string
+        files:
+          type: array
+          items:
+            type: string
 
     LedgerDatabaseStatus:
       type: object

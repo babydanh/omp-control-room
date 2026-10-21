@@ -137,6 +137,63 @@ describe('ledger store: replies', () => {
       reason: 'Không đọc được tệp.',
     });
   });
+  it('requests file history and applies only the newest matching reply', () => {
+    const { store, sent } = harness();
+    const firstRequestId = store.requestFileHistory('D:/repo/src/a.ts');
+    const requestId = store.requestFileHistory('D:/repo/src/b.ts');
+    expect(sent).toEqual([
+      { type: 'ledgerFileHistoryRequest', requestId: firstRequestId, path: 'D:/repo/src/a.ts' },
+      { type: 'ledgerFileHistoryRequest', requestId, path: 'D:/repo/src/b.ts' },
+    ]);
+    expect(store.getSnapshot().fileHistory).toMatchObject({
+      requestId,
+      path: 'D:/repo/src/b.ts',
+      status: 'loading',
+      entries: [],
+    });
+    store.accept({
+      type: 'ledgerFileHistory',
+      requestId: firstRequestId,
+      path: 'D:/repo/src/a.ts',
+      entries: [],
+    });
+    expect(store.getSnapshot().fileHistory?.requestId).toBe(requestId);
+    const entries = [{
+      ts: '2026-10-21 11:00:00',
+      sessionId: 'session-a',
+      agentKind: 'codex',
+      agentName: 'Worker',
+      branch: 'feat/a',
+      checkout: 'D:/repo-wt',
+      tool: 'apply_patch',
+      intent: 'Sửa màn hình',
+    }];
+    store.accept({
+      type: 'ledgerFileHistory',
+      requestId,
+      path: 'D:/repo/src/b.ts',
+      entries,
+    });
+    expect(store.getSnapshot().fileHistory).toMatchObject({
+      requestId,
+      path: 'D:/repo/src/b.ts',
+      status: 'done',
+      entries,
+    });
+    const failedId = store.requestFileHistory('D:/repo/src/c.ts');
+    store.accept({
+      type: 'ledgerFileHistory',
+      requestId: failedId,
+      path: 'D:/repo/src/c.ts',
+      entries: [],
+      reason: 'Không đọc được cơ sở dữ liệu hoạt động.',
+    });
+    expect(store.getSnapshot().fileHistory).toMatchObject({
+      requestId: failedId,
+      status: 'failed',
+      reason: 'Không đọc được cơ sở dữ liệu hoạt động.',
+    });
+  });
 });
 
 describe('ledger store: sending messages', () => {

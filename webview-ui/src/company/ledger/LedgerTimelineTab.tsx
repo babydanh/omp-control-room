@@ -88,7 +88,7 @@ export function LedgerTimelineTab({ ledger, selection, onSelect }: LedgerTimelin
       )}
       <div ref={ref} className="overflow-x-auto rounded-(--company-radius-md) bg-panel p-2.5">
         {timeline === null ? (
-          <p className="text-2xs text-text-muted">Đang tải dòng thời gian…</p>
+          <p className="text-sm text-text-muted">Đang tải dòng thời gian…</p>
         ) : (
           <TimelineCanvas
             timeline={timeline}
@@ -123,7 +123,7 @@ function TimelineCanvas({
   onSelect,
 }: TimelineCanvasProps) {
   if (layout.lanes.length === 0) {
-    return <p className="text-2xs text-text-muted">Không có hoạt động trong khoảng này.</p>;
+    return <p className="text-sm text-text-muted">Không có hoạt động trong khoảng này.</p>;
   }
 
   const hoverLane =
@@ -141,8 +141,7 @@ function TimelineCanvas({
       {layout.groups.map((group) => (
         <div
           key={group.key}
-          className="absolute left-0 flex items-center truncate text-2xs text-text-secondary"
-          style={{ top: group.top, height: group.height, width: LABEL_WIDTH + layout.width }}
+          className="absolute left-0 flex items-center truncate text-xs text-text-secondary"
         >
           {group.label}
         </div>
@@ -192,7 +191,7 @@ function TimelineCanvas({
               type="button"
               aria-pressed={selected}
               onClick={() => onSelect({ kind: 'session', sessionId: lane.sessionId })}
-              className={`absolute flex items-center gap-1 truncate rounded-(--company-radius-sm) px-1 text-left text-xs text-text hover:bg-hover ${selected ? 'bg-selected' : ''}`}
+              className={`absolute flex items-center gap-1 truncate rounded-(--company-radius-sm) px-1 text-sm text-text hover:bg-hover ${selected ? 'bg-selected' : ''}`}
               style={{
                 left: 0,
                 top: lane.top,
@@ -302,7 +301,7 @@ function TimelineCanvas({
 
 function Legend() {
   return (
-    <div className="flex flex-wrap items-center gap-3 text-2xs text-text-muted">
+    <div className="flex flex-wrap items-center gap-3 text-xs text-text-muted">
       {LEDGER_CATEGORIES.map((category) => (
         <span key={category} className="flex items-center gap-1">
           <span

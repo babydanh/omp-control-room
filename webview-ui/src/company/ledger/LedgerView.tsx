@@ -14,6 +14,7 @@ import { LedgerDetailPanel } from './LedgerDetailPanel.js';
 import { databaseLabel, formatClock, parseLedgerTimestamp } from './ledgerFormat.js';
 import { type PaneInput } from './ledgerManagers.js';
 import type { BoardSessionIndex } from './ledgerMapping.js';
+import { LedgerOverviewTab } from './LedgerOverviewTab.js';
 import { scopeLedgerView } from './ledgerScope.js';
 import { type LedgerSelection, resolveSelection } from './ledgerSelection.js';
 import { LedgerSidePanels } from './LedgerSidePanels.js';
@@ -21,10 +22,11 @@ import { type LedgerState, useLedgerState } from './ledgerStore.js';
 import { LedgerTimelineTab } from './LedgerTimelineTab.js';
 import { LedgerTreeTab } from './LedgerTreeTab.js';
 
-type LedgerTab = 'graph' | 'timeline';
+type LedgerTab = 'overview' | 'graph' | 'timeline';
 
-const TABS: readonly LedgerTab[] = ['graph', 'timeline'];
+const TABS: readonly LedgerTab[] = ['overview', 'graph', 'timeline'];
 const TAB_LABELS: Record<LedgerTab, string> = {
+  overview: 'Tổng quan',
   graph: 'Đồ thị nhánh',
   timeline: 'Dòng thời gian',
 };
@@ -53,7 +55,7 @@ export function LedgerView({
 }: LedgerViewProps) {
   const ledger = useLedgerState(ledgerStore);
   const phone = useLayoutMode() === 'phone';
-  const [tab, setTab] = useState<LedgerTab>('graph');
+  const [tab, setTab] = useState<LedgerTab>('overview');
   const [selection, setSelection] = useState<LedgerSelection | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
   const view = useMemo(
@@ -161,7 +163,9 @@ export function LedgerView({
               ))}
             </div>
             <div role="tabpanel" className="min-h-0 flex-1 overflow-auto px-3 pb-3">
-              {tab === 'graph' ? (
+              {tab === 'overview' ? (
+                <LedgerOverviewTab view={view} ledger={ledger} boardSessions={boardSessions} onSelect={choose} />
+              ) : tab === 'graph' ? (
                 <LedgerTreeTab
                   view={view}
                   selection={selection}

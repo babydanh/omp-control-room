@@ -23,13 +23,19 @@ import {
   LEDGER_SPAM_RULE,
 } from './constants.js';
 import { type GitRepoScan, type GitRunner, readRepo } from './git.js';
-import type { EventRow, LedgerSource } from './ledgerDb.js';
+import type { EventRow, LedgerFileTouch, LedgerSource } from './ledgerDb.js';
 import { ledgerPathKey, normalizeLedgerPath } from './ledgerPath.js';
 import { formatLedgerTime } from './ledgerTime.js';
+import { MergeBlockCache } from './mergeBlocks.js';
 import { OverlapScanner } from './overlap.js';
 import type { ScriptRunner } from './processRunner.js';
 import { buildTimeline, type TimelineEvent, timelineEventOf } from './timeline.js';
 import { buildLedgerView, type LedgerRepoInput, viewContentJson } from './view.js';
+
+export interface LedgerFileHistoryOutcome {
+  readonly entries: LedgerFileTouch[];
+  readonly reason?: string;
+}
 
 export type LedgerSnapshotListener = (message: LedgerSnapshotMessage) => void;
 
@@ -68,6 +74,7 @@ interface GitEntry {
 export class LedgerService {
   private readonly listeners = new Set<LedgerSnapshotListener>();
   private readonly gitEntries = new Map<string, GitEntry>();
+  private readonly mergeBlocks = new MergeBlockCache();
   private readonly overlap: OverlapScanner;
   private lastHash: string | null = null;
   private lastRequestAt: number | null = null;
@@ -164,6 +171,24 @@ export class LedgerService {
     const known = view.repos.flatMap((repo) => repo.worktrees);
     return commands.fileDiff(this.options.git, worktree, path, known);
   }
+  async fileHistory(path: string): Promise<LedgerFileHistoryOutcome> {
+    this.touch();
+    const entries = this.options.source.fileHistory(
+      ledgerPathKey(path),
+      formatLedgerTime(this.options.now() - LEDGER_DAY_MS * 7),
+    );
+    const database = this.options.source.status();
+    if (database.state !== 'ok') {
+      return {
+        entries,
+        reason:
+          database.state === 'missing'
+            ? 'Không tìm thấy cơ sở dữ liệu hoạt động.'
+            : 'Không đọc được cơ sở dữ liệu hoạt động.',
+      };
+    }
+    return { entries };
+  }
 
   async sendMessage(sessionId: string, text: string): Promise<commands.SendOutcome> {
     this.touch();
@@ -221,6 +246,19 @@ export class LedgerService {
       }
     }
 
+    const mergeBlocks = (
+      await Promise.all(
+        repos.map(async ({ repo }) => {
+          try {
+            return await this.mergeBlocks.read(this.options.git, repo, nowMs);
+          } catch (error) {
+            console.warn('[ledger] merge-lane read failed', repo, error);
+            return [];
+          }
+        }),
+      )
+    ).flat();
+
     return buildLedgerView({
       nowMs,
       database: source.status(),
@@ -231,6 +269,7 @@ export class LedgerService {
       mainWrites: source.mainWriteRows(dayStart),
       repos,
       overlaps,
+      mergeBlocks,
       folderOf: await this.folderTags(repos),
     });
   }

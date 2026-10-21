@@ -19,30 +19,31 @@ import {
 export function LedgerSidePanels({ view }: { view: LedgerView }) {
   return (
     <div className="flex flex-col gap-2">
-      <Panel title={`Tin chưa được nhận (${view.notices.length})`}>
+      <details className="rounded-(--company-radius-md) bg-panel p-2.5">
+        <summary className="cursor-pointer list-none text-sm text-text">
+          <span className="inline-flex items-center gap-1.5">
+            Tin chưa được nhận
+            <span className="rounded-full bg-raised px-2 py-0.5 text-xs text-text-secondary">
+              {view.notices.length}
+            </span>
+          </span>
+        </summary>
         {view.notices.length === 0 ? (
-          <p className="text-2xs text-text-muted">Không có tin chờ.</p>
+          <p className="mt-2 text-sm text-text-muted">Không có tin chờ.</p>
         ) : (
-          <ul className="flex flex-col gap-1.5">
+          <ul className="mt-2 flex flex-col gap-1">
             {view.notices.map((notice) => (
-              <li key={notice.id} className="text-2xs">
-                <p className="text-text">
-                  {nameOf(view, notice.fromSession)} → {nameOf(view, notice.toSession)}{' '}
-                  <span className="text-text-muted">
-                    {formatRelativeTime(notice.ts, view.generatedAt)}
-                  </span>
-                </p>
-                {notice.relKey !== null && (
-                  <p className="font-mono text-text-muted">{notice.relKey}</p>
-                )}
-                <p className="whitespace-pre-wrap break-words text-text-secondary">
-                  {notice.content}
-                </p>
+              <li
+                key={notice.id}
+                className="truncate text-sm text-text-secondary"
+                title={`${nameOf(view, notice.fromSession)} → ${nameOf(view, notice.toSession)} · ${notice.content}`}
+              >
+                {nameOf(view, notice.fromSession)} → {nameOf(view, notice.toSession)} · {notice.content}
               </li>
             ))}
           </ul>
         )}
-      </Panel>
+      </details>
 
       <Panel title={`Việc chưa xong (${view.pending.length})`}>
         {view.pending.length === 0 ? (

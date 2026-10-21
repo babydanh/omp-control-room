@@ -19,7 +19,7 @@ import {
 import type { LedgerView } from '../../../../core/src/messages.js';
 import { Icon } from '../components/Icon.js';
 import { formatRelativeTime } from './ledgerFormat.js';
-import { type NodeTone, TONE_LABEL } from './ledgerHealth.js';
+import type { NodeTone } from './ledgerHealth.js';
 import { LedgerLegend } from './LedgerLegend.js';
 import { filterManagerChips, type ManagerAction, type ManagerAgentKind, type ManagerChip, type PaneInput } from './ledgerManagers.js';
 import type { BoardSessionIndex } from './ledgerMapping.js';
@@ -41,16 +41,13 @@ import {
 import { buildRepoTree, type RepoTree, type TreeNode } from './ledgerTreeModel.js';
 import {
   DOT_CLASS,
-  TONE_BADGE,
   TONE_BAR,
   TONE_FILL,
-  TONE_ICON,
   TONE_STROKE,
   TONE_TEXT,
 } from './ledgerTreeStyle.js';
 
-/** Shown on a card with nothing to act on. */
-const ALL_CLEAR = 'Không có việc cần làm';
+const ALL_CLEAR = '✓';
 const AGENT_KIND_CLASS: Readonly<Record<ManagerAgentKind, string>> = {
   omp: 'bg-accent/12 text-text',
   sub: 'bg-warning/12 text-warning',
@@ -348,11 +345,11 @@ function TreeCard({ node, repo, generatedAt, selected, agentKind, onSelect, onOp
   const subtitle =
     worktree === null
       ? 'Máy này chưa có checkout chính của repo'
-      : [
-          node.trunk ? 'Checkout chính' : worktree.name,
-          worktree.lastCommitSubject === '' ? 'chưa có commit' : worktree.lastCommitSubject,
-          formatRelativeTime(worktree.lastCommitAt, generatedAt),
-        ].join(' · ');
+      : worktree.lastCommitSubject === ''
+        ? 'Chưa có commit'
+        : worktree.lastCommitSubject;
+  const conflictCount = health.reasons.filter((reason) => reason.key === 'conflict').length;
+  const firstConflict = health.reasons.findIndex((reason) => reason.key === 'conflict');
 
   return (
     <article
@@ -369,53 +366,70 @@ function TreeCard({ node, repo, generatedAt, selected, agentKind, onSelect, onOp
           className="absolute inset-0 rounded-(--company-radius-md) hover:bg-hover/40"
         />
       )}
-      <div className="pointer-events-none relative flex flex-col gap-2">
+      <div className="pointer-events-none relative flex flex-col gap-1.5">
         <div className="flex flex-wrap items-center gap-2">
           <Icon name="git-branch" className="text-text-muted" />
           <h4 className="min-w-0 flex-1 truncate text-sm text-text" title={title}>
             {title}
           </h4>
-          <span
-            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-2xs ${TONE_BADGE[health.tone]}`}
-          >
-            <Icon name={TONE_ICON[health.tone]} />
-            {TONE_LABEL[health.tone]}
-          </span>
         </div>
-        <p className="truncate text-2xs text-text-muted">{subtitle}</p>
-        <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3 md:grid-cols-2">
-          {worktree === null ? (
-            <p className="text-xs text-text-muted">Không có việc để làm trên máy này.</p>
-          ) : health.reasons.length === 0 ? (
-            <p className={`flex items-center gap-1.5 text-xs ${TONE_TEXT.ok}`}>
-              <Icon name="check" />
-              {ALL_CLEAR}
-            </p>
-          ) : (
-            <ul className="flex min-w-0 flex-col gap-1">
-              {health.reasons.map((item) => (
-                <li
-                  key={item.text}
-                  className={`flex items-start gap-1.5 text-xs ${TONE_TEXT[item.tone]}`}
-                >
-                  <span className="mt-0.5 shrink-0">
-                    <Icon name={item.icon} />
-                  </span>
-                  <span className="min-w-0">{item.text}</span>
-                </li>
-              ))}
-            </ul>
+        <p className="truncate text-xs text-text-muted" title={subtitle}>
+          {subtitle}
+          {worktree !== null && worktree.lastCommitAt !== null && (
+            <span> · {formatRelativeTime(worktree.lastCommitAt, generatedAt)}</span>
           )}
-          <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-2xs text-text-muted">Ai đang quản lý</span>
-            {visibleManagers.length === 0 ? (
-              <span className="text-2xs text-text-muted">Không có phiên nào đang quản lý</span>
-            ) : (
-              visibleManagers.map((chip) => (
-                <ManagerChipButton key={chip.key} chip={chip} onOpen={onOpenManager} />
-              ))
-            )}
-          </div>
+        </p>
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+          {worktree === null ? (
+            <span className="text-sm text-text-muted">Không có việc để làm trên máy này.</span>
+          ) : health.reasons.length === 0 ? (
+            <span className={`flex items-center gap-1 text-sm ${TONE_TEXT.ok}`} title="Không có việc cần làm">
+              {ALL_CLEAR}
+            </span>
+          ) : (
+            health.reasons.map((item, index) => {
+              const label =
+                item.key === 'conflict'
+                  ? `⚔ ${conflictCount}`
+                  : item.key === 'behind'
+                    ? `↻ ${worktree.behind}`
+                    : item.key === 'unpushed'
+                      ? `⬆ ${worktree.unpushed ?? worktree.ahead}`
+                      : item.key === 'dirty'
+                        ? `✎ ${worktree.dirtyCount}`
+                        : item.key === 'merged'
+                          ? '✓'
+                          : null;
+              if (label === null || (item.key === 'conflict' && index !== firstConflict)) return null;
+              return (
+                <span
+                  key={`${item.key}-${index}`}
+                  title={
+                    item.key === 'conflict'
+                      ? health.reasons
+                          .filter((reason) => reason.key === 'conflict')
+                          .map((reason) => reason.text)
+                          .join('\n')
+                      : item.text
+                  }
+                  aria-label={
+                    item.key === 'conflict'
+                      ? health.reasons
+                          .filter((reason) => reason.key === 'conflict')
+                          .map((reason) => reason.text)
+                          .join('\n')
+                      : item.text
+                  }
+                  className={`rounded-full bg-panel px-2 py-0.5 text-xs ${TONE_TEXT[item.tone]}`}
+                >
+                  {label}
+                </span>
+              );
+            })
+          )}
+          {visibleManagers.map((chip) => (
+            <ManagerChipButton key={chip.key} chip={chip} onOpen={onOpenManager} />
+          ))}
         </div>
       </div>
     </article>
@@ -434,23 +448,15 @@ function ManagerChipButton({
       type="button"
       aria-label={`${chip.label}: ${chip.state}`}
       onClick={() => onOpen(chip.action)}
-      className="pointer-events-auto touch-target flex flex-col items-start gap-0.5 rounded-(--company-radius-sm) bg-panel px-2 py-1.5 text-left hover:bg-hover"
+      className="pointer-events-auto touch-target flex items-center gap-1 rounded-full bg-panel px-2 py-0.5 text-left text-xs text-text hover:bg-hover"
     >
-      <span className="flex max-w-full items-center gap-1.5 text-xs text-text">
-        <span
-          aria-hidden="true"
-          className={`size-2 shrink-0 rounded-full ${DOT_CLASS[chip.dot]}`}
-        />
-        <span className="truncate">{chip.label}</span>
-        <span className={`rounded px-1 text-2xs ${AGENT_KIND_CLASS[chip.agentKind]}`}>{chip.agentKind}</span>
-      </span>
-      <span className="text-2xs text-text-muted">
-        {chip.age === null ? chip.state : `${chip.state} · ${chip.age}`}
-      </span>
-      {chip.detail !== null && (
-        <span className="max-w-full truncate text-2xs text-text-muted">{chip.detail}</span>
-      )}
-      {chip.flag !== null && <span className="text-2xs text-caution">{chip.flag}</span>}
+      <span
+        aria-hidden="true"
+        className={`size-2 shrink-0 rounded-full ${DOT_CLASS[chip.dot]}`}
+      />
+      <span className="max-w-36 truncate">{chip.label}</span>
+      <span className={`rounded px-1 text-2xs ${AGENT_KIND_CLASS[chip.agentKind]}`}>{chip.agentKind}</span>
+      <span className="text-xs text-text-muted">{chip.age ?? chip.state}</span>
     </button>
   );
 }

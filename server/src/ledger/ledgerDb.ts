@@ -51,6 +51,19 @@ export interface EventRow {
   readonly intent: string | null;
 }
 
+export interface LedgerFileTouch {
+  readonly ts: string;
+  readonly sessionId: string;
+  readonly agentKind: string | null;
+  readonly agentName: string | null;
+  readonly branch: string | null;
+  readonly checkout: string | null;
+  readonly tool: string | null;
+  readonly intent: string | null;
+}
+
+export const LEDGER_FILE_HISTORY_MAX = 200;
+
 export interface PendingRow {
   readonly checkout: string;
   readonly sessionId: string | null;
@@ -79,6 +92,7 @@ export interface LedgerSource {
   pendingRows(): PendingRow[];
   noticeRows(): NoticeRow[];
   mainWriteRows(sinceTs: string): EventRow[];
+  fileHistory(pathKey: string, sinceTs: string): LedgerFileTouch[];
   close(): void;
 }
 
@@ -140,6 +154,10 @@ const NOTICES_SQL =
   'SELECT id, ts, to_session, from_session, rel_key, content, delivered FROM notices ' +
   'WHERE delivered = 0 ORDER BY ts DESC, id DESC LIMIT ?';
 
+const FILE_HISTORY_SQL =
+  'SELECT e.ts, e.session_id, s.agent_kind, s.agent_name, e.branch, e.checkout, e.tool, e.intent ' +
+  'FROM events e LEFT JOIN sessions s ON s.session_id = e.session_id ' +
+  'WHERE e.path_key = ? AND e.ts >= ? ORDER BY e.ts DESC, e.id DESC LIMIT ?';
 type SqlRow = Record<string, unknown>;
 
 class SqliteLedgerSource implements LedgerSource {
@@ -180,6 +198,13 @@ class SqliteLedgerSource implements LedgerSource {
   mainWriteRows(sinceTs: string): EventRow[] {
     return this.read([], (db) =>
       rowsOf(db.prepare(MAIN_WRITES_SQL).all(sinceTs, LEDGER_MAIN_WRITES_MAX)).map(eventRowOf),
+    );
+  }
+  fileHistory(pathKey: string, sinceTs: string): LedgerFileTouch[] {
+    return this.read([], (db) =>
+      rowsOf(db.prepare(FILE_HISTORY_SQL).all(pathKey, sinceTs, LEDGER_FILE_HISTORY_MAX)).map(
+        fileTouchOf,
+      ),
     );
   }
 
@@ -283,6 +308,18 @@ function eventRowOf(row: SqlRow): EventRow {
     checkout: textOf(row.checkout),
     isMainCheckout: numberOf(row.is_main_checkout) === 1,
     branch: textOf(row.branch),
+    intent: textOf(row.intent),
+  };
+}
+function fileTouchOf(row: SqlRow): LedgerFileTouch {
+  return {
+    ts: requiredText(row.ts),
+    sessionId: requiredText(row.session_id),
+    agentKind: textOf(row.agent_kind),
+    agentName: textOf(row.agent_name),
+    branch: textOf(row.branch),
+    checkout: textOf(row.checkout),
+    tool: textOf(row.tool),
     intent: textOf(row.intent),
   };
 }

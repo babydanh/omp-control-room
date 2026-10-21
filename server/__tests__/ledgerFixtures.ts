@@ -8,6 +8,7 @@ import type { LedgerDatabaseStatus } from '../../core/src/messages.js';
 import type { GitRunner, GitRunOptions } from '../src/ledger/git.js';
 import type {
   EventRow,
+  LedgerFileTouch,
   LedgerSource,
   NoticeRow,
   PendingRow,
@@ -224,6 +225,25 @@ export class FakeLedgerSource implements LedgerSource {
 
   mainWriteRows(sinceTs: string): EventRow[] {
     return (this.data.mainWrites ?? []).filter((row) => row.ts >= sinceTs);
+  }
+  fileHistory(pathKey: string, sinceTs: string): LedgerFileTouch[] {
+    return (this.data.events ?? [])
+      .filter((row) => row.pathKey === pathKey && row.ts >= sinceTs)
+      .sort((a, b) => b.ts.localeCompare(a.ts) || b.id - a.id)
+      .slice(0, 200)
+      .map((row) => {
+        const session = this.data.sessions?.find((entry) => entry.sessionId === row.sessionId);
+        return {
+          ts: row.ts,
+          sessionId: row.sessionId,
+          agentKind: session?.agentKind ?? null,
+          agentName: session?.agentName ?? null,
+          branch: row.branch,
+          checkout: row.checkout,
+          tool: row.tool,
+          intent: row.intent,
+        };
+      });
   }
 
   close(): void {
