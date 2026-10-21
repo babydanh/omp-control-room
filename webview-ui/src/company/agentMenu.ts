@@ -44,6 +44,7 @@ export type ProjectNodeAction =
   | 'openSession'
   | 'copySessionId'
   | 'wake'
+  | 'cloudHandoff'
   | 'stop';
 
 /** What a project-tree menu needs beyond the node: whether git rows sit under it, and its folders. */
@@ -120,6 +121,7 @@ export type AgentMenuAction =
   | { kind: 'workItemAction'; action: WorkItemMenuAction }
   | { kind: 'squadAction'; action: SquadRunMenuAction }
   | { kind: 'wake' }
+  | { kind: 'cloudHandoff' }
   | { kind: 'projectNodeAction'; action: ProjectNodeAction };
 
 export interface AgentMenuItem {
@@ -216,6 +218,17 @@ const CONTROL_ITEMS: ReadonlyArray<{
   { flag: 'restart', action: 'restart', label: 'Khởi động lại', icon: 'refresh' },
   { flag: 'archive', action: 'archive', label: 'Lưu trữ', icon: 'archive' },
 ];
+
+/**
+ * What "Đẩy lên cloud làm tiếp" sends to a pane. The agent writes the handoff file and runs the
+ * script itself, so the board never commits or pushes; omp on GitHub Actions picks the Issue up.
+ */
+export const CLOUD_HANDOFF_PROMPT = [
+  'Đẩy việc đang làm lên cloud để omp trên GitHub làm tiếp:',
+  '1. Cập nhật file bàn giao (openspec/changes/<id>/handoff.md, không có OpenSpec thì HANDOFF.md ở gốc worktree) theo mẫu ~/.omp/agent/skills/git-worktree-lanes/handoff-template.md.',
+  '2. Từ worktree của phiên này chạy: powershell C:\\Users\\GIGABYTE\\.omp\\scripts\\fast-handoff.ps1 -TaskTitle "<tên việc ngắn>" (ở checkout chính thì thêm -Files "<đúng các file của phiên, kèm file bàn giao>").',
+  '3. Báo lại link Issue rồi dừng.',
+].join('\n');
 
 interface ItemSpec {
   id: string;
@@ -660,6 +673,13 @@ export function herdrMenuItems(
         action: { kind: 'readScreen' },
       }),
       item({ id: 'focus', label: 'Mở trong herdr', icon: 'external', action: { kind: 'focus' } }),
+      item({
+        id: 'cloudHandoff',
+        label: 'Đẩy lên cloud làm tiếp',
+        icon: 'send',
+        action: { kind: 'cloudHandoff' },
+        title: 'Nhắn agent viết file bàn giao rồi chạy fast-handoff; omp trên GitHub làm tiếp.',
+      }),
     ]),
     ...withGroupStart(workItemMenuItems(work)),
     ...withGroupStart([
@@ -836,6 +856,7 @@ export function projectNodeMenuItems(
           ? [add('open-session', 'Mở phiên', 'external', 'openSession')]
           : []),
         ...changes(true),
+        ...(awakePaneOf(node) === null ? [] : [add('cloud-handoff', 'Đẩy lên cloud làm tiếp', 'send', 'cloudHandoff')]),
         add('copy-session', 'Sao chép mã phiên', 'copy', 'copySessionId', true),
         add('copy-path', 'Sao chép thư mục làm việc', 'copy', 'copyPath'),
         // A ledger session's process can be stopped; a subagent shares its parent's.
@@ -846,6 +867,13 @@ export function projectNodeMenuItems(
     case 'file-agg':
       return [];
   }
+}
+
+/** The herdr pane a Project session runs in, while it is awake; null when it has none or sleeps. */
+export function awakePaneOf(node: ProjectTreeNode): string | null {
+  if (node.herdrPaneId !== undefined) return node.herdrPaneId;
+  if (node.agentKind !== 'herdr' || node.state === 'sleeping') return null;
+  return node.sessionId ?? null;
 }
 
 /** The pane-name rule herdr enforces. The same text is the hint and the refusal. */

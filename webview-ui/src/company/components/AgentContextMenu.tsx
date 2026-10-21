@@ -22,6 +22,8 @@ import {
   type AgentMenuItem,
   type AgentMenuRequest,
   type AgentMenuSubject,
+  awakePaneOf,
+  CLOUD_HANDOFF_PROMPT,
   type CopyWhat,
   HERDR_NAME_RULE,
   herdrMenuItems,
@@ -612,6 +614,11 @@ export function AgentContextMenu({
       setMode('project-delete');
       return;
     }
+    if (action === 'cloudHandoff') {
+      const pane = awakePaneOf(node);
+      if (pane !== null) track(client.herdrPrompt(pane, CLOUD_HANDOFF_PROMPT));
+      return;
+    }
     if (action === 'stop') {
       setMode('project-stop');
       return;
@@ -815,6 +822,9 @@ export function AgentContextMenu({
         return;
       case 'wake':
         if (paneId !== null) track(client.herdrWake(paneId));
+        return;
+      case 'cloudHandoff':
+        if (paneId !== null) track(client.herdrPrompt(paneId, CLOUD_HANDOFF_PROMPT));
         return;
       case 'assignWork':
         if (workAgent !== null && work.folder !== null) {

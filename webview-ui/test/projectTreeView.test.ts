@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectTreeNode } from '../../core/src/messages.js';
+import { awakePaneOf } from '../src/company/agentMenu.js';
 import {
   changesAt,
   checkoutChangesByPath,
@@ -130,6 +131,18 @@ describe('projectTreeView', () => {
     expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Đánh thức', 'Mở phiên']);
     const awake = { ...asleep, state: 'idle' };
     expect(projectNodeMenuItems(awake, projectMenuContext([...nodes, awake], awake)).map((item) => item.label)).not.toContain('Đánh thức');
+  });
+
+  it('offers the cloud handoff only to a session in an awake herdr pane, the one it messages', () => {
+    const labels = (entry: ProjectTreeNode) => projectNodeMenuItems(entry, projectMenuContext([...nodes, entry], entry)).map((item) => item.label);
+    const joined = node('claude', 'session', 'checkout', { agentKind: 'claude', state: 'running', herdrPaneId: 'w1:p7' });
+    expect(labels(joined)).toContain('Đẩy lên cloud làm tiếp');
+    expect(awakePaneOf(joined)).toBe('w1:p7');
+    const asleep = node('pane', 'session', 'checkout', { agentKind: 'herdr', state: 'sleeping', sessionId: 'w1:p2' });
+    expect(labels(asleep)).not.toContain('Đẩy lên cloud làm tiếp');
+    expect(awakePaneOf({ ...asleep, state: 'idle' })).toBe('w1:p2');
+    // Not in herdr: the board has no pane to message.
+    expect(labels(nodes.find((entry) => entry.id === 'session')!)).not.toContain('Đẩy lên cloud làm tiếp');
   });
 
   it('opens the herdr pane and the last edited checkout of a session at a folder root', () => {
