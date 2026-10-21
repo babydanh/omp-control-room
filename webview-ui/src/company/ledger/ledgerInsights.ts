@@ -336,14 +336,16 @@ function makeMatrix(
   sourceRows: ReadonlyMap<string, { cells: Record<string, Touch>; hunks: CollisionHunk[] }>,
 ): CollisionMatrix {
   const main = worktrees.find((worktree) => worktree.isMain);
+  const rows = Array.from(sourceRows, ([file, value]) => ({ file, cells: value.cells, hunks: value.hunks }));
+  rows.sort((a, b) => Number(!hasConflictCell(a.cells)) - Number(!hasConflictCell(b.cells)) || a.file.localeCompare(b.file));
+  // Only branches some file touches get a column: an empty column is noise in a wide matrix.
+  const touched = new Set(rows.flatMap((row) => Object.keys(row.cells)));
   const columns = [
     ...(main === undefined ? [] : [{ path: main.path, label: 'main' }]),
     ...worktrees
       .filter((worktree) => !worktree.isMain && !worktree.merged)
       .map((worktree) => ({ path: worktree.path, label: worktree.branch ?? worktree.name })),
-  ];
-  const rows = Array.from(sourceRows, ([file, value]) => ({ file, cells: value.cells, hunks: value.hunks }));
-  rows.sort((a, b) => Number(!hasConflictCell(a.cells)) - Number(!hasConflictCell(b.cells)) || a.file.localeCompare(b.file));
+  ].filter((column) => touched.has(column.path));
   return { columns, rows };
 }
 function hasConflictCell(cells: Readonly<Record<string, Touch>>): boolean {
