@@ -136,6 +136,14 @@ describe('squad lanes', () => {
   ])('shows a %s run in the %s lane', (status, lane) => {
     expect(squadLaneFor(run({ status }))).toBe(lane);
   });
+  it('puts compact results in Chờ bạn until closed and maps terminal states correctly', () => {
+    expect(squadLaneFor(run({ compact: true, status: 'done' }))).toBe('needs_input');
+    expect(squadLaneFor(run({ compact: true, status: 'done', closed: true }))).toBe('done');
+    expect(squadLaneFor(run({ compact: true, status: 'failed' }))).toBe('failed');
+    expect(squadLaneFor(run({ compact: true, status: 'stopped' }))).toBe('done');
+    expect(squadLaneFor(run({ status: 'done' }))).toBe('done');
+    expect(squadLaneFor(run({ status: 'failed' }))).toBe('planned');
+  });
 });
 
 describe('squad run actions', () => {
@@ -190,6 +198,18 @@ describe('proposal rows', () => {
         dependsOn: [],
       },
     ]);
+  });
+  it('groups compact run child items by every proposal id', () => {
+    expect(
+      epicChildren(
+        { id: 'run-1', proposalIds: ['prop-old', 'prop-new'] },
+        [
+          workItem({ id: 'old', sequence: 1, squadRunId: 'prop-old' }),
+          workItem({ id: 'new', sequence: 2, squadRunId: 'prop-new' }),
+          workItem({ id: 'other', sequence: 3, squadRunId: 'other-proposal' }),
+        ],
+      ).map((child) => child.id),
+    ).toEqual(['old', 'new']);
   });
 
   it('starts a blank row with no assignee', () => {

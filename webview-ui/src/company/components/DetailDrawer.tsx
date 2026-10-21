@@ -374,6 +374,7 @@ function DrawerContent(props: ContentProps) {
           workspacePath={subject.workspacePath}
           runId={subject.runId}
           onRemoved={props.onClose}
+          onOpenWorkItem={(id) => onOpen({ kind: 'workItem', id, workspacePath: subject.workspacePath })}
         />
       );
     case 'files':

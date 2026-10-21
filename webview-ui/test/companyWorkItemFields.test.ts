@@ -23,6 +23,7 @@ const SETTINGS = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  compactSquad: false,
   engineLeader: 'omp' as const,
   engineJudge: 'omp' as const,
   engineWorker: 'omp' as const,

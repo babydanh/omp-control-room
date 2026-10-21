@@ -47,6 +47,7 @@ const CLAUDE_ALLOWED_TOOLS_DEFAULT: readonly string[] = [
 
 /** The settings a folder starts with, before the user changes any. */
 export const SQUAD_SETTINGS_DEFAULT: SquadSettings = {
+  compactSquad: true,
   maxParallel: 4,
   maxSquadSessions: 3,
   minFreeRamGb: 2,
@@ -161,6 +162,7 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
     isIntegerIn(value.maxSquadSessions, maxSquadSessions.min, maxSquadSessions.max) &&
     isNumberIn(value.minFreeRamGb, minFreeRamGb.min, minFreeRamGb.max) &&
     typeof value.autoJudge === 'boolean' &&
+    typeof value.compactSquad === 'boolean' &&
     typeof value.autoApproveNext === 'boolean' &&
     isSquadEngine(value.engineLeader) &&
     isSquadEngine(value.engineJudge) &&
@@ -211,6 +213,8 @@ export function parseSquadSettings(value: unknown): SquadSettings {
       ? value.minFreeRamGb
       : base.minFreeRamGb,
     autoJudge: typeof value.autoJudge === 'boolean' ? value.autoJudge : base.autoJudge,
+    compactSquad:
+      typeof value.compactSquad === 'boolean' ? value.compactSquad : base.compactSquad,
     autoApproveNext:
       typeof value.autoApproveNext === 'boolean' ? value.autoApproveNext : base.autoApproveNext,
     engineLeader: isSquadEngine(value.engineLeader)

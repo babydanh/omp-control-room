@@ -1156,6 +1156,8 @@ async function openOwnerCompanyHost(
       }),
       ledger: options.ledger ?? NO_LEDGER,
       prepareWorktree: options.prepareWorktree,
+      isCompactSquadProposal: (proposalId) =>
+        squadWiring?.service.isCompactProposal(proposalId) ?? false,
     });
     unregisterWorkItems = registerWorkItemService(store.namespaceDir, workItemsWiring.service);
     const director = modelRoles.assignments.director;

@@ -248,6 +248,8 @@ export interface WorkItemPorts {
   readonly claudeAuth: ClaudeAuthProbe;
   /** The user's Claude MCP servers: the names the squad lists, and a worker run's config. */
   readonly claudeMcp: ClaudeMcpSource;
+  /** Whether the approved proposal belongs to a compact squad run. */
+  readonly isCompactSquadProposal?: (proposalId: string) => boolean;
 }
 
 /** A command the board sent. The request id makes a resent command harmless. */
@@ -1624,6 +1626,18 @@ export class WorkItemService {
           item.assignee.kind === 'herdr'
             ? WORK_ITEM_REASON.needsInputHerdr
             : WORK_ITEM_REASON.needsInputSession;
+        if (item.squadRunId !== undefined && this.ports.isCompactSquadProposal?.(item.squadRunId)) {
+          const before = item.status;
+          const screen =
+            item.assignee.kind === 'herdr' && item.assignee.paneId !== undefined
+              ? await this.readResult(item.assignee.paneId)
+              : undefined;
+          if (item.status !== before) return;
+          const result = `Agent dừng chờ trả lời: ${screen ?? reason}`;
+          item.result = clip(result, WORK_ITEM_RESULT_MAX_CHARS);
+          this.fail(item, item.result, item.result);
+          return;
+        }
         this.setStatus(item, 'needs_input', reason, reason);
       }
       return;
@@ -1668,6 +1682,19 @@ export class WorkItemService {
   private moveToReview(item: StoredWorkItem, result: string | undefined, message: string): void {
     const at = this.iso();
     this.observedBusy.delete(item.id);
+    if (item.squadRunId !== undefined && this.ports.isCompactSquadProposal?.(item.squadRunId)) {
+      item.status = 'done';
+      item.updatedAt = at;
+      delete item.reason;
+      if (result === undefined) delete item.result;
+      else item.result = result;
+      this.pushEvent(item, makeEvent(at, 'status', message));
+      this.again = true;
+      this.commit();
+      this.notifySettled(item);
+      this.scheduleReconcile();
+      return;
+    }
     item.status = 'review';
     item.updatedAt = at;
     item.reason = WORK_ITEM_REASON.review;

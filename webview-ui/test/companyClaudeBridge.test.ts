@@ -41,6 +41,7 @@ const SETTINGS: SquadSettings = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  compactSquad: false,
   engineLeader: 'omp',
   engineJudge: 'omp',
   engineWorker: 'omp',

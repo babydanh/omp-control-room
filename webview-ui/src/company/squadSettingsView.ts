@@ -43,6 +43,7 @@ export interface SquadSettingsDraft {
   minFreeRamGb: string;
   autoJudge: boolean;
   autoApproveNext: boolean;
+  compactSquad: boolean;
   engineLeader: SquadEngine;
   engineJudge: SquadEngine;
   engineWorker: SquadEngine;
@@ -80,6 +81,7 @@ export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraf
     maxSquadSessions: String(settings.maxSquadSessions),
     minFreeRamGb: String(settings.minFreeRamGb),
     autoJudge: settings.autoJudge,
+    compactSquad: settings.compactSquad,
     autoApproveNext: settings.autoApproveNext,
     engineLeader: settings.engineLeader,
     engineJudge: settings.engineJudge,
@@ -233,6 +235,7 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
       maxSquadSessions,
       minFreeRamGb,
       autoJudge: draft.autoJudge,
+      compactSquad: draft.compactSquad,
       autoApproveNext: draft.autoApproveNext,
       engineLeader: draft.engineLeader,
       engineJudge: draft.engineJudge,

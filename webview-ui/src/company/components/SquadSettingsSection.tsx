@@ -174,6 +174,14 @@ function SquadSettingsForm({
         disabled={command.pending}
         onChange={(checked) => setDraft((current) => ({ ...current, autoApproveNext: checked }))}
       />
+      <ToggleSetting
+        id="squad-setting-compact"
+        label="Chế độ gọn"
+        hint="Mỗi repo một phiên, không chấm từng thẻ, xong cả đội mới hỏi bạn một lần"
+        checked={draft.compactSquad}
+        disabled={command.pending}
+        onChange={(checked) => setDraft((current) => ({ ...current, compactSquad: checked }))}
+      />
       <section aria-labelledby="squad-cli-heading" className="flex flex-col gap-3">
         <p id="squad-cli-heading" className="text-2xs font-semibold text-text-muted">
           CLI theo vai trò

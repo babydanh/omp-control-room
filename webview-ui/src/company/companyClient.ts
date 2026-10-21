@@ -626,6 +626,18 @@ export class CompanyClient {
     return this.command((requestId) => commands.squadRemove(requestId, workspacePath, runId));
   }
 
+  replySquad(workspacePath: string, runId: string, text: string): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.squadReply(requestId, workspacePath, runId, text),
+    );
+  }
+
+  closeSquad(workspacePath: string, runId: string): CompanyCommandHandle {
+    return this.command((requestId) =>
+      commands.squadClose(requestId, workspacePath, runId),
+    );
+  }
+
   /** Save one folder's squad settings. The verdict is a companyCommandResult. */
   setSquadSettings(workspacePath: string, settings: SquadSettings): CompanyCommandHandle {
     return this.command((requestId) =>

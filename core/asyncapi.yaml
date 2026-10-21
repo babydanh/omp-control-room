@@ -262,6 +262,8 @@ components:
         - $ref: '#/components/schemas/CompanySquadCancelMessage'
         - $ref: '#/components/schemas/CompanySquadRemoveMessage'
         - $ref: '#/components/schemas/CompanySquadRetryMessage'
+        - $ref: '#/components/schemas/CompanySquadReplyMessage'
+        - $ref: '#/components/schemas/CompanySquadCloseMessage'
         - $ref: '#/components/schemas/CompanySquadClaudeCheckMessage'
         # Ledger (privileged; read-only views and one message command)
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
@@ -4171,7 +4173,7 @@ components:
     SquadSettings:
       type: object
       additionalProperties: false
-      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxClaudeRuns, maxAgyRuns, claudeMaxTurns, claudeMaxBudgetUsd, claudePermission, claudeAllowedTools, claudeWorkerMcp]
+      required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, compactSquad, engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxClaudeRuns, maxAgyRuns, claudeMaxTurns, claudeMaxBudgetUsd, claudePermission, claudeAllowedTools, claudeWorkerMcp]
       description: >-
         Per-folder limits and CLI choices for the squad scheduler. maxParallel caps running work items in the folder.
         maxSquadSessions caps the omp sessions the squad opens. minFreeRamGb is the free memory needed before
@@ -4195,6 +4197,9 @@ components:
           type: boolean
         autoApproveNext:
           type: boolean
+        compactSquad:
+          type: boolean
+          description: Mỗi repo một phiên, không chấm từng thẻ, hỏi người dùng một lần khi xong.
         engineLeader:
           type: string
           enum: [omp, claude, agy]
@@ -4670,7 +4675,7 @@ components:
           $ref: '#/components/schemas/SquadEventKind'
         message:
           type: string
-          maxLength: 2000
+          maxLength: 4000
 
     SquadDependency:
       type: object
@@ -4872,8 +4877,20 @@ components:
           $ref: '#/components/schemas/SquadProgress'
         note:
           type: string
-          maxLength: 2000
+          maxLength: 4000
           description: The leader's closing note once the squad is done.
+        compact:
+          type: boolean
+          description: Run này dùng chế độ gọn. Run cũ thiếu trường này được hiểu là không gọn.
+        closed:
+          type: boolean
+          description: Người dùng đã đọc và đóng bản tổng kết của run chế độ gọn.
+        proposalIds:
+          type: array
+          description: Proposal IDs for compact-run child items, so the board can hide and group every task across turns.
+          items:
+            type: string
+            format: uuid
         error:
           type: string
           maxLength: 2000
@@ -5061,6 +5078,46 @@ components:
       properties:
         type:
           const: companySquadCancel
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        runId:
+          type: string
+          format: uuid
+
+    CompanySquadReplyMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, runId, text]
+      properties:
+        type:
+          const: companySquadReply
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        runId:
+          type: string
+          format: uuid
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+
+    CompanySquadCloseMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, runId]
+      properties:
+        type:
+          const: companySquadClose
         requestId:
           type: string
           format: uuid

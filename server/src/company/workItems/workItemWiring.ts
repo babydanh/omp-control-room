@@ -60,6 +60,7 @@ export interface WorkItemWiringOptions {
   readonly judge: LeaderRunner;
   /** The ledger the conflict check reads overlaps from, and reports whether a board watches it. */
   readonly ledger: WorkItemLedger;
+  readonly isCompactSquadProposal?: (proposalId: string) => boolean;
 }
 
 /** A started service and the way to stop it. */
@@ -202,6 +203,7 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     agy: createAgyRuns({ newRunId: () => randomUUID() }),
     claudeAuth: createClaudeAuthProbe(),
     claudeMcp: createClaudeMcpSource({ configPath: join(homedir(), '.claude.json') }),
+    isCompactSquadProposal: options.isCompactSquadProposal,
   });
   await service.load();
   const unsubscribe = options.herdr?.onAgents(() => service.scheduleReconcile());

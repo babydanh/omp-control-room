@@ -3,9 +3,9 @@ import { describe, expect, it } from 'vitest';
 import type {
   AgentRole,
   CompanyWorkspaceEntry,
+  SquadRun,
   SquadSettings,
   WorkItem,
-  WorkItemStatus,
 } from '../../core/src/messages.js';
 import { buildBoardLanes } from '../src/company/boardView.js';
 import {
@@ -39,6 +39,7 @@ const SETTINGS: SquadSettings = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  compactSquad: false,
   engineLeader: 'omp',
   engineJudge: 'omp',
   engineWorker: 'omp',
@@ -126,7 +127,7 @@ describe('laneForWorkItem', () => {
 
 describe('statusWordVi', () => {
   it('names every status in Vietnamese, each word distinct', () => {
-    const statuses: WorkItemStatus[] = [
+    const statuses: WorkItem['status'][] = [
       'queued',
       'running',
       'needs_input',
@@ -301,6 +302,36 @@ describe('visibleWorkItems', () => {
     expect(visible.map((entry) => entry.workspacePath)).toEqual([ACTIVE, OTHER]);
     expect(visible.every((entry) => entry.folder !== null)).toBe(true);
     expect(visible[1]?.folder?.path).toBe(OTHER);
+  });
+  it('hides compact-run children but keeps manual and regular squad items in the columns', () => {
+    let state = withWorkItems(boardWithRoster('all'), ACTIVE, [
+      item({ id: 'manual', sequence: 1 }),
+      item({ id: 'compact-child', sequence: 2, squadRunId: 'proposal-1' }),
+      item({ id: 'regular-child', sequence: 3, squadRunId: 'proposal-2' }),
+    ]);
+    const compactRun: SquadRun = {
+      id: 'compact-run',
+      request: 'Làm việc',
+      status: 'working',
+      turns: 1,
+      maxTurns: 10,
+      progress: { done: 0, total: 1 },
+      history: [],
+      compact: true,
+      proposalIds: ['proposal-1'],
+      createdAt: '2026-05-01T10:00:00.000Z',
+      updatedAt: '2026-05-01T10:00:00.000Z',
+    };
+    state = applyCompanyMessage(state, {
+      type: 'companySquad',
+      workspacePath: ACTIVE,
+      revision: 1,
+      runs: [compactRun],
+    }).state;
+    expect(visibleWorkItems(state).map((entry) => entry.item.id)).toEqual([
+      'manual',
+      'regular-child',
+    ]);
   });
 });
 

@@ -12,6 +12,7 @@ const VALID = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  compactSquad: true,
   engineLeader: 'omp',
   engineJudge: 'omp',
   engineWorker: 'omp',
@@ -30,6 +31,9 @@ describe('parseSquadSettings', () => {
   it('returns the defaults for a missing or non-object value', () => {
     expect(parseSquadSettings(undefined)).toEqual(SQUAD_SETTINGS_DEFAULT);
     expect(parseSquadSettings('bad')).toEqual(SQUAD_SETTINGS_DEFAULT);
+  });
+  it('defaults compact mode on when an older settings file does not have the field', () => {
+    expect(parseSquadSettings({ autoJudge: false }).compactSquad).toBe(true);
   });
 
   it('keeps each valid field and defaults each invalid one', () => {
@@ -50,6 +54,7 @@ describe('parseSquadSettings', () => {
       maxSquadSessions: 2,
       minFreeRamGb: 1.5,
       autoJudge: SQUAD_SETTINGS_DEFAULT.autoJudge,
+      compactSquad: SQUAD_SETTINGS_DEFAULT.compactSquad,
       autoApproveNext: true,
       engineLeader: 'claude',
       engineJudge: SQUAD_SETTINGS_DEFAULT.engineJudge,
@@ -153,6 +158,7 @@ describe('isSquadSettings', () => {
     expect(isSquadSettings({ ...VALID, maxSquadSessions: 7 })).toBe(false);
     expect(isSquadSettings({ ...VALID, minFreeRamGb: -1 })).toBe(false);
     expect(isSquadSettings({ ...VALID, autoJudge: undefined })).toBe(false);
+    expect(isSquadSettings({ ...VALID, compactSquad: undefined })).toBe(false);
     expect(isSquadSettings(null)).toBe(false);
     expect(isSquadSettings({ ...VALID, maxAgyRuns: 0 })).toBe(false);
     expect(isSquadSettings({ ...VALID, maxAgyRuns: 5 })).toBe(false);

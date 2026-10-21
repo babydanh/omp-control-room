@@ -94,6 +94,7 @@ class FakeWorkItems implements SquadWorkItems {
     minFreeRamGb: 2,
     autoJudge: false,
     autoApproveNext: false,
+    compactSquad: false,
     engineLeader: 'omp',
     engineJudge: 'omp',
     engineWorker: 'omp',
@@ -1321,5 +1322,85 @@ describe('SquadService completeness, settles and automatic approval', () => {
     await letTurnsPass();
     expect(h.leader.prompts).toHaveLength(2);
     expect(h.runOf(runId)?.turns).toBe(2);
+  });
+});
+
+describe('SquadService compact runs', () => {
+  it('uses repo-based compact prompts and auto-approves warned proposals', async () => {
+    const h = new Harness();
+    h.workItems.settings.compactSquad = true;
+    h.leader.reply(JSON.stringify({
+      assignments: [{ assignee: 'new-session', agent: 'scout', repo: REPO_APP, text: 'Làm việc', reason: 'Cần làm' }],
+      note: 'Đang chia việc',
+      done: false,
+    }));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn thiện tính năng' });
+    await waitFor(() => h.runOf(runId)?.status === 'working');
+    expect(h.runOf(runId)?.compact).toBe(true);
+    expect(h.runOf(runId)?.proposal?.warnings.length).toBeGreaterThan(0);
+    expect(h.workItems.creates).toHaveLength(1);
+    expect(h.leader.prompts[0]).toContain('Chia việc theo repo');
+    expect(h.leader.prompts[0]).not.toContain('followed by a "reviewer" row');
+    expect(h.leader.prompts[0]).not.toContain('"security-reviewer" row');
+  });
+  it('retries one failed automatic approval, then fails the run instead of waiting for the user', async () => {
+    const h = new Harness();
+    h.workItems.settings.compactSquad = true;
+    h.workItems.createError = new Error('phụ thuộc #4 đã đóng');
+    h.leader.reply(proposal('Việc lần một', 'new-session'));
+    h.leader.reply(proposal('Việc lần hai', 'new-session'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn thiện tính năng' });
+
+    await waitFor(() => h.runOf(runId)?.status === 'failed');
+
+    expect(h.runOf(runId)?.turns).toBe(2);
+    expect(h.leader.prompts).toHaveLength(2);
+    expect(h.leader.prompts[1]).toContain('Không tự duyệt được đề xuất: phụ thuộc #4 đã đóng.');
+  });
+
+
+  it.each(['review', 'done', 'failed'] as const)(
+    'sends a child %s result to the leader without waiting for judging',
+    async (status) => {
+      const h = new Harness();
+      h.workItems.settings.compactSquad = true;
+      h.leader.reply(proposal('Làm việc', 'new-session'));
+      const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn thiện tính năng' });
+      await waitFor(() => h.workItems.creates.length === 1);
+      const item = h.workItems.items[0];
+      if (item === undefined) throw new Error('no compact child');
+      h.leader.reply(DONE_REPLY);
+      h.workItems.settle(item.id, status, h.stamp(), `Kết quả ${status}`);
+      await waitFor(() => h.runOf(runId)?.status === 'done');
+      expect(h.leader.prompts).toHaveLength(2);
+      expect(h.leader.prompts[1]).toContain(`Kết quả ${status}`);
+    },
+  );
+
+  it('saves a user reply in history and includes it in the next leader prompt', async () => {
+    const h = new Harness();
+    h.workItems.settings.compactSquad = true;
+    h.leader.reply(DONE_REPLY);
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn thiện tính năng' });
+    await waitFor(() => h.runOf(runId)?.status === 'done');
+    h.leader.reply(DONE_REPLY);
+    const requestId = randomUUID();
+    await h.service.reply({ requestId, runId, text: 'Giữ nguyên API hiện tại.' });
+    await h.service.reply({ requestId, runId, text: 'Giữ nguyên API hiện tại.' });
+    await waitFor(() => h.runOf(runId)?.turns === 2);
+    expect(h.leader.prompts[1]).toContain('Trả lời của bạn: Giữ nguyên API hiện tại.');
+    expect(h.runOf(runId)?.history.some((event) => event.message?.includes('Giữ nguyên API hiện tại.'))).toBe(true);
+  });
+
+  it('closes a completed run and lets a closed run be removed', async () => {
+    const h = new Harness();
+    h.workItems.settings.compactSquad = true;
+    h.leader.reply(DONE_REPLY);
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn thiện tính năng' });
+    await waitFor(() => h.runOf(runId)?.status === 'done');
+    await h.service.close({ requestId: randomUUID(), runId });
+    expect(h.runOf(runId)?.closed).toBe(true);
+    await h.service.remove({ requestId: randomUUID(), runId });
+    expect(h.runOf(runId)).toBeUndefined();
   });
 });

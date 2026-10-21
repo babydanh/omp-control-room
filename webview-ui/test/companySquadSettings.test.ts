@@ -16,6 +16,7 @@ const SETTINGS: SquadSettings = {
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
+  compactSquad: true,
   engineLeader: 'omp',
   engineJudge: 'omp',
   engineWorker: 'omp',
@@ -43,6 +44,7 @@ describe('squadSettingsDraftOf', () => {
       minFreeRamGb: '2',
       autoJudge: true,
       autoApproveNext: false,
+      compactSquad: true,
       engineLeader: 'omp',
       engineJudge: 'omp',
       engineWorker: 'omp',
@@ -146,14 +148,16 @@ describe('squadSettingsFromDraft', () => {
     }
   });
 
-  it('carries the two switches through unchanged', () => {
+  it('carries all switches through unchanged', () => {
     expect(
-      squadSettingsFromDraft(draftWith({ autoJudge: false, autoApproveNext: true })),
+      squadSettingsFromDraft(
+        draftWith({ autoJudge: false, autoApproveNext: true, compactSquad: false }),
+      ),
     ).toEqual({
       ok: true,
-      settings: { ...SETTINGS, autoJudge: false, autoApproveNext: true },
+      settings: { ...SETTINGS, autoJudge: false, autoApproveNext: true, compactSquad: false },
     });
-  });
+});
 });
 
 describe('squadSettingsSet', () => {

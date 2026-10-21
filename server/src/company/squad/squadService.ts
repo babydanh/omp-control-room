@@ -121,6 +121,9 @@ type ApproveCommand = SquadCommand & {
   readonly rows: unknown;
 };
 
+type RunCommand = SquadCommand & { readonly runId: string };
+type ReplyCommand = RunCommand & { readonly text: string };
+
 /** Vietnamese refusals and notices the board shows. */
 const MESSAGE = {
   noMembers: 'Chưa có thành viên nào trong thư mục này để đội trưởng giao việc.',
@@ -142,6 +145,8 @@ const MESSAGE = {
     'Chỉ hỏi đội trưởng bước tiếp từ việc đã xong (đang chờ duyệt) và không thuộc đội nào.',
   cancelNotActive: 'Chỉ huỷ được lượt chưa kết thúc.',
   cancelled: 'Đã huỷ lượt. Các việc đã tạo từ đề xuất được duyệt vẫn tiếp tục.',
+  replyNotAllowed: 'Chỉ trả lời được đội gọn đang chờ bạn.',
+  closeNotAllowed: 'Chỉ đóng được bản tổng kết của đội gọn đã xong.',
   removeNotFinished: 'Hãy huỷ lượt này trước khi xoá.',
 } as const;
 
@@ -234,6 +239,7 @@ export class SquadService {
       history: [squadEvent(at, 'request')],
       createdAt: at,
       updatedAt: at,
+      compact: this.ports.workItems.snapshot().settings.compactSquad,
       ...(command.fromWorkItemId === undefined ? {} : { fromWorkItemId: command.fromWorkItemId }),
     };
     this.runs.set(run.id, run);
@@ -410,12 +416,53 @@ export class SquadService {
   async remove(command: SquadCommand & { runId: string }): Promise<void> {
     if (this.answers.has(command.requestId)) return;
     const run = this.requireRun(command.runId);
-    if (!REMOVABLE_STATUSES.includes(run.status))
+    if (!REMOVABLE_STATUSES.includes(run.status) || (run.compact && run.status === 'done' && !run.closed))
       throw new CompanyError('squad_status', MESSAGE.removeNotFinished);
     this.runs.delete(run.id);
     this.remember(command.requestId, run.id);
     this.commit();
     await this.flush();
+  }
+
+  /** Answers a completed compact run and grants at most five additional leader turns. */
+  async reply(command: ReplyCommand): Promise<void> {
+    if (this.answers.has(command.requestId)) return;
+    const run = this.requireRun(command.runId);
+    const text = command.text.trim();
+    if (!run.compact || run.status !== 'done' || text === '' || text.length > 4000) {
+      throw new CompanyError('squad_status', MESSAGE.replyNotAllowed);
+    }
+    run.closed = false;
+    run.status = 'planning';
+    delete run.note;
+    delete run.error;
+    run.extraTurns = Math.min(5, (run.extraTurns ?? 0) + 1);
+    appendEvent(run, squadEvent(this.iso(), 'turn', `Trả lời của bạn: ${text}`, 4000));
+    this.remember(command.requestId, run.id);
+    this.commit();
+    await this.flush();
+    this.scheduleTurn(run.id);
+  }
+
+  /** Closes a completed compact run after the user has read its summary. */
+  async close(command: RunCommand): Promise<void> {
+    if (this.answers.has(command.requestId)) return;
+    const run = this.requireRun(command.runId);
+    if (!run.compact || run.status !== 'done') {
+      throw new CompanyError('squad_status', MESSAGE.closeNotAllowed);
+    }
+    run.closed = true;
+    appendEvent(run, squadEvent(this.iso(), 'turn', 'Người dùng đã đóng bản tổng kết.'));
+    this.remember(command.requestId, run.id);
+    this.commit();
+    await this.flush();
+  }
+
+  /** Whether a proposal belongs to a compact run. */
+  isCompactProposal(proposalId: string): boolean {
+    return [...this.runs.values()].some(
+      (run) => run.compact === true && run.proposals.some((proposal) => proposal.id === proposalId),
+    );
   }
 
 
@@ -475,7 +522,7 @@ export class SquadService {
     const eligible =
       run.status === 'planning' || (run.status === 'working' && run.pendingReviews.length > 0);
     if (!eligible) return;
-    if (run.turns >= SQUAD_MAX_TURNS) {
+    if (run.turns >= SQUAD_MAX_TURNS + (run.extraTurns ?? 0)) {
       this.stopRun(run);
       return;
     }
@@ -509,11 +556,13 @@ export class SquadService {
           reviews,
           history: run.history,
           turn: run.turns + 1,
+          maxTurns: SQUAD_MAX_TURNS + (run.extraTurns ?? 0),
+          compact: run.compact === true,
         }),
         controller.signal,
         (live) => sendLive({ ...live, startedAt }),
       );
-      const checked = parseLeaderReply(output, members, catalog, openSequences);
+      const checked = parseLeaderReply(output, members, catalog, openSequences, run.compact === true);
       if (!checked.ok) throw new SquadLeaderError(checked.message);
       if (this.disposed || this.runs.get(runId) !== run || FINISHED_STATUSES.includes(run.status))
         return;
@@ -571,7 +620,7 @@ export class SquadService {
       appendEvent(run, squadEvent(at, 'proposal', `Đề xuất ${reply.assignments.length} việc.`));
     }
     this.commit();
-    if (proposed !== undefined && this.autoApproves(proposed)) {
+    if (proposed !== undefined && this.autoApproves(run, proposed)) {
       this.approveAutomatically(run, proposed);
     }
   }
@@ -622,6 +671,7 @@ export class SquadService {
       snapshot.settings.autoJudge,
       finished,
       conflicts !== undefined,
+      run.compact === true,
     );
     if (outcome === undefined) return;
     const result = item.result ?? (item.status === 'failed' ? item.reason : undefined);
@@ -645,9 +695,11 @@ export class SquadService {
    * proposal carries no completeness warning. The first proposal of a run counts too, so a squad with
    * automatic approval plans and dispatches without waiting on the user.
    */
-  private autoApproves(proposal: SquadProposal): boolean {
+  /** Compact runs auto-approve every proposal; regular runs keep their existing warning gate. */
+  private autoApproves(run: StoredSquadRun, proposal: SquadProposal): boolean {
     return (
-      this.ports.workItems.snapshot().settings.autoApproveNext && proposal.warnings.length === 0
+      run.compact === true ||
+      (this.ports.workItems.snapshot().settings.autoApproveNext && proposal.warnings.length === 0)
     );
   }
 
@@ -663,14 +715,21 @@ export class SquadService {
       const current = this.runs.get(run.id);
       if (this.disposed || current === undefined) return;
       const detail = error instanceof Error ? clip(error.message, 200) : MESSAGE.unknownError;
-      appendEvent(
-        current,
-        squadEvent(
-          this.iso(),
-          'failed',
-          `Không tự duyệt được đề xuất: ${detail}. Hãy duyệt tay hoặc bỏ đề xuất.`,
-        ),
-      );
+      const failure = `Không tự duyệt được đề xuất: ${detail}.`;
+      if (
+        current.compact === true &&
+        !current.history.some((event) => event.message?.startsWith('Không tự duyệt được đề xuất:'))
+      ) {
+        current.status = 'planning';
+        appendEvent(
+          current,
+          squadEvent(this.iso(), 'turn', `${failure} Đội trưởng được thêm một lượt để tự sửa.`),
+        );
+        this.commit();
+        this.scheduleTurn(current.id);
+        return;
+      }
+      this.setFailed(current, `${failure} Run thất bại sau lượt sửa tự động.`, this.iso());
       this.commit();
     });
   }
@@ -819,7 +878,14 @@ function settleOutcome(
   autoJudge: boolean,
   finished: boolean,
   conflicted: boolean,
+  compact: boolean,
 ): SquadReviewOutcome | undefined {
+  if (compact) {
+    if (item.status === 'review') return 'done';
+    if (item.status === 'failed') return 'failed';
+    if (item.status === 'done') return 'done';
+    return undefined;
+  }
   if (item.status === 'review') return autoJudge && !conflicted ? undefined : 'review';
   if (item.status === 'failed') return 'failed';
   if (item.status === 'done') return autoJudge || finished ? 'done' : undefined;

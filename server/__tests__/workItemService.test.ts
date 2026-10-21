@@ -69,6 +69,7 @@ class Fixture {
   readonly submits: { sessionId: string; text: string; mode: 'chat' | 'company' }[] = [];
   chatsOpened = 0;
   readonly openedWith: { cwd: string; role: string }[] = [];
+  readonly compactSquadRunIds = new Set<string>();
   poolFull = false;
   readonly worktreesMade: { repo: string; shortId: string }[] = [];
   worktreeError: Error | null = null;
@@ -86,6 +87,7 @@ class Fixture {
   readonly claude = new FakeClaudeRuns();
   readonly agy = new FakeAgyRuns();
   readonly claudeAuth = new FakeClaudeAuth();
+  readonly judge = vi.fn(() => new Promise<string>(() => undefined));
   readonly claudeMcp = new FakeClaudeMcp();
   private timers: Timer[] = [];
   readonly service: WorkItemService;
@@ -153,9 +155,10 @@ class Fixture {
         remove: async () => 'removed',
         exists: () => this.worktreeOnDisk,
       },
-      judge: () => new Promise<string>(() => undefined),
+      judge: this.judge,
       overlaps: async () => [],
       boardWatching: () => false,
+      isCompactSquadProposal: (runId) => this.compactSquadRunIds.has(runId),
       claude: this.claude,
       agy: this.agy,
       claudeAuth: this.claudeAuth,
@@ -1560,6 +1563,81 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     await f.service.mark({ requestId: randomUUID(), id: reviewed, verdict: 'done' });
     expect(settled).toEqual([`review:${reviewed}`, `failed:${failed}`, `done:${reviewed}`]);
     stop();
+  });
+
+  it('finishes a compact squad item without calling the judge', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const [id] = await f.service.createWorkItems(
+      [{ text: 'Sửa repo', assignee: herdr(PANE_A) }],
+      { squadRunId },
+    );
+    if (id === undefined) throw new Error('expected a work item');
+
+    f.setPane(PANE_A, 'working');
+    await f.service.reconcileNow();
+    f.setPane(PANE_A, 'idle');
+    f.screen = 'Đã sửa repo';
+    await f.service.reconcileNow();
+
+    expect(itemOf(f, id)).toMatchObject({ status: 'done', result: 'Đã sửa repo' });
+    expect(f.service.snapshot().items[0]?.judge).toBeUndefined();
+    expect(f.judge).not.toHaveBeenCalled();
+  });
+
+  it('reports a compact item question to its squad and keeps dependent work blocked', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const settled: WorkItem[] = [];
+    const stop = f.service.onItemSettled((item) => settled.push(item));
+    const ids = await f.service.createWorkItems(
+      [
+        { text: 'Backend', assignee: herdr(PANE_A) },
+        { text: 'Web', assignee: herdr(PANE_A), dependsOnDrafts: [0] },
+      ],
+      { squadRunId },
+    );
+    const first = ids[0];
+    const dependent = ids[1];
+    if (first === undefined || dependent === undefined) throw new Error('expected dependent work items');
+    f.setPane(PANE_A, 'blocked');
+    f.screen = 'Cần bạn cung cấp URL API.';
+    await f.service.reconcileNow();
+
+    expect(itemOf(f, first)).toMatchObject({
+      status: 'failed',
+      result: 'Agent dừng chờ trả lời: Cần bạn cung cấp URL API.',
+    });
+    expect(itemOf(f, first).status).not.toBe('done');
+    expect(itemOf(f, dependent).status).not.toBe('running');
+    expect(f.prompts).toHaveLength(1);
+    expect(settled).toContainEqual(expect.objectContaining({
+      id: first,
+      status: 'failed',
+      result: 'Agent dừng chờ trả lời: Cần bạn cung cấp URL API.',
+    }));
+    stop();
+  });
+
+  it('continues to judge ordinary work items', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Việc thường',
+      assignee: herdr(PANE_A),
+    });
+    f.setPane(PANE_A, 'working');
+    await f.service.reconcileNow();
+    f.setPane(PANE_A, 'idle');
+    await f.service.reconcileNow();
+
+    expect(itemOf(f, id).status).toBe('review');
+    expect(f.judge).toHaveBeenCalled();
   });
 
   it('saves squad settings once per request id and refuses values out of range', async () => {

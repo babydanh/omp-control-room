@@ -32,7 +32,7 @@ import {
 } from '../squadView.js';
 import { useCommandDialog } from '../useCommandDialog.js';
 import { useNow } from '../useNow.js';
-import { workItemsOf } from '../workItemView.js';
+import { assigneeLabel, statusWordVi, workItemCardHead, workItemsOf } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
 import { SquadPlanRow, type SquadRowChange } from './SquadPlanRow.js';
@@ -48,23 +48,46 @@ export interface SquadRunPanelProps {
   workspacePath: string;
   runId: string;
   onRemoved: () => void;
+  onOpenWorkItem: (workItemId: string) => void;
 }
 
 
-export function SquadRunPanel({ client, state, workspacePath, runId, onRemoved }: SquadRunPanelProps) {
+export function SquadRunPanel({
+  client,
+  state,
+  workspacePath,
+  runId,
+  onRemoved,
+  onOpenWorkItem,
+}: SquadRunPanelProps) {
   const now = useNow();
   const [confirming, setConfirming] = useState<'cancel' | 'remove' | null>(null);
+  const [answer, setAnswer] = useState('');
   const command = useCommandDialog(client);
   const removeCommand = useCommandDialog(client, onRemoved);
   const run = findSquadRun(state, { runId, workspacePath });
   if (run === undefined) {
     return <p className="text-xs text-text-muted">Đội này không còn trong thư mục.</p>;
   }
-  const proposal = run.status === 'proposed' ? run.proposal : undefined;
+  const isCompact = run.compact === true;
+  const autoApprovalFailed =
+    isCompact &&
+    run.status === 'failed' &&
+    run.proposal?.status === 'pending' &&
+    run.history.some((event) => event.message?.startsWith('Không tự duyệt được đề xuất:'));
+  const proposal =
+    run.status === 'proposed' || autoApprovalFailed ? run.proposal : undefined;
   const progress = progressLabel(run.progress);
   const note = (run.note ?? '').trim();
   const error = run.status === 'failed' ? run.error?.trim() || 'Đội gặp lỗi.' : null;
   const actions = squadRunActions(run.status);
+  const canRemove = actions.remove && (!isCompact || run.status !== 'done' || run.closed);
+  const proposalIds = new Set(run.proposalIds ?? (run.proposal === undefined ? [] : [run.proposal.id]));
+  const childItems = isCompact
+    ? workItemsOf(state, workspacePath).items
+        .filter((item) => item.squadRunId !== undefined && proposalIds.has(item.squadRunId))
+        .sort((left, right) => left.sequence - right.sequence)
+    : [];
   const cancelRun = (): void => {
     void command.run(client.cancelSquad(workspacePath, run.id), CANCEL_FALLBACK);
     setConfirming(null);
@@ -75,6 +98,14 @@ export function SquadRunPanel({ client, state, workspacePath, runId, onRemoved }
   };
   const retry = (): void => {
     void command.run(client.retrySquad(workspacePath, run.id), RETRY_FALLBACK);
+  };
+  const replyToLeader = (): void => {
+    const text = answer.trim();
+    if (text === '' || text.length > 4000) return;
+    void command.run(client.replySquad(workspacePath, run.id, text), 'Chưa gửi được câu trả lời.');
+  };
+  const closeCompactRun = (): void => {
+    void command.run(client.closeSquad(workspacePath, run.id), 'Chưa đóng được đội.');
   };
 
   return (
@@ -97,8 +128,35 @@ export function SquadRunPanel({ client, state, workspacePath, runId, onRemoved }
           proposal={proposal}
         />
       )}
-      {proposal === undefined && note !== '' && (
+      {isCompact && run.status === 'done' && note !== '' && (
+        <section aria-label="Bản tổng kết" className="rounded-(--company-radius-sm) border border-accent/40 bg-accent/10 p-3">
+          <h3 className="mb-1 font-semibold text-text">Bản tổng kết</h3>
+          <p className="whitespace-pre-wrap break-words text-text">{note}</p>
+        </section>
+      )}
+      {!isCompact && proposal === undefined && note !== '' && (
         <p className="whitespace-pre-wrap break-words text-text-muted">{note}</p>
+      )}
+      {isCompact && run.status === 'done' && !run.closed && (
+        <section aria-label="Trả lời trưởng đội" className="flex flex-col gap-2">
+          <label htmlFor="squad-leader-reply" className="font-semibold text-text">Trả lời trưởng đội</label>
+          <textarea
+            id="squad-leader-reply"
+            className="min-h-20 rounded-(--company-radius-sm) border border-border bg-well p-2 text-text"
+            value={answer}
+            maxLength={4000}
+            disabled={command.pending}
+            onChange={(event) => setAnswer(event.currentTarget.value)}
+          />
+          <div className="flex flex-wrap gap-1.5">
+            <CompanyButton size="sm" variant="accent" disabled={command.pending || answer.trim() === ''} onClick={replyToLeader}>
+              Gửi
+            </CompanyButton>
+            <CompanyButton size="sm" disabled={command.pending} onClick={closeCompactRun}>
+              Đóng
+            </CompanyButton>
+          </div>
+        </section>
       )}
       {error !== null && <p className="whitespace-pre-wrap break-words text-warning">{error}</p>}
       {removeCommand.notice !== null && (
@@ -112,14 +170,37 @@ export function SquadRunPanel({ client, state, workspacePath, runId, onRemoved }
           </CompanyButton>
         </div>
       )}
-      {(actions.cancel || actions.remove) && (
+      {isCompact && childItems.length > 0 && (
+        <section aria-label="Việc con">
+          <h3 className="mb-1 text-2xs font-semibold text-text-muted">Việc con</h3>
+          <ol className="flex flex-col gap-1.5">
+            {childItems.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className="flex w-full flex-col gap-0.5 rounded-(--company-radius-sm) bg-well p-2 text-left hover:bg-well-hover"
+                  onClick={() => onOpenWorkItem(item.id)}
+                >
+                  <span className="break-words text-text">
+                    #{item.sequence} · {item.repo ?? 'Thư mục gốc'} · {workItemCardHead(item.text)}
+                  </span>
+                  <span className="text-2xs text-text-muted">
+                    {statusWordVi(item.status)} · {assigneeLabel(item.assignee, state, workspacePath)}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+      {(actions.cancel || canRemove) && (
         <div className="flex flex-wrap gap-1.5">
           {actions.cancel && (
             <CompanyButton size="sm" disabled={command.pending} onClick={() => setConfirming('cancel')}>
               Huỷ lượt
             </CompanyButton>
           )}
-          {actions.remove && (
+          {canRemove && (
             <CompanyButton
               size="sm"
               disabled={command.pending || removeCommand.pending}

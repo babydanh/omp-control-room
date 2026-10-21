@@ -541,11 +541,19 @@ export function visibleWorkItems(state: CompanyViewState): VisibleWorkItem[] {
   const showAll = showsAllFolders(state);
   const seen = new Set<string>();
   const rows: VisibleWorkItem[] = [];
+  const compactProposals = new Set(
+    Object.values(state.squad).flatMap((folder) =>
+      folder.runs.flatMap((run) =>
+        run.compact ? (run.proposalIds ?? (run.proposal === undefined ? [] : [run.proposal.id])) : [],
+      ),
+    ),
+  );
   for (const workspacePath of foldersInView(state, Object.keys(state.workItems))) {
     const items = [...workItemsOf(state, workspacePath).items].sort(
       (left, right) => left.sequence - right.sequence,
     );
     for (const item of items) {
+      if (item.squadRunId !== undefined && compactProposals.has(item.squadRunId)) continue;
       const key = workItemKey({ id: item.id, workspacePath });
       if (seen.has(key)) continue;
       seen.add(key);

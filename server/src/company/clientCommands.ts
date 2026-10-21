@@ -295,6 +295,8 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companySquadCancel',
   'companySquadRemove',
   'companySquadRetry',
+  'companySquadReply',
+  'companySquadClose',
   'companySquadClaudeCheck',
   'companyAgentRoleSet',
   ...FOLDER_COMMAND_TYPES,
@@ -342,6 +344,8 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companySquadCancel: true,
   companySquadRemove: true,
   companySquadRetry: true,
+  companySquadReply: true,
+  companySquadClose: true,
   companySquadClaudeCheck: true,
   companyAgentRoleSet: true,
 };
@@ -576,6 +580,8 @@ async function run(
       case 'companySquadCancel':
       case 'companySquadRemove':
       case 'companySquadRetry':
+      case 'companySquadReply':
+      case 'companySquadClose':
         await squadCommand(msg, requestId, services, send);
         return;
       case 'terminalAttach':
@@ -1384,6 +1390,16 @@ async function squadCommand(
   }
   if (msg.type === 'companySquadRemove') {
     await squad.remove({ requestId, runId });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companySquadReply') {
+    await squad.reply({ requestId, runId, text: stringField(msg, 'text') ?? '' });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companySquadClose') {
+    await squad.close({ requestId, runId });
     ok(send, requestId);
     return;
   }

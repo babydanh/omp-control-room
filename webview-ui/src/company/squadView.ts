@@ -142,8 +142,15 @@ const EVENT_LABEL_VI: Readonly<Record<SquadEventKind, string>> = {
   stopped: 'Đã dừng',
 };
 
-/** The lane a run is shown in, or null when the board hides it. The run's status is the only input. */
-export function squadLaneFor(run: Pick<SquadRun, 'status'>): CompanyLaneId | null {
+/** The lane a run is shown in, or null when the board hides it. */
+export function squadLaneFor(
+  run: Pick<SquadRun, 'status' | 'compact' | 'closed'>,
+): CompanyLaneId | null {
+  if (run.compact) {
+    if (run.status === 'done') return run.closed ? 'done' : 'needs_input';
+    if (run.status === 'failed') return 'failed';
+    if (run.status === 'stopped') return 'done';
+  }
   return LANE_BY_RUN_STATUS[run.status];
 }
 
@@ -506,14 +513,15 @@ function waitOn(dependency: WorkItem | undefined): EpicWait {
  * `Chờ việc đã gỡ` when the folder no longer holds it.
  */
 export function epicChildren(
-  run: Pick<SquadRun, 'id'>,
+  run: Pick<SquadRun, 'id' | 'proposalIds'>,
   items: readonly WorkItem[],
   parkedSessionIds: readonly string[] = [],
 ): EpicChild[] {
   const byId = new Map(items.map((item) => [item.id, item] as const));
+  const proposalIds = new Set(run.proposalIds ?? [run.id]);
   return items
-    .filter((item) => item.squadRunId === run.id)
-    .sort((a, b) => a.sequence - b.sequence)
+    .filter((item) => item.squadRunId !== undefined && proposalIds.has(item.squadRunId))
+    .sort((left, right) => left.sequence - right.sequence)
     .map((item) => ({
       id: item.id,
       sequence: item.sequence,

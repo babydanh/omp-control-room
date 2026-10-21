@@ -56,6 +56,7 @@ export const SQUAD_HISTORY_MAX = 60;
 export const SQUAD_EVENT_MAX_CHARS = 2000;
 /** Longest leader note, in characters, as the contract allows. */
 export const SQUAD_NOTE_MAX_CHARS = 2000;
+export const SQUAD_COMPACT_NOTE_MAX_CHARS = 4000;
 /** Longest reason on one proposed row, in characters. */
 export const SQUAD_REASON_MAX_CHARS = 500;
 /** Longest item text or review text the leader sees, in characters. */
@@ -114,6 +115,12 @@ export interface StoredSquadRun {
   readonly request: string;
   /** The finished work item this run asks the leader about, when it started from one. */
   readonly fromWorkItemId?: string;
+  /** Whether the run captured compact-squad behavior when it started. Missing means legacy. */
+  compact?: boolean;
+  /** Whether the user has closed a completed compact run. */
+  closed?: boolean;
+  /** Additional turns granted after a user reply, capped at five. */
+  extraTurns?: number;
   status: SquadRunStatus;
   turns: number;
   /** Every proposal, oldest first. The newest one is the run's current proposal. */
@@ -232,11 +239,14 @@ export interface LeaderPromptInput {
   readonly agents: readonly OmpAgentInfo[];
   /** Whether a judge agent decides finished items, rather than the leader. */
   readonly autoJudge: boolean;
+  /** Compact behavior is fixed for the lifetime of the run. */
+  readonly compact?: boolean;
   readonly members: readonly SquadMember[];
   readonly items: readonly LeaderItemView[];
   readonly reviews: readonly SquadReview[];
   readonly history: readonly SquadEvent[];
   readonly turn: number;
+  readonly maxTurns?: number;
 }
 
 const RUN_STATUSES: readonly SquadRunStatus[] = [
@@ -300,10 +310,13 @@ export function emptySquadFile(): SquadFile {
 }
 
 /** Builds one history event. `message` is clipped and omitted when absent. */
-export function squadEvent(at: string, kind: SquadEventKind, message?: string): SquadEvent {
-  return message === undefined
-    ? { at, kind }
-    : { at, kind, message: clip(message, SQUAD_EVENT_MAX_CHARS) };
+export function squadEvent(
+  at: string,
+  kind: SquadEventKind,
+  message?: string,
+  maxChars = SQUAD_EVENT_MAX_CHARS,
+): SquadEvent {
+  return message === undefined ? { at, kind } : { at, kind, message: clip(message, maxChars) };
 }
 
 /** Adds an event, drops the oldest past the cap, and moves the run's last change to the event. */
@@ -377,12 +390,15 @@ export function toWireRun(run: StoredSquadRun, progress: SquadProgress): SquadRu
     request: run.request,
     status: run.status,
     turns: run.turns,
-    maxTurns: SQUAD_MAX_TURNS,
+    maxTurns: SQUAD_MAX_TURNS + (run.extraTurns ?? 0),
     progress: { ...progress },
     history: structuredClone(run.history),
     createdAt: run.createdAt,
     updatedAt: run.updatedAt,
   };
+  wire.compact = run.compact ?? false;
+  if (run.closed === true) wire.closed = true;
+  if (run.compact === true) wire.proposalIds = run.proposals.map((proposal) => proposal.id);
   const latest = run.proposals.at(-1);
   if (latest !== undefined) wire.proposal = structuredClone(latest);
   if (run.note !== undefined) wire.note = run.note;
@@ -424,6 +440,7 @@ export function parseLeaderReply(
   members: readonly SquadMember[],
   catalog: SquadCatalog,
   openSequences: ReadonlySet<number>,
+  compact = false,
 ): Checked<LeaderReply> {
   let value: unknown;
   try {
@@ -477,7 +494,14 @@ export function parseLeaderReply(
   if (!done && assignments.length === 0) {
     return { ok: false, message: 'Đội trưởng không giao việc nào và chưa báo xong.' };
   }
-  return { ok: true, value: { assignments, note: clip(note.trim(), SQUAD_NOTE_MAX_CHARS), done } };
+  return {
+    ok: true,
+    value: {
+      assignments,
+      note: clip(note.trim(), compact ? SQUAD_COMPACT_NOTE_MAX_CHARS : SQUAD_NOTE_MAX_CHARS),
+      done,
+    },
+  };
 }
 
 /**
@@ -580,58 +604,102 @@ export function warningsOf(rows: readonly SquadRow[], catalog: SquadCatalog): st
 /** The prompt one leader turn reads: the rules, the reply shape, the team, and the run so far. */
 export function buildLeaderPrompt(input: LeaderPromptInput): string {
   const lines: string[] = [
-    `You are the squad leader for the project folder "${input.folderName}". The user gave the team the request below. Decide which team members should do which work next, or that the request is finished.`,
+    input.compact
+      ? `Bạn là trưởng đội của dự án "${input.folderName}". Hãy phân việc tiếp theo cho các repo, hoặc kết luận đội đã hoàn thành yêu cầu.`
+      : `You are the squad leader for the project folder "${input.folderName}". The user gave the team the request below. Decide which team members should do which work next, or that the request is finished.`,
     '',
-    'Rules:',
-    '- You run no tools and do no work yourself. Each assignment is a prompt its assignee will run.',
-    '- "assignee" is an id listed under "Team", "auto" (the scheduler picks a free agent in the row repo), or "new-session" (a fresh omp chat in the folder). Never invent an id. Omitted means "auto".',
-    '- "claude" as an "assignee" is a Claude Code run.',
-    '- "repo" is one of the paths under "Repos": the repo the row works in. Omitted means the folder root.',
-    `- "agent" is one name under "Agents". Omitted means "${SQUAD_DEFAULT_AGENT}", the default worker. Read-only agents only report; "${SQUAD_DEFAULT_AGENT}" changes code.`,
-    '- "role" is one of: advisor, worker, qa, judge, chat. Omitted means no role.',
-    '- "areas" lists the lowercase code areas a row edits, such as web:src/app; at most 8. Read-only agents take none.',
-    '- Optional per assignment: "priority" from 0 (most urgent) to 3 (least), default 2; "acceptance", a short "done when" the result must meet; "dependsOn", the 0-based positions of OTHER assignments in this reply that must finish first, plus "#n" for open work items listed below. Leave out what you do not need.',
-    '- Give each assignment a "reason" in one short sentence.',
-    `- Propose at most ${SQUAD_MAX_ROWS} assignments per reply.`,
-    '- Write "text", "reason", "acceptance" and "note" in the language of the request.',
+    input.compact ? 'Nguyên tắc:' : 'Rules:',
+    input.compact
+      ? '- Bạn không tự chạy công cụ hay làm việc; mỗi assignment là một yêu cầu để người được giao thực hiện.'
+      : '- You run no tools and do no work yourself. Each assignment is a prompt its assignee will run.',
+    input.compact
+      ? '- "assignee" là "new-session" để mở phiên omp mới; không dùng phiên đang có hay "auto".'
+      : '- "assignee" is an id listed under "Team", "auto" (the scheduler picks a free agent in the row repo), or "new-session" (a fresh omp chat in the folder). Never invent an id. Omitted means "auto".',
+    input.compact
+      ? '- "claude" là lượt chạy Claude Code.'
+      : '- "claude" as an "assignee" is a Claude Code run.',
+    input.compact
+      ? '- "repo" phải là một đường dẫn trong danh sách repo; bỏ trống nghĩa là thư mục gốc.'
+      : '- "repo" is one of the paths under "Repos": the repo the row works in. Omitted means the folder root.',
+    input.compact
+      ? '- "agent" phải là "task" cho mọi việc được giao.'
+      : `- "agent" is one name under "Agents". Omitted means "${SQUAD_DEFAULT_AGENT}", the default worker. Read-only agents only report; "${SQUAD_DEFAULT_AGENT}" changes code.`,
+    input.compact
+      ? '- "role" có thể là advisor, worker, qa, judge hoặc chat.'
+      : '- "role" is one of: advisor, worker, qa, judge, chat. Omitted means no role.',
+    input.compact
+      ? '- "areas" ghi các vùng code phù hợp, tối đa 8 mục.'
+      : '- "areas" lists the lowercase code areas a row edits, such as web:src/app; at most 8. Read-only agents take none.',
+    input.compact
+      ? '- "priority" từ 0 (gấp nhất) đến 3; "acceptance" mô tả điều kiện hoàn thành; "dependsOn" ghi các việc phải xong trước.'
+      : '- Optional per assignment: "priority" from 0 (most urgent) to 3 (least), default 2; "acceptance", a short "done when" the result must meet; "dependsOn", the 0-based positions of OTHER assignments in this reply that must finish first, plus "#n" for open work items listed below. Leave out what you do not need.',
+    input.compact
+      ? '- Mỗi assignment nêu một lý do ngắn.'
+      : '- Give each assignment a "reason" in one short sentence.',
+    `- ${input.compact ? 'Tối đa' : 'Propose at most'} ${SQUAD_MAX_ROWS} ${input.compact ? 'việc mỗi lượt.' : 'assignments per reply.'}`,
+    input.compact
+      ? '- Viết mọi nội dung bằng tiếng Việt.'
+      : '- Write "text", "reason", "acceptance" and "note" in Vietnamese.',
+    ...(input.compact
+      ? [
+          'Chế độ gọn:',
+          '- Chia việc theo repo; mỗi repo tối đa MỘT việc trong mỗi lượt. Giao bằng assignee "new-session" và agent "task".',
+          '- Mỗi việc phải tự trọn gói: tự khảo sát repo, thực hiện, chạy test phù hợp, tự review thay đổi, rồi báo bằng chứng file:dòng, lệnh đã chạy và mã thoát.',
+          '- Dùng dependsOn khi một repo cần repo khác hoàn tất trước (ví dụ Backend trước Web).',
+          '- Khi có kết quả: nếu thiếu, lỗi hoặc agent dừng hỏi thì giao MỘT việc bổ sung cho đúng repo; tự trả lời câu hỏi nếu suy ra được từ yêu cầu, nếu không thì đưa vào câu hỏi cuối.',
+          '- Không giao việc không đảo ngược như gộp main, deploy, xoá dữ liệu hoặc xử lý secret; đưa việc đó vào câu hỏi cuối.',
+          '- Khi done, note là tổng kết cho người dùng: từng repo đã làm gì, nhánh/worktree, test; phần còn lại; mục "Cần bạn quyết:" với danh sách đánh số hoặc "Không có".',
+          ...(input.history.some((event) => event.message?.startsWith('Trả lời của bạn:'))
+            ? ['- Đã có câu trả lời của người dùng ở lịch sử; phải tính đến câu trả lời đó trong lượt này.']
+            : []),
+        ]
+      : [
+          'Work pipeline for each request:',
+          '1. If facts are missing (where the code lives, how it works, what is required), first assign a read-only "scout" row that reports them.',
+          `2. Code changes go to "${SQUAD_DEFAULT_AGENT}" rows with a repo and areas.`,
+          '3. Each row that changes code is followed by a "reviewer" row that depends on it. Skip the reviewer only for trivial mechanical work done by "sonic".',
+          '4. Add a "security-reviewer" row that depends on any row that touches auth, user input, SQL, tokens, file paths, or shell commands.',
+          '5. Every row has an "acceptance" line that says what done means.',
+          '',
+          input.autoJudge
+            ? 'Judging: automatic judging is on. A judge agent decides each finished item; you read only the judged results.'
+            : 'Judging: automatic judging is off. You judge each finished result against its "done when" line.',
+        ]),
     '',
-    'Work pipeline for each request:',
-    '1. If facts are missing (where the code lives, how it works, what is required), first assign a read-only "scout" row that reports them.',
-    `2. Code changes go to "${SQUAD_DEFAULT_AGENT}" rows with a repo and areas.`,
-    '3. Each row that changes code is followed by a "reviewer" row that depends on it. Skip the reviewer only for trivial mechanical work done by "sonic".',
-    '4. Add a "security-reviewer" row that depends on any row that touches auth, user input, SQL, tokens, file paths, or shell commands.',
-    '5. Every row has an "acceptance" line that says what done means.',
+    input.compact
+      ? 'Chỉ trả lời đúng một đối tượng JSON, không thêm lời dẫn hay khung mã.'
+      : 'Reply with ONLY one JSON object: no text before or after it, no code fence.',
+    input.compact
+      ? '{"assignments":[{"assignee":"new-session","agent":"task","repo":"<đường dẫn repo>","role":"worker","areas":["web:src/app"],"text":"<yêu cầu>","reason":"<lý do>","acceptance":"<điều kiện xong>","priority":2,"dependsOn":[]}],"note":"<tóm tắt hoặc câu hỏi>","done":false}'
+      : '{"assignments":[{"assignee":"auto","agent":"task","repo":"<repo path>","role":"worker","areas":["web:src/app"],"text":"<prompt>","reason":"<one short sentence>","acceptance":"<done when>","priority":2,"dependsOn":[]}],"note":"<one short sentence for the user>","done":false}',
+    input.compact
+      ? 'Chỉ đặt "done" thành true khi mọi việc đã hoàn thành. Note cuối phải có tóm tắt theo repo, nhánh/worktree, test và mã thoát, phần còn lại, mục "Cần bạn quyết:".'
+      : 'Set "done" to true only when the request is complete, judged from the results below. Then "assignments" must be [].',
     '',
-    input.autoJudge
-      ? 'Judging: automatic judging is on. A judge agent decides each finished item; you read only the judged results.'
-      : 'Judging: automatic judging is off. You judge each finished result against its "done when" line.',
-    '',
-    'Reply with ONLY one JSON object: no text before or after it, no code fence.',
-    '{"assignments":[{"assignee":"auto","agent":"task","repo":"<repo path>","role":"worker","areas":["web:src/app"],"text":"<prompt>","reason":"<one short sentence>","acceptance":"<done when>","priority":2,"dependsOn":[]}],"note":"<one short sentence for the user>","done":false}',
-    'Set "done" to true only when the request is complete, judged from the results below. Then "assignments" must be [].',
-    '',
-    '## Request',
+    input.compact ? '## Yêu cầu' : '## Request',
     input.request,
     '',
-    '## Repos',
+    input.compact ? '## Repo' : '## Repos',
     ...repoLines(input.repos),
     '',
-    '## Agents',
+    input.compact ? '## Agent' : '## Agents',
     ...agentLines(input.agents),
     '',
-    '## Team',
+    input.compact ? '## Thành viên đội' : '## Team',
     ...teamLines(input.members),
     '',
-    '## Work items of this request',
+    input.compact ? '## Việc của yêu cầu này' : '## Work items of this request',
     ...itemLines(input.items),
     '',
-    '## New results since your last turn',
+    input.compact ? '## Kết quả mới từ lượt trước' : '## New results since your last turn',
     ...reviewLines(input.reviews),
     '',
-    '## Earlier steps',
+    input.compact ? '## Các bước trước, gồm trả lời của bạn' : '## Earlier steps',
     ...historyLines(input.history),
     '',
-    `This is turn ${input.turn} of ${SQUAD_MAX_TURNS}.`,
+    input.compact
+      ? `Đây là lượt ${input.turn} trên ${input.maxTurns ?? SQUAD_MAX_TURNS}.`
+      : `This is turn ${input.turn} of ${input.maxTurns ?? SQUAD_MAX_TURNS}.`,
   ];
   return lines.join('\n');
 }
@@ -661,7 +729,10 @@ function parseStoredRun(value: unknown): StoredSquadRun | null {
     !isTimestamp(value['updatedAt']) ||
     (note !== undefined && typeof note !== 'string') ||
     (error !== undefined && typeof error !== 'string') ||
-    (fromWorkItemId !== undefined && !isUuid(fromWorkItemId))
+    (fromWorkItemId !== undefined && !isUuid(fromWorkItemId)) ||
+    (value['compact'] !== undefined && typeof value['compact'] !== 'boolean') ||
+    (value['closed'] !== undefined && typeof value['closed'] !== 'boolean') ||
+    (value['extraTurns'] !== undefined && (!isCount(value['extraTurns']) || value['extraTurns'] > 5))
   ) {
     return null;
   }
@@ -677,6 +748,9 @@ function parseStoredRun(value: unknown): StoredSquadRun | null {
     updatedAt: value['updatedAt'] as string,
     ...(typeof fromWorkItemId === 'string' ? { fromWorkItemId } : {}),
   };
+  if (value['compact'] === true) run.compact = true;
+  if (value['closed'] === true) run.closed = true;
+  if (typeof value['extraTurns'] === 'number') run.extraTurns = value['extraTurns'];
   if (typeof note === 'string') run.note = note;
   if (typeof error === 'string') run.error = error;
   return run;

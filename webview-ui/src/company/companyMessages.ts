@@ -499,6 +499,21 @@ export function squadRemove(requestId: string, workspacePath: string, runId: str
   return { type: 'companySquadRemove', requestId, workspacePath, runId };
 }
 
+/** Answer the leader of a completed compact run. */
+export function squadReply(
+  requestId: string,
+  workspacePath: string,
+  runId: string,
+  text: string,
+): ClientMessage {
+  return { type: 'companySquadReply', requestId, workspacePath, runId, text };
+}
+
+/** Close a completed compact run after reading its summary. */
+export function squadClose(requestId: string, workspacePath: string, runId: string): ClientMessage {
+  return { type: 'companySquadClose', requestId, workspacePath, runId };
+}
+
 /**
  * Save one folder's squad settings. A request id seen before saves nothing new. The verdict is a
  * companyCommandResult.
