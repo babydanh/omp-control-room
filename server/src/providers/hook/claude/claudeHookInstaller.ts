@@ -33,8 +33,8 @@ interface ClaudeSettings {
 }
 
 /** Returns the absolute path to ~/.claude/settings.json. */
-function getClaudeSettingsPath(): string {
-  return path.join(os.homedir(), '.claude', 'settings.json');
+function getClaudeSettingsPath(homeDir = os.homedir()): string {
+  return path.join(homeDir, '.claude', 'settings.json');
 }
 
 /** Returns the destination path for the hook script (~/.pixel-agents/hooks/claude-hook.js). */
@@ -77,8 +77,8 @@ export const SETTINGS_HOOKS_NOT_OBJECT_MESSAGE =
   'hooks in ~/.claude/settings.json is not an object — fix or remove it';
 
 /** Raw file content, or null when the file does not exist. Throws on read errors. */
-function readRawClaudeSettings(): string | null {
-  const settingsPath = getClaudeSettingsPath();
+function readRawClaudeSettings(homeDir = os.homedir()): string | null {
+  const settingsPath = getClaudeSettingsPath(homeDir);
   if (!fs.existsSync(settingsPath)) {
     return null;
   }
@@ -101,8 +101,8 @@ function parseClaudeSettings(raw: string | null): ClaudeSettings {
 }
 
 /** Read and parse ~/.claude/settings.json (see parseClaudeSettings for the throw contract). */
-function readClaudeSettings(): ClaudeSettings {
-  return parseClaudeSettings(readRawClaudeSettings());
+function readClaudeSettings(homeDir = os.homedir()): ClaudeSettings {
+  return parseClaudeSettings(readRawClaudeSettings(homeDir));
 }
 
 function sleep(ms: number): Promise<void> {
@@ -126,8 +126,9 @@ function sleep(ms: number): Promise<void> {
  * first attempt: retrying a permission error just delays the same failure, and
  * the caller must hear about it rather than get a false "installed".
  */
-async function mutateClaudeSettings(
+export async function mutateClaudeSettings(
   mutate: (settings: ClaudeSettings) => boolean,
+  homeDir = os.homedir(),
 ): Promise<boolean> {
   let lastError: Error | null = null;
   for (let attempt = 0; attempt < SETTINGS_MUTATE_ATTEMPTS; attempt++) {
@@ -137,7 +138,7 @@ async function mutateClaudeSettings(
     let raw: string | null;
     let settings: ClaudeSettings;
     try {
-      raw = readRawClaudeSettings();
+      raw = readRawClaudeSettings(homeDir);
       settings = parseClaudeSettings(raw);
     } catch (e) {
       lastError = e instanceof Error ? e : new Error(String(e));
@@ -147,7 +148,7 @@ async function mutateClaudeSettings(
       return false;
     }
     try {
-      writeClaudeSettings(settings, raw);
+      writeClaudeSettings(settings, raw, homeDir);
       return true;
     } catch (e) {
       if (!(e instanceof ConcurrentWriteError)) throw e;
@@ -223,8 +224,8 @@ export function settingsUnusableBackupMessage(backupPath: string): string {
  * swallowed: a caller that hears no error installs an entry pointing at a file
  * that was never written.
  */
-function writeClaudeSettings(settings: ClaudeSettings, expectedRaw: string | null): void {
-  const settingsPath = getClaudeSettingsPath();
+function writeClaudeSettings(settings: ClaudeSettings, expectedRaw: string | null, homeDir = os.homedir()): void {
+  const settingsPath = getClaudeSettingsPath(homeDir);
   const dir = path.dirname(settingsPath);
   const tmpPath = settingsPath + SETTINGS_TMP_SUFFIX;
 
@@ -270,7 +271,7 @@ function writeClaudeSettings(settings: ClaudeSettings, expectedRaw: string | nul
       mode: SETTINGS_FRESH_FILE_MODE,
     });
     fs.chmodSync(tmpPath, mode);
-    if (readRawClaudeSettings() !== expectedRaw) {
+    if (readRawClaudeSettings(homeDir) !== expectedRaw) {
       throw new ConcurrentWriteError();
     }
     fs.renameSync(tmpPath, settingsPath);

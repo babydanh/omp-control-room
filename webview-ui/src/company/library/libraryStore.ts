@@ -4,6 +4,8 @@ import type {
   ClientMessage,
   LibraryAccountLogin,
   LibraryAccountsSnapshot,
+  LibraryClaudeRoleSet,
+  LibraryClaudeRolesSnapshot,
   LibraryCommandResult,
   LibraryMcpCheckRequest,
   LibraryMcpSnapshot,
@@ -23,6 +25,7 @@ export type LibraryStorageKind = LibraryStorageSearchRequest['kind'];
 
 type LibraryRequest =
   | LibrarySnapshotRequest
+  | LibraryClaudeRoleSet
   | LibrarySkillPreviewRequest
   | LibraryStorageSearchRequest
   | LibraryWorkItemRestore
@@ -31,6 +34,7 @@ type LibraryRequest =
 
 export type LibraryServerMessage =
   | LibraryAccountsSnapshot
+  | LibraryClaudeRolesSnapshot
   | LibrarySkillsSnapshot
   | LibraryMcpSnapshot
   | LibraryStorageSearchResult
@@ -39,6 +43,7 @@ export type LibraryServerMessage =
 
 export interface LibraryState {
   accounts: LibraryAccountsSnapshot | null;
+  claudeRoles: LibraryClaudeRolesSnapshot | null;
   skills: LibrarySkillsSnapshot | null;
   mcp: LibraryMcpSnapshot | null;
   storage: Partial<Record<LibraryStorageKind, LibraryStorageSearchResult>>;
@@ -62,6 +67,7 @@ export interface LibraryStore {
   requestSnapshot: (section: LibrarySection, refresh?: boolean) => string;
   searchStorage: (kind: LibraryStorageKind, options?: Omit<LibraryStorageSearchRequest, 'type' | 'requestId' | 'kind'>) => string;
   previewSkill: (id: string, sourceId?: string) => string;
+  setClaudeRole: (name: string, updates: Omit<LibraryClaudeRoleSet, 'type' | 'requestId' | 'name'>) => string;
   restoreWorkItem: (workItemId: string) => string;
   loginAccount: (tool: LibraryAccountLogin['tool'], provider?: string) => string;
   checkMcp: (name: string) => string;
@@ -70,6 +76,7 @@ export interface LibraryStore {
 export function isLibraryServerMessage(message: ServerMessage): message is LibraryServerMessage {
   return (
     message.type === 'libraryAccountsSnapshot' ||
+    message.type === 'libraryClaudeRolesSnapshot' ||
     message.type === 'librarySkillsSnapshot' ||
     message.type === 'libraryMcpSnapshot' ||
     message.type === 'libraryStorageSearchResult' ||
@@ -81,6 +88,7 @@ export function isLibraryServerMessage(message: ServerMessage): message is Libra
 function initialState(): LibraryState {
   return {
     accounts: null,
+    claudeRoles: null,
     skills: null,
     mcp: null,
     storage: {},
@@ -100,6 +108,7 @@ function requestSection(request: LibraryRequest): string {
     case 'libraryWorkItemRestore': return 'command:restoreWorkItem';
     case 'libraryAccountLogin': return 'command:login';
     case 'libraryMcpCheckRequest': return 'command:checkMcp';
+    case 'libraryClaudeRoleSet': return 'command:setClaudeRole';
   }
 }
 
@@ -112,6 +121,7 @@ function requestKey(request: LibraryRequest): string {
     case 'libraryWorkItemRestore': return `restore:${request.workItemId}`;
     case 'libraryAccountLogin': return `login:${request.tool}`;
     case 'libraryMcpCheckRequest': return `mcp:${request.name}`;
+    case 'libraryClaudeRoleSet': return `claudeRole:${request.name}`;
   }
 }
 
@@ -119,6 +129,8 @@ function responseMatches(request: LibraryRequest, message: LibraryServerMessage)
   switch (message.type) {
     case 'libraryAccountsSnapshot':
       return request.type === 'librarySnapshotRequest' && request.section === 'accounts';
+    case 'libraryClaudeRolesSnapshot':
+      return request.type === 'librarySnapshotRequest' && request.section === 'claudeRoles';
     case 'librarySkillsSnapshot':
       return request.type === 'librarySnapshotRequest' && request.section === 'skills';
     case 'libraryMcpSnapshot':
@@ -136,7 +148,8 @@ function responseMatches(request: LibraryRequest, message: LibraryServerMessage)
       return (
         (request.type === 'libraryWorkItemRestore' && message.command === 'restoreWorkItem') ||
         (request.type === 'libraryAccountLogin' && message.command === 'login') ||
-        (request.type === 'libraryMcpCheckRequest' && message.command === 'checkMcp')
+        (request.type === 'libraryMcpCheckRequest' && message.command === 'checkMcp') ||
+        (request.type === 'libraryClaudeRoleSet' && message.command === 'setClaudeRole')
       );
   }
 }
@@ -197,6 +210,7 @@ export function createLibraryStore(options: LibraryStoreOptions): LibraryStore {
 
     switch (message.type) {
       case 'libraryAccountsSnapshot': commit({ ...state, accounts: message, pending, errors }); return;
+      case 'libraryClaudeRolesSnapshot': commit({ ...state, claudeRoles: message, pending, errors }); return;
       case 'librarySkillsSnapshot': commit({ ...state, skills: message, pending, errors }); return;
       case 'libraryMcpSnapshot': commit({ ...state, mcp: message, pending, errors }); return;
       case 'libraryStorageSearchResult':
@@ -212,6 +226,9 @@ export function createLibraryStore(options: LibraryStoreOptions): LibraryStore {
         return;
       case 'libraryCommandResult':
         commit({ ...state, commandResults: { ...state.commandResults, [message.requestId]: message }, pending, errors });
+        if (message.command === 'setClaudeRole' && message.ok) {
+          transmit({ type: 'librarySnapshotRequest', requestId: newRequestId(), section: 'claudeRoles' });
+        }
         return;
     }
   }
@@ -229,6 +246,8 @@ export function createLibraryStore(options: LibraryStoreOptions): LibraryStore {
       transmit({ type: 'libraryStorageSearchRequest', requestId: newRequestId(), kind, ...requestOptions }),
     previewSkill: (id, sourceId) =>
       transmit({ type: 'librarySkillPreviewRequest', requestId: newRequestId(), id, sourceId }),
+    setClaudeRole: (name, updates) =>
+      transmit({ type: 'libraryClaudeRoleSet', requestId: newRequestId(), name, ...updates }),
     restoreWorkItem: (workItemId) =>
       transmit({ type: 'libraryWorkItemRestore', requestId: newRequestId(), workItemId }),
     loginAccount: (tool, provider) =>

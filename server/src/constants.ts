@@ -203,6 +203,7 @@ export const LIBRARY_FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000
 export const LIBRARY_PROOF_ROUTE = '/api/library/proofs/:proofId';
 export const LIBRARY_REQUEST_TYPES: Record<string, true> = {
   librarySnapshotRequest: true,
+  libraryClaudeRoleSet: true,
   librarySkillPreviewRequest: true,
   libraryStorageSearchRequest: true,
   libraryWorkItemRestore: true,

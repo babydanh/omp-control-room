@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { LibrarySkill } from '../../../../core/src/messages.js';
+import { ClaudeRolesPage } from './ClaudeRolesPage.js';
 import { libraryStore } from './libraryClient.js';
 import { useLibraryState } from './libraryStore.js';
 import { LibraryEmpty, LibraryError, LibraryLoading, LibraryPage, LibraryToolbar } from './LibraryUi.js';
@@ -41,6 +42,7 @@ export function SkillsPage() {
   const [filter, setFilter] = useState<SkillFilter>('all');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<'skills' | 'roles'>('skills');
   useEffect(() => {
     libraryStore.requestSnapshot('skills');
   }, []);
@@ -69,6 +71,23 @@ export function SkillsPage() {
       title="Kho skill"
       description="Duyệt, tìm kiếm và xem trước các skill trên những công cụ AI của bạn."
     >
+      <div role="tablist" aria-label="Kho skill và role Claude" className="flex gap-2 border-b border-border">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'skills'}
+          className={`border-b-2 px-3 py-2 text-sm ${activeTab === 'skills' ? 'border-accent text-text' : 'border-transparent text-text-secondary'}`}
+          onClick={() => setActiveTab('skills')}
+        >Skill</button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeTab === 'roles'}
+          className={`border-b-2 px-3 py-2 text-sm ${activeTab === 'roles' ? 'border-accent text-text' : 'border-transparent text-text-secondary'}`}
+          onClick={() => setActiveTab('roles')}
+        >Role Claude</button>
+      </div>
+      {activeTab === 'roles' ? <ClaudeRolesPage /> : <>
       <LibraryToolbar
         query={query}
         onQueryChange={setQuery}
@@ -77,7 +96,6 @@ export function SkillsPage() {
         selectedFilter={filter}
         onFilterChange={(value) => setFilter(value as SkillFilter)}
       />
-      {state.errors.skills && <LibraryError message={state.errors.skills} />}
       {pending && skills.length === 0 && <LibraryLoading label="Đang quét kho skill…" />}
       {!pending && !state.errors.skills && skills.length === 0 && (
         <LibraryEmpty
@@ -168,8 +186,9 @@ export function SkillsPage() {
               <div className="flex h-full min-h-96 items-center justify-center p-6 text-center text-sm text-text-secondary">Chọn một skill để xem trước nội dung.</div>
             )}
           </section>
-        </div>
+          </div>
       )}
+      </>}
     </LibraryPage>
   );
 }

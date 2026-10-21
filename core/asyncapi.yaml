@@ -165,6 +165,7 @@ components:
         - $ref: '#/components/schemas/ProjectSessionStartResultMessage'
         - $ref: '#/components/schemas/ProjectMergePreviewResultMessage'
         # Library (privileged; accounts, storage, skills and MCP)
+        - $ref: '#/components/schemas/LibraryClaudeRolesSnapshot'
         - $ref: '#/components/schemas/LibraryAccountsSnapshot'
         - $ref: '#/components/schemas/LibrarySkillsSnapshot'
         - $ref: '#/components/schemas/LibraryMcpSnapshot'
@@ -277,6 +278,7 @@ components:
         # Library (privileged; pages and commands)
         - $ref: '#/components/schemas/LibrarySnapshotRequest'
         - $ref: '#/components/schemas/LibrarySkillPreviewRequest'
+        - $ref: '#/components/schemas/LibraryClaudeRoleSet'
         - $ref: '#/components/schemas/LibraryStorageSearchRequest'
         - $ref: '#/components/schemas/LibraryWorkItemRestore'
         - $ref: '#/components/schemas/LibraryAccountLogin'
@@ -5744,7 +5746,7 @@ components:
           format: uuid
         section:
           type: string
-          enum: [accounts, storage, skills, mcp]
+          enum: [accounts, storage, skills, mcp, claudeRoles]
         refresh:
           type: boolean
           default: false
@@ -5881,6 +5883,69 @@ components:
         reason:
           type: string
 
+    LibraryClaudeRole:
+      type: object
+      additionalProperties: false
+      required: [id, name, source, description, model, effort, writesFiles, editable, enabled]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        source:
+          type: string
+          enum: [builtin, user, plugin]
+        plugin:
+          type: string
+        description:
+          type: string
+        model:
+          type: string
+        effort:
+          type: [string, 'null']
+        writesFiles:
+          type: boolean
+        editable:
+          type: boolean
+        enabled:
+          type: boolean
+
+    LibraryClaudeRolesSnapshot:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, roles]
+      properties:
+        type:
+          const: libraryClaudeRolesSnapshot
+        requestId:
+          type: string
+          format: uuid
+        roles:
+          type: array
+          items:
+            $ref: '#/components/schemas/LibraryClaudeRole'
+        reason:
+          type: string
+
+    LibraryClaudeRoleSet:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, name]
+      properties:
+        type:
+          const: libraryClaudeRoleSet
+        requestId:
+          type: string
+          format: uuid
+        name:
+          type: string
+        model:
+          type: string
+        effort:
+          type: [string, 'null']
+        enabled:
+          type: boolean
+
     LibraryMcpSnapshot:
       type: object
       additionalProperties: false
@@ -5952,7 +6017,7 @@ components:
           format: uuid
         command:
           type: string
-          enum: [restoreWorkItem, login, checkMcp]
+          enum: [restoreWorkItem, login, checkMcp, setClaudeRole]
         ok:
           type: boolean
         reason:

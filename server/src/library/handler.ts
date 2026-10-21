@@ -1,5 +1,8 @@
+import * as os from 'node:os';
+
 import type {
   LibraryAccountLogin,
+  LibraryClaudeRoleSet,
   LibraryStorageSearchRequest,
   ServerMessage,
 } from '../../../core/src/messages.js';
@@ -9,6 +12,7 @@ import {
   LIBRARY_REQUEST_TYPES,
 } from '../constants.js';
 import * as accounts from './accounts.js';
+import * as claudeRoles from './claudeRoles.js';
 import { LibraryUserError } from './libraryError.js';
 import * as mcp from './mcp.js';
 import * as skills from './skills.js';
@@ -46,6 +50,12 @@ async function runLibraryRequest(
           const list = await skills.readSkills(msg.refresh === true);
           const reason = skills.skillsSourceReason();
           send({ type: 'librarySkillsSnapshot', requestId, skills: list, ...(reason ? { reason } : {}) });
+        } else if (msg.section === 'claudeRoles') {
+          send({
+            type: 'libraryClaudeRolesSnapshot',
+            requestId,
+            roles: await claudeRoles.scanClaudeRoles(os.homedir()),
+          });
         } else if (msg.section === 'mcp') {
           const servers = await mcp.readMcpServers(msg.refresh === true);
           const reason = mcp.mcpSourceReason();
@@ -98,6 +108,17 @@ async function runLibraryRequest(
         send({ type: 'libraryCommandResult', requestId, command: 'checkMcp', ok: true, target: name });
         return;
       }
+      case 'libraryClaudeRoleSet': {
+        const request = msg as unknown as LibraryClaudeRoleSet;
+        await claudeRoles.setClaudeRole(os.homedir(), request);
+        send({ type: 'libraryCommandResult', requestId, command: 'setClaudeRole', ok: true, target: request.name });
+        send({
+          type: 'libraryClaudeRolesSnapshot',
+          requestId,
+          roles: await claudeRoles.scanClaudeRoles(os.homedir()),
+        });
+        return;
+      }
     }
   } catch (error) {
     const reason = error instanceof LibraryUserError ? error.message : LIBRARY_OPERATION_FAILED_REASON;
@@ -111,6 +132,7 @@ function errorMessage(msg: Record<string, unknown>, requestId: string, reason: s
       if (msg.section === 'accounts') return { type: 'libraryAccountsSnapshot', requestId, accounts: [], reason };
       if (msg.section === 'skills') return { type: 'librarySkillsSnapshot', requestId, skills: [], reason };
       if (msg.section === 'mcp') return { type: 'libraryMcpSnapshot', requestId, servers: [], reason };
+      if (msg.section === 'claudeRoles') return { type: 'libraryClaudeRolesSnapshot', requestId, roles: [], reason };
       return { type: 'libraryStorageSearchResult', requestId, kind: 'workItems', results: [], reason };
     case 'librarySkillPreviewRequest':
       return {
@@ -134,6 +156,8 @@ function errorMessage(msg: Record<string, unknown>, requestId: string, reason: s
       return { type: 'libraryCommandResult', requestId, command: 'restoreWorkItem', ok: false, reason };
     case 'libraryAccountLogin':
       return { type: 'libraryCommandResult', requestId, command: 'login', ok: false, reason };
+    case 'libraryClaudeRoleSet':
+      return { type: 'libraryCommandResult', requestId, command: 'setClaudeRole', ok: false, reason };
     default:
       return { type: 'libraryCommandResult', requestId, command: 'checkMcp', ok: false, reason };
   }
