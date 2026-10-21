@@ -47,12 +47,14 @@ const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>>
 };
 /** Rows another folder or group can be dropped on. */
 const DROP_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
-/** Row text size by kind: Projects and folders read as headings, sessions as the main content. */
+/** Row text size by kind: Projects and folders read as headings, sessions one compact line each. */
 const ROW_TEXT_CLASS: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>> = {
   project: 'text-base',
   folder: 'text-base',
-  session: 'text-base',
+  session: 'text-sm',
 };
+/** Branches a session row leaves unsaid: most sessions work on one of them. */
+const MAIN_BRANCHES: ReadonlySet<string> = new Set(['main', 'master']);
 
 function readCollapsed(): ReadonlySet<string> {
   try {
@@ -197,6 +199,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
     props.onMenu,
   );
   const isSession = node.kind === 'session';
+  const stateLabel = node.state === undefined ? undefined : (SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state);
   const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
   const rowRef = useRef<HTMLButtonElement>(null);
   // The drawer just opened this session: bring its row into view so you see where it sits.
@@ -224,7 +227,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           onMove(event.dataTransfer.getData('text/plain'), node);
         }}
         className="group flex min-w-0 items-center gap-1 rounded-(--company-radius-sm) hover:bg-hover"
-        style={{ paddingLeft: `${depth * 16}px` }}
+        style={{ paddingLeft: `${depth * 12}px` }}
       >
         {children.length > 0 ? (
           <button type="button" aria-label={isCollapsed ? 'Mở rộng' : 'Thu gọn'} aria-expanded={!isCollapsed} onClick={() => onToggleCollapse(node.id)} className="touch-target size-6 shrink-0 text-base text-text-muted">{isCollapsed ? '›' : '⌄'}</button>
@@ -234,25 +237,28 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           aria-current={selected ? 'true' : undefined}
           type="button"
           aria-label={`${node.kind}: ${node.name}`}
-          title={isSession ? [node.title, branch.where].filter(Boolean).join(' · ') : node.path ?? node.name}
+          title={isSession ? [node.title, stateLabel, branch.where].filter(Boolean).join(' · ') : node.path ?? node.name}
           onClick={() => {
             if (node.kind === 'project') props.onSelectProject(node.id);
             else if (isSession) props.onOpenSession(node, branch);
             else onToggleCollapse(node.id);
           }}
           {...menu}
-          className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} ${isSession ? 'py-1.5' : 'py-0.5'}`}
+          className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} py-0.5`}
         >
           {isSession ? (
             <>
-              <span aria-hidden="true" className={`size-2.5 shrink-0 rounded-full ${isRunningNode(node) ? 'bg-status-success' : 'bg-status-permission'}`} />
+              <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${isRunningNode(node) ? 'bg-status-success' : 'bg-status-permission'}`} />
               <span className="min-w-0 flex-1 leading-snug">
-                <span className="block truncate text-text">{node.name}</span>
-                <span className="block truncate text-xs text-text-muted">
-                  {node.agentKind !== undefined && <span className={AGENT_KIND_CLASS[node.agentKind]}>{node.agentKind}</span>}
-                  {node.state !== undefined && ` · ${SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state}`}
-                  {children.length > 0 && ` · ${children.length} subagent`}
-                  {branch.where !== undefined && ` · ${branch.where}`}
+                {/* One line: the name, then only what a glance needs. A running session's green dot says "đang chạy"; main is the usual branch. */}
+                <span className="flex min-w-0 items-baseline gap-1.5">
+                  <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
+                  <span className="max-w-[45%] shrink-0 truncate text-2xs text-text-muted">
+                    {node.agentKind !== undefined && <span className={AGENT_KIND_CLASS[node.agentKind]}>{node.agentKind}</span>}
+                    {!isRunningNode(node) && stateLabel !== undefined && ` · ${stateLabel}`}
+                    {children.length > 0 && ` · +${children.length}`}
+                    {branch.where !== undefined && !MAIN_BRANCHES.has(branch.where) && ` · ${branch.where}`}
+                  </span>
                 </span>
                 {progress !== null && (
                   <span className="mt-1 block" data-testid="session-progress" title={[progress.current && `Đang: ${progress.current}`, progress.blocked && `Kẹt: ${progress.blocked}`].filter(Boolean).join('\n')}>
