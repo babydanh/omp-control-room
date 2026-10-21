@@ -23,7 +23,8 @@ export const SAFE_READ_ONLY_BLOCK =
  */
 export const UNATTENDED_BLOCK =
   'Việc này do Đội giao và chạy không có người trực: không hỏi lại người dùng, không đưa lựa chọn A/B, không dùng tool hỏi (ask), không mở plan chờ duyệt. ' +
-  'Thiếu thông tin thì tự tra trong code; chỗ phải quyết thì chọn hướng an toàn, làm tiếp và ghi rõ giả định trong báo cáo.';
+  'Thiếu thông tin thì tự tra trong code; chỗ phải quyết thì chọn hướng an toàn, làm tiếp và ghi rõ giả định trong báo cáo. ' +
+  'Việc không đảo ngược được (push hay gộp vào main, deploy, xoá dữ liệu, đụng secret) thì không tự làm: ghi vào báo cáo để người dùng quyết.';
 
 /** The default worker. Naming it adds no subagent line. */
 export const DEFAULT_AGENT = 'task';

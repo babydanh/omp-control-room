@@ -865,7 +865,7 @@ export function BoardShell({ client }: BoardShellProps) {
             lanes={lanes}
             artifactId={artifactId}
             onOpen={setOpened}
-            onSelectSession={selectSession}
+            onOpenSessionTab={openSessionTab}
             onOpenArtifact={(id) => {
               setArtifactId(id);
               setOpened({ kind: 'files' });

@@ -78,8 +78,8 @@ export interface DetailDrawerProps {
   lanes: readonly BoardLane[];
   artifactId: string | null;
   onOpen: (subject: OpenedSubject) => void;
-  /** Shows a board session in the drawer, as picking it in the agent list does. */
-  onSelectSession: (sessionId: string) => void;
+  /** Shows a board session in the drawer on one tab, as the agent menu's tab items do. */
+  onOpenSessionTab: (sessionId: string, tab: CompanyDrawerTab) => void;
   onOpenArtifact: (artifactId: string) => void;
   onClearArtifact: () => void;
   onClose: () => void;
@@ -351,12 +351,16 @@ function DrawerContent(props: ContentProps) {
           actionRequest={props.workItemAction}
           onActionHandled={props.onWorkItemActionHandled}
           onOpenHolder={(assignee) => {
-            if (assignee.kind === 'herdr' && assignee.paneId) {
-              onOpen({ kind: 'herdr', paneId: assignee.paneId });
+            const paneId = assignee.kind === 'herdr' ? (assignee.paneId ?? '') : '';
+            if (paneId !== '' && state.herdrRoster.sleeping.some((entry) => entry.paneId === paneId)) {
+              // A sleeping pane has no live screen; its own panel says how to wake it.
+              onOpen({ kind: 'sleeping', paneId });
+            } else if (paneId !== '') {
+              onOpen({ kind: 'herdr', paneId });
               props.onHerdrTab('screen');
-              client.select({ herdrPaneId: assignee.paneId });
+              client.select({ herdrPaneId: paneId });
             } else if (assignee.kind === 'session' && assignee.sessionId) {
-              props.onSelectSession(assignee.sessionId);
+              props.onOpenSessionTab(assignee.sessionId, 'terminal');
             }
           }}
         />
