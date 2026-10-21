@@ -1,0 +1,339 @@
+/**
+ * `board`: the Agent Board for an agent in a terminal.
+ *
+ *   board status              who is working where, and the open work items
+ *   board task                the work items that are this session's own
+ *   board report <#n> <text>  write a progress note onto work item #n
+ *   add --json for the raw answer
+ *
+ * The session names itself by HERDR_PANE_ID and its working directory. The board's port and token
+ * come from ~/.pixel-agents/server.json, the file the board writes when it starts. Every answer is
+ * read field by field before it is printed: a board without the agent API answers with its web page.
+ */
+
+import { readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
+import type { WorkItem } from '../../core/src/messages.js';
+import { isRecord } from './company/typeGuards.js';
+
+export const BOARD_HELP = [
+  'board: xem và báo cho Agent Board từ terminal.',
+  '',
+  '  board status                  phiên nào đang làm gì ở đâu, và các việc chưa xong trên bảng',
+  '  board task                    việc trên bảng giao cho chính phiên này',
+  '  board report <#n> <nội dung>  ghi tiến độ vào lịch sử việc #n (không đổi trạng thái)',
+  '',
+  'Thêm --json để lấy dữ liệu thô.',
+].join('\n');
+
+const STATUS_LABEL: Record<WorkItem['status'], string> = {
+  queued: 'Xếp hàng',
+  running: 'Đang làm',
+  needs_input: 'Chờ người dùng',
+  review: 'Đang chấm',
+  done: 'Xong',
+  failed: 'Lỗi',
+};
+
+/** A board without the agent API answers an unknown route with its web page: say to restart it. */
+const OLD_BOARD = 'Board đang chạy bản chưa có lệnh board, hoặc trả dữ liệu lạ: khởi động lại board.';
+
+export type BoardCommand =
+  | { readonly kind: 'help' }
+  | { readonly kind: 'status' | 'task'; readonly json: boolean }
+  | { readonly kind: 'report'; readonly json: boolean; readonly item: string; readonly text: string }
+  | { readonly kind: 'error'; readonly message: string };
+
+export function parseBoardArgs(argv: readonly string[]): BoardCommand {
+  const json = argv.includes('--json');
+  const [command, ...rest] = argv.filter((arg) => arg !== '--json');
+  if (command === undefined || command === 'help' || command === '--help' || command === '-h') return { kind: 'help' };
+  if (command === 'status' || command === 'task') return { kind: command, json };
+  if (command === 'report') {
+    const [item, ...words] = rest;
+    const text = words.join(' ').trim();
+    if (item === undefined || text === '') return { kind: 'error', message: 'Cách dùng: board report <#n> <nội dung>' };
+    return { kind: 'report', json, item, text };
+  }
+  return { kind: 'error', message: `Không có lệnh "${command}".\n\n${BOARD_HELP}` };
+}
+
+// ── What the CLI prints, read from the board's answer ────────────
+
+export interface CliCaller {
+  readonly paneId?: string;
+  readonly cwd?: string;
+}
+
+export interface CliProgress {
+  readonly done: number;
+  readonly total: number;
+  readonly current?: string;
+  readonly blocked?: string;
+}
+
+export interface CliSession {
+  readonly agent: string;
+  readonly state: string;
+  readonly title: string;
+  readonly cwd: string;
+  readonly paneId?: string;
+  readonly progress?: CliProgress;
+}
+
+export interface CliItem {
+  readonly sequence: number;
+  readonly status: WorkItem['status'];
+  readonly text: string;
+  readonly folder: string;
+  readonly assignee: string;
+  readonly reason?: string;
+  readonly acceptance?: string;
+  readonly repo?: string;
+  readonly worktree?: { readonly path: string; readonly branch: string };
+  readonly history: readonly { readonly at: string; readonly message: string }[];
+}
+
+export interface StatusAnswer {
+  readonly caller: CliCaller;
+  readonly you?: CliSession;
+  readonly sessions: readonly CliSession[];
+  readonly workItems: readonly CliItem[];
+}
+
+export interface TaskAnswer {
+  readonly caller: CliCaller;
+  readonly items: readonly CliItem[];
+}
+
+function text(record: Record<string, unknown>, field: string): string | undefined {
+  const value = record[field];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function need(record: Record<string, unknown>, field: string): string {
+  const value = text(record, field);
+  if (value === undefined) throw new Error(OLD_BOARD);
+  return value;
+}
+
+function optional<K extends string>(key: K, value: string | undefined): Partial<Record<K, string>> {
+  return value === undefined || value === '' ? {} : ({ [key]: value } as Partial<Record<K, string>>);
+}
+
+function readCaller(value: unknown): CliCaller {
+  const caller = isRecord(value) && isRecord(value['caller']) ? value['caller'] : {};
+  return { ...optional('paneId', text(caller, 'paneId')), ...optional('cwd', text(caller, 'cwd')) };
+}
+
+function readProgress(value: unknown): CliProgress | undefined {
+  if (!isRecord(value)) return undefined;
+  const done = value['done'];
+  const total = value['total'];
+  if (typeof done !== 'number' || typeof total !== 'number' || total <= 0) return undefined;
+  return { done, total, ...optional('current', text(value, 'current')), ...optional('blocked', text(value, 'blocked')) };
+}
+
+function readSession(value: unknown): CliSession {
+  if (!isRecord(value)) throw new Error(OLD_BOARD);
+  const progress = readProgress(value['progress']);
+  return {
+    agent: need(value, 'agent'),
+    state: need(value, 'state'),
+    title: need(value, 'title'),
+    cwd: need(value, 'cwd'),
+    ...optional('paneId', text(value, 'paneId')),
+    ...(progress === undefined ? {} : { progress }),
+  };
+}
+
+function readAssignee(value: unknown): string {
+  if (!isRecord(value)) return '?';
+  const kind = text(value, 'kind') ?? '?';
+  if (kind === 'herdr') return `pane ${text(value, 'paneId') ?? '?'}`;
+  if (kind === 'session') return `phiên ${text(value, 'sessionId') ?? '?'}`;
+  return kind;
+}
+
+function isStatus(value: unknown): value is WorkItem['status'] {
+  return typeof value === 'string' && Object.hasOwn(STATUS_LABEL, value);
+}
+
+function readItem(value: unknown): CliItem {
+  if (!isRecord(value)) throw new Error(OLD_BOARD);
+  const sequence = value['sequence'];
+  const status = value['status'];
+  if (typeof sequence !== 'number' || !isStatus(status)) throw new Error(OLD_BOARD);
+  const worktree = value['worktree'];
+  const path = isRecord(worktree) ? text(worktree, 'path') : undefined;
+  const branch = isRecord(worktree) ? text(worktree, 'branch') : undefined;
+  const history = Array.isArray(value['history']) ? value['history'] : [];
+  return {
+    sequence,
+    status,
+    text: need(value, 'text'),
+    folder: need(value, 'folder'),
+    assignee: readAssignee(value['assignee']),
+    ...optional('reason', text(value, 'reason')),
+    ...optional('acceptance', text(value, 'acceptance')),
+    ...optional('repo', text(value, 'repo')),
+    ...(path === undefined || branch === undefined || value['worktreeRemoved'] === true ? {} : { worktree: { path, branch } }),
+    history: history.flatMap((event) => {
+      if (!isRecord(event)) return [];
+      const at = text(event, 'at');
+      const message = text(event, 'message');
+      return at === undefined || message === undefined ? [] : [{ at, message }];
+    }),
+  };
+}
+
+function readList<T>(value: unknown, field: string, read: (entry: unknown) => T): T[] {
+  const list = isRecord(value) ? value[field] : undefined;
+  if (!Array.isArray(list)) throw new Error(OLD_BOARD);
+  return list.map(read);
+}
+
+export function readStatusAnswer(value: unknown): StatusAnswer {
+  const you = isRecord(value) && value['you'] !== undefined ? readSession(value['you']) : undefined;
+  return {
+    caller: readCaller(value),
+    ...(you === undefined ? {} : { you }),
+    sessions: readList(value, 'sessions', readSession),
+    workItems: readList(value, 'workItems', readItem),
+  };
+}
+
+export function readTaskAnswer(value: unknown): TaskAnswer {
+  return { caller: readCaller(value), items: readList(value, 'items', readItem) };
+}
+
+// ── Printing ─────────────────────────────────────────────────────
+
+function clip(value: string, max: number): string {
+  const line = value.replace(/\s+/g, ' ').trim();
+  return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
+}
+
+function progressText(progress: CliProgress | undefined): string {
+  if (progress === undefined) return '';
+  const percent = Math.round((Math.min(progress.done, progress.total) / progress.total) * 100);
+  const tail = progress.blocked ? ` · KẸT: ${clip(progress.blocked, 160)}` : progress.current ? ` · đang: ${clip(progress.current, 100)}` : '';
+  return ` · ${progress.done}/${progress.total} (${percent}%)${tail}`;
+}
+
+function sessionLine(session: CliSession): string {
+  const pane = session.paneId === undefined ? '' : ` [${session.paneId}]`;
+  return `  ${session.agent}${pane} · ${session.state} · ${clip(session.title, 80)} · ${session.cwd}${progressText(session.progress)}`;
+}
+
+function itemLine(item: CliItem): string {
+  return `  #${item.sequence} [${STATUS_LABEL[item.status]}] ${clip(item.text, 100)} → ${item.assignee}${item.reason ? ` · ${clip(item.reason, 140)}` : ''}`;
+}
+
+function callerText(caller: CliCaller): string {
+  return [caller.paneId && `pane ${caller.paneId}`, caller.cwd].filter(Boolean).join(' · ') || 'không rõ';
+}
+
+export function formatStatus(answer: StatusAnswer): string {
+  const lines = [`Bạn: ${callerText(answer.caller)}${answer.you ? ` · ${answer.you.agent} "${clip(answer.you.title, 60)}"` : ''}`, ''];
+  lines.push(`Phiên đang chạy (${answer.sessions.length}):`);
+  lines.push(...(answer.sessions.length === 0 ? ['  (không có)'] : answer.sessions.map(sessionLine)));
+  lines.push('', `Việc chưa xong trên bảng (${answer.workItems.length}):`);
+  lines.push(...(answer.workItems.length === 0 ? ['  (không có)'] : answer.workItems.map(itemLine)));
+  return lines.join('\n');
+}
+
+export function formatTask(answer: TaskAnswer): string {
+  if (answer.items.length === 0) return `Không có việc nào trên bảng giao cho phiên này (${callerText(answer.caller)}).`;
+  return answer.items.map((item) => {
+    const lines = [`#${item.sequence} · ${STATUS_LABEL[item.status]} · ${item.folder}`, `Việc: ${item.text.trim()}`];
+    if (item.acceptance) lines.push(`Xong khi: ${item.acceptance}`);
+    if (item.repo) lines.push(`Repo: ${item.repo}`);
+    if (item.worktree) lines.push(`Worktree: ${item.worktree.path} (nhánh ${item.worktree.branch})`);
+    if (item.reason) lines.push(`Lý do/chặn: ${item.reason}`);
+    const recent = item.history.slice(-6);
+    if (recent.length > 0) lines.push('Lịch sử gần đây:', ...recent.map((event) => `  ${event.at.slice(0, 16).replace('T', ' ')} ${clip(event.message, 200)}`));
+    lines.push(`Báo tiến độ: board report #${item.sequence} "<nội dung>"`);
+    return lines.join('\n');
+  }).join('\n\n');
+}
+
+// ── Talking to the board ─────────────────────────────────────────
+
+interface BoardServer {
+  readonly port: number;
+  readonly token: string;
+}
+
+function readServer(): BoardServer {
+  const file = join(homedir(), '.pixel-agents', 'server.json');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(file, 'utf8'));
+  } catch {
+    throw new Error(`Board chưa chạy (không đọc được ${file}).`);
+  }
+  const port = isRecord(parsed) ? parsed['port'] : undefined;
+  const token = isRecord(parsed) ? parsed['token'] : undefined;
+  if (typeof port !== 'number' || typeof token !== 'string') throw new Error(`${file} thiếu port hoặc token.`);
+  return { port, token };
+}
+
+async function call(server: BoardServer, path: string, init: RequestInit = {}): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetch(`http://127.0.0.1:${server.port}/api/agent/${path}`, {
+      ...init,
+      headers: { authorization: `Bearer ${server.token}`, 'content-type': 'application/json' },
+    });
+  } catch {
+    throw new Error(`Không kết nối được board ở cổng ${server.port}: board có đang chạy không?`);
+  }
+  const body: unknown = await response.json().catch(() => undefined);
+  if (!response.ok) {
+    const error = isRecord(body) ? body['error'] : undefined;
+    throw new Error(typeof error === 'string' ? error : `Board trả lỗi ${response.status}.`);
+  }
+  return body;
+}
+
+export async function runBoard(argv: readonly string[], env: NodeJS.ProcessEnv, cwd: string): Promise<string> {
+  const command = parseBoardArgs(argv);
+  if (command.kind === 'help') return BOARD_HELP;
+  if (command.kind === 'error') throw new Error(command.message);
+  const server = readServer();
+  const pane = env['HERDR_PANE_ID'];
+  const caller = { cwd, ...(pane ? { pane } : {}) };
+  if (command.kind === 'report') {
+    const answer = await call(server, 'report', {
+      method: 'POST',
+      body: JSON.stringify({ item: command.item, text: command.text, ...caller }),
+    });
+    const item = isRecord(answer) ? answer['item'] : undefined;
+    const folder = isRecord(answer) ? answer['folder'] : undefined;
+    if (typeof item !== 'number' || typeof folder !== 'string') throw new Error(OLD_BOARD);
+    return command.json ? JSON.stringify(answer, null, 2) : `Đã ghi vào lịch sử việc #${item} (${folder}).`;
+  }
+  const answer = await call(server, `${command.kind}?${new URLSearchParams(caller).toString()}`);
+  if (command.kind === 'status') {
+    const status = readStatusAnswer(answer);
+    return command.json ? JSON.stringify(answer, null, 2) : formatStatus(status);
+  }
+  const task = readTaskAnswer(answer);
+  return command.json ? JSON.stringify(answer, null, 2) : formatTask(task);
+}
+
+/** Runs one `board` command and prints its answer; `boardMain.ts` calls it. */
+export function main(): void {
+  runBoard(process.argv.slice(2), process.env, process.cwd()).then(
+    (output) => {
+      process.stdout.write(`${output}\n`);
+    },
+    (error: unknown) => {
+      process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
+      process.exitCode = 1;
+    },
+  );
+}

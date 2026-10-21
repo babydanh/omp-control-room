@@ -111,6 +111,7 @@ async function main() {
     await buildCli();
     await buildPtyHost();
     await buildOmpBridge();
+    await buildBoardCli();
     await buildUninstall();
   }
 }
@@ -159,6 +160,21 @@ async function buildCli() {
   if (!production) {
     console.log('[build] CLI bundled: dist/cli.mjs');
   }
+}
+
+/** Bundle the `board` command agents run in a terminal (server/src/boardCli.ts). */
+async function buildBoardCli() {
+  await esbuild.build({
+    entryPoints: ['server/src/boardMain.ts'],
+    bundle: true,
+    format: 'cjs',
+    minify: production,
+    platform: 'node',
+    target: 'node20',
+    outfile: 'dist/board.js',
+    logLevel: 'silent',
+  });
+  console.log('[build] board CLI bundled: dist/board.js');
 }
 
 /**

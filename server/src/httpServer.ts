@@ -6,6 +6,7 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 
+import { type AgentFolder, type AgentSessionRow, registerAgentRoutes, sessionRows } from './agentApi/agentApi.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import {
@@ -34,7 +35,7 @@ import type { HerdrLink } from './herdr/herdrLink.js';
 import type { LedgerService } from './ledger/ledgerService.js';
 import { resolveProofPath } from './library/storage.js';
 import { handleProjectMessage, type ProjectCommandContext } from './projects/handler.js';
-import type { HerdrProjectSession } from './projects/projectTree.js';
+import { buildProjectTreeSnapshot, type HerdrProjectSession } from './projects/projectTree.js';
 import { createTranscriptProgress } from './projects/sessionProgress.js';
 import { processAlive } from './projects/sessionStop.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
@@ -152,6 +153,11 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     allowedHostnames,
     ptyManager: options.ptyManager,
   });
+  registerAgentRoutes(app, {
+    token: options.token,
+    sessions: () => agentSessions(options),
+    folders: () => agentFolders(options),
+  });
 
   // ── Listen ──────────────────────────────────────────────────
 
@@ -207,6 +213,49 @@ function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandC
       sessionProgress: transcriptProgress,
     },
   };
+}
+
+/** herdr's panes (working and sleeping) as Project tree sessions; a pane with no cwd is left out. */
+function herdrProjectSessions(herdr: HerdrLink | null | undefined): HerdrProjectSession[] {
+  const snapshot = herdr?.snapshot();
+  if (snapshot === undefined) return [];
+  const toSession = (
+    session: { paneId: string; cwd?: string; status?: string; title?: string; name?: string; sessionFile?: string; sessionId?: string },
+  ): HerdrProjectSession[] => session.cwd === undefined ? [] : [{
+    id: session.paneId,
+    cwd: session.cwd,
+    status: session.status ?? 'sleeping',
+    title: session.title ?? session.name ?? '',
+    ...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
+    ...(session.sessionId === undefined ? {} : { sessionId: session.sessionId }),
+  }];
+  return [...snapshot.agents.flatMap(toSession), ...snapshot.sleeping.flatMap(toSession)];
+}
+
+// ── Agent CLI (`board`) ────────────────────────────────────────
+
+/** Live sessions for `board status`: the Project tree without its git scan. */
+async function agentSessions(options: HttpServerOptions): Promise<AgentSessionRow[]> {
+  const store = options.projects?.store;
+  const tree = options.projects?.tree ?? projectTreeFromLedger(options).tree;
+  if (store === undefined || tree === undefined) return [];
+  const { nodes } = await buildProjectTreeSnapshot(store, {
+    ...tree,
+    sessionsOnly: true,
+    agents: options.store.values(),
+    herdrSessions: () => herdrProjectSessions(options.herdr),
+  });
+  return sessionRows(nodes);
+}
+
+/** The work item boards of the open folders. */
+function agentFolders(options: HttpServerOptions): AgentFolder[] {
+  const workspaces = options.workspaces;
+  if (workspaces === null || workspaces === undefined) return [];
+  return workspaces.entries().flatMap((entry) => {
+    const service = entry.open ? workspaces.servicesFor(entry.path)?.workItems : undefined;
+    return service === undefined ? [] : [{ path: entry.path, service }];
+  });
 }
 
 // ── Hook Events ────────────────────────────────────────────────
@@ -302,21 +351,7 @@ function registerWebSocketRoute(
       ...projectTreeFromLedger(options),
       privileged,
       agents: store.values(),
-      herdrSessions: () => {
-        const snapshot = options.herdr?.snapshot();
-        if (snapshot === undefined) return [];
-        const toSession = (
-          session: { paneId: string; cwd?: string; status?: string; title?: string; name?: string; sessionFile?: string; sessionId?: string },
-        ): HerdrProjectSession[] => session.cwd === undefined ? [] : [{
-          id: session.paneId,
-          cwd: session.cwd,
-          status: session.status ?? 'sleeping',
-          title: session.title ?? session.name ?? '',
-          ...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
-          ...(session.sessionId === undefined ? {} : { sessionId: session.sessionId }),
-        }];
-        return [...snapshot.agents.flatMap(toSession), ...snapshot.sleeping.flatMap(toSession)];
-      },
+      herdrSessions: () => herdrProjectSessions(options.herdr),
     });
     const scheduleProjectTree = () => {
       if (!projectTreeRequested || !privileged || projectTreeTimer !== undefined) return;
