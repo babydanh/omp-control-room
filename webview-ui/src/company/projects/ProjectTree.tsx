@@ -56,7 +56,6 @@ export interface ProjectTreeProps {
   selectedProjectId: string | null;
   store: ProjectStore;
   onSelectProject: (projectId: string | null) => void;
-  onCreateNode: (kind: 'project' | 'folder' | 'group', parentId?: string) => void;
   onOpenChanges: (checkoutId: string, tab?: 'diff' | 'merge') => void;
   onOpenSettings: (nodeId: string | null) => void;
   onNewSession: (nodeId: string, engine?: 'omp' | 'claude' | 'agy') => void;
@@ -67,7 +66,8 @@ export interface ProjectTreeProps {
 
 /** Sidebar: Project → groups → folders → the sessions working there. Git and files live on other pages. */
 export function ProjectTree(props: ProjectTreeProps) {
-  const { nodes, selectedProjectId, onSelectProject, onCreateNode } = props;
+  const { nodes, selectedProjectId, onSelectProject } = props;
+  const [newProjectName, setNewProjectName] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [agentKind, setAgentKind] = useState<ProjectTreeNode['agentKind'] | 'all'>('all');
   // Default view: only sessions that are working or waiting on you; untick to see idle ones too.
@@ -106,8 +106,32 @@ export function ProjectTree(props: ProjectTreeProps) {
     <nav aria-label="Dự án" className="flex min-h-0 flex-col gap-1 border-b border-hairline px-2 py-2">
       <div className="flex items-center gap-1">
         <button type="button" aria-pressed={selectedProjectId === null} onClick={() => onSelectProject(null)} className="touch-target min-w-0 flex-1 rounded px-2 text-left text-2xs text-text-secondary aria-pressed:bg-selected">Tất cả dự án</button>
-        <button type="button" aria-label="Tạo project" title="Tạo project" onClick={() => onCreateNode('project')} className="touch-target rounded px-2 text-text-secondary">➕</button>
+        <button type="button" aria-label="Tạo project" title="Tạo project" aria-expanded={newProjectName !== null} onClick={() => setNewProjectName((current) => (current === null ? '' : null))} className="touch-target rounded px-2 text-text-secondary">➕</button>
       </div>
+      {newProjectName !== null && (
+        <form
+          className="flex items-center gap-1 px-1"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const name = newProjectName.trim();
+            if (name === '') return;
+            props.store.createNode({ kind: 'project', name });
+            setNewProjectName(null);
+          }}
+        >
+          <input
+            autoFocus
+            aria-label="Tên project mới"
+            placeholder="Tên project mới"
+            value={newProjectName}
+            maxLength={120}
+            onChange={(event) => setNewProjectName(event.target.value)}
+            onKeyDown={(event) => { if (event.key === 'Escape') setNewProjectName(null); }}
+            className="min-w-0 flex-1 rounded bg-well px-2 py-1 text-xs text-text"
+          />
+          <button type="submit" disabled={newProjectName.trim() === ''} className="touch-target rounded px-2 text-xs text-text-secondary hover:bg-hover disabled:opacity-50">Tạo</button>
+        </form>
+      )}
       <div className="flex items-center gap-2 px-2 text-2xs text-text-muted">
         <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-0 flex-1 rounded bg-well px-1 py-1 text-text">
           <option value="all">Mọi công cụ</option>

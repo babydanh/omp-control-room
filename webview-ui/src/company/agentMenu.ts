@@ -41,7 +41,8 @@ export type ProjectNodeAction =
   | 'copyBranch'
   | 'removeFolder'
   | 'openSession'
-  | 'copySessionId';
+  | 'copySessionId'
+  | 'wake';
 
 /** What a project-tree menu needs beyond the node: whether git rows sit under it, and its folders. */
 export interface ProjectNodeMenuContext {
@@ -816,6 +817,9 @@ export function projectNodeMenuItems(
       ];
     case 'session':
       return [
+        ...(node.agentKind === 'herdr' && node.state === 'sleeping'
+          ? [add('wake', 'Đánh thức', 'play', 'wake')]
+          : []),
         // Only sessions the board can show: one it runs, or a herdr pane. Others have just their changes.
         ...(node.boardSessionId !== undefined || node.agentKind === 'herdr'
           ? [add('open-session', 'Mở phiên', 'external', 'openSession')]

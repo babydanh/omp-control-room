@@ -1,63 +1,24 @@
 /**
- * AgentSidebar: the project tree beside the board. Each board folder is a project
- * header with its counts; the active folder expands into its sessions, and the herdr
- * agents sit under the repository they work in, one project per repo. A project folds
- * with its header, and the fold is remembered.
- *
- * An open background folder lists its sessions too; a click switches the board to it.
- *
- * A folder's sessions form one list in role order (chat first), each row edged in its
- * role's colour; within a role, rows that wait on the user sort first. Parked sessions
- * sit collapsed under one "Tạm trữ" toggle so live work stays in view. Role models are
- * set in the "Vai trò & model" dialog, opened from the gear beside the heading. Every
- * action on a project or a row is in its right-click menu. The sidebar can be resized
- * from its right edge with the pointer or with the arrow keys.
+ * AgentSidebar: the Project tree beside the board (Project → groups → folders →
+ * the sessions working there, herdr panes included), under a one-line activity
+ * count. Herdr panes no Project folder holds sit in a folded "Ngoài dự án" list
+ * below, so none goes out of reach. Every action on a tree row is in its
+ * right-click menu. Role models are set in the "Vai trò & model" dialog, opened
+ * from the gear beside the heading. The sidebar can be resized from its right edge
+ * with the pointer or with the arrow keys.
  */
 
-import type {
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent,
-  ReactNode,
-} from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent } from 'react';
 import { useRef, useState } from 'react';
 
-import type { AgentMenuRequest, AgentMenuSubject } from '../agentMenu.js';
-import {
-  activityCounts,
-  type AgentRoleGroup,
-  type AgentRow,
-  agentTooltip,
-  type HerdrGroup,
-  type HerdrRow,
-  herdrRowCount,
-  herdrTooltip,
-  sidebarSessionEntries,
-  type SleepingRow,
-  sleepingTooltip,
-  type SummaryLine,
-} from '../agentSidebarView.js';
-import {
-  buildProjectTree,
-  type FolderRows,
-  projectCountsText,
-  type ProjectNode,
-} from '../agentTree.js';
-import type { CompanyClient } from '../companyClient.js';
-import type { CompanyViewState } from '../companyState.js';
+import type { HerdrRoster } from '../companyState.js';
 import { COMPANY_SIDEBAR_MAX_WIDTH_PX, COMPANY_SIDEBAR_MIN_WIDTH_PX } from '../constants.js';
 import { isSheetDismissSwipe, type SidebarPresentation } from '../layoutMode.js';
 import { ProjectTree, type ProjectTreeProps } from '../projects/ProjectTree.js';
-import { ROLE_EDGE_CLASS } from '../roleProfiles.js';
+import { herdrOutsideProjects, type OutsideHerdrRow, sessionActivityCounts } from '../projects/projectTreeView.js';
 import { clampSidebarWidth } from '../sidebarPrefs.js';
-import type { PreviewTarget } from '../terminalPreview.js';
-import { previewTriggers, useTerminalPreview } from '../terminalPreviewActions.js';
-import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
-import { useFlightLayout } from '../useFlightLayout.js';
-import { useNow } from '../useNow.js';
 import { ActivityChips } from './ActivityCounts.js';
 import { Icon } from './Icon.js';
-import { SessionProgressLabel } from './SessionInsightPanels.js';
-import { StatusDot } from './StatusDot.js';
 
 /** Pixels one arrow-key press moves the resize edge. */
 const RESIZE_STEP_PX = 16;
@@ -74,73 +35,35 @@ const PRESENTATION_CLASS: Record<PanelPresentation, string> = {
 };
 
 export interface AgentSidebarProps {
-  client: CompanyClient;
-  state: CompanyViewState;
-  /** The session the drawer shows, so its row reads as selected. */
-  selectedSessionId: string | null;
-  /** The herdr pane the drawer shows, so its row reads as selected. */
-  selectedPaneId: string | null;
   width: number;
   /** Where the sidebar sits: docked beside the board, floating over it, or a phone's sheet. */
   presentation: PanelPresentation;
-  /** The keys of the projects the user folded. */
-  collapsedProjects: ReadonlySet<string>;
   projectTree: ProjectTreeProps;
-  onWidthChange: (width: number) => void;
-  onCollapse: () => void;
-  onSelectSession: (sessionId: string) => void;
-  onSelectWorkspaceSession: (path: string, sessionId: string) => void;
+  /** Every pane the herdr server reports, so the ones outside all Projects stay listed. */
+  herdrRoster: HerdrRoster;
   onOpenHerdr: (paneId: string) => void;
   /** Opens a hibernated session's drawer, where its wake control is. */
   onOpenSleeping: (paneId: string) => void;
-  onToggleProject: (key: string) => void;
-  onMenu: (request: AgentMenuRequest) => void;
+  onWidthChange: (width: number) => void;
+  onCollapse: () => void;
   /** Opens the "Vai trò & model" dialog from the sidebar heading. */
   onOpenRoles: () => void;
   /** Closes the sheet after a leftward swipe on it. */
   onDismiss: () => void;
 }
 
-/** What every row and header needs from the sidebar, passed down once. */
-interface TreeView {
-  selectedSessionId: string | null;
-  selectedPaneId: string | null;
-  onSelectSession: (sessionId: string) => void;
-  onSelectWorkspaceSession: (path: string, sessionId: string) => void;
-  onOpenWorkspace: (path: string) => void;
-  onForgetWorkspace: (path: string) => void;
-  /** The folder the board is switching to for a session chosen in another folder; null when none. */
-  switchingPath: string | null;
-  onOpenHerdr: (paneId: string) => void;
-  onOpenSleeping: (paneId: string) => void;
-  onToggleProject: (key: string) => void;
-  onMenu: (request: AgentMenuRequest) => void;
-}
-
 export function AgentSidebar({
-  client,
-  state,
-  selectedSessionId,
-  selectedPaneId,
   width,
   presentation,
-  collapsedProjects,
   onWidthChange,
   onCollapse,
-  onSelectSession,
-  onSelectWorkspaceSession,
-  onOpenHerdr,
-  onOpenSleeping,
-  onToggleProject,
-  onMenu,
   onDismiss,
   onOpenRoles,
   projectTree,
+  herdrRoster,
+  onOpenHerdr,
+  onOpenSleeping,
 }: AgentSidebarProps) {
-  const now = useNow();
-  const treeRef = useRef<HTMLDivElement>(null);
-  useFlightLayout(treeRef);
-
   // A leftward swipe on the sheet dismisses it; a swipe on a docked or tablet sidebar does nothing.
   const sheetSwipe = useRef<{ pointerId: number; x: number; y: number } | null>(null);
 
@@ -157,40 +80,10 @@ export function AgentSidebar({
     if (presentation === 'sheet' && isSheetDismissSwipe(dx, dy)) onDismiss();
   }
 
-  const tree = buildProjectTree(state, now, collapsedProjects);
-  const boards = tree.projects.filter((project) => project.kind === 'board');
-  const repos = tree.projects.filter((project) => project.kind === 'herdr');
-  // Every loaded project counts: the active folder, or each open folder in all mode.
-  const activeGroups = boards
-    .filter((project) => project.active)
-    .flatMap((project) => project.groups);
-  const counts = activityCounts(activeGroups, tree.herdr);
-  const total =
-    activeGroups.reduce((sum, group) => sum + group.active.length + group.parked.length, 0) +
-    herdrRowCount(tree.herdr);
-  // In folder mode the herdr group holds only this folder's panes, so its empty line says so.
-  const herdrEmptyText =
-    state.viewMode === 'folder'
-      ? 'Không có agent herdr nào trong thư mục này'
-      : 'Không có agent nào trong herdr.';
-
-  const view: TreeView = {
-    selectedSessionId,
-    selectedPaneId,
-    onSelectSession,
-    onSelectWorkspaceSession,
-    onOpenWorkspace: (path) => {
-      client.openWorkspace(path);
-    },
-    onForgetWorkspace: (path) => {
-      client.forgetFolder(path);
-    },
-    switchingPath: state.pendingWorkspaceSelection?.path ?? null,
-    onOpenHerdr,
-    onOpenSleeping,
-    onToggleProject,
-    onMenu,
-  };
+  // The heading counts the sessions the Project tree lists, each once.
+  const counts = sessionActivityCounts(projectTree.nodes);
+  const total = counts.total;
+  const outside = herdrOutsideProjects(projectTree.nodes, herdrRoster);
 
   return (
     <aside
@@ -227,14 +120,12 @@ export function AgentSidebar({
           </button>
         </div>
       </header>
-      <ProjectTree {...projectTree} />
       <ActivityChips counts={counts} />
-
-      <div ref={treeRef} data-testid="agent-tree" className="min-h-0 flex-1 overflow-y-auto">
-        {boards.map((project) => (
-          <ProjectSection key={project.key} project={project} view={view} />
-        ))}
-        <HerdrBlock herdr={tree.herdr} repos={repos} view={view} emptyText={herdrEmptyText} />
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+        <ProjectTree {...projectTree} />
+        {outside.length > 0 && (
+          <OutsideProjects rows={outside} onOpenHerdr={onOpenHerdr} onOpenSleeping={onOpenSleeping} />
+        )}
       </div>
 
       {presentation !== 'sheet' && <ResizeEdge width={width} onWidthChange={onWidthChange} />}
@@ -242,504 +133,50 @@ export function AgentSidebar({
   );
 }
 
-/** A project's header, and its children when it is open. */
-function ProjectSection({ project, view }: { project: ProjectNode; view: TreeView }) {
-  const triggers = useAgentMenuGestures<HTMLButtonElement>(
-    { kind: 'project', project },
-    view.onMenu,
-  );
-  return (
-    <section aria-label={project.name} data-testid={`project-${project.key}`} className="pb-2">
-      <button
-        type="button"
-        aria-expanded={!project.collapsed}
-        onClick={() => view.onToggleProject(project.key)}
-        {...triggers}
-        title={project.tooltip}
-        className="flex w-full min-w-0 cursor-pointer items-center gap-2 rounded-(--company-radius-sm) px-2.5 py-2 text-left hover:bg-hover"
-      >
-        <span aria-hidden="true" className="w-3 shrink-0 text-2xs text-text-muted">
-          <Icon name={project.collapsed ? 'chevron-right' : 'chevron-down'} />
-        </span>
-        <span
-          aria-hidden="true"
-          className="h-4 w-[3px] shrink-0 rounded-full"
-          style={{ backgroundColor: `var(--company-project-${project.tone})` }}
-        />
-        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text-secondary">
-          {project.name}
-        </span>
-        {project.branch !== null && (
-          <span
-            title={project.branch}
-            className="max-w-[40%] min-w-0 shrink truncate rounded-(--company-radius-sm) bg-raised px-1 font-mono text-2xs text-status-active"
-          >
-            {project.branch}
-          </span>
-        )}
-        <span className="shrink-0 text-xs text-text-muted">
-          {projectCountsText(project.counts)}
-        </span>
-      </button>
-      {!project.collapsed && <ProjectBody project={project} view={view} />}
-    </section>
-  );
-}
-
-/** A project's children, indented under a guide: its roles, its panes, or a note. */
-function ProjectBody({ project, view }: { project: ProjectNode; view: TreeView }) {
-  const contents = <ProjectContents project={project} view={view} />;
-  if (!project.missing || project.path === null) return contents;
-  return (
-    <>
-      <MissingFolderNote path={project.path} view={view} />
-      {contents}
-    </>
-  );
-}
-
-/** A folder the server reports as gone from disk: said once, with the action that takes it off. */
-function MissingFolderNote({ path, view }: { path: string; view: TreeView }) {
-  return (
-    <div className="flex flex-wrap items-center gap-x-2 px-4 pb-1 text-xs text-text-muted">
-      <span>Thư mục không còn</span>
-      <button
-        type="button"
-        onClick={() => view.onForgetWorkspace(path)}
-        className="cursor-pointer rounded-(--company-radius-sm) px-1 text-text hover:bg-hover"
-      >
-        Gỡ khỏi danh sách
-      </button>
-    </div>
-  );
-}
-
-function ProjectContents({ project, view }: { project: ProjectNode; view: TreeView }) {
-  if (project.kind === 'herdr') {
-    return (
-      <>
-        <ul className="ml-4 pb-1 pl-1">
-          {project.panes.map((row, index) => (
-            <li key={row.paneId}>
-              <HerdrRowButton
-                row={row}
-                lane={project.key}
-                index={index}
-                selected={row.paneId === view.selectedPaneId}
-                onOpen={() => view.onOpenHerdr(row.paneId)}
-                onMenu={view.onMenu}
-              />
-            </li>
-          ))}
-        </ul>
-        <SleepingGroup rows={project.sleeping} view={view} />
-      </>
-    );
-  }
-  if (!project.active) {
-    if (project.folderRows !== null) {
-      return <WorkspaceSessions folder={project.folderRows} project={project} view={view} />;
-    }
-    if (project.notOpen && project.switchTo !== null) {
-      const path = project.switchTo;
-      return (
-        <button
-          type="button"
-          onClick={() => view.onOpenWorkspace(path)}
-          className="cursor-pointer px-4 pb-2 text-left text-xs text-text-muted hover:text-text"
-        >
-          chưa mở — bấm để mở
-        </button>
-      );
-    }
-    return (
-      <p className="px-4 pb-2 text-xs text-text-muted">Mở thư mục này trên bảng để xem phiên.</p>
-    );
-  }
-  return <ActiveSessions groups={project.groups} view={view} />;
-}
-
-/**
- * A background folder's sessions, as the folder list reports them. A click switches the
- * board to that folder and selects the session there; the right-click menu is the folder's.
- */
-function WorkspaceSessions({
-  folder,
-  project,
-  view,
+/** Herdr panes no Project folder holds, folded by default; a click opens the pane or its wake drawer. */
+function OutsideProjects({
+  rows,
+  onOpenHerdr,
+  onOpenSleeping,
 }: {
-  folder: FolderRows;
-  project: ProjectNode;
-  view: TreeView;
+  rows: readonly OutsideHerdrRow[];
+  onOpenHerdr: (paneId: string) => void;
+  onOpenSleeping: (paneId: string) => void;
 }) {
-  const empty = folder.live.length === 0 && folder.parked.length === 0;
-  return (
-    <div className="ml-4 pb-1 pl-1">
-      {view.switchingPath === folder.path && (
-        <p className="px-2 py-1 text-xs text-text-muted">Đang chuyển sang thư mục này…</p>
-      )}
-      {empty && <p className="px-2 py-1 text-xs text-text-muted">Chưa có phiên nào.</p>}
-      <ul>
-        {folder.live.map((row, index) => (
-          <li key={row.sessionId}>
-            <AgentRowButton
-              row={row}
-              testId={`folder-row-${row.code}`}
-              lane={`folder:${folder.path}`}
-              index={index}
-              selected={false}
-              menu={{ kind: 'project', project }}
-              onSelect={() => view.onSelectWorkspaceSession(folder.path, row.sessionId)}
-              onMenu={view.onMenu}
-            />
-          </li>
-        ))}
-      </ul>
-      {folder.parked.length > 0 && (
-        <ParkedToggle count={folder.parked.length}>
-          <ul>
-            {folder.parked.map((row, index) => (
-              <li key={row.sessionId}>
-                <AgentRowButton
-                  row={row}
-                  testId={`folder-row-${row.code}`}
-                  lane={`folder:${folder.path}:parked`}
-                  index={index}
-                  selected={false}
-                  menu={{ kind: 'project', project }}
-                  onSelect={() => view.onSelectWorkspaceSession(folder.path, row.sessionId)}
-                  onMenu={view.onMenu}
-                />
-              </li>
-            ))}
-          </ul>
-        </ParkedToggle>
-      )}
-    </div>
-  );
-}
-
-/** The herdr agents, under a heading, one project per repository they work in. */
-function HerdrBlock({
-  herdr,
-  repos,
-  view,
-  emptyText,
-}: {
-  herdr: HerdrGroup;
-  repos: readonly ProjectNode[];
-  view: TreeView;
-  emptyText: string;
-}) {
-  if (herdr.kind === 'hidden') return null;
-  if (herdr.kind === 'unavailable') {
-    return <p className="px-2.5 py-2 text-xs text-text-muted">{herdr.message}</p>;
-  }
-  if (repos.length === 0) {
-    return <p className="px-2.5 py-2 text-xs text-text-muted">{emptyText}</p>;
-  }
-  return (
-    <div data-testid="agent-group-herdr">
-      <h3 className="flex items-baseline gap-2 px-2.5 pb-1 pt-2">
-        <span className="text-sm font-semibold text-text-secondary">Herdr</span>
-        <span className="text-xs text-status-active">{herdrRowCount(herdr)} agent</span>
-      </h3>
-      {repos.map((project) => (
-        <ProjectSection key={project.key} project={project} view={view} />
-      ))}
-    </div>
-  );
-}
-
-/**
- * A folder's sessions as one list: chat first, then the Company roles in role order, each
- * row edged in its role's colour. The parked sessions of every role share one toggle.
- */
-function ActiveSessions({ groups, view }: { groups: readonly AgentRoleGroup[]; view: TreeView }) {
-  const { live, parked } = sidebarSessionEntries(groups);
-  return (
-    <div className="ml-4 pb-1 pl-1">
-      <ul>
-        {live.map((entry) => (
-          <SessionItem key={entry.row.sessionId} {...entry} view={view} />
-        ))}
-      </ul>
-      {parked.length > 0 && (
-        <ParkedToggle count={parked.length}>
-          <ul>
-            {parked.map((entry) => (
-              <SessionItem key={entry.row.sessionId} {...entry} view={view} />
-            ))}
-          </ul>
-        </ParkedToggle>
-      )}
-    </div>
-  );
-}
-
-/** One session row of an active folder, in its role's live lane or its parked lane. */
-function SessionItem({
-  row,
-  lane,
-  index,
-  view,
-}: {
-  row: AgentRow;
-  lane: string;
-  index: number;
-  view: TreeView;
-}) {
-  return (
-    <li>
-      <AgentRowButton
-        row={row}
-        testId={`agent-row-${row.code}`}
-        menu={{ kind: 'session', sessionId: row.sessionId, drawer: null }}
-        previewTarget={{ kind: 'session', sessionId: row.sessionId }}
-        lane={lane}
-        index={index}
-        selected={row.sessionId === view.selectedSessionId}
-        onSelect={() => view.onSelectSession(row.sessionId)}
-        onMenu={view.onMenu}
-      />
-    </li>
-  );
-}
-
-/** A folder's parked sessions behind one toggle, collapsed until the reader opens it. */
-function ParkedToggle({ count, children }: { count: number; children: ReactNode }) {
   const [open, setOpen] = useState(false);
   return (
-    <div className="px-2">
+    <section aria-label="Ngoài dự án" className="px-2 py-2">
       <button
         type="button"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
-        className="cursor-pointer py-0.5 text-xs text-text-muted hover:text-text"
+        title="Phiên herdr ở thư mục chưa thuộc Project nào. Thêm thư mục đó vào một Project để nó vào cây."
+        className="touch-target flex w-full items-center gap-1 rounded px-1 text-left text-2xs text-text-muted hover:bg-hover"
       >
-        Tạm trữ ({count}) <Icon name={open ? 'chevron-up' : 'chevron-down'} />
-      </button>
-      {open && children}
-    </div>
-  );
-}
-
-/** A row's second line: what the agent is doing, its glyph, and how long ago. */
-function SummaryText({ summary }: { summary: SummaryLine }) {
-  return (
-    <span className="mt-0.5 flex min-w-0 items-baseline gap-2 text-xs text-text-muted">
-      <span className="min-w-0 flex-1 truncate">
-        {summary.glyph !== '' && <span aria-hidden="true">{summary.glyph} </span>}
-        {summary.text}
-      </span>
-      {summary.age !== null && <span className="shrink-0">{summary.age}</span>}
-    </span>
-  );
-}
-
-function AgentRowButton({
-  row,
-  testId,
-  lane,
-  index,
-  selected,
-  menu,
-  previewTarget,
-  onSelect,
-  onMenu,
-}: {
-  row: AgentRow;
-  testId: string;
-  lane: string;
-  index: number;
-  selected: boolean;
-  /** What the row's right-click menu acts on: the session itself, or the folder it belongs to. */
-  menu: AgentMenuSubject;
-  previewTarget?: PreviewTarget;
-  onSelect: () => void;
-  onMenu: (request: AgentMenuRequest) => void;
-}) {
-  const actions = useTerminalPreview();
-  const triggers = useAgentMenuGestures<HTMLButtonElement>(
-    menu,
-    onMenu,
-    previewTarget === undefined ? undefined : () => actions.press(previewTarget),
-  );
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      {...(previewTarget === undefined ? {} : previewTriggers(actions, previewTarget))}
-      {...triggers}
-      aria-pressed={selected}
-      title={agentTooltip(row)}
-      data-testid={testId}
-      data-flight-key={`session:${row.sessionId}`}
-      data-lane={lane}
-      data-index={index}
-      className={`flex w-full cursor-pointer items-start gap-2 rounded-(--company-radius-sm) px-2 py-1.5 text-left hover:bg-hover ${ROLE_EDGE_CLASS[row.role]} ${selected ? 'company-selected' : ''}`}
-    >
-      <span className="flex h-4 w-3 shrink-0 items-center justify-center">
-        <StatusDot tone={row.tone} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-baseline gap-2">
-          <span className="shrink-0 font-mono text-2xs text-text-muted">{row.code}</span>
-          <span className="min-w-0 flex-1 truncate text-sm text-text">{row.name}</span>
-          <span className={`shrink-0 text-xs ${row.needsYou ? 'text-warning' : 'text-text-muted'}`}>
-            {row.label}
-          </span>
-        </span>
-        {row.summary !== null && <SummaryText summary={row.summary} />}
-        {row.progressSource !== undefined && <SessionProgressLabel session={row.progressSource} />}
-      </span>
-    </button>
-  );
-}
-
-function HerdrRowButton({
-  row,
-  lane,
-  index,
-  selected,
-  onOpen,
-  onMenu,
-}: {
-  row: HerdrRow;
-  lane: string;
-  index: number;
-  selected: boolean;
-  onOpen: () => void;
-  onMenu: (request: AgentMenuRequest) => void;
-}) {
-  const actions = useTerminalPreview();
-  const herdrTarget: PreviewTarget = { kind: 'herdr', paneId: row.paneId };
-  const triggers = useAgentMenuGestures<HTMLButtonElement>(
-    { kind: 'herdr', paneId: row.paneId, drawer: null },
-    onMenu,
-    () => actions.press(herdrTarget),
-  );
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      {...previewTriggers(actions, herdrTarget)}
-      {...triggers}
-      aria-pressed={selected}
-      title={herdrTooltip(row)}
-      data-testid={`herdr-row-${row.paneId}`}
-      data-flight-key={`pane:${row.paneId}`}
-      data-lane={lane}
-      data-index={index}
-      className={`flex w-full cursor-pointer items-start gap-2 rounded-(--company-radius-sm) px-2 py-1.5 text-left hover:bg-hover ${selected ? 'company-selected' : ''}`}
-    >
-      <span className="flex h-4 w-3 shrink-0 items-center justify-center">
-        <StatusDot tone={row.tone} />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-baseline gap-2">
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold text-text">
-            {row.kind} · {row.paneId}
-          </span>
-          {row.branch !== null && (
-            <span
-              title={row.worktreeRoot ?? row.branch}
-              className="min-w-0 max-w-[40%] shrink truncate rounded-(--company-radius-sm) bg-raised px-1 font-mono text-2xs text-status-active"
-            >
-              {row.branch}
-            </span>
-          )}
-          <span className="shrink-0 text-xs text-text-muted">{row.label}</span>
-        </span>
-        {row.summary !== null && <SummaryText summary={row.summary} />}
-      </span>
-    </button>
-  );
-}
-
-/**
- * A repo's hibernated sessions, under a toggle that opens them; open by default. Their
- * rows open the session's drawer, where it can be woken. Nothing here sends a command.
- */
-function SleepingGroup({ rows, view }: { rows: readonly SleepingRow[]; view: TreeView }) {
-  const [open, setOpen] = useState(true);
-  if (rows.length === 0) return null;
-  return (
-    <div className="ml-4 pb-1 pl-1" data-testid="sleeping-group">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className="cursor-pointer py-0.5 text-xs text-text-muted hover:text-text"
-      >
-        Ngủ đông ({rows.length}) <Icon name={open ? 'chevron-up' : 'chevron-down'} />
+        <span aria-hidden="true">{open ? '⌄' : '›'}</span>
+        <span className="flex-1">Ngoài dự án · herdr</span>
+        <span>{rows.length}</span>
       </button>
       {open && (
-        <ul>
-          {rows.map((row, index) => (
+        <ul className="mt-1 flex flex-col">
+          {rows.map((row) => (
             <li key={row.paneId}>
-              <SleepingRowButton
-                row={row}
-                index={index}
-                selected={row.paneId === view.selectedPaneId}
-                onOpen={() => view.onOpenSleeping(row.paneId)}
-                onMenu={view.onMenu}
-              />
+              <button
+                type="button"
+                onClick={() => (row.sleeping ? onOpenSleeping(row.paneId) : onOpenHerdr(row.paneId))}
+                title={row.sleeping ? 'Mở để đánh thức' : row.paneId}
+                className="touch-target w-full rounded px-2 py-1 text-left hover:bg-hover"
+              >
+                <span className="block truncate text-xs text-text">{row.title}</span>
+                <span className="block truncate text-2xs text-text-muted">
+                  {['herdr', row.where, row.sleeping ? 'ngủ đông' : row.status].filter((part) => part !== '').join(' · ')}
+                </span>
+              </button>
             </li>
           ))}
         </ul>
       )}
-    </div>
-  );
-}
-
-function SleepingRowButton({
-  row,
-  index,
-  selected,
-  onOpen,
-  onMenu,
-}: {
-  row: SleepingRow;
-  index: number;
-  selected: boolean;
-  onOpen: () => void;
-  onMenu: (request: AgentMenuRequest) => void;
-}) {
-  const actions = useTerminalPreview();
-  const sleepingTarget: PreviewTarget = { kind: 'herdr', paneId: row.paneId };
-  const triggers = useAgentMenuGestures<HTMLButtonElement>(
-    { kind: 'sleeping', paneId: row.paneId, drawer: null },
-    onMenu,
-    () => actions.press(sleepingTarget),
-  );
-  return (
-    <button
-      type="button"
-      onClick={onOpen}
-      {...previewTriggers(actions, sleepingTarget)}
-      {...triggers}
-      aria-pressed={selected}
-      title={sleepingTooltip(row)}
-      data-testid={`sleeping-row-${row.paneId}`}
-      data-flight-key={`sleeping:${row.paneId}`}
-      data-lane={`sleeping:${row.repo.key}`}
-      data-index={index}
-      className={`flex w-full cursor-pointer items-start gap-2 rounded-(--company-radius-sm) px-2 py-1.5 text-left hover:bg-hover ${selected ? 'company-selected' : ''}`}
-    >
-      <span
-        aria-hidden="true"
-        className="flex h-4 w-4 shrink-0 items-center justify-center font-mono text-2xs leading-none text-text-muted"
-      >
-        <Icon name="moon" />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium text-text">{row.name}</span>
-        {row.sleptLabel !== null && (
-          <span className="block truncate text-xs text-text-muted">{row.sleptLabel}</span>
-        )}
-      </span>
-    </button>
+    </section>
   );
 }
 

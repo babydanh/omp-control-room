@@ -1,4 +1,5 @@
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
+import type { ActivityCounts } from '../agentSidebarView.js';
 export { projectNodeMenuItems } from '../agentMenu.js';
 
 export interface ProjectTreeBranch {
@@ -107,6 +108,69 @@ export function isRunningNode(node: ProjectTreeNode): boolean {
 /** A session worth showing by default: working now, or stopped waiting for you. */
 export function isLiveNode(node: ProjectTreeNode): boolean {
   return isRunningNode(node) || (node.kind === 'session' && WAITING_ON_YOU_STATES.has((node.state ?? '').toLowerCase()));
+}
+
+/** The heading's counts, over each session once even when two Projects hold its folder; hibernated ones are not agents. */
+export function sessionActivityCounts(nodes: readonly ProjectTreeNode[]): ActivityCounts & { total: number } {
+  const counts = { total: 0, working: 0, needs: 0, idle: 0, error: 0 };
+  const seen = new Set<string>();
+  for (const node of nodes) {
+    if (node.kind !== 'session' || node.state === 'sleeping') continue;
+    const key = node.sessionId ?? node.id;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    counts.total += 1;
+    const state = (node.state ?? '').toLowerCase();
+    if (RUNNING_STATES.has(state)) counts.working += 1;
+    else if (WAITING_ON_YOU_STATES.has(state)) counts.needs += 1;
+    else if (state === 'error') counts.error += 1;
+    else counts.idle += 1;
+  }
+  return counts;
+}
+
+/** A herdr pane no Project folder holds: listed below the tree so it stays reachable. */
+export interface OutsideHerdrRow {
+  paneId: string;
+  title: string;
+  /** The folder it works in, last segment; empty when herdr does not say. */
+  where: string;
+  status: string;
+  sleeping: boolean;
+}
+
+/** Herdr panes and hibernated sessions the Project tree does not show, live ones first. */
+export function herdrOutsideProjects(
+  nodes: readonly ProjectTreeNode[],
+  roster: {
+    readonly agents: readonly { paneId: string; status: string; title?: string; name?: string; cwd?: string }[];
+    readonly sleeping: readonly { paneId: string; title: string; cwd?: string }[];
+  },
+): OutsideHerdrRow[] {
+  const shown = new Set(
+    nodes.flatMap((node) => (node.kind === 'session' && node.agentKind === 'herdr' && node.sessionId !== undefined ? [node.sessionId] : [])),
+  );
+  const where = (cwd: string | undefined) => lastPathSegment(cwd) ?? cwd ?? '';
+  return [
+    ...roster.agents
+      .filter((agent) => !shown.has(agent.paneId))
+      .map((agent) => ({
+        paneId: agent.paneId,
+        title: agent.title || agent.name || agent.paneId,
+        where: where(agent.cwd),
+        status: agent.status,
+        sleeping: false,
+      })),
+    ...roster.sleeping
+      .filter((session) => !shown.has(session.paneId))
+      .map((session) => ({
+        paneId: session.paneId,
+        title: session.title || session.paneId,
+        where: where(session.cwd),
+        status: 'sleeping',
+        sleeping: true,
+      })),
+  ];
 }
 
 

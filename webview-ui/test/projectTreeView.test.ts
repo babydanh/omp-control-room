@@ -7,7 +7,9 @@ import {
   canMoveProjectNode,
   countSessions,
   filterProjectTree,
+  herdrOutsideProjects,
   projectNodeMenuItems,
+  sessionActivityCounts,
 } from '../src/company/projects/projectTreeView.js';
 
 const node = (id: string, kind: ProjectTreeNode['kind'], parentId?: string, extra: Partial<ProjectTreeNode> = {}): ProjectTreeNode => ({
@@ -82,5 +84,39 @@ describe('projectTreeView', () => {
     expect(canMoveProjectNode(nodes, 'group', 'folder')).toBe(false);
     expect(canMoveProjectNode(nodes, 'group', 'group')).toBe(false);
     expect(canMoveProjectNode(nodes, 'group', 'other')).toBe(true);
+  });
+
+  it('offers waking a hibernated herdr session, and opening it', () => {
+    const asleep = node('pane', 'session', 'checkout', { agentKind: 'herdr', state: 'sleeping', sessionId: 'w1:p2' });
+    const items = projectNodeMenuItems(asleep, projectMenuContext([...nodes, asleep], asleep));
+    expect(items.slice(0, 2).map((item) => item.label)).toEqual(['Đánh thức', 'Mở phiên']);
+    const awake = { ...asleep, state: 'idle' };
+    expect(projectNodeMenuItems(awake, projectMenuContext([...nodes, awake], awake)).map((item) => item.label)).not.toContain('Đánh thức');
+  });
+
+  it('counts each session once across Projects, leaving hibernated ones out', () => {
+    const shared = [
+      node('a', 'session', 'folder', { sessionId: 's1', state: 'running' }),
+      node('b', 'session', 'empty', { sessionId: 's1', state: 'running' }),
+      node('c', 'session', 'folder', { sessionId: 's2', state: 'waiting_input' }),
+      node('d', 'session', 'folder', { sessionId: 's3', state: 'idle' }),
+      node('e', 'session', 'folder', { sessionId: 's4', state: 'sleeping' }),
+    ];
+    expect(sessionActivityCounts(shared)).toEqual({ total: 3, working: 1, needs: 1, idle: 1, error: 0 });
+  });
+
+  it('keeps herdr panes outside every Project reachable, live ones before hibernated', () => {
+    const inTree = node('pane', 'session', 'folder', { agentKind: 'herdr', sessionId: 'w1:p1' });
+    const rows = herdrOutsideProjects([...nodes, inTree], {
+      agents: [
+        { paneId: 'w1:p1', status: 'working', cwd: 'D:/repo' },
+        { paneId: 'w1:p3', status: 'idle', name: 'omp', cwd: 'D:\\other\\tool' },
+      ],
+      sleeping: [{ paneId: 'w1:p9', title: 'Ngủ', cwd: 'D:/away' }],
+    });
+    expect(rows).toEqual([
+      { paneId: 'w1:p3', title: 'omp', where: 'tool', status: 'idle', sleeping: false },
+      { paneId: 'w1:p9', title: 'Ngủ', where: 'away', status: 'sleeping', sleeping: true },
+    ]);
   });
 });
