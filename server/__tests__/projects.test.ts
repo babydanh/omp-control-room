@@ -246,6 +246,15 @@ describe('parentSessions', () => {
     ];
     expect(Object.fromEntries(parentSessions(rows))).toEqual({ 'sub-1': 'main-1', 'sub-2': 'sub-1', 'sub-3': 'main-1' });
   });
+
+  it('leaves a subagent without a file unlinked when its process holds two main sessions', () => {
+    const rows = [
+      sessionRow('main-a', { pid: 12, sessionFile: 'C:\\s\\a.jsonl' }),
+      sessionRow('main-b', { pid: 12, sessionFile: 'C:\\s\\b.jsonl' }),
+      sessionRow('sub-x', { pid: 12, agentKind: 'sub' }),
+    ];
+    expect(parentSessions(rows).has('sub-x')).toBe(false);
+  });
 });
 
 describe('project tree request', () => {

@@ -43,6 +43,12 @@ const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>>
 };
 /** Rows another folder or group can be dropped on. */
 const DROP_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
+/** Row text size by kind: Projects and folders read as headings, sessions as the main content. */
+const ROW_TEXT_CLASS: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>> = {
+  project: 'text-base',
+  folder: 'text-base',
+  session: 'text-base',
+};
 
 function readCollapsed(): ReadonlySet<string> {
   try {
@@ -108,7 +114,7 @@ export function ProjectTree(props: ProjectTreeProps) {
   return (
     <nav aria-label="Dự án" className="flex min-h-0 flex-col gap-1 border-b border-hairline px-2 py-2">
       <div className="flex items-center gap-1">
-        <button type="button" aria-pressed={selectedProjectId === null} onClick={() => onSelectProject(null)} className="touch-target min-w-0 flex-1 rounded px-2 text-left text-2xs text-text-secondary aria-pressed:bg-selected">Tất cả dự án</button>
+        <button type="button" aria-pressed={selectedProjectId === null} onClick={() => onSelectProject(null)} className="touch-target min-w-0 flex-1 rounded px-2 text-left text-sm text-text-secondary aria-pressed:bg-selected">Tất cả dự án</button>
         <button type="button" aria-label="Tạo project" title="Tạo project" aria-expanded={newProjectName !== null} onClick={() => setNewProjectName((current) => (current === null ? '' : null))} className="touch-target rounded px-2 text-text-secondary">➕</button>
       </div>
       {newProjectName !== null && (
@@ -130,13 +136,13 @@ export function ProjectTree(props: ProjectTreeProps) {
             maxLength={120}
             onChange={(event) => setNewProjectName(event.target.value)}
             onKeyDown={(event) => { if (event.key === 'Escape') setNewProjectName(null); }}
-            className="min-w-0 flex-1 rounded bg-well px-2 py-1 text-xs text-text"
+            className="min-w-0 flex-1 rounded bg-well px-2 py-1 text-sm text-text"
           />
-          <button type="submit" disabled={newProjectName.trim() === ''} className="touch-target rounded px-2 text-xs text-text-secondary hover:bg-hover disabled:opacity-50">Tạo</button>
+          <button type="submit" disabled={newProjectName.trim() === ''} className="touch-target rounded px-2 text-sm text-text-secondary hover:bg-hover disabled:opacity-50">Tạo</button>
         </form>
       )}
-      <div className="flex items-center gap-2 px-2 text-2xs text-text-muted">
-        <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-0 flex-1 rounded bg-well px-1 py-1 text-text">
+      <div className="flex items-center gap-2 px-2 text-xs text-text-muted">
+        <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-0 flex-1 rounded bg-well px-1 py-1 text-sm text-text">
           <option value="all">Mọi công cụ</option>
           {AGENT_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
         </select>
@@ -147,7 +153,7 @@ export function ProjectTree(props: ProjectTreeProps) {
           <ProjectTreeRow key={branch.node.id} branch={branch} depth={0} collapsed={collapsed} onToggleCollapse={toggleCollapse} onMove={moveNode} {...props} />
         ))}
         {visible.length === 0 && (
-          <p className="px-2 py-3 text-2xs text-text-muted">
+          <p className="px-2 py-3 text-xs text-text-muted">
             {nodes.length === 0 ? 'Đang tải dự án…' : 'Chưa có Project nào.'}
           </p>
         )}
@@ -192,11 +198,11 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           onMove(event.dataTransfer.getData('text/plain'), node);
         }}
         className="group flex min-w-0 items-center gap-1 rounded-(--company-radius-sm) hover:bg-hover"
-        style={{ paddingLeft: `${depth * 10}px` }}
+        style={{ paddingLeft: `${depth * 16}px` }}
       >
         {children.length > 0 ? (
-          <button type="button" aria-label={isCollapsed ? 'Mở rộng' : 'Thu gọn'} aria-expanded={!isCollapsed} onClick={() => onToggleCollapse(node.id)} className="touch-target size-5 shrink-0 text-text-muted">{isCollapsed ? '›' : '⌄'}</button>
-        ) : <span className="w-5 shrink-0" />}
+          <button type="button" aria-label={isCollapsed ? 'Mở rộng' : 'Thu gọn'} aria-expanded={!isCollapsed} onClick={() => onToggleCollapse(node.id)} className="touch-target size-6 shrink-0 text-base text-text-muted">{isCollapsed ? '›' : '⌄'}</button>
+        ) : <span className="w-6 shrink-0" />}
         <button
           type="button"
           aria-label={`${node.kind}: ${node.name}`}
@@ -207,27 +213,27 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
             else onToggleCollapse(node.id);
           }}
           {...menu}
-          className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left text-xs ${node.kind === 'project' && props.selectedProjectId === node.id ? 'bg-selected text-text' : 'text-text-secondary'} ${isSession ? 'py-1' : ''}`}
+          className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${node.kind === 'project' && props.selectedProjectId === node.id ? 'bg-selected text-text' : 'text-text-secondary'} ${isSession ? 'py-1.5' : 'py-0.5'}`}
         >
           {isSession ? (
             <>
-              <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${isRunningNode(node) ? 'bg-status-success' : 'bg-status-permission'}`} />
-              <span className="min-w-0 flex-1 leading-tight">
+              <span aria-hidden="true" className={`size-2.5 shrink-0 rounded-full ${isRunningNode(node) ? 'bg-status-success' : 'bg-status-permission'}`} />
+              <span className="min-w-0 flex-1 leading-snug">
                 <span className="block truncate text-text">{node.name}</span>
-                <span className="block truncate text-2xs text-text-muted">
+                <span className="block truncate text-xs text-text-muted">
                   {node.agentKind !== undefined && <span className={AGENT_KIND_CLASS[node.agentKind]}>{node.agentKind}</span>}
-                  {branch.where !== undefined && ` · ${branch.where}`}
-                  {children.length > 0 && ` · ${children.length} subagent`}
                   {node.state !== undefined && ` · ${SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state}`}
+                  {children.length > 0 && ` · ${children.length} subagent`}
+                  {branch.where !== undefined && ` · ${branch.where}`}
                 </span>
               </span>
             </>
           ) : (
             <>
               <span aria-hidden="true" className="shrink-0 text-text-muted">{STRUCTURE_ICON[node.kind] ?? '·'}</span>
-              <span className={`min-w-0 flex-1 truncate ${node.kind === 'project' ? 'font-semibold text-text' : ''}`}>{node.name}</span>
+              <span className={`min-w-0 flex-1 truncate ${node.kind === 'project' || node.kind === 'folder' ? 'font-semibold text-text' : 'font-medium'}`}>{node.name}</span>
               {counts !== null && counts.total > 0 && (
-                <span className="shrink-0 text-2xs text-text-muted" title={`${counts.running} đang chạy / ${counts.total} phiên`}>
+                <span className="shrink-0 text-xs text-text-muted" title={`${counts.running} đang chạy / ${counts.total} phiên`}>
                   {counts.running > 0 ? `${counts.running} chạy` : `${counts.total} phiên`}
                 </span>
               )}
@@ -240,7 +246,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
             aria-label={`Phiên mới trong ${node.name}`}
             title="Phiên mới trong thư mục này (chuột phải để chọn omp / Claude / agy)"
             onClick={() => props.onNewSession(node.id)}
-            className="touch-target shrink-0 rounded px-1.5 text-sm text-text-muted hover:bg-hover hover:text-text"
+            className="touch-target shrink-0 rounded px-1.5 text-base text-text-muted hover:bg-hover hover:text-text"
           >
             +
           </button>

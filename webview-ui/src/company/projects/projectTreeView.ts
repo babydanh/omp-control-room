@@ -53,8 +53,10 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
     const folder = cursor === undefined ? undefined : branches.get(cursor.id);
     if (folder === undefined) continue;
     const home = repo === undefined || samePath(repo.path, folder.node.path) ? folder : repoHeading(folder, repo);
-    // The quick snapshot has no checkouts: the session's own folder name stands in for its branch.
-    const where = checkout?.branch ?? checkout?.name ?? lastPathSegment(node.path);
+    // The quick snapshot has no checkouts: the session's own folder name stands in for its branch,
+    // unless that is just the folder the row sits under.
+    const ownFolder = lastPathSegment(node.path);
+    const where = checkout?.branch ?? checkout?.name ?? (ownFolder === lastPathSegment(folder.node.path) ? undefined : ownFolder);
     const row: ProjectTreeBranch = {
       node,
       children: [],

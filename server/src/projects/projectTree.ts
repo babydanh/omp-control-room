@@ -117,8 +117,9 @@ function fileStem(file: string): string {
 /**
  * Each live session's spawner. A subagent's transcript sits in a folder named after
  * its parent's transcript, so the deepest live transcript whose stem prefixes the
- * file is the parent. Rows without a file fall back to the live main session in the
- * same process. The ledger's `parent_id` is an agent name, so it cannot link them.
+ * file is the parent. A subagent without a file falls back to the live main session
+ * of its process, but only when that process has exactly one: two would be a guess,
+ * so it stays unlinked. The ledger's `parent_id` is an agent name, so it cannot link them.
  */
 export function parentSessions(rows: readonly SessionRow[]): Map<string, string> {
   const live = rows.filter((row) => row.endedAt === null);
@@ -131,10 +132,10 @@ export function parentSessions(rows: readonly SessionRow[]): Map<string, string>
       : stems
         .filter((candidate) => candidate.id !== row.sessionId && file.startsWith(candidate.stem))
         .sort((a, b) => b.stem.length - a.stem.length)[0]?.id;
-    const byProcess = byFile !== undefined || row.agentKind?.toLowerCase() !== 'sub' || row.pid === null
-      ? undefined
-      : live.find((other) => other.pid === row.pid && other.agentKind?.toLowerCase() !== 'sub')?.sessionId;
-    const parent = byFile ?? byProcess;
+    const mains = byFile !== undefined || row.agentKind?.toLowerCase() !== 'sub' || row.pid === null
+      ? []
+      : live.filter((other) => other.pid === row.pid && other.agentKind?.toLowerCase() !== 'sub');
+    const parent = byFile ?? (mains.length === 1 ? mains[0]?.sessionId : undefined);
     if (parent !== undefined) parents.set(row.sessionId, parent);
   }
   return parents;

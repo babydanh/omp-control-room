@@ -98,7 +98,7 @@ export function AgentSidebar({
       }}
     >
       <header className="flex items-center justify-between gap-2 px-2.5 py-2">
-        <h2 className="text-xs font-semibold text-text-muted">Đàn agent · {total}</h2>
+        <h2 className="text-sm font-semibold text-text-muted">Đàn agent · {total}</h2>
         <div className="flex shrink-0 items-center gap-1">
           <button
             type="button"
@@ -151,7 +151,7 @@ function OutsideProjects({
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
         title="Phiên herdr ở thư mục chưa thuộc Project nào. Thêm thư mục đó vào một Project để nó vào cây."
-        className="touch-target flex w-full items-center gap-1 rounded px-1 text-left text-2xs text-text-muted hover:bg-hover"
+        className="touch-target flex w-full items-center gap-1 rounded px-1 text-left text-sm text-text-muted hover:bg-hover"
       >
         <span aria-hidden="true">{open ? '⌄' : '›'}</span>
         <span className="flex-1">Ngoài dự án · herdr</span>
@@ -167,8 +167,8 @@ function OutsideProjects({
                 title={row.sleeping ? 'Mở để đánh thức' : row.paneId}
                 className="touch-target w-full rounded px-2 py-1 text-left hover:bg-hover"
               >
-                <span className="block truncate text-xs text-text">{row.title}</span>
-                <span className="block truncate text-2xs text-text-muted">
+                <span className="block truncate text-base text-text">{row.title}</span>
+                <span className="block truncate text-xs text-text-muted">
                   {['herdr', row.where, row.sleeping ? 'ngủ đông' : row.status].filter((part) => part !== '').join(' · ')}
                 </span>
               </button>
