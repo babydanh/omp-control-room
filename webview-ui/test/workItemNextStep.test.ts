@@ -14,6 +14,10 @@ describe('nextStepFor', () => {
     expect(summaryLine('|---|---|\n- mục đầu', 6)).toBe('mục đ…');
   });
 
+  it('asks you to answer, not to add to a report, when the agent itself asks a question', () => {
+    expect(nextStepFor({ status: 'needs_input', reason: 'Dùng nhánh nào?' }, '', false)).toMatchObject({ title: 'Agent đang hỏi bạn', actions: ['answer', 'finish'] });
+  });
+
   it('says who acts while you wait: the queue, the agent, the judge', () => {
     expect(nextStepFor({ status: 'queued' }, 'Chờ claude-be-1 rảnh', false)).toMatchObject({ tone: 'wait', detail: 'Chờ claude-be-1 rảnh', actions: [] });
     expect(nextStepFor({ status: 'running' }, '', false).actions).toEqual([]);

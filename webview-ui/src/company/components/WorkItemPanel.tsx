@@ -243,9 +243,9 @@ export function WorkItemPanel({
   const runStep = (action: NextStepAction): void => {
     if (action === 'rejudge') send('judge', client.judgeWorkItem(workspacePath, id));
     else if (action === 'finish') send('verdict', client.markWorkItem(workspacePath, id, 'done'));
-    else if (action === 'followUp') {
-      // Asking for more starts from what the judge found missing; the user edits it before sending.
-      if (draft.trim() === '') setDraft(followUpDraftFor(item));
+    else if (action === 'followUp' || action === 'answer') {
+      // Asking for more starts from what the judge found missing; an answer to the agent starts empty.
+      if (action === 'followUp' && draft.trim() === '') setDraft(followUpDraftFor(item));
       followUpRef.current?.focus();
     }
     else if (action === 'reassign') openReassign();

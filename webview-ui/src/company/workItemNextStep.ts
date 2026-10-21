@@ -7,7 +7,7 @@
 
 import type { WorkItem } from '../../../core/src/messages.js';
 
-export type NextStepAction = 'rejudge' | 'finish' | 'followUp' | 'reassign' | 'cleanWorktree' | 'remove';
+export type NextStepAction = 'rejudge' | 'finish' | 'followUp' | 'answer' | 'reassign' | 'cleanWorktree' | 'remove';
 
 export interface NextStep {
   /** wait: someone else acts; act: you act; done / error: finished. */
@@ -23,6 +23,7 @@ export const NEXT_STEP_LABEL: Record<NextStepAction, string> = {
   rejudge: 'Chấm lại',
   finish: 'Chấp nhận kết quả',
   followUp: 'Yêu cầu bổ sung',
+  answer: 'Trả lời agent',
   reassign: 'Giao người khác',
   cleanWorktree: 'Dọn worktree',
   remove: 'Xoá',
@@ -71,7 +72,7 @@ export function nextStepFor(item: StepItem, waitText: string | null, canClean: b
       if (judge?.status === 'verdict') {
         return { tone: 'act', title: 'Giám khảo thấy còn thiếu', detail: short(item.reason), actions: ['followUp', 'finish'] };
       }
-      return { tone: 'act', title: 'Agent đang hỏi bạn', detail: short(item.reason), actions: ['followUp', 'finish'] };
+      return { tone: 'act', title: 'Agent đang hỏi bạn', detail: short(item.reason), actions: ['answer', 'finish'] };
     case 'failed':
       return { tone: 'error', title: 'Lỗi', detail: short(item.reason), actions: ['reassign', 'followUp', 'remove'] };
     case 'done':
