@@ -109,6 +109,8 @@ export interface ProjectTreeFilters {
   agentKind: ProjectTreeNode['agentKind'] | 'all';
   /** Hide idle and ended sessions; running ones and ones waiting on you stay. */
   liveOnly: boolean;
+  /** The session the drawer shows: kept whatever the filters say, so its row can be pointed at. */
+  keep?: TreeSelection;
 }
 
 /**
@@ -126,8 +128,9 @@ export function filterProjectTree(
     if (branch.node.kind === 'repository') return children.length > 0 ? { ...branch, children } : null;
     if (branch.node.kind !== 'session') return { ...branch, children };
     const matched =
-      (filters.agentKind === 'all' || branch.node.agentKind === filters.agentKind) &&
-      (!filters.liveOnly || isLiveNode(branch.node));
+      (filters.keep !== undefined && isSelectedSession(branch.node, filters.keep)) ||
+      ((filters.agentKind === 'all' || branch.node.agentKind === filters.agentKind) &&
+        (!filters.liveOnly || isLiveNode(branch.node)));
     return matched || children.length > 0 ? { ...branch, children } : null;
   };
   return roots.map(filterBranch).filter((branch): branch is ProjectTreeBranch => branch !== null);
@@ -183,6 +186,17 @@ export function isSelectedSession(node: ProjectTreeNode, selection: TreeSelectio
   const pane = node.herdrPaneId ?? (node.agentKind === 'herdr' ? node.sessionId : undefined);
   if (selection.paneId !== null && pane === selection.paneId) return true;
   return selection.sessionId !== null && (node.boardSessionId === selection.sessionId || node.sessionId === selection.sessionId);
+}
+
+/** The rows above the session the drawer shows, which must be expanded for its row to appear. */
+export function selectedAncestorIds(nodes: readonly ProjectTreeNode[], selection: TreeSelection): string[] {
+  const byId = new Map(nodes.map((node) => [node.id, node]));
+  const ids: string[] = [];
+  for (const node of nodes) {
+    if (!isSelectedSession(node, selection)) continue;
+    for (let parent = node.parentId; parent !== undefined; parent = byId.get(parent)?.parentId) ids.push(parent);
+  }
+  return ids;
 }
 
 /**

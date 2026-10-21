@@ -16,6 +16,7 @@ import {
   herdrOutsideProjects,
   isSelectedSession,
   projectNodeMenuItems,
+  selectedAncestorIds,
   sessionActivityCounts,
 } from '../src/company/projects/projectTreeView.js';
 
@@ -158,6 +159,16 @@ describe('projectTreeView', () => {
     expect(isSelectedSession(joined, { sessionId: null, paneId: 'w1:p2' })).toBe(false);
     // A folder holding the session is not the session.
     expect(isSelectedSession(node('f', 'folder'), { sessionId: null, paneId: 'w1:p7' })).toBe(false);
+  });
+
+  it('keeps the session the drawer shows past the filters, and names the folders to unfold above it', () => {
+    const idle = { ...nodes.find((entry) => entry.id === 'idle')!, sessionId: 'omp-1' };
+    const all = nodes.map((entry) => (entry.id === 'idle' ? idle : entry));
+    const sessionsOf = (roots: ReturnType<typeof filterProjectTree>) => JSON.stringify(roots).includes('"id":"idle"');
+    expect(sessionsOf(filterProjectTree(buildAgentTree(all), { agentKind: 'claude', liveOnly: true }))).toBe(false);
+    expect(sessionsOf(filterProjectTree(buildAgentTree(all), { agentKind: 'claude', liveOnly: true, keep: { sessionId: 'omp-1', paneId: null } }))).toBe(true);
+    expect(selectedAncestorIds(all, { sessionId: 'omp-1', paneId: null })).toEqual(['checkout', 'repo', 'folder', 'group', 'project']);
+    expect(selectedAncestorIds(all, { sessionId: 'none', paneId: null })).toEqual([]);
   });
 
   it('opens the herdr pane and the last edited checkout of a session at a folder root', () => {

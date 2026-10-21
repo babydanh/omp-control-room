@@ -13,6 +13,7 @@ import {
   isRunningNode,
   isSelectedSession,
   type ProjectTreeBranch,
+  selectedAncestorIds,
   sessionProgressView,
   type TreeSelection,
 } from './projectTreeView.js';
@@ -90,7 +91,20 @@ export function ProjectTree(props: ProjectTreeProps) {
   const selectedRoots = selectedProjectId === null
     ? tree
     : tree.filter((branch) => branch.node.id === selectedProjectId);
-  const visible = filterProjectTree(selectedRoots, { agentKind, liveOnly });
+  const visible = filterProjectTree(selectedRoots, { agentKind, liveOnly, ...(props.selection === undefined ? {} : { keep: props.selection }) });
+  // The drawer opened a session inside a folded folder: unfold the way down to its row, once per
+  // session, so folding that folder again afterwards stays folded on later tree updates.
+  const selection = props.selection;
+  const selectionKey = `${selection?.sessionId ?? ''}|${selection?.paneId ?? ''}`;
+  const unfoldedFor = useRef('');
+  useEffect(() => {
+    if (selection === undefined || unfoldedFor.current === selectionKey) return;
+    const ancestors = selectedAncestorIds(nodes, selection);
+    // The tree may not list the session yet: try again when it updates.
+    if (ancestors.length === 0) return;
+    unfoldedFor.current = selectionKey;
+    setCollapsed((current) => (ancestors.some((id) => current.has(id)) ? new Set([...current].filter((id) => !ancestors.includes(id))) : current));
+  }, [nodes, selection, selectionKey]);
   useEffect(() => {
     try {
       window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
