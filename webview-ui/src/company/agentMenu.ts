@@ -646,10 +646,12 @@ export function planningMenuItems(hasSession: boolean): AgentMenuItem[] {
  * The items for a herdr agent: its views, its pane actions, its work items, then copies and
  * maximize.
  */
+/** `omp`: the pane runs omp, the one agent whose session fast-handoff takes to the cloud. */
 export function herdrMenuItems(
   folder: string | null,
   drawer: DrawerView | null,
   work: WorkMenuFacts | null,
+  omp = false,
 ): AgentMenuItem[] {
   return [
     item({
@@ -673,13 +675,15 @@ export function herdrMenuItems(
         action: { kind: 'readScreen' },
       }),
       item({ id: 'focus', label: 'Mở trong herdr', icon: 'external', action: { kind: 'focus' } }),
-      item({
-        id: 'cloudHandoff',
-        label: 'Đẩy lên cloud làm tiếp',
-        icon: 'send',
-        action: { kind: 'cloudHandoff' },
-        title: 'Nhắn agent viết file bàn giao rồi chạy fast-handoff; omp trên GitHub làm tiếp.',
-      }),
+      ...(omp
+        ? [item({
+            id: 'cloudHandoff',
+            label: 'Đẩy lên cloud làm tiếp',
+            icon: 'send',
+            action: { kind: 'cloudHandoff' },
+            title: 'Nhắn agent viết file bàn giao rồi chạy fast-handoff; omp trên GitHub làm tiếp.',
+          })]
+        : []),
     ]),
     ...withGroupStart(workItemMenuItems(work)),
     ...withGroupStart([
@@ -856,7 +860,10 @@ export function projectNodeMenuItems(
           ? [add('open-session', 'Mở phiên', 'external', 'openSession')]
           : []),
         ...changes(true),
-        ...(awakePaneOf(node) === null ? [] : [add('cloud-handoff', 'Đẩy lên cloud làm tiếp', 'send', 'cloudHandoff')]),
+        // fast-handoff carries an omp session to the cloud; a Claude or agy one has no transcript there.
+        ...(node.agentKind === 'omp' && awakePaneOf(node) !== null
+          ? [add('cloud-handoff', 'Đẩy lên cloud làm tiếp', 'send', 'cloudHandoff')]
+          : []),
         add('copy-session', 'Sao chép mã phiên', 'copy', 'copySessionId', true),
         add('copy-path', 'Sao chép thư mục làm việc', 'copy', 'copyPath'),
         // A ledger session's process can be stopped; a subagent shares its parent's.
@@ -871,8 +878,9 @@ export function projectNodeMenuItems(
 
 /** The herdr pane a Project session runs in, while it is awake; null when it has none or sleeps. */
 export function awakePaneOf(node: ProjectTreeNode): string | null {
+  if (node.state === 'sleeping') return null;
   if (node.herdrPaneId !== undefined) return node.herdrPaneId;
-  if (node.agentKind !== 'herdr' || node.state === 'sleeping') return null;
+  if (node.agentKind !== 'herdr') return null;
   return node.sessionId ?? null;
 }
 

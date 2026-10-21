@@ -235,7 +235,7 @@ function itemsFor(subject: AgentMenuSubject, facts: MenuFacts): AgentMenuItem[] 
       return facts.prompt === undefined ? null : planningMenuItems(facts.session !== undefined);
     case 'herdr':
       if (facts.agent === undefined) return null;
-      return herdrMenuItems(facts.folder, subject.drawer, facts.work);
+      return herdrMenuItems(facts.folder, subject.drawer, facts.work, facts.agent.kind === 'omp');
     case 'sleeping':
       return facts.sleeping === undefined ? null : sleepingMenuItems(subject.drawer);
     case 'project':
@@ -616,7 +616,8 @@ export function AgentContextMenu({
     }
     if (action === 'cloudHandoff') {
       const pane = awakePaneOf(node);
-      if (pane !== null) track(client.herdrPrompt(pane, CLOUD_HANDOFF_PROMPT));
+      // One handoff per click: a second while the first is in flight would open a second Issue.
+      if (pane !== null && pending === null) track(client.herdrPrompt(pane, CLOUD_HANDOFF_PROMPT));
       return;
     }
     if (action === 'stop') {
@@ -824,7 +825,7 @@ export function AgentContextMenu({
         if (paneId !== null) track(client.herdrWake(paneId));
         return;
       case 'cloudHandoff':
-        if (paneId !== null) track(client.herdrPrompt(paneId, CLOUD_HANDOFF_PROMPT));
+        if (paneId !== null && pending === null) track(client.herdrPrompt(paneId, CLOUD_HANDOFF_PROMPT));
         return;
       case 'assignWork':
         if (workAgent !== null && work.folder !== null) {

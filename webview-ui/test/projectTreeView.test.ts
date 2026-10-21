@@ -133,16 +133,18 @@ describe('projectTreeView', () => {
     expect(projectNodeMenuItems(awake, projectMenuContext([...nodes, awake], awake)).map((item) => item.label)).not.toContain('Đánh thức');
   });
 
-  it('offers the cloud handoff only to a session in an awake herdr pane, the one it messages', () => {
+  it('offers the cloud handoff only to an omp session in an awake herdr pane, the one it messages', () => {
     const labels = (entry: ProjectTreeNode) => projectNodeMenuItems(entry, projectMenuContext([...nodes, entry], entry)).map((item) => item.label);
-    const joined = node('claude', 'session', 'checkout', { agentKind: 'claude', state: 'running', herdrPaneId: 'w1:p7' });
-    expect(labels(joined)).toContain('Đẩy lên cloud làm tiếp');
-    expect(awakePaneOf(joined)).toBe('w1:p7');
-    const asleep = node('pane', 'session', 'checkout', { agentKind: 'herdr', state: 'sleeping', sessionId: 'w1:p2' });
-    expect(labels(asleep)).not.toContain('Đẩy lên cloud làm tiếp');
-    expect(awakePaneOf({ ...asleep, state: 'idle' })).toBe('w1:p2');
+    const omp = node('omp', 'session', 'checkout', { agentKind: 'omp', state: 'running', herdrPaneId: 'w1:p7' });
+    expect(labels(omp)).toContain('Đẩy lên cloud làm tiếp');
+    expect(awakePaneOf(omp)).toBe('w1:p7');
+    // fast-handoff would carry some other omp transcript for a Claude session.
+    expect(labels({ ...omp, agentKind: 'claude' })).not.toContain('Đẩy lên cloud làm tiếp');
+    // A joined pane that sleeps has no agent to read the message.
+    expect(labels({ ...omp, state: 'sleeping' })).not.toContain('Đẩy lên cloud làm tiếp');
+    expect(awakePaneOf({ ...omp, state: 'sleeping' })).toBeNull();
     // Not in herdr: the board has no pane to message.
-    expect(labels(nodes.find((entry) => entry.id === 'session')!)).not.toContain('Đẩy lên cloud làm tiếp');
+    expect(labels(node('out', 'session', 'checkout', { agentKind: 'omp', state: 'running' }))).not.toContain('Đẩy lên cloud làm tiếp');
   });
 
   it('opens the herdr pane and the last edited checkout of a session at a folder root', () => {

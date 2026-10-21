@@ -323,11 +323,15 @@ describe('herdrMenuItems', () => {
       'Xem màn hình',
       'Đọc lại màn hình',
       'Mở trong herdr',
-      'Đẩy lên cloud làm tiếp',
       'Sao chép màn hình',
       'Sao chép thư mục',
       'Sao chép pane id',
     ]);
+  });
+
+  it('offers the cloud handoff only on an omp pane, whose session fast-handoff takes up', () => {
+    expect(herdrMenuItems('/repo', null, null, true).map((item) => item.label)).toContain('Đẩy lên cloud làm tiếp');
+    expect(herdrMenuItems('/repo', null, null, false).map((item) => item.label)).not.toContain('Đẩy lên cloud làm tiếp');
   });
 
   it('maps the info and screen items to the drawer tabs', () => {
@@ -416,7 +420,6 @@ describe('work item actions in the agent menu', () => {
       'Xem màn hình',
       'Đọc lại màn hình',
       'Mở trong herdr',
-      'Đẩy lên cloud làm tiếp',
       'Giao việc cho agent này…',
       'Mô tả vai trò…',
       'Sao chép màn hình',
