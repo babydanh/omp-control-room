@@ -37,6 +37,7 @@ export type ProjectNodeAction =
   | 'moveTo'
   | 'changes'
   | 'merge'
+  | 'compare'
   | 'copyPath'
   | 'copyBranch'
   | 'removeFolder'
@@ -808,10 +809,17 @@ export function projectNodeMenuItems(
         add('remove-folder', 'Bỏ khỏi project…', 'trash', 'removeFolder', true, true),
       ];
     case 'repository':
+      return [
+        ...newSessions(),
+        ...changes(true),
+        add('merge', 'Thử gộp với…', 'git-branch', 'merge'),
+        add('copy-path', 'Sao chép đường dẫn', 'copy', 'copyPath', true),
+      ];
     case 'checkout':
       return [
         ...newSessions(),
         ...changes(true),
+        add('compare', 'So sánh với…', 'git-branch', 'compare'),
         add('merge', 'Thử gộp với…', 'git-branch', 'merge'),
         add('copy-path', 'Sao chép đường dẫn', 'copy', 'copyPath', true),
         ...(node.branch === undefined ? [] : [add('copy-branch', 'Sao chép nhánh', 'copy', 'copyBranch')]),

@@ -40,6 +40,7 @@ export interface LedgerViewProps {
   onOpenHerdr: (paneId: string) => void;
   onOpenSleeping: (paneId: string) => void;
   onClose: () => void;
+  onCompare: (repo: string, branch: string) => void;
   /** The folder rules' input: the Cây git view shows only the repos and folders in view. */
   focus: FolderFocusInput;
 }
@@ -52,6 +53,7 @@ export function LedgerView({
   onOpenHerdr,
   onOpenSleeping,
   onClose,
+  onCompare,
 }: LedgerViewProps) {
   const ledger = useLedgerState(ledgerStore);
   const phone = useLayoutMode() === 'phone';
@@ -164,7 +166,7 @@ export function LedgerView({
             </div>
             <div role="tabpanel" className="min-h-0 flex-1 overflow-auto px-3 pb-3">
               {tab === 'overview' ? (
-                <LedgerOverviewTab view={view} ledger={ledger} boardSessions={boardSessions} onSelect={choose} />
+                <LedgerOverviewTab view={view} ledger={ledger} boardSessions={boardSessions} onSelect={choose} onCompare={onCompare} />
               ) : tab === 'graph' ? (
                 <LedgerTreeTab
                   view={view}

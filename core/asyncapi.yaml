@@ -166,6 +166,7 @@ components:
         - $ref: '#/components/schemas/ProjectSessionStartResultMessage'
         - $ref: '#/components/schemas/ProjectImageSavedMessage'
         - $ref: '#/components/schemas/ProjectMergePreviewResultMessage'
+        - $ref: '#/components/schemas/ProjectBranchCompareMessage'
         # Library (privileged; accounts, storage, skills and MCP)
         - $ref: '#/components/schemas/LibraryClaudeRolesSnapshot'
         - $ref: '#/components/schemas/LibraryAccountsSnapshot'
@@ -279,6 +280,7 @@ components:
         - $ref: '#/components/schemas/ProjectSessionStartMessage'
         - $ref: '#/components/schemas/ProjectSessionStopMessage'
         - $ref: '#/components/schemas/ProjectImageSaveMessage'
+        - $ref: '#/components/schemas/ProjectBranchCompareRequestMessage'
         - $ref: '#/components/schemas/ProjectMergePreviewRequestMessage'
         # Library (privileged; pages and commands)
         - $ref: '#/components/schemas/LibrarySnapshotRequest'
@@ -7787,7 +7789,7 @@ components:
           maxLength: 4096
         scope:
           type: string
-          enum: [uncommitted, branch, commit]
+          enum: [uncommitted, branch, commit, compare]
         sha:
           type: string
           minLength: 1
@@ -8002,7 +8004,7 @@ components:
           type: string
         scope:
           type: string
-          enum: [uncommitted, branch, commit]
+          enum: [uncommitted, branch, commit, compare]
         sha:
           type: string
         files:
@@ -8202,6 +8204,154 @@ components:
         reason:
           type: string
           description: Vietnamese refusal or failure reason.
+
+    ProjectBranchCompareRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, repo, branchA, branchB]
+      properties:
+        type:
+          const: projectBranchCompareRequest
+        requestId:
+          type: string
+          format: uuid
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        branchA:
+          type: string
+          minLength: 1
+          maxLength: 256
+        branchB:
+          type: string
+          minLength: 1
+          maxLength: 256
+
+    ProjectBranchCompareMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, repo, branchA, branchB, a, b, mergeBase, onlyA, onlyB, commitsTruncated, files, mergeClean, conflicts]
+      properties:
+        type:
+          const: projectBranchCompare
+        requestId:
+          type: string
+          format: uuid
+        repo:
+          type: string
+        branchA:
+          type: string
+        branchB:
+          type: string
+        a:
+          $ref: '#/components/schemas/ProjectBranchCompareSide'
+        b:
+          $ref: '#/components/schemas/ProjectBranchCompareSide'
+        mergeBase:
+          type: [string, 'null']
+        onlyA:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectBranchCommit'
+        onlyB:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectBranchCommit'
+        commitsTruncated:
+          type: boolean
+        files:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectBranchCompareFile'
+        mergeClean:
+          type: boolean
+        conflicts:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectBranchCompareConflict'
+        reason:
+          type: string
+
+    ProjectBranchCompareSide:
+      type: object
+      additionalProperties: false
+      required: [branch, head, lastCommitAt, lastCommitSubject, dirtyFiles]
+      properties:
+        branch:
+          type: string
+        head:
+          type: string
+        lastCommitAt:
+          type: [string, 'null']
+        lastCommitSubject:
+          type: [string, 'null']
+        checkout:
+          type: string
+        dirtyFiles:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [path, status]
+            properties:
+              path:
+                type: string
+              status:
+                type: string
+
+    ProjectBranchCommit:
+      type: object
+      additionalProperties: false
+      required: [sha, subject, author, at]
+      properties:
+        sha:
+          type: string
+        subject:
+          type: string
+        author:
+          type: string
+        at:
+          type: string
+
+    ProjectBranchCompareFile:
+      type: object
+      additionalProperties: false
+      required: [path, inA, inB, conflict]
+      properties:
+        path:
+          type: string
+        inA:
+          type: boolean
+        inB:
+          type: boolean
+        conflict:
+          type: boolean
+
+    ProjectBranchCompareConflict:
+      type: object
+      additionalProperties: false
+      required: [file, hunks]
+      properties:
+        file:
+          type: string
+        hunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProjectBranchConflictHunk'
+
+    ProjectBranchConflictHunk:
+      type: object
+      additionalProperties: false
+      required: [line, ours, theirs]
+      properties:
+        line:
+          type: integer
+          minimum: 1
+        ours:
+          type: string
+        theirs:
+          type: string
 
     ProjectDiffFile:
       type: object

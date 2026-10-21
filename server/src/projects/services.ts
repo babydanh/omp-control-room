@@ -1,3 +1,4 @@
+import type { ProjectBranchCompareServices } from './branchCompare.js';
 import type { ProjectCommentServices } from './comments.js';
 import type { ProjectDiffServices } from './diff.js';
 import type { ProjectMergePreviewServices } from './mergePreview.js';
@@ -18,6 +19,7 @@ export interface ProjectModuleDeps<S> {
 export interface ProjectServices {
   readonly diff?: ProjectDiffServices;
   readonly mergePreview?: ProjectMergePreviewServices;
+  readonly branchCompare?: ProjectBranchCompareServices;
   readonly comments?: ProjectCommentServices;
   readonly settings?: ProjectSettingsServices;
   readonly session?: ProjectSessionServices;

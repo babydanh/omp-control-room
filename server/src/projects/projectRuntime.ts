@@ -6,6 +6,7 @@ import { ledgerPathKey } from '../ledger/ledgerPath.js';
 import type { LedgerService } from '../ledger/ledgerService.js';
 import type { ProcessRunner } from '../ledger/processRunner.js';
 import { LibraryUserError } from '../library/libraryError.js';
+import { createProjectBranchCompareServices } from './branchCompare.js';
 import { createProjectCommentServices } from './comments.js';
 import { createProjectDiffServices } from './diff.js';
 import { createProjectMergePreviewServices } from './mergePreview.js';
@@ -98,6 +99,7 @@ export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime
       settings,
       diff: createProjectDiffServices({ runProcess, ledger: ledger.projectTreeSource }),
       mergePreview: createProjectMergePreviewServices({ runProcess }),
+      branchCompare: createProjectBranchCompareServices({ runProcess }),
       comments: createProjectCommentServices({
         ledger,
         sendBoardPrompt: async (sessionId, text) => {

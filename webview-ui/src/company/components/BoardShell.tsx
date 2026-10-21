@@ -154,7 +154,8 @@ export function BoardShell({ client }: BoardShellProps) {
   const [projectSettingsNode, setProjectSettingsNode] = useState<string | null>(null);
   const [newSessionNode, setNewSessionNode] = useState<{ nodeId: string; engine?: ProjectSessionEngine } | null>(null);
   const [selectedCheckoutId, setSelectedCheckoutId] = useState('');
-  const [changesTab, setChangesTab] = useState<'diff' | 'merge'>('diff');
+  const [changesTab, setChangesTab] = useState<'diff' | 'merge' | 'compare'>('diff');
+  const [compareBranchA, setCompareBranchA] = useState('');
   const state = useCompanyState(client);
   useSessionLogBackfill(client, state);
   const ledger = useLedgerState(ledgerStore);
@@ -416,10 +417,11 @@ export function BoardShell({ client }: BoardShellProps) {
     client.select(selectionForTask(state, taskId));
   }
 
-  function openProjectChanges(checkoutPath: string, tab: 'diff' | 'merge' = 'diff'): void {
+  function openProjectChanges(checkoutPath: string, tab: 'diff' | 'merge' | 'compare' = 'diff', branchA = ''): void {
     setSelectedCheckoutId(checkoutPath);
     setChangesTab(tab);
-    projectStore.requestDiff({ checkout: checkoutPath, scope: 'uncommitted', sha: '' });
+    setCompareBranchA(branchA);
+    if (tab !== 'compare') projectStore.requestDiff({ checkout: checkoutPath, scope: 'uncommitted', sha: '' });
     selectPage('changes');
   }
 
@@ -447,9 +449,9 @@ export function BoardShell({ client }: BoardShellProps) {
 
   /** Menu actions that leave the menu: pages and dialogs. Tree edits run in the menu itself. */
   function runProjectNodeAction(node: ProjectTreeNode, action: ProjectNodeAction): void {
-    if (action === 'changes' || action === 'merge') {
+    if (action === 'changes' || action === 'merge' || action === 'compare') {
       const checkout = checkoutPathFor(projects.nodes, node);
-      if (checkout !== null) openProjectChanges(checkout, action === 'merge' ? 'merge' : 'diff');
+      if (checkout !== null) openProjectChanges(checkout, action === 'merge' ? 'merge' : action === 'compare' ? 'compare' : 'diff', node.branch ?? '');
       return;
     }
     if (action === 'settings') {
@@ -821,6 +823,13 @@ export function BoardShell({ client }: BoardShellProps) {
               onOpenHerdr={openHerdr}
               onOpenSleeping={openSleeping}
               onClose={() => selectPage('board')}
+              onCompare={(repo, branch) => {
+                // The ledger writes `V:/a/b`, the Project tree may write `V:\a\b`: compare them separator- and case-blind.
+                const key = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+                const repository = projects.nodes.find((node) => node.kind === 'repository' && node.path !== undefined && key(node.path) === key(repo));
+                const branchCheckout = projects.nodes.find((node) => node.kind === 'checkout' && node.parentId === repository?.id && node.branch === branch);
+                if (branchCheckout?.path) openProjectChanges(branchCheckout.path, 'compare', branch);
+              }}
             />
           ) : (
             <CompanyBoard
@@ -887,7 +896,7 @@ export function BoardShell({ client }: BoardShellProps) {
       </div>
       </>
       ) : activePage === 'changes' ? (
-        <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} initialTab={changesTab} onClose={() => selectPage('board')} />
+        <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} initialTab={changesTab} initialBranchA={compareBranchA} onClose={() => selectPage('board')} />
       ) : activePage === 'usage' ? (
         <div key="usage-page" className="company-shell-page flex min-h-0 flex-1 flex-col">
           <UsagePage client={client} />

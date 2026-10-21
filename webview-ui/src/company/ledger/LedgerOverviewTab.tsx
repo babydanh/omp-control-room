@@ -30,9 +30,10 @@ export interface LedgerOverviewTabProps {
   ledger: LedgerState;
   boardSessions: BoardSessionIndex;
   onSelect: (selection: LedgerSelection) => void;
+  onCompare: (repo: string, branch: string) => void;
 }
 
-export function LedgerOverviewTab({ view, ledger, boardSessions, onSelect }: LedgerOverviewTabProps) {
+export function LedgerOverviewTab({ view, ledger, boardSessions, onSelect, onCompare }: LedgerOverviewTabProps) {
   // Measured from the snapshot's own time, so a render stays pure and ages move with each poll.
   const insights = useMemo(() => buildInsights(view, parseLedgerTimestamp(view.generatedAt) ?? 0), [view]);
   const [query, setQuery] = useState('');
@@ -88,13 +89,13 @@ export function LedgerOverviewTab({ view, ledger, boardSessions, onSelect }: Led
         </label>
         <span className="text-xs text-text-muted">Dùng j/k rồi Enter để mở nhánh</span>
       </div>
-      {insights.map((insight) => <RepoOverview key={insight.repo} insight={insight} view={view} ledger={ledger} boardSessions={boardSessions} onSelect={onSelect} query={query} tool={tool} filter={filters.get(insight.repo) ?? null} onFilter={(kind) => toggleFilter(insight.repo, kind)} expandedTodos={expandedTodos} onToggleTodo={(id) => setExpandedTodos((current) => toggleSet(current, id))} mergedCollapsed={collapsedMerged.has(insight.repo)} onToggleMerged={() => setCollapsedMerged((current) => toggleSet(current, insight.repo))} />)}
+      {insights.map((insight) => <RepoOverview key={insight.repo} insight={insight} view={view} ledger={ledger} boardSessions={boardSessions} onSelect={onSelect} onCompare={onCompare} query={query} tool={tool} filter={filters.get(insight.repo) ?? null} onFilter={(kind) => toggleFilter(insight.repo, kind)} expandedTodos={expandedTodos} onToggleTodo={(id) => setExpandedTodos((current) => toggleSet(current, id))} mergedCollapsed={collapsedMerged.has(insight.repo)} onToggleMerged={() => setCollapsedMerged((current) => toggleSet(current, insight.repo))} />)}
     </div>
   );
 }
 
-function RepoOverview({ insight, view, ledger, boardSessions, onSelect, query, tool, filter, onFilter, expandedTodos, onToggleTodo, mergedCollapsed, onToggleMerged }: {
-  insight: RepoInsight; view: LedgerView; ledger: LedgerState; boardSessions: BoardSessionIndex; onSelect: (selection: LedgerSelection) => void; query: string; tool: string; filter: string | null; onFilter: (kind: string) => void; expandedTodos: ReadonlySet<string>; onToggleTodo: (id: string) => void; mergedCollapsed: boolean; onToggleMerged: () => void;
+function RepoOverview({ insight, view, ledger, boardSessions, onSelect, onCompare, query, tool, filter, onFilter, expandedTodos, onToggleTodo, mergedCollapsed, onToggleMerged }: {
+  insight: RepoInsight; view: LedgerView; ledger: LedgerState; boardSessions: BoardSessionIndex; onSelect: (selection: LedgerSelection) => void; onCompare: (repo: string, branch: string) => void; query: string; tool: string; filter: string | null; onFilter: (kind: string) => void; expandedTodos: ReadonlySet<string>; onToggleTodo: (id: string) => void; mergedCollapsed: boolean; onToggleMerged: () => void;
 }) {
   const searchable = query.trim().toLocaleLowerCase();
   const rows = insight.rows.filter((row) => {
@@ -123,7 +124,7 @@ function RepoOverview({ insight, view, ledger, boardSessions, onSelect, query, t
         const grouped = rows.filter((row) => row.status === group.status);
         if (grouped.length === 0) return null;
         const folded = group.status === 'merged' && mergedCollapsed;
-        return <div key={group.status}><button type="button" onClick={group.status === 'merged' ? onToggleMerged : undefined} className="py-1 text-xs font-medium text-text-muted">{group.label} · {grouped.length}{group.status === 'merged' ? ` ${folded ? '›' : '⌄'}` : ''}</button>{!folded && grouped.map((row) => <BranchLine key={row.path} row={row} view={view} boardSessions={boardSessions} onSelect={onSelect} />)}</div>;
+        return <div key={group.status}><button type="button" onClick={group.status === 'merged' ? onToggleMerged : undefined} className="py-1 text-xs font-medium text-text-muted">{group.label} · {grouped.length}{group.status === 'merged' ? ` ${folded ? '›' : '⌄'}` : ''}</button>{!folded && grouped.map((row) => <BranchLine key={row.path} row={row} view={view} boardSessions={boardSessions} onSelect={onSelect} onCompare={onCompare} />)}</div>;
       })}
       {rows.length === 0 && <p className="text-sm text-text-muted">Không có nhánh khớp bộ lọc.</p>}
     </section>
@@ -184,17 +185,20 @@ function TodoRow({ todo, insight, ledger, view, expanded, onToggle }: { todo: To
   </article>;
 }
 
-function BranchLine({ row, view, boardSessions, onSelect }: { row: BranchRow; view: LedgerView; boardSessions: BoardSessionIndex; onSelect: (selection: LedgerSelection) => void }) {
+function BranchLine({ row, view, boardSessions, onSelect, onCompare }: { row: BranchRow; view: LedgerView; boardSessions: BoardSessionIndex; onSelect: (selection: LedgerSelection) => void; onCompare: (repo: string, branch: string) => void }) {
   const sessions = row.sessionIds.map((id) => view.sessions.find((item) => item.sessionId === id && item.live)).filter((item) => item !== undefined);
   const max = Math.max(1, row.behind, row.ahead);
   const behindWidth = `${Math.min(50, row.behind / max * 50)}%`;
   const aheadWidth = `${Math.min(50, row.ahead / max * 50)}%`;
-  return <button type="button" data-ledger-branch-row="true" onClick={() => onSelect({ kind: 'branch', repo: row.repo, path: row.path })} className="grid w-full grid-cols-[8px_minmax(100px,1fr)_minmax(100px,180px)_auto_minmax(80px,1fr)] items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent">
-    <span className={`h-2 w-2 rounded-full ${STATUS_DOT[row.status]}`} /><span className="truncate text-sm font-medium text-text" title={row.name}>{row.name}</span>
-    <span className="flex items-center gap-1 text-xs text-text-muted"><span>{row.behind}</span><span className="relative h-2 flex-1 overflow-hidden rounded bg-well"><span className="absolute inset-y-0 right-1/2 bg-status-error" style={{ width: behindWidth }} /><span className="absolute inset-y-0 left-1/2 bg-status-active" style={{ width: aheadWidth }} /><span className="absolute inset-y-0 left-1/2 w-px bg-text-muted" /></span><span>{row.ahead}</span></span>
-    <span className="flex gap-2 whitespace-nowrap text-xs">{row.collideFiles > 0 && <span className="text-status-error" title={`${row.collideFiles} file sẽ đụng`}>⚔ {row.collideFiles}</span>}{row.unpushed > 0 && <span className="text-warning" title={`${row.unpushed} commit chưa đẩy`}>⬆ {row.unpushed}</span>}{row.dirty > 0 && <span className="text-text-secondary" title={`${row.dirty} file sửa chưa commit`}>✎ {row.dirty}</span>}</span>
-    <span className="flex justify-end gap-1 overflow-hidden">{sessions.map((session) => { const key = boardSessionFor(session.sessionId, boardSessions); return <span key={session.sessionId} className="truncate rounded-full bg-raised px-2 py-0.5 text-xs text-text-secondary" title={`${session.agentName}${key === null ? '' : ` · ${boardSessions[key]?.label ?? ''}`}`}>{session.agentName || session.agentKind}</span>; })}</span>
-  </button>;
+  return <div className="flex items-center gap-1">
+    <button type="button" data-ledger-branch-row="true" onClick={() => onSelect({ kind: 'branch', repo: row.repo, path: row.path })} className="grid min-w-0 flex-1 grid-cols-[8px_minmax(100px,1fr)_minmax(100px,180px)_auto_minmax(80px,1fr)] items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-hover focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent">
+      <span className={`h-2 w-2 rounded-full ${STATUS_DOT[row.status]}`} /><span className="truncate text-sm font-medium text-text" title={row.name}>{row.name}</span>
+      <span className="flex items-center gap-1 text-xs text-text-muted"><span>{row.behind}</span><span className="relative h-2 flex-1 overflow-hidden rounded bg-well"><span className="absolute inset-y-0 right-1/2 bg-status-error" style={{ width: behindWidth }} /><span className="absolute inset-y-0 left-1/2 bg-status-active" style={{ width: aheadWidth }} /><span className="absolute inset-y-0 left-1/2 w-px bg-text-muted" /></span><span>{row.ahead}</span></span>
+      <span className="flex gap-2 whitespace-nowrap text-xs">{row.collideFiles > 0 && <span className="text-status-error" title={`${row.collideFiles} file sẽ đụng`}>⚔ {row.collideFiles}</span>}{row.unpushed > 0 && <span className="text-warning" title={`${row.unpushed} commit chưa đẩy`}>⬆ {row.unpushed}</span>}{row.dirty > 0 && <span className="text-text-secondary" title={`${row.dirty} file sửa chưa commit`}>✎ {row.dirty}</span>}</span>
+      <span className="flex justify-end gap-1 overflow-hidden">{sessions.map((session) => { const key = boardSessionFor(session.sessionId, boardSessions); return <span key={session.sessionId} className="truncate rounded-full bg-raised px-2 py-0.5 text-xs text-text-secondary" title={`${session.agentName}${key === null ? '' : ` · ${boardSessions[key]?.label ?? ''}`}`}>{session.agentName || session.agentKind}</span>; })}</span>
+    </button>
+    <button type="button" aria-label={`So sánh nhánh ${row.name}`} title="So sánh nhánh" onClick={() => onCompare(row.repo, row.branch ?? row.name)} className="shrink-0 rounded px-2 py-1 text-sm text-text-secondary hover:bg-hover">⇄</button>
+  </div>;
 }
 
 function toggleSet(current: ReadonlySet<string>, value: string): ReadonlySet<string> {

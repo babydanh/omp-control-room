@@ -1,4 +1,5 @@
 import type {
+  ProjectBranchCompareRequestMessage,
   ProjectCommandResultMessage,
   ProjectCommentMessage,
   ProjectDiffRequestMessage,
@@ -17,6 +18,7 @@ import type {
 import { killClaudeTree } from '../company/claudeCode/claudeProcess.js';
 import { LibraryUserError } from '../library/libraryError.js';
 import type { AgentState } from '../types.js';
+import { getProjectBranchCompare } from './branchCompare.js';
 import { sendProjectComment } from './comments.js';
 import { getProjectDiff } from './diff.js';
 import { savePromptImage } from './imageSave.js';
@@ -49,6 +51,7 @@ const REQUEST_TYPES: Record<string, true> = {
   projectSessionStop: true,
   projectImageSave: true,
   projectMergePreviewRequest: true,
+  projectBranchCompareRequest: true,
 };
 let defaultStore: ProjectStore | undefined;
 
@@ -91,6 +94,8 @@ export function handleProjectMessage(
     const reason = 'Chỉ kết nối được cấp quyền mới được quản lý Project.';
     if (msg.type === 'projectMergePreviewRequest') {
       send(mergePreviewFailure(msg, requestId, reason));
+    } else if (msg.type === 'projectBranchCompareRequest') {
+      send(branchCompareFailure(msg, requestId, reason));
     } else {
       send(commandResult(requestId, commandFor(msg.type), false, reason));
     }
@@ -236,11 +241,19 @@ async function runProjectRequest(
         send({ ...result, requestId });
         return;
       }
+      case 'projectBranchCompareRequest': {
+        const deps = depsFor(store, context, context.services?.branchCompare);
+        const result = await getProjectBranchCompare(msg as unknown as ProjectBranchCompareRequestMessage, deps);
+        send({ ...result, requestId });
+        return;
+      }
     }
   } catch (error) {
     const reason = error instanceof LibraryUserError ? error.message : safeReason(type);
     if (msg.type === 'projectMergePreviewRequest') {
       send(mergePreviewFailure(msg, requestId, reason));
+    } else if (msg.type === 'projectBranchCompareRequest') {
+      send(branchCompareFailure(msg, requestId, reason));
     } else if (msg.type === 'projectTreeRequest') {
       send(commandResult(requestId, 'create', false, reason));
     } else if (msg.type === 'projectSessionStart') {
@@ -406,6 +419,31 @@ function mergePreviewFailure(
   };
 }
 
-function isDiffScope(value: unknown): value is 'uncommitted' | 'branch' | 'commit' {
-  return value === 'uncommitted' || value === 'branch' || value === 'commit';
+function branchCompareFailure(msg: Record<string, unknown>, requestId: string, reason: string): ServerMessage {
+  const branchA = typeof msg.branchA === 'string' ? msg.branchA : '';
+  const branchB = typeof msg.branchB === 'string' ? msg.branchB : '';
+  const side = (branch: string) => ({
+    branch, head: '', lastCommitAt: null, lastCommitSubject: null, dirtyFiles: [],
+  });
+  return {
+    type: 'projectBranchCompare',
+    requestId,
+    repo: typeof msg.repo === 'string' ? msg.repo : '',
+    branchA,
+    branchB,
+    a: side(branchA),
+    b: side(branchB),
+    mergeBase: null,
+    onlyA: [],
+    onlyB: [],
+    commitsTruncated: false,
+    files: [],
+    mergeClean: false,
+    conflicts: [],
+    reason,
+  };
+}
+
+function isDiffScope(value: unknown): value is 'uncommitted' | 'branch' | 'commit' | 'compare' {
+  return value === 'uncommitted' || value === 'branch' || value === 'commit' || value === 'compare';
 }

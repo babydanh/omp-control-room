@@ -65,7 +65,7 @@ export interface ProjectTreeProps {
   selectedProjectId: string | null;
   store: ProjectStore;
   onSelectProject: (projectId: string | null) => void;
-  onOpenChanges: (checkoutId: string, tab?: 'diff' | 'merge') => void;
+  onOpenChanges: (checkoutId: string, tab?: 'diff' | 'merge' | 'compare', branchA?: string) => void;
   onOpenSettings: (nodeId: string | null) => void;
   onNewSession: (nodeId: string, engine?: 'omp' | 'claude' | 'agy') => void;
   /** Opens a session row's terminal; the branch carries the Project folder it works under. */

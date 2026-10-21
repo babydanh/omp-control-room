@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { ServerMessage } from '../../core/src/messages.js';
+import type { ClientMessage, ServerMessage } from '../../core/src/messages.js';
 import { createProjectStore } from '../src/company/projects/projectStore.js';
 
 const snapshot = (requestId: string, name: string, partial = false): ServerMessage =>
@@ -31,5 +31,43 @@ describe('project store tree snapshots', () => {
     store.accept(snapshot('b', 'quick', true));
     expect(store.getSnapshot().nodes.map((node) => node.name)).toEqual(['full']);
     expect(store.getSnapshot().treeComplete).toBe(true);
+  });
+});
+
+describe('project store branch comparison', () => {
+  it('sends comparisons, replaces the latest identical request and stores the matching result', () => {
+    const sent: ClientMessage[] = [];
+    let nextId = 0;
+    const store = createProjectStore({
+      send: (message) => sent.push(message),
+      newRequestId: () => `compare-${++nextId}`,
+    });
+    const input = { repo: '/repo', branchA: 'feature-a', branchB: 'feature-b' };
+
+    store.requestBranchCompare(input);
+    store.requestBranchCompare(input);
+
+    expect(sent).toEqual([
+      { ...input, type: 'projectBranchCompareRequest', requestId: 'compare-1' },
+      { ...input, type: 'projectBranchCompareRequest', requestId: 'compare-2' },
+    ]);
+    expect(Object.keys(store.getSnapshot().pending)).toEqual(['compare-2']);
+    const result: ServerMessage = {
+      type: 'projectBranchCompare',
+      requestId: 'compare-2',
+      ...input,
+      a: { branch: 'feature-a', head: 'a', lastCommitAt: null, lastCommitSubject: null, dirtyFiles: [] },
+      b: { branch: 'feature-b', head: 'b', lastCommitAt: null, lastCommitSubject: null, dirtyFiles: [] },
+      mergeBase: null,
+      onlyA: [],
+      onlyB: [],
+      commitsTruncated: false,
+      files: [],
+      mergeClean: true,
+      conflicts: [],
+    };
+    store.accept(result);
+    expect(store.getSnapshot().results['compare-2']).toEqual(result);
+    expect(store.getSnapshot().pending).toEqual({});
   });
 });

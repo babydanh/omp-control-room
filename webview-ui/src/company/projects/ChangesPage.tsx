@@ -2,46 +2,25 @@ import { useEffect, useMemo, useState } from 'react';
 
 import type { ProjectDiffFile, ProjectTreeNode } from '../../../../core/src/messages.js';
 import { CompanyButton } from '../components/CompanyButton.js';
-import { numberDiffLines,type NumberedDiffLine } from './projectDiffLines.js';
+import { BranchComparePanel } from './BranchComparePanel.js';
+import { ProjectDiffLine } from './ProjectDiffLine.js';
+import { numberDiffLines } from './projectDiffLines.js';
 import { type ProjectStore, useProjectState } from './projectStore.js';
-import { highlightLine, type SyntaxKind } from './projectSyntax.js';
 
 export interface ChangesPageProps {
   store: ProjectStore;
   checkoutId: string;
   onClose: () => void;
-  initialTab?: 'diff' | 'merge';
+  initialTab?: 'diff' | 'merge' | 'compare';
+  initialBranchA?: string;
+
 }
 
-const SYNTAX_CLASS: Readonly<Record<SyntaxKind, string>> = {
-  plain: 'text-syntax-punctuation',
-  keyword: 'text-syntax-keyword',
-  storage: 'text-syntax-storage',
-  string: 'text-syntax-string',
-  number: 'text-syntax-number',
-  comment: 'text-syntax-comment italic',
-  function: 'text-syntax-function',
-  type: 'text-syntax-type',
-  variable: 'text-syntax-variable',
-  punctuation: 'text-syntax-punctuation',
-};
-const LINE_CLASS: Readonly<Record<NumberedDiffLine['kind'], string>> = {
-  addition: 'bg-status-success/15',
-  deletion: 'bg-status-error/15',
-  context: '',
-  meta: 'bg-raised text-text-muted',
-};
-const MARK_CLASS: Readonly<Record<NumberedDiffLine['kind'], string>> = {
-  addition: 'text-status-success',
-  deletion: 'text-status-error',
-  context: 'text-text-muted',
-  meta: 'text-text-muted',
-};
 const FIELD_CLASS = 'rounded border border-border bg-well px-2 py-1 text-text';
 
-export function ChangesPage({ store, checkoutId: initialCheckout, onClose, initialTab = 'diff' }: ChangesPageProps) {
+export function ChangesPage({ store, checkoutId: initialCheckout, onClose, initialTab = 'diff', initialBranchA = '' }: ChangesPageProps) {
   const state = useProjectState(store);
-  const [tab, setTab] = useState<'diff' | 'merge'>(initialTab);
+  const [tab, setTab] = useState<'diff' | 'merge' | 'compare'>(initialTab);
   const [scope, setScope] = useState<'uncommitted' | 'branch' | 'commit'>('uncommitted');
   const [sha, setSha] = useState('');
   const [selectedPath, setSelectedPath] = useState('');
@@ -113,6 +92,7 @@ export function ChangesPage({ store, checkoutId: initialCheckout, onClose, initi
     <nav className="flex gap-2" aria-label="Chế độ xem">
       <button className={tabClass(tab === 'diff')} onClick={() => setTab('diff')}>Diff</button>
       <button className={tabClass(tab === 'merge')} onClick={() => setTab('merge')}>Thử gộp</button>
+      <button className={tabClass(tab === 'compare')} onClick={() => setTab('compare')}>So sánh</button>
     </nav>
     {tab === 'diff' ? <>
       <div className="flex flex-wrap items-center gap-2">
@@ -136,7 +116,7 @@ export function ChangesPage({ store, checkoutId: initialCheckout, onClose, initi
             </div>
             {selected.status === 'binary'
               ? <p className="p-3 text-text-muted">Tệp nhị phân</p>
-              : lines.map((line, index) => <DiffLine key={`${index}-${line.oldLine}-${line.newLine}`} line={line} filePath={selected.path} onComment={setCommentLine} />)}
+              : lines.map((line, index) => <ProjectDiffLine key={`${index}-${line.oldLine}-${line.newLine}`} line={line} filePath={selected.path} onComment={setCommentLine} />)}
           </>}
         </section>
       </div>
@@ -146,23 +126,12 @@ export function ChangesPage({ store, checkoutId: initialCheckout, onClose, initi
         <CompanyButton type="submit" size="sm" variant="accent" disabled={!receiver || !comment.trim()}>Gửi</CompanyButton>
         <CompanyButton type="button" size="sm" onClick={() => setCommentLine(null)}>Huỷ</CompanyButton>
       </form>}
-    </> : <MergePanel store={store} checkout={checkout} branches={branches} branchB={branchB} setBranchB={setBranchB} nodes={nodes} />}
+    </> : tab === 'merge'
+      ? <MergePanel store={store} checkout={checkout} branches={branches} branchB={branchB} setBranchB={setBranchB} nodes={nodes} />
+      : <BranchComparePanel store={store} checkout={checkout} branches={[...(checkout === undefined ? [] : [checkout]), ...branches]} initialBranchA={initialBranchA} nodes={nodes} />}
   </main>;
 }
 
-/** One diff line: tinted green/red for added/removed, line numbers you click to comment, code coloured by syntax. */
-function DiffLine({ line, filePath, onComment }: { line: NumberedDiffLine; filePath: string; onComment: (line: number | null) => void }) {
-  const tokens = useMemo(() => line.kind === 'meta' ? [{ text: line.text, kind: 'plain' as const }] : highlightLine(line.text, filePath), [line, filePath]);
-  const numberClass = 'w-9 text-right text-text-muted hover:text-text disabled:invisible';
-  return <div className={`flex whitespace-pre ${LINE_CLASS[line.kind]}`}>
-    <span className="flex shrink-0 gap-1 border-r border-hairline pr-2">
-      <button disabled={line.oldLine === null} className={numberClass} onClick={() => onComment(line.oldLine)}>{line.oldLine ?? ''}</button>
-      <button disabled={line.newLine === null} className={numberClass} onClick={() => onComment(line.newLine)}>{line.newLine ?? ''}</button>
-    </span>
-    <span className={`w-5 shrink-0 select-none text-center ${MARK_CLASS[line.kind]}`}>{line.kind === 'addition' ? '+' : line.kind === 'deletion' ? '−' : ''}</span>
-    <span className="pr-3 text-text">{tokens.map((token, index) => <span key={index} className={SYNTAX_CLASS[token.kind]}>{token.text}</span>)}</span>
-  </div>;
-}
 
 function FileRow({ file, selected, onClick }: { file: ProjectDiffFile; selected: boolean; onClick: () => void }) {
   const name = file.path.split('/').pop() ?? file.path;

@@ -105,7 +105,7 @@ describe('projectTreeView', () => {
     expect(actions('folder')).toEqual(expect.arrayContaining(['newSessionClaude', 'changes', 'removeFolder']));
     // A folder that is not a git repo has no diff to show.
     expect(actions('empty')).not.toContain('changes');
-    expect(actions('checkout')).toEqual(expect.arrayContaining(['merge', 'copyBranch']));
+    expect(actions('checkout')).toEqual(expect.arrayContaining(['merge', 'compare', 'copyBranch']));
     // A session the board does not run offers its changes, not an "open" that goes nowhere; its process can be stopped.
     expect(actions('session')).toEqual(['changes', 'copySessionId', 'copyPath', 'stop']);
     // A subagent shares its parent's process: no stop of its own.

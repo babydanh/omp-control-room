@@ -1,8 +1,8 @@
 /**
  * Read-only diff of one checkout for the Project tree's "Thay đổi" page.
  *
- * Three scopes: uncommitted work (working tree vs HEAD), the whole branch (working tree vs its
- * merge base with main, so committed and uncommitted work show together) and one commit. Every
+ * Scopes: uncommitted work (working tree vs HEAD), the whole branch (working tree vs its
+ * merge base with main), one commit, and branch comparison (HEAD vs a named branch).
  * git call goes through the ledger GitRunner (argv only, no shell, bounded time and bytes) and
  * never writes to the repository. Each changed file is attributed to the sessions that edited it,
  * from the shared activity ledger the caller passes in.
@@ -35,6 +35,7 @@ export const PROJECT_DIFF_TEXT = {
   unknownCheckout: 'Worktree này không có trong cây Project, không xem được thay đổi.',
   badSha: 'Mã commit không hợp lệ.',
   missingCommit: 'Không tìm thấy commit này trong worktree.',
+  missingBranch: 'Không tìm thấy nhánh cần so sánh trong worktree.',
   noBase: 'Không tìm thấy nhánh main (origin/main hoặc main) để so sánh cả nhánh.',
   timeout: 'Đọc thay đổi quá lâu, đã dừng. Thử lại hoặc xem từng file.',
   failed: 'Không đọc được thay đổi của worktree này.',
@@ -76,6 +77,15 @@ export async function readCheckoutDiff(
     withUntracked = false;
   } else if (request.scope === 'branch') {
     base = await mergeBase(deps.git, checkout);
+  } else if (request.scope === 'compare') {
+    if (request.sha.length === 0 || request.sha.length > 255 || request.sha.startsWith('-') || /[\s\0~^:?*[\\]/.test(request.sha)) {
+      throw new LibraryUserError(PROJECT_DIFF_TEXT.missingBranch);
+    }
+    const branch = await revParse(deps.git, checkout, request.sha);
+    if (branch === null) throw new LibraryUserError(PROJECT_DIFF_TEXT.missingBranch);
+    base = (await revParse(deps.git, checkout, 'HEAD')) ?? EMPTY_TREE;
+    target = branch;
+    withUntracked = false;
   } else {
     base = (await revParse(deps.git, checkout, 'HEAD')) ?? EMPTY_TREE;
   }
@@ -104,7 +114,7 @@ export async function readCheckoutDiff(
     requestId: request.requestId,
     checkout,
     scope: request.scope,
-    sha: target ?? base,
+    sha: request.scope === 'compare' ? request.sha : target ?? base,
     files,
     truncated,
     ...(reason === undefined ? {} : { reason }),

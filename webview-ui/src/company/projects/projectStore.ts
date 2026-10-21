@@ -2,6 +2,8 @@ import { useSyncExternalStore } from 'react';
 
 import type {
   ClientMessage,
+  ProjectBranchCompareMessage,
+  ProjectBranchCompareRequestMessage,
   ProjectCommandResultMessage,
   ProjectCommentMessage,
   ProjectDiffMessage,
@@ -35,6 +37,7 @@ export type ProjectServerMessage =
   | ProjectCommandResultMessage
   | ProjectSessionStartResultMessage
   | ProjectImageSavedMessage
+  | ProjectBranchCompareMessage
   | ProjectMergePreviewResultMessage;
 type ProjectRequest =
   | ProjectTreeRequestMessage
@@ -50,7 +53,8 @@ type ProjectRequest =
   | ProjectSessionStopMessage
   | ProjectImageSaveMessage
   | ProjectCommentMessage
-  | ProjectMergePreviewRequestMessage;
+  | ProjectMergePreviewRequestMessage
+  | ProjectBranchCompareRequestMessage;
 
 export interface ProjectState {
   nodes: readonly ProjectTreeNode[];
@@ -59,7 +63,7 @@ export interface ProjectState {
   diff: ProjectDiffMessage | null;
   settings: ProjectSettingsMessage | null;
   pending: Readonly<Record<string, ProjectRequest>>;
-  results: Readonly<Record<string, ProjectCommandResultMessage | ProjectSessionStartResultMessage | ProjectMergePreviewResultMessage | ProjectImageSavedMessage>>;
+  results: Readonly<Record<string, ProjectCommandResultMessage | ProjectSessionStartResultMessage | ProjectBranchCompareMessage | ProjectMergePreviewResultMessage | ProjectImageSavedMessage>>;
   errors: Readonly<Record<string, string>>;
 }
 export interface ProjectStoreOptions { send: (message: ClientMessage) => void; newRequestId?: () => string; }
@@ -83,10 +87,11 @@ export interface ProjectStore {
   saveImage: (input: Omit<ProjectImageSaveMessage, 'type' | 'requestId'>) => string;
   sendComment: (input: Omit<ProjectCommentMessage, 'type' | 'requestId'>) => string;
   previewMerge: (input: Omit<ProjectMergePreviewRequestMessage, 'type' | 'requestId'>) => string;
+  requestBranchCompare: (input: { repo: string; branchA: string; branchB: string }) => string;
 }
 
 export function isProjectServerMessage(message: ServerMessage): message is ProjectServerMessage {
-  return message.type === 'projectTreeSnapshot' || message.type === 'projectDiff' || message.type === 'projectSettings' || message.type === 'projectCommandResult' || message.type === 'projectSessionStartResult' || message.type === 'projectMergePreviewResult' || message.type === 'projectImageSaved';
+  return message.type === 'projectTreeSnapshot' || message.type === 'projectDiff' || message.type === 'projectSettings' || message.type === 'projectCommandResult' || message.type === 'projectSessionStartResult' || message.type === 'projectMergePreviewResult' || message.type === 'projectBranchCompare' || message.type === 'projectImageSaved';
 }
 
 export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
@@ -149,6 +154,7 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
       case 'projectImageSave': return `image:${request.requestId}`;
       case 'projectComment': return `comment:${request.requestId}`;
       case 'projectMergePreviewRequest': return `merge:${request.repo}:${request.branchA}:${request.branchB}`;
+      case 'projectBranchCompareRequest': return `compare:${request.repo}:${request.branchA}:${request.branchB}`;
     }
   }
   return {
@@ -167,6 +173,7 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     saveImage: (input) => { const req = { ...input, type: 'projectImageSave' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     sendComment: (input) => { const req = { ...input, type: 'projectComment' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     previewMerge: (input) => { const req = { ...input, type: 'projectMergePreviewRequest' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
+    requestBranchCompare: (input) => { const req = { ...input, type: 'projectBranchCompareRequest' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     clearSetting: (input) => {
       const req = { ...input, type: 'projectSettingsClear' as const, requestId: requestId() };
       return transmit(req, latestKey(req));
