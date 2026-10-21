@@ -3,7 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { ProjectBranchCompareRequestMessage } from '../../core/src/messages.js';
 import { createGitRunner } from '../src/ledger/git.js';
@@ -37,7 +37,9 @@ function deps() {
   return { git, knownRepos: [repo] };
 }
 
-beforeEach(() => {
+// One repo for the whole file: the tests only read it, and building it costs ~17 git calls,
+// which under a loaded full run overran the per-test timeout when it ran before every test.
+beforeAll(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'project-branch-compare-'));
   repo = path.join(root, 'repo').replace(/\\/g, '/');
   worktreeB = path.join(root, 'branch-b').replace(/\\/g, '/');
@@ -60,7 +62,7 @@ beforeEach(() => {
   fs.writeFileSync(path.join(worktreeB, 'dirty.txt'), 'uncommitted\n');
 });
 
-afterEach(() => {
+afterAll(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -86,8 +88,13 @@ describe('compareProjectBranches', () => {
 
   it('keeps only the ours side when git writes conflicts in diff3 style', async () => {
     sh(repo, 'config', 'merge.conflictStyle', 'diff3');
-    const result = await compareProjectBranches(request(), deps());
-    expect(result.conflicts[0]?.hunks).toEqual([{ line: 1, ours: 'A version', theirs: 'B version' }]);
+    try {
+      const result = await compareProjectBranches(request(), deps());
+      expect(result.conflicts[0]?.hunks).toEqual([{ line: 1, ours: 'A version', theirs: 'B version' }]);
+    } finally {
+      // The repo is shared by the file's tests: the default style comes back for the next one.
+      sh(repo, 'config', '--unset', 'merge.conflictStyle');
+    }
   });
 
   it('reports clean for non-conflicting branches and rejects an unknown branch', async () => {
