@@ -18,7 +18,7 @@ import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { useNow } from '../useNow.js';
-import { NEXT_STEP_LABEL, type NextStep, type NextStepAction, nextStepFor } from '../workItemNextStep.js';
+import { followUpDraftFor, NEXT_STEP_LABEL, type NextStep, type NextStepAction, nextStepFor, summaryLine } from '../workItemNextStep.js';
 import {
   conflictText,
   isParkedAssignee,
@@ -222,7 +222,7 @@ export function WorkItemPanel({
   const canCancel = status === 'queued' || status === 'done' || status === 'failed';
   // A finished item is removed from the board, a queued one is cancelled before it is sent.
   const removes = status !== 'queued';
-  const canFollowUp = status === 'review' || status === 'failed';
+  const canFollowUp = status === 'review' || status === 'failed' || status === 'needs_input';
   const canReassign = status === 'queued' || status === 'review' || status === 'failed';
   const canAskLeader = status === 'review' && item.squadRunId === undefined;
   const hasActions =
@@ -243,7 +243,11 @@ export function WorkItemPanel({
   const runStep = (action: NextStepAction): void => {
     if (action === 'rejudge') send('judge', client.judgeWorkItem(workspacePath, id));
     else if (action === 'finish') send('verdict', client.markWorkItem(workspacePath, id, 'done'));
-    else if (action === 'followUp') followUpRef.current?.focus();
+    else if (action === 'followUp') {
+      // Asking for more starts from what the judge found missing; the user edits it before sending.
+      if (draft.trim() === '') setDraft(followUpDraftFor(item));
+      followUpRef.current?.focus();
+    }
     else if (action === 'reassign') openReassign();
     else if (action === 'cleanWorktree') setConfirming('cleanWorktree');
     else setConfirming('cancel');
@@ -296,8 +300,11 @@ export function WorkItemPanel({
       />
 
       <details open={status === 'queued'} className="px-2.5">
-        <summary className="cursor-pointer text-2xs text-text-muted">Nội dung việc</summary>
-        <p data-testid="work-item-text" className="mt-1 whitespace-pre-wrap break-words text-xs text-text">
+        <summary className="cursor-pointer text-xs text-text">
+          <span className="text-text-muted">Giao: </span>
+          {summaryLine(item.text, 110) ?? 'Nội dung việc'}
+        </summary>
+        <p data-testid="work-item-text" className="mt-1 whitespace-pre-wrap break-words text-xs text-text-secondary">
           {item.text}
         </p>
         {acceptance !== null && (
@@ -333,16 +340,19 @@ export function WorkItemPanel({
       )}
 
       {item.result !== undefined && item.result.trim() !== '' && (
-        <section aria-label="Kết quả" className="flex flex-col gap-1 px-2.5">
-          <p className="text-2xs text-text-muted">Kết quả</p>
+        <details aria-label="Kết quả" className="px-2.5">
+          <summary className="cursor-pointer text-xs text-text">
+            <span className="text-text-muted">Agent báo: </span>
+            {summaryLine(withoutTerminalEscapes(item.result), 140) ?? 'Kết quả'}
+          </summary>
           <pre
             data-testid="work-item-result"
-            className="company-work-result whitespace-pre-wrap break-words rounded-(--company-radius-sm) bg-well p-2 font-mono text-2xs text-text"
+            className="company-work-result mt-1 max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-(--company-radius-sm) bg-well p-2 font-mono text-2xs text-text"
           >
             {/* Results saved before the board dropped colour codes still carry them. */}
             {withoutTerminalEscapes(item.result)}
           </pre>
-        </section>
+        </details>
       )}
 
       {hasActions && (
@@ -364,7 +374,7 @@ export function WorkItemPanel({
               disabled={busy}
               onClick={() => setConfirming('failed')}
             >
-              Hỏng
+              Đánh dấu hỏng
             </CompanyButton>
           )}
           {canCancel && !inStep.has('remove') && (

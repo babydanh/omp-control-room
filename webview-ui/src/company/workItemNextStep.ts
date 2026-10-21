@@ -21,19 +21,33 @@ export interface NextStep {
 
 export const NEXT_STEP_LABEL: Record<NextStepAction, string> = {
   rejudge: 'Chấm lại',
-  finish: 'Đánh dấu xong',
-  followUp: 'Gửi tiếp',
-  reassign: 'Giao lại',
+  finish: 'Chấp nhận kết quả',
+  followUp: 'Yêu cầu bổ sung',
+  reassign: 'Giao người khác',
   cleanWorktree: 'Dọn worktree',
   remove: 'Xoá',
 };
 
 const DETAIL_MAX = 160;
 
+/** The first line that says something, without markdown marks, clipped to `max` characters. */
+export function summaryLine(text: string | undefined, max = DETAIL_MAX): string | undefined {
+  for (const raw of (text ?? '').split('\n')) {
+    const line = raw.replace(/[*`#>|]/g, '').replace(/^\s*[-•]\s*/, '').replace(/\s+/g, ' ').trim();
+    if (line.length < 3 || /^-+$/.test(line)) continue;
+    return line.length <= max ? line : `${line.slice(0, max - 1)}…`;
+  }
+  return undefined;
+}
+
 function short(text: string | undefined): string | undefined {
-  const line = (text ?? '').replace(/\s+/g, ' ').trim().replace(/^Giám khảo chưa thấy đạt:\s*/i, '');
-  if (line === '') return undefined;
-  return line.length <= DETAIL_MAX ? line : `${line.slice(0, DETAIL_MAX - 1)}…`;
+  return summaryLine((text ?? '').replace(/^Giám khảo chưa thấy đạt:\s*/i, '').replace(/\s+/g, ' '));
+}
+
+/** What the user sends when they ask the agent to fill in what the judge found missing. */
+export function followUpDraftFor(item: Pick<WorkItem, 'reason'>): string {
+  const missing = short(item.reason);
+  return missing === undefined ? '' : `Bổ sung vào báo cáo: ${missing}`;
 }
 
 type StepItem = Pick<WorkItem, 'status' | 'reason' | 'judge'>;
@@ -51,13 +65,13 @@ export function nextStepFor(item: StepItem, waitText: string | null, canClean: b
       if (judge?.status === 'interrupted' || judge?.status === 'error') {
         return { tone: 'act', title: 'Chấm bị gián đoạn', detail: 'Bấm Chấm lại để giám khảo đọc lại kết quả.', actions: ['rejudge', 'finish'] };
       }
-      return { tone: 'act', title: 'Agent đã xong: bạn xem kết quả', actions: ['finish', 'followUp', 'reassign'] };
+      return { tone: 'act', title: 'Agent đã xong, bạn xem kết quả', actions: ['finish', 'followUp', 'reassign'] };
     case 'needs_input':
-      // A sent-back item can be judged again or accepted; reassigning it is refused by the server.
+      // The judge sent it back: you accept the result as it is, or have the agent add what is missing.
       if (judge?.status === 'verdict') {
-        return { tone: 'act', title: 'Giám khảo chưa cho đạt', detail: short(item.reason), actions: ['rejudge', 'finish'] };
+        return { tone: 'act', title: 'Giám khảo thấy còn thiếu', detail: short(item.reason), actions: ['followUp', 'finish'] };
       }
-      return { tone: 'act', title: 'Agent đang hỏi bạn', detail: short(item.reason), actions: ['finish'] };
+      return { tone: 'act', title: 'Agent đang hỏi bạn', detail: short(item.reason), actions: ['followUp', 'finish'] };
     case 'failed':
       return { tone: 'error', title: 'Lỗi', detail: short(item.reason), actions: ['reassign', 'followUp', 'remove'] };
     case 'done':

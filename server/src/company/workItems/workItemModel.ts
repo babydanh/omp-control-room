@@ -276,9 +276,10 @@ export function occupiesAgent(status: WorkItemStatus): boolean {
   return status === 'running' || status === 'needs_input';
 }
 
-/** "Gửi tiếp": only a finished-for-now item can get another prompt. */
+/** "Gửi tiếp" / "Yêu cầu bổ sung": an item the agent is not working on can get another prompt. */
 export function canFollowUp(status: WorkItemStatus): boolean {
-  return status === 'review' || status === 'failed';
+  // needs_input: the agent or the judge waits on the user, and a follow-up is the user's answer.
+  return status === 'review' || status === 'failed' || status === 'needs_input';
 }
 
 /** Done or failed: the item is over, and counts toward WORK_ITEM_FINISHED_KEEP. */

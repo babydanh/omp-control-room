@@ -65,10 +65,12 @@ describe('work item status rules', () => {
     expect(occupiesAgent('queued')).toBe(false);
   });
 
-  it('allows follow-up only from review or failed, reassign from queued, review or failed, cancel only from queued', () => {
+  it('allows follow-up from review, failed or waiting on the user, reassign from queued, review or failed', () => {
     expect(canFollowUp('review')).toBe(true);
     expect(canFollowUp('failed')).toBe(true);
+    expect(canFollowUp('needs_input')).toBe(true);
     expect(canFollowUp('queued')).toBe(false);
+    expect(canFollowUp('running')).toBe(false);
     expect(canReassign('queued')).toBe(true);
     expect(canReassign('running')).toBe(false);
     expect(canCancel('queued')).toBe(true);

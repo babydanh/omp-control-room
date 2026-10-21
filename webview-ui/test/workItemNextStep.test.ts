@@ -1,11 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { nextStepFor } from '../src/company/workItemNextStep.js';
+import { followUpDraftFor, nextStepFor, summaryLine } from '../src/company/workItemNextStep.js';
 
 describe('nextStepFor', () => {
-  it('asks you to judge again when the judge sent the item back, without its boilerplate prefix', () => {
-    const step = nextStepFor({ status: 'needs_input', reason: 'Giám khảo chưa thấy đạt: thiếu bản đồ route', judge: { status: 'verdict', verdict: 'fail', followUps: 2 } }, '', false);
-    expect(step).toEqual({ tone: 'act', title: 'Giám khảo chưa cho đạt', detail: 'thiếu bản đồ route', actions: ['rejudge', 'finish'] });
+  it('offers to ask for what the judge found missing, or to accept, when the judge sent the item back', () => {
+    const item = { status: 'needs_input', reason: 'Giám khảo chưa thấy đạt: thiếu bản đồ route', judge: { status: 'verdict', verdict: 'fail', followUps: 2 } } as const;
+    expect(nextStepFor(item, '', false)).toEqual({ tone: 'act', title: 'Giám khảo thấy còn thiếu', detail: 'thiếu bản đồ route', actions: ['followUp', 'finish'] });
+    expect(followUpDraftFor(item)).toBe('Bổ sung vào báo cáo: thiếu bản đồ route');
+  });
+
+  it('reads the first line that says something, without markdown marks', () => {
+    expect(summaryLine('\n**Kết luận:** Backend không cần code mới\n## Bảng')).toBe('Kết luận: Backend không cần code mới');
+    expect(summaryLine('|---|---|\n- mục đầu', 6)).toBe('mục đ…');
   });
 
   it('says who acts while you wait: the queue, the agent, the judge', () => {
