@@ -406,6 +406,13 @@ export function AgentContextMenu({
   const [mode, setMode] = useState<MenuMode>('menu');
   const [notice, setNotice] = useState<Notice | null>(null);
   const [pending, setPending] = useState<string | null>(null);
+  // Set before the first cloud handoff is sent: each one opens a GitHub Issue, so this menu sends at most one.
+  const handoffSent = useRef(false);
+  function sendHandoff(pane: string | null): void {
+    if (pane === null || handoffSent.current) return;
+    handoffSent.current = true;
+    track(client.herdrPrompt(pane, CLOUD_HANDOFF_PROMPT));
+  }
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [projectPathDraft, setProjectPathDraft] = useState('');
@@ -615,9 +622,7 @@ export function AgentContextMenu({
       return;
     }
     if (action === 'cloudHandoff') {
-      const pane = awakePaneOf(node);
-      // One handoff per click: a second while the first is in flight would open a second Issue.
-      if (pane !== null && pending === null) track(client.herdrPrompt(pane, CLOUD_HANDOFF_PROMPT));
+      sendHandoff(awakePaneOf(node));
       return;
     }
     if (action === 'stop') {
@@ -825,7 +830,7 @@ export function AgentContextMenu({
         if (paneId !== null) track(client.herdrWake(paneId));
         return;
       case 'cloudHandoff':
-        if (paneId !== null && pending === null) track(client.herdrPrompt(paneId, CLOUD_HANDOFF_PROMPT));
+        sendHandoff(paneId);
         return;
       case 'assignWork':
         if (workAgent !== null && work.folder !== null) {
