@@ -11,7 +11,8 @@ import type { ProcessResult } from '../src/ledger/processRunner.js';
 import { toPathKey } from '../src/pathKey.js';
 import { handleProjectMessage } from '../src/projects/handler.js';
 import { ProjectStore } from '../src/projects/projectStore.js';
-import { buildProjectTreeSnapshot } from '../src/projects/projectTree.js';
+import { buildProjectTreeSnapshot, parentSessions } from '../src/projects/projectTree.js';
+import { sessionRow } from './ledgerFixtures.js';
 
 function processResult(stdout = '', code = 0, ok = code === 0): ProcessResult {
   return { ok, code, stdout, stderr: '', timedOut: false, truncated: false };
@@ -226,6 +227,24 @@ describe('buildProjectTreeSnapshot', () => {
       listRepos: async () => [repo, worktree, submodule],
     });
     expect(scanned.sort()).toEqual([path.resolve(repo), path.resolve(submodule)].sort());
+  });
+});
+
+describe('parentSessions', () => {
+  it('links a subagent to the live session whose transcript folder holds its file, else to the main one in its process', () => {
+    const main = 'C:\\s\\2026-10-16T03_01a1.jsonl';
+    const rows = [
+      sessionRow('main-1', { pid: 7, sessionFile: main }),
+      sessionRow('sub-1', { pid: 7, agentKind: 'sub', sessionFile: 'c:/s/2026-10-16T03_01a1/ScoutWebAppUi.jsonl' }),
+      // A subagent of a subagent belongs to the deeper transcript.
+      sessionRow('sub-2', { pid: 7, agentKind: 'sub', sessionFile: 'C:\\s\\2026-10-16T03_01a1\\ScoutWebAppUi\\Deeper.jsonl' }),
+      // No file: the live main session in the same process.
+      sessionRow('sub-3', { pid: 7, agentKind: 'sub' }),
+      // A same-named prefix that is not its folder does not count.
+      sessionRow('main-2', { pid: 8, sessionFile: 'C:\\s\\2026-10-16T03_01a1-other.jsonl' }),
+      sessionRow('sub-old', { pid: 7, agentKind: 'sub', sessionFile: 'C:\\s\\gone\\X.jsonl', endedAt: '2026-10-16' }),
+    ];
+    expect(Object.fromEntries(parentSessions(rows))).toEqual({ 'sub-1': 'main-1', 'sub-2': 'sub-1', 'sub-3': 'main-1' });
   });
 });
 

@@ -24,6 +24,8 @@ export interface ProjectSessionSnapshot {
   readonly cwd: string;
   /** Ledger sessions a board folder runs: that board session's id. */
   readonly boardSessionId?: string;
+  /** The session that spawned this one, when the ledger links them. */
+  readonly parentSessionId?: string;
 }
 
 export interface HerdrProjectSession {
@@ -85,17 +87,60 @@ function agentKindForLedger(row: SessionRow): ProjectAgentKind {
   return 'omp';
 }
 
-/** A ledger session row with its latest intent and the board session behind it, when known. */
-type TitledSessionRow = SessionRow & { readonly intent?: string; readonly boardSessionId?: string };
+/** A ledger session row with its latest intent, the board session behind it, and its spawner, when known. */
+type TitledSessionRow = SessionRow & {
+  readonly intent?: string;
+  readonly boardSessionId?: string;
+  readonly parentSessionId?: string;
+};
 
-/** Agent name when it says something, else what the session is doing now, else the short session id. */
+/**
+ * A subagent's task name (its transcript's file name, e.g. "ScoutWebAppUi"), else the
+ * agent name when it says something, else what the session is doing now, else the
+ * short session id.
+ */
 function titleForLedger(row: TitledSessionRow): string {
+  const task = row.agentKind?.toLowerCase() === 'sub' && row.sessionFile
+    ? (row.sessionFile.split(/[\\/]/).pop() ?? '').replace(/\.jsonl?$/i, '')
+    : '';
+  if (task !== '') return task;
   const name = row.agentName?.trim() ?? '';
   if (name !== '' && name !== 'main') return name;
   return row.intent ?? `…${row.sessionId.slice(-8)}`;
 }
 
-/** Adds each session's latest non-empty intent (last few hours) and its board session id. */
+/** A transcript path compared case- and separator-blind, without its extension. */
+function fileStem(file: string): string {
+  return file.replace(/\\/g, '/').toLowerCase().replace(/\.jsonl?$/, '');
+}
+
+/**
+ * Each live session's spawner. A subagent's transcript sits in a folder named after
+ * its parent's transcript, so the deepest live transcript whose stem prefixes the
+ * file is the parent. Rows without a file fall back to the live main session in the
+ * same process. The ledger's `parent_id` is an agent name, so it cannot link them.
+ */
+export function parentSessions(rows: readonly SessionRow[]): Map<string, string> {
+  const live = rows.filter((row) => row.endedAt === null);
+  const stems = live.flatMap((row) => (row.sessionFile ? [{ id: row.sessionId, stem: `${fileStem(row.sessionFile)}/` }] : []));
+  const parents = new Map<string, string>();
+  for (const row of live) {
+    const file = row.sessionFile ? fileStem(row.sessionFile) : null;
+    const byFile = file === null
+      ? undefined
+      : stems
+        .filter((candidate) => candidate.id !== row.sessionId && file.startsWith(candidate.stem))
+        .sort((a, b) => b.stem.length - a.stem.length)[0]?.id;
+    const byProcess = byFile !== undefined || row.agentKind?.toLowerCase() !== 'sub' || row.pid === null
+      ? undefined
+      : live.find((other) => other.pid === row.pid && other.agentKind?.toLowerCase() !== 'sub')?.sessionId;
+    const parent = byFile ?? byProcess;
+    if (parent !== undefined) parents.set(row.sessionId, parent);
+  }
+  return parents;
+}
+
+/** Adds each session's latest non-empty intent (last few hours), its board session id and its spawner. */
 function annotateLedgerRows(
   rows: readonly SessionRow[],
   ledger: LedgerSource,
@@ -106,13 +151,16 @@ function annotateLedgerRows(
     const intent = event.intent?.trim();
     if (intent) intents.set(event.sessionId, intent);
   }
+  const parents = parentSessions(rows);
   return rows.map((row) => {
     const intent = intents.get(row.sessionId);
     const boardSessionId = row.endedAt === null ? boardSessionFor?.(row.sessionId) : undefined;
+    const parentSessionId = parents.get(row.sessionId);
     return {
       ...row,
       ...(intent === undefined ? {} : { intent }),
       ...(boardSessionId === undefined ? {} : { boardSessionId }),
+      ...(parentSessionId === undefined ? {} : { parentSessionId }),
     };
   });
 }
@@ -149,6 +197,7 @@ function sessionsForCheckout(
       title: titleForLedger(row),
       cwd: row.cwd,
       ...(row.boardSessionId === undefined ? {} : { boardSessionId: row.boardSessionId }),
+      ...(row.parentSessionId === undefined ? {} : { parentSessionId: row.parentSessionId }),
     });
   }
   for (const agent of agents) {
@@ -505,6 +554,7 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
       title: session.title,
       path: session.cwd,
       ...(session.boardSessionId === undefined ? {} : { boardSessionId: session.boardSessionId }),
+      ...(session.parentSessionId === undefined ? {} : { parentSessionId: session.parentSessionId }),
     });
   }
 }

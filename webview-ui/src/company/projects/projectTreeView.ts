@@ -16,10 +16,12 @@ export interface ProjectTreeBranch {
 const STRUCTURE_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
 
 /**
- * The sidebar's tree: Project → groups → folders → the sessions working there.
- * Repos, worktrees and files are not rows: each session is lifted to its nearest
- * folder and keeps its branch as a label. The git and file tree lives on the
- * Thay đổi and Cây git pages.
+ * The sidebar's tree: Project → groups → folders → repos → the sessions working
+ * there, each subagent under the session that spawned it. A folder that holds
+ * several repos gets one heading per repo; a folder that is itself the repo, and the
+ * quick snapshot (which has no repos yet), list sessions straight under the folder.
+ * Worktrees and files are not rows: each session keeps its branch as a label. The
+ * git and file tree lives on the Thay đổi and Cây git pages.
  */
 export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBranch[] {
   const byId = new Map(nodes.map((node) => [node.id, node]));
@@ -28,6 +30,9 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
   for (const node of nodes) {
     if (STRUCTURE_KINDS.has(node.kind)) branches.set(node.id, { node, children: [] });
   }
+  const repoHeadings = new Map<string, ProjectTreeBranch>();
+  const sessionRows = new Map<string, ProjectTreeBranch>();
+  const spawned: { row: ProjectTreeBranch; home: ProjectTreeBranch; key: string }[] = [];
   for (const node of nodes) {
     const own = branches.get(node.id);
     if (own !== undefined) {
@@ -38,24 +43,58 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
     }
     if (node.kind !== 'session') continue;
     let checkout: ProjectTreeNode | undefined;
+    let repo: ProjectTreeNode | undefined;
     let cursor = node.parentId === undefined ? undefined : byId.get(node.parentId);
     while (cursor !== undefined && !STRUCTURE_KINDS.has(cursor.kind)) {
       if (cursor.kind === 'checkout') checkout ??= cursor;
+      if (cursor.kind === 'repository') repo ??= cursor;
       cursor = cursor.parentId === undefined ? undefined : byId.get(cursor.parentId);
     }
     const folder = cursor === undefined ? undefined : branches.get(cursor.id);
     if (folder === undefined) continue;
+    const home = repo === undefined || samePath(repo.path, folder.node.path) ? folder : repoHeading(folder, repo);
     // The quick snapshot has no checkouts: the session's own folder name stands in for its branch.
     const where = checkout?.branch ?? checkout?.name ?? lastPathSegment(node.path);
-    folder.children.push({
+    const row: ProjectTreeBranch = {
       node,
       children: [],
       ...(where === undefined ? {} : { where }),
       ...(checkout?.path === undefined ? {} : { checkoutPath: checkout.path }),
       ...(folder.node.path === undefined ? {} : { folderPath: folder.node.path }),
-    });
+    };
+    // Keyed per folder: two Projects holding one folder each nest their own copy.
+    if (node.sessionId !== undefined) sessionRows.set(`${folder.node.id}:${node.sessionId}`, row);
+    if (node.parentSessionId === undefined) home.children.push(row);
+    else spawned.push({ row, home, key: `${folder.node.id}:${node.parentSessionId}` });
+  }
+  // A subagent whose parent the tree does not hold stays where it works.
+  for (const { row, home, key } of spawned) (sessionRows.get(key) ?? home).children.push(row);
+  for (const branch of branches.values()) {
+    if (branch.node.kind === 'folder') branch.children.sort(sessionsBeforeRepos);
   }
   return roots;
+
+  function repoHeading(folder: ProjectTreeBranch, repo: ProjectTreeNode): ProjectTreeBranch {
+    const key = `${folder.node.id}:${repo.id}`;
+    const existing = repoHeadings.get(key);
+    if (existing !== undefined) return existing;
+    const heading: ProjectTreeBranch = { node: repo, children: [] };
+    repoHeadings.set(key, heading);
+    folder.children.push(heading);
+    return heading;
+  }
+}
+
+/** A folder lists its own sessions first, then its repos by name. */
+function sessionsBeforeRepos(a: ProjectTreeBranch, b: ProjectTreeBranch): number {
+  const rank = (branch: ProjectTreeBranch) => (branch.node.kind === 'repository' ? 1 : 0);
+  return rank(a) - rank(b) || (rank(a) === 1 ? a.node.name.localeCompare(b.node.name) : 0);
+}
+
+function samePath(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return false;
+  const normal = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  return normal(a) === normal(b);
 }
 
 function lastPathSegment(value: string | undefined): string | undefined {
@@ -68,33 +107,37 @@ export interface ProjectTreeFilters {
   liveOnly: boolean;
 }
 
-/** Filters session rows only: Projects, groups and folders always stay, so a new empty folder is visible. */
+/**
+ * Filters session rows only: Projects, groups and folders always stay, so a new empty
+ * folder is visible; a repo heading goes when none of its sessions is left. A session
+ * stays when it matches or when one of its subagents does, so a subagent is never
+ * shown without the session that spawned it.
+ */
 export function filterProjectTree(
   roots: readonly ProjectTreeBranch[],
   filters: ProjectTreeFilters,
 ): ProjectTreeBranch[] {
   const filterBranch = (branch: ProjectTreeBranch): ProjectTreeBranch | null => {
-    if (branch.node.kind !== 'session') {
-      const children = branch.children.map(filterBranch).filter((child): child is ProjectTreeBranch => child !== null);
-      return { ...branch, children };
-    }
+    const children = branch.children.map(filterBranch).filter((child): child is ProjectTreeBranch => child !== null);
+    if (branch.node.kind === 'repository') return children.length > 0 ? { ...branch, children } : null;
+    if (branch.node.kind !== 'session') return { ...branch, children };
     const matched =
       (filters.agentKind === 'all' || branch.node.agentKind === filters.agentKind) &&
       (!filters.liveOnly || isLiveNode(branch.node));
-    return matched ? branch : null;
+    return matched || children.length > 0 ? { ...branch, children } : null;
   };
   return roots.map(filterBranch).filter((branch): branch is ProjectTreeBranch => branch !== null);
 }
 
-/** Sessions in a branch, at any depth: the count a folder row shows. */
+/** Sessions in a branch, at any depth and subagents included: the count a folder row shows. */
 export function countSessions(branch: ProjectTreeBranch): { total: number; running: number } {
-  if (branch.node.kind === 'session') return { total: 1, running: isRunningNode(branch.node) ? 1 : 0 };
+  const own = branch.node.kind === 'session' ? { total: 1, running: isRunningNode(branch.node) ? 1 : 0 } : { total: 0, running: 0 };
   return branch.children.reduce(
     (sum, child) => {
       const counts = countSessions(child);
       return { total: sum.total + counts.total, running: sum.running + counts.running };
     },
-    { total: 0, running: 0 },
+    own,
   );
 }
 
@@ -110,21 +153,29 @@ export function isLiveNode(node: ProjectTreeNode): boolean {
   return isRunningNode(node) || (node.kind === 'session' && WAITING_ON_YOU_STATES.has((node.state ?? '').toLowerCase()));
 }
 
-/** The heading's counts, over each session once even when two Projects hold its folder; hibernated ones are not agents. */
+/** States the "rảnh" chip counts: stopped, nothing asked of you. */
+const IDLE_STATES: ReadonlySet<string> = new Set(['idle', 'waiting']);
+
+/**
+ * The heading's counts, over each session once even when two Projects hold its folder.
+ * Only sessions in a chip count toward the total: hibernated, finished and unknown
+ * ones are not agents at work.
+ */
 export function sessionActivityCounts(nodes: readonly ProjectTreeNode[]): ActivityCounts & { total: number } {
   const counts = { total: 0, working: 0, needs: 0, idle: 0, error: 0 };
   const seen = new Set<string>();
   for (const node of nodes) {
-    if (node.kind !== 'session' || node.state === 'sleeping') continue;
+    if (node.kind !== 'session') continue;
     const key = node.sessionId ?? node.id;
     if (seen.has(key)) continue;
     seen.add(key);
-    counts.total += 1;
     const state = (node.state ?? '').toLowerCase();
     if (RUNNING_STATES.has(state)) counts.working += 1;
     else if (WAITING_ON_YOU_STATES.has(state)) counts.needs += 1;
     else if (state === 'error') counts.error += 1;
-    else counts.idle += 1;
+    else if (IDLE_STATES.has(state)) counts.idle += 1;
+    else continue;
+    counts.total += 1;
   }
   return counts;
 }

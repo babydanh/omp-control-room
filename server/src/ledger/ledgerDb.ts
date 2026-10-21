@@ -25,7 +25,10 @@ export interface SessionRow {
   readonly cwd: string | null;
   readonly agentKind: string | null;
   readonly agentName: string | null;
+  /** The agent name of the spawner (e.g. "Main"), not a session id. */
   readonly parentId: string | null;
+  /** The session's transcript file; a subagent's sits in a folder named after its parent's file. */
+  readonly sessionFile?: string | null;
   readonly startedAt: string | null;
   readonly lastSeen: string | null;
   readonly endedAt: string | null;
@@ -116,7 +119,7 @@ function openReadOnlySqlite(dbPath: string): SqliteDatabase {
 }
 
 const SESSIONS_SQL =
-  'SELECT session_id, pid, cwd, agent_kind, agent_name, parent_id, started_at, last_seen, ' +
+  'SELECT session_id, pid, cwd, agent_kind, agent_name, parent_id, session_file, started_at, last_seen, ' +
   'ended_at, state, heartbeat FROM sessions ' +
   'ORDER BY (ended_at IS NULL) DESC, COALESCE(heartbeat, last_seen) DESC LIMIT ?';
 
@@ -258,6 +261,7 @@ function sessionRowOf(row: SqlRow): SessionRow {
     agentKind: textOf(row.agent_kind),
     agentName: textOf(row.agent_name),
     parentId: textOf(row.parent_id),
+    sessionFile: textOf(row.session_file),
     startedAt: textOf(row.started_at),
     lastSeen: textOf(row.last_seen),
     endedAt: textOf(row.ended_at),

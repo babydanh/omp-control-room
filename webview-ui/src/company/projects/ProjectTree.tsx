@@ -39,7 +39,10 @@ const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>>
   project: '▰',
   group: '▸',
   folder: '📁',
+  repository: '⎇',
 };
+/** Rows another folder or group can be dropped on. */
+const DROP_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
 
 function readCollapsed(): ReadonlySet<string> {
   try {
@@ -64,7 +67,7 @@ export interface ProjectTreeProps {
   onMenu: (request: AgentMenuRequest) => void;
 }
 
-/** Sidebar: Project → groups → folders → the sessions working there. Git and files live on other pages. */
+/** Sidebar: Project → groups → folders → repos → sessions, subagents under theirs. Git and files live on other pages. */
 export function ProjectTree(props: ProjectTreeProps) {
   const { nodes, selectedProjectId, onSelectProject } = props;
   const [newProjectName, setNewProjectName] = useState<string | null>(null);
@@ -169,7 +172,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
     props.onMenu,
   );
   const isSession = node.kind === 'session';
-  const receivesDrop = !isSession;
+  const receivesDrop = DROP_KINDS.has(node.kind);
   const counts = isSession ? null : countSessions(branch);
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!receivesDrop) return;
@@ -214,6 +217,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                 <span className="block truncate text-2xs text-text-muted">
                   {node.agentKind !== undefined && <span className={AGENT_KIND_CLASS[node.agentKind]}>{node.agentKind}</span>}
                   {branch.where !== undefined && ` · ${branch.where}`}
+                  {children.length > 0 && ` · ${children.length} subagent`}
                   {node.state !== undefined && ` · ${SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state}`}
                 </span>
               </span>
