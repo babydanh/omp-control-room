@@ -91,6 +91,7 @@ function rosterFor(herdr: WorkItemHerdr | undefined): WorkItemRoster {
           paneId: agent.paneId,
           status: agent.status,
           ...(agent.cwd === undefined ? {} : { cwd: agent.cwd }),
+          kind: agent.kind,
         })),
       };
     },

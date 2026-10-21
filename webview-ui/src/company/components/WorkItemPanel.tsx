@@ -18,6 +18,7 @@ import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { useNow } from '../useNow.js';
+import { NEXT_STEP_LABEL, type NextStep, type NextStepAction, nextStepFor } from '../workItemNextStep.js';
 import {
   conflictText,
   isParkedAssignee,
@@ -205,9 +206,7 @@ export function WorkItemPanel({
       : queueWaitText(item.assignee.kind === 'auto' ? 'agent' : holder, position);
   const folder = workItemFolderIdentity(state, workspacePath);
   const updated = relativeTimeVi(item.updatedAt, now);
-  const reason = item.reason?.trim() ? item.reason : null;
   const acceptance = item.acceptance?.trim() || null;
-  const needsAttention = status === 'needs_input' || status === 'failed';
   const judge = judgeChipFor(item);
   const worktree = worktreeOffer(item);
   const parked = isParkedAssignee(item.assignee, folderWork.parkedSessionIds);
@@ -237,6 +236,17 @@ export function WorkItemPanel({
 
   const progress = workItemProgressLine(item);
   const interrupted = workItemInterruptedNote(item);
+  const step = nextStepFor(item, waitText, canCleanWorktree);
+  // The next step's buttons lead; the row below keeps only the moves it does not offer.
+  const inStep = new Set<string>(step.actions);
+  const runStep = (action: NextStepAction): void => {
+    if (action === 'rejudge') send('judge', client.judgeWorkItem(workspacePath, id));
+    else if (action === 'finish') send('verdict', client.markWorkItem(workspacePath, id, 'done'));
+    else if (action === 'followUp') followUpRef.current?.focus();
+    else if (action === 'reassign') openReassign();
+    else if (action === 'cleanWorktree') setConfirming('cleanWorktree');
+    else setConfirming('cancel');
+  };
 
   return (
     <div
@@ -244,6 +254,7 @@ export function WorkItemPanel({
       data-status={status}
       className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto py-2"
     >
+      <NextStepBanner step={step} busy={busy} onAction={runStep} />
       <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-2.5 text-2xs">
         <dt className="text-text-muted">Trạng thái</dt>
         <dd className="text-text">{statusWordVi(status)}</dd>
@@ -257,12 +268,6 @@ export function WorkItemPanel({
         <dd className="min-w-0">
           <FolderTag identity={folder} />
         </dd>
-        {reason !== null && (
-          <>
-            <dt className="text-text-muted">Lý do</dt>
-            <dd className={needsAttention ? 'text-warning' : 'text-text'}>{reason}</dd>
-          </>
-        )}
         {progress !== null && (
           <>
             <dt className="text-text-muted">Tiến độ</dt>
@@ -272,18 +277,6 @@ export function WorkItemPanel({
             >
               {progress}
             </dd>
-          </>
-        )}
-        {acceptance !== null && (
-          <>
-            <dt className="text-text-muted">Xong khi</dt>
-            <dd className="whitespace-pre-wrap break-words text-text">{acceptance}</dd>
-          </>
-        )}
-        {status === 'queued' && (
-          <>
-            <dt className="text-text-muted">Đang chờ</dt>
-            <dd className="text-text">{waitText}</dd>
           </>
         )}
         <dt className="text-text-muted">Cập nhật</dt>
@@ -301,12 +294,18 @@ export function WorkItemPanel({
         className="px-2.5"
       />
 
-      <p
-        data-testid="work-item-text"
-        className="whitespace-pre-wrap break-words px-2.5 text-sm text-text"
-      >
-        {item.text}
-      </p>
+      <details open={status === 'queued'} className="px-2.5">
+        <summary className="cursor-pointer text-2xs text-text-muted">Nội dung việc</summary>
+        <p data-testid="work-item-text" className="mt-1 whitespace-pre-wrap break-words text-xs text-text">
+          {item.text}
+        </p>
+        {acceptance !== null && (
+          <p className="mt-1 whitespace-pre-wrap break-words text-2xs text-text-secondary">
+            <span className="text-text-muted">Xong khi: </span>
+            {acceptance}
+          </p>
+        )}
+      </details>
 
       {status === 'queued' && (
         <DependencyEditor
@@ -347,7 +346,7 @@ export function WorkItemPanel({
 
       {hasActions && (
         <div role="group" aria-label="Thao tác" className="flex flex-wrap gap-1.5 px-2.5">
-          {canFinish && (
+          {canFinish && !inStep.has('finish') && (
             <CompanyButton
               variant="accent"
               size="sm"
@@ -367,7 +366,7 @@ export function WorkItemPanel({
               Hỏng
             </CompanyButton>
           )}
-          {canCancel && (
+          {canCancel && !inStep.has('remove') && (
             <CompanyButton
               size="sm"
               className="text-danger"
@@ -377,7 +376,7 @@ export function WorkItemPanel({
               {removes ? 'Xoá' : 'Huỷ'}
             </CompanyButton>
           )}
-          {canRejudge && (
+          {canRejudge && !inStep.has('rejudge') && (
             <CompanyButton
               size="sm"
               disabled={busy}
@@ -386,7 +385,7 @@ export function WorkItemPanel({
               Chấm lại
             </CompanyButton>
           )}
-          {canReassign && (
+          {canReassign && !inStep.has('reassign') && (
             <CompanyButton size="sm" disabled={busy} onClick={openReassign}>
               Giao lại
             </CompanyButton>
@@ -396,7 +395,7 @@ export function WorkItemPanel({
               Hỏi đội trưởng bước tiếp
             </CompanyButton>
           )}
-          {canCleanWorktree && (
+          {canCleanWorktree && !inStep.has('cleanWorktree') && (
             <CompanyButton
               size="sm"
               disabled={busy}
@@ -470,14 +469,14 @@ export function WorkItemPanel({
         </p>
       )}
 
-      <section aria-label="Lịch sử" className="flex flex-col gap-1.5 px-2.5">
-        <p className="text-2xs text-text-muted">Lịch sử</p>
-        <ol className="flex flex-col gap-1.5">
+      <details className="px-2.5">
+        <summary className="cursor-pointer text-2xs text-text-muted">Lịch sử ({item.history.length})</summary>
+        <ol className="mt-1.5 flex flex-col gap-1.5">
           {item.history.map((event, index) => (
             <HistoryRow key={`${event.at}:${event.kind}:${index}`} event={event} now={now} />
           ))}
         </ol>
-      </section>
+      </details>
 
       {reassigning && (
         <AssignWorkDialog
@@ -499,6 +498,32 @@ export function WorkItemPanel({
         />
       )}
     </div>
+  );
+}
+
+const STEP_TONE: Record<NextStep['tone'], string> = {
+  wait: 'border-hairline text-text-secondary',
+  act: 'border-warning text-warning',
+  done: 'border-hairline text-status-success',
+  error: 'border-status-error text-status-error',
+};
+
+/** What the item asks for now, and the buttons that do it. */
+function NextStepBanner({ step, busy, onAction }: { step: NextStep; busy: boolean; onAction: (action: NextStepAction) => void }) {
+  return (
+    <section aria-label="Bước tiếp theo" data-testid="work-item-next-step" className={`mx-2.5 rounded-(--company-radius-sm) border bg-well p-2 ${STEP_TONE[step.tone]}`}>
+      <p className="text-sm font-semibold">{step.title}</p>
+      {step.detail !== undefined && <p className="mt-0.5 text-2xs text-text-secondary">{step.detail}</p>}
+      {step.actions.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {step.actions.map((action, index) => (
+            <CompanyButton key={action} size="sm" variant={index === 0 ? 'accent' : undefined} className={action === 'remove' ? 'text-danger' : undefined} disabled={busy} onClick={() => onAction(action)}>
+              {NEXT_STEP_LABEL[action]}
+            </CompanyButton>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

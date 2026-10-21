@@ -20,8 +20,11 @@ export const SAFE_READ_ONLY_BLOCK =
 /** The default worker. Naming it adds no subagent line. */
 export const DEFAULT_AGENT = 'task';
 
-/** Which engine runs the item. Its subagent line names the engine's own way to run a role. */
-export type PromptEngine = 'omp' | 'claude';
+/**
+ * Which engine runs the item. Its subagent line names the engine's own way to run a role: omp has
+ * the task tool, Claude Code its own agents; another agent (agy, an unknown pane) just takes the role.
+ */
+export type PromptEngine = 'omp' | 'claude' | 'other';
 
 /** What a prompt is composed from. `agent` absent means the default worker. */
 export interface DispatchPromptParts {
@@ -43,7 +46,9 @@ export function composeDispatchPrompt(parts: DispatchPromptParts): string {
     sections.push(
       parts.engine === 'claude'
         ? `Làm việc này theo vai trò \`${parts.agent}\` trong Claude Code, rồi tổng hợp kết quả và báo lại.`
-        : `Làm việc này bằng subagent omp \`${parts.agent}\` (tool task, agent: ${parts.agent}), rồi tổng hợp kết quả và báo lại.`,
+        : parts.engine === 'other'
+          ? `Làm việc này theo vai trò \`${parts.agent}\`, rồi tổng hợp kết quả và báo lại.`
+          : `Làm việc này bằng subagent omp \`${parts.agent}\` (tool task, agent: ${parts.agent}), rồi tổng hợp kết quả và báo lại.`,
     );
   }
   sections.push(parts.readOnly ? SAFE_READ_ONLY_BLOCK : SAFE_WORK_BLOCK);

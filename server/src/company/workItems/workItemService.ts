@@ -140,6 +140,8 @@ export interface WorkItemPaneView {
   readonly status: HerdrAgent['status'];
   /** The checkout the pane runs in, when herdr reports one. */
   readonly cwd?: string;
+  /** The agent herdr sees in the pane: omp, claude, agy… Absent when herdr does not say. */
+  readonly kind?: string;
 }
 
 /** What the roster answers about herdr panes at one moment. */
@@ -673,12 +675,28 @@ export class WorkItemService {
     await this.flush();
   }
 
-  /** "Chấm lại": judges a review item again now. A conflict holds the judge until it clears. */
+  /**
+   * "Chấm lại": judges again now, on the agent's result read afresh (a herdr pane's transcript may
+   * hold a fuller report than the one saved). Takes a review item, or one the judge sent back to the
+   * user. A conflict holds the judge until it clears.
+   */
   async judgeAgain(command: WorkItemCommand & { id: string }): Promise<void> {
     if (this.replay(command.requestId) !== undefined) return;
     const item = this.requireItem(command.id);
-    if (item.status !== 'review') throw new CompanyError('work_item_status', MESSAGE.status);
+    const sentBack = item.status === 'needs_input' && item.judge?.status === 'verdict';
+    if (item.status !== 'review' && !sentBack) throw new CompanyError('work_item_status', MESSAGE.status);
+    const paneId = item.assignee.kind === 'herdr' ? item.assignee.paneId : undefined;
+    const fresh = paneId === undefined ? undefined : await this.readResult(paneId);
     this.remember(command.requestId, '');
+    if (fresh !== undefined) item.result = fresh;
+    if (sentBack) {
+      const at = this.iso();
+      item.status = 'review';
+      item.reason = WORK_ITEM_REASON.review;
+      item.updatedAt = at;
+      this.pushEvent(item, makeEvent(at, 'status', 'Bạn cho chấm lại.'));
+      this.commit();
+    }
     this.startJudge(item);
     await this.flush();
   }
@@ -1128,7 +1146,8 @@ export class WorkItemService {
 
   /**
    * The prompt an item owes its agent: its text, the subagent line, the safe-work block, then acceptance.
-   * A Claude Code assignee gets the role line for its engine, not the omp task tool.
+   * The subagent line follows the agent that will read it: a Claude Code run, or the agent in the
+   * herdr pane (Claude in a pane has no omp task tool either). An unknown pane is taken as omp.
    */
   private promptFor(
     text: string,
@@ -1136,7 +1155,7 @@ export class WorkItemService {
     agent: string | undefined,
     assignee: WorkItemAssignee,
   ): string {
-    const engine: PromptEngine = assignee.kind === 'claude' ? 'claude' : 'omp';
+    const engine = this.engineOf(assignee);
     return composeDispatchPrompt({
       text,
       acceptance,
@@ -1144,6 +1163,14 @@ export class WorkItemService {
       readOnly: this.isReadOnly(agent),
       engine,
     });
+  }
+
+  private engineOf(assignee: WorkItemAssignee): PromptEngine {
+    if (assignee.kind === 'claude') return 'claude';
+    if (assignee.kind !== 'herdr') return 'omp';
+    const kind = this.ports.roster.panes().panes.find((pane) => pane.paneId === assignee.paneId)?.kind;
+    if (kind === undefined || kind === 'omp' || kind === 'unknown') return 'omp';
+    return kind === 'claude' ? 'claude' : 'other';
   }
 
   /** Puts an item back in its assignee's queue, owing `prompt` to the agent. */
