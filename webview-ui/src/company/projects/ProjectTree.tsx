@@ -80,8 +80,8 @@ export function ProjectTree(props: ProjectTreeProps) {
   const [newProjectName, setNewProjectName] = useState<string | null>(null);
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [agentKind, setAgentKind] = useState<ProjectTreeNode['agentKind'] | 'all'>('all');
-  // Default view: only sessions that are working or waiting on you; untick to see idle ones too.
-  const [liveOnly, setLiveOnly] = useState(true);
+  // Every open session shows by default: an idle omp pane is the user's own work, waiting for them.
+  const [liveOnly, setLiveOnly] = useState(false);
   const tree = useMemo(() => buildAgentTree(nodes), [nodes]);
   const selectedRoots = selectedProjectId === null
     ? tree
@@ -147,7 +147,7 @@ export function ProjectTree(props: ProjectTreeProps) {
           <option value="all">Mọi công cụ</option>
           {AGENT_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
         </select>
-        <label className="flex items-center gap-1" title="Bỏ chọn để xem cả phiên đang rảnh"><input type="checkbox" checked={liveOnly} onChange={(event) => setLiveOnly(event.target.checked)} />Đang hoạt động</label>
+        <label className="flex items-center gap-1" title="Chỉ hiện phiên đang làm hoặc đang chờ bạn, ẩn phiên rảnh"><input type="checkbox" checked={liveOnly} onChange={(event) => setLiveOnly(event.target.checked)} />Ẩn phiên rảnh</label>
       </div>
       <div className="min-h-0 overflow-y-auto">
         {visible.map((branch) => (

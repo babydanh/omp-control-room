@@ -86,10 +86,12 @@ describe('projectTreeView', () => {
     expect(agy[0]?.children[0]?.children[0]?.children).toEqual([]);
   });
 
-  it('live filter hides idle sessions and keeps running ones and ones waiting on you', () => {
+  it('live filter hides idle sessions and keeps running ones, ones waiting on you, and idle ones with a blocked todo', () => {
     const waiting = node('waiting', 'session', 'checkout', { agentKind: 'claude', state: 'waiting_input' });
-    const live = filterProjectTree(buildAgentTree([...nodes, waiting]), { agentKind: 'all', liveOnly: true });
-    expect(live[0]?.children[0]?.children[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['session', 'waiting']);
+    const stuck = node('stuck', 'session', 'checkout', { agentKind: 'omp', state: 'idle', sessionId: 'stuck-1', progress: { done: 3, total: 6, blocked: 'Gộp main: chờ người dùng cho phép' } });
+    const live = filterProjectTree(buildAgentTree([...nodes, waiting, stuck]), { agentKind: 'all', liveOnly: true });
+    expect(live[0]?.children[0]?.children[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['session', 'waiting', 'stuck']);
+    expect(sessionActivityCounts([stuck]).needs).toBe(1);
   });
 
   it('offers only what works for each node, from the tree around it', () => {

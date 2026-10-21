@@ -171,9 +171,18 @@ export function isRunningNode(node: ProjectTreeNode): boolean {
   return node.kind === 'session' && RUNNING_STATES.has((node.state ?? '').toLowerCase());
 }
 
-/** A session worth showing by default: working now, or stopped waiting for you. */
+/**
+ * A session that waits on you: its agent says so (waiting for input, a permission), or it stopped
+ * with a todo task marked blocked, the way omp asks the user to choose before going on.
+ */
+function waitsOnYou(node: ProjectTreeNode): boolean {
+  if (node.kind !== 'session' || isRunningNode(node)) return false;
+  return WAITING_ON_YOU_STATES.has((node.state ?? '').toLowerCase()) || node.progress?.blocked !== undefined;
+}
+
+/** A session the "Đang hoạt động" filter keeps: working now, or stopped waiting for you. */
 export function isLiveNode(node: ProjectTreeNode): boolean {
-  return isRunningNode(node) || (node.kind === 'session' && WAITING_ON_YOU_STATES.has((node.state ?? '').toLowerCase()));
+  return isRunningNode(node) || waitsOnYou(node);
 }
 
 /** States the "rảnh" chip counts: stopped, nothing asked of you. */
@@ -194,7 +203,7 @@ export function sessionActivityCounts(nodes: readonly ProjectTreeNode[]): Activi
     seen.add(key);
     const state = (node.state ?? '').toLowerCase();
     if (RUNNING_STATES.has(state)) counts.working += 1;
-    else if (WAITING_ON_YOU_STATES.has(state)) counts.needs += 1;
+    else if (waitsOnYou(node)) counts.needs += 1;
     else if (state === 'error') counts.error += 1;
     else if (IDLE_STATES.has(state)) counts.idle += 1;
     else continue;
