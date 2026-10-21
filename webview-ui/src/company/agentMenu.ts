@@ -462,12 +462,14 @@ export function workItemCardMenuItems(work: WorkItemMenuFacts): AgentMenuItem[] 
         }),
       );
     }
-    if (work.status === 'queued') {
+    if (work.status === 'queued' || work.status === 'done' || work.status === 'failed') {
+      // A queued item is cancelled before it is sent; a finished one is taken off the board.
+      const queued = work.status === 'queued';
       items.push(
         item({
           id: 'work-cancel',
-          label: 'Huỷ việc',
-          icon: 'stop',
+          label: queued ? 'Huỷ việc' : 'Xoá việc…',
+          icon: queued ? 'stop' : 'trash',
           action: { kind: 'workItemAction', action: 'cancel' },
           danger: true,
         }),

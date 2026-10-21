@@ -458,8 +458,8 @@ describe('work item actions in the agent menu', () => {
       'review',
       ['work-open', 'work-assign', 'work-follow-up', 'work-done', 'work-failed', 'work-squad'],
     ],
-    ['failed', ['work-open', 'work-assign', 'work-follow-up', 'work-done']],
-    ['done', ['work-open']],
+    ['failed', ['work-open', 'work-assign', 'work-follow-up', 'work-done', 'work-cancel']],
+    ['done', ['work-open', 'work-cancel']],
   ] as const)('selects valid actions for a %s work item', (status, expected) => {
     const items = workItemCardMenuItems({
       id: 'work-1',

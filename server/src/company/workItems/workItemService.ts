@@ -622,7 +622,7 @@ export class WorkItemService {
     if (command.verdict === 'done') await this.reconcileAfterSave();
   }
 
-  /** Removes a queued item that was never sent. */
+  /** Removes an item nobody works on: a queued one never sent, or a finished one (done, failed). */
   async cancel(command: WorkItemCommand & { id: string }): Promise<void> {
     if (this.replay(command.requestId) !== undefined) return;
     const item = this.requireItem(command.id);

@@ -72,7 +72,10 @@ describe('work item status rules', () => {
     expect(canReassign('queued')).toBe(true);
     expect(canReassign('running')).toBe(false);
     expect(canCancel('queued')).toBe(true);
+    expect(canCancel('failed')).toBe(true);
+    expect(canCancel('done')).toBe(true);
     expect(canCancel('review')).toBe(false);
+    expect(canCancel('running')).toBe(false);
   });
 
   it('refuses a verdict on a done item or a repeated verdict', () => {

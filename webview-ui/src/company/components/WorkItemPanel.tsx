@@ -217,7 +217,9 @@ export function WorkItemPanel({
   const canFinish = status !== 'done';
   const canFail =
     status === 'queued' || status === 'running' || status === 'needs_input' || status === 'review';
-  const canCancel = status === 'queued';
+  const canCancel = status === 'queued' || status === 'done' || status === 'failed';
+  // A finished item is removed from the board, a queued one is cancelled before it is sent.
+  const removes = status !== 'queued';
   const canFollowUp = status === 'review' || status === 'failed';
   const canReassign = status === 'queued' || status === 'review' || status === 'failed';
   const canAskLeader = status === 'review' && item.squadRunId === undefined;
@@ -368,7 +370,7 @@ export function WorkItemPanel({
               disabled={busy}
               onClick={() => setConfirming('cancel')}
             >
-              Huỷ
+              {removes ? 'Xoá' : 'Huỷ'}
             </CompanyButton>
           )}
           {canRejudge && (
@@ -406,14 +408,18 @@ export function WorkItemPanel({
           <ConfirmAction
             message={
               confirming === 'cancel'
-                ? 'Huỷ việc này? Việc đang chạy sẽ dừng.'
+                ? removes
+                  ? 'Xoá việc này khỏi bảng? Worktree của việc (nếu có) vẫn giữ trên đĩa.'
+                  : 'Huỷ việc này? Việc đang chạy sẽ dừng.'
                 : confirming === 'failed'
                   ? 'Đánh dấu việc này thất bại?'
                   : 'Dọn worktree của việc này?'
             }
             confirmLabel={
               confirming === 'cancel'
-                ? 'Huỷ việc'
+                ? removes
+                  ? 'Xoá việc'
+                  : 'Huỷ việc'
                 : confirming === 'failed'
                   ? 'Đánh dấu thất bại'
                   : 'Dọn worktree'

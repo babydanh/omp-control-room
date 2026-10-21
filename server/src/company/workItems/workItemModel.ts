@@ -291,9 +291,12 @@ export function canReassign(status: WorkItemStatus): boolean {
   return status === 'queued' || status === 'review' || status === 'failed';
 }
 
-/** "Huỷ": only a queued item, never sent, can be removed. */
+/**
+ * "Huỷ"/"Xoá": an item nobody works on can be removed — a queued one never sent, or a finished
+ * one (done, failed). Its worktree, if any, stays on disk: "Dọn worktree" is the way to remove it.
+ */
 export function canCancel(status: WorkItemStatus): boolean {
-  return status === 'queued';
+  return status === 'queued' || status === 'done' || status === 'failed';
 }
 
 /** A user verdict may move any open item or a failed one to done, or any open item to failed. */

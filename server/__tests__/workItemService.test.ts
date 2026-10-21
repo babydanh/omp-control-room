@@ -476,6 +476,21 @@ describe('WorkItemService: commands', () => {
     expect(f.service.snapshot().items.map((item) => item.id)).toEqual([running]);
   });
 
+  it('removes a finished item from the board, which a running one refuses', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    const id = await f.service.create({ requestId: randomUUID(), text: 'Hỏng', assignee: herdr(PANE_A) });
+    f.setPane(PANE_A, 'working');
+    await f.service.reconcileNow();
+    await expect(f.service.cancel({ requestId: randomUUID(), id })).rejects.toMatchObject({
+      code: 'work_item_busy',
+    });
+
+    await f.service.mark({ requestId: randomUUID(), id, verdict: 'failed' });
+    await f.service.cancel({ requestId: randomUUID(), id });
+    expect(f.service.snapshot().items).toEqual([]);
+  });
+
   it('records a verdict without sending anything to an agent', async () => {
     const f = await openFixture();
     f.panes.push({ paneId: PANE_A, status: 'idle' });
