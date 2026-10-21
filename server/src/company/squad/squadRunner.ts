@@ -26,9 +26,59 @@ const execFileAsync = promisify(execFile);
 /** A turn failure whose message is shown to the user as it is. */
 export class SquadLeaderError extends Error {}
 
-/** One turn: the prompt in, the final text out. */
+/** What a running turn has produced so far: reasoning is counted, never shown; the answer's tail is. */
+export interface LeaderLive {
+  readonly phase: 'thinking' | 'writing';
+  readonly chars: number;
+  readonly text?: string;
+}
+
+/** One turn: the prompt in, the final text out. `onLive` hears the turn's progress, when the engine streams it. */
 export interface LeaderRunner {
-  run(prompt: string, signal: AbortSignal): Promise<string>;
+  run(prompt: string, signal: AbortSignal, onLive?: (live: LeaderLive) => void): Promise<string>;
+}
+
+/** The last characters of the answer a live update carries. */
+const LIVE_TEXT_CHARS = 1500;
+/** At most one live update per this many milliseconds. */
+const LIVE_INTERVAL_MS = 1000;
+
+/**
+ * Reads omp's JSON-lines stdout as it arrives and reports the turn's progress: `thinking_delta`
+ * events are counted, `text_delta` events build the answer. Updates are spaced by
+ * {@link LIVE_INTERVAL_MS}; `now` is injected for tests.
+ */
+export function createLiveReader(
+  onLive: (live: LeaderLive) => void,
+  now: () => number = Date.now,
+): (chunk: string) => void {
+  let carry = '';
+  let thinking = 0;
+  let text = '';
+  let last = Number.NEGATIVE_INFINITY;
+  return (chunk) => {
+    const lines = (carry + chunk).split('\n');
+    carry = lines.pop() ?? '';
+    let changed = false;
+    for (const line of lines) {
+      if (!line.includes('"message_update"')) continue;
+      let event: unknown;
+      try {
+        event = JSON.parse(line);
+      } catch {
+        continue;
+      }
+      const update = isRecord(event) ? event['assistantMessageEvent'] : undefined;
+      if (!isRecord(update) || typeof update['delta'] !== 'string') continue;
+      if (update['type'] === 'thinking_delta') thinking += update['delta'].length;
+      else if (update['type'] === 'text_delta') text += update['delta'];
+      else continue;
+      changed = true;
+    }
+    if (!changed || now() - last < LIVE_INTERVAL_MS) return;
+    last = now();
+    onLive(text === '' ? { phase: 'thinking', chars: thinking } : { phase: 'writing', chars: text.length, text: text.slice(-LIVE_TEXT_CHARS) });
+  };
 }
 
 /** What one omp process run needs. `execute` is replaced in tests. */
@@ -40,6 +90,8 @@ export interface LeaderProcessRequest {
   readonly signal: AbortSignal;
   /** Who the turn is for, in the errors the user reads. */
   readonly who: string;
+  /** Hears stdout as it arrives, before the whole output resolves. */
+  readonly onStdout?: (chunk: string) => void;
 }
 
 /** Runs the process and resolves with its stdout. */
@@ -156,6 +208,9 @@ export async function execLeaderProcess(request: LeaderProcessRequest): Promise<
     encoding: 'utf8',
   });
   child.child.stdin?.end();
+  if (request.onStdout !== undefined) {
+    child.child.stdout?.on('data', (chunk: Buffer | string) => request.onStdout?.(chunk.toString()));
+  }
   try {
     const { stdout } = await child;
     return stdout;
@@ -170,7 +225,7 @@ export function createOmpLeaderRunner(options: OmpLeaderRunnerOptions): LeaderRu
   const timeoutMs = options.timeoutMs ?? SQUAD_TURN_TIMEOUT_MS;
   const who = options.label ?? LEADER_LABEL;
   return {
-    async run(prompt, signal) {
+    async run(prompt, signal, onLive) {
       const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'squad-leader-'));
       try {
         const promptPath = path.join(dir, 'prompt.md');
@@ -182,6 +237,7 @@ export function createOmpLeaderRunner(options: OmpLeaderRunnerOptions): LeaderRu
           timeoutMs,
           signal,
           who,
+          ...(onLive === undefined ? {} : { onStdout: createLiveReader(onLive) }),
         });
         return leaderTextFromOutput(stdout, who);
       } finally {

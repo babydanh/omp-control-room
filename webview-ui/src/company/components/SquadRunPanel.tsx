@@ -7,7 +7,7 @@
 
 import { useRef, useState } from 'react';
 
-import type { SquadDependency, SquadEvent, SquadProposal } from '../../../../core/src/messages.js';
+import type { SquadDependency, SquadEvent, SquadLeaderLive, SquadProposal } from '../../../../core/src/messages.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import { assigneeOptionsFor } from '../assigneeOptions.js';
 import type { CompanyClient } from '../companyClient.js';
@@ -86,6 +86,7 @@ export function SquadRunPanel({ client, state, workspacePath, runId, onRemoved }
         {progress !== null && <span className="tabular-nums">{progress}</span>}
       </div>
       <p className="whitespace-pre-wrap break-words text-text">{run.request}</p>
+      <LeaderLiveBlock live={state.squadLive[run.id]} now={now} />
       {proposal !== undefined && (
         <ProposalEditor
           key={proposal.id}
@@ -148,6 +149,23 @@ export function SquadRunPanel({ client, state, workspacePath, runId, onRemoved }
         </ol>
       </section>
     </div>
+  );
+}
+
+/** A running leader turn as it streams: how long, how much reasoning, then the answer being written. */
+function LeaderLiveBlock({ live, now }: { live: SquadLeaderLive | undefined; now: number }) {
+  if (live === undefined) return null;
+  const seconds = Math.max(0, Math.round((now - Date.parse(live.startedAt)) / 1000));
+  const head = live.phase === 'thinking'
+    ? `Đội trưởng đang suy nghĩ… ${seconds} giây${live.chars > 0 ? ` · ${live.chars.toLocaleString('vi-VN')} ký tự suy luận` : ''}`
+    : `Đội trưởng đang viết đề xuất… ${seconds} giây · ${live.chars.toLocaleString('vi-VN')} ký tự`;
+  return (
+    <section aria-label="Đội trưởng đang làm" aria-live="polite" className="rounded-(--company-radius-sm) bg-well p-2">
+      <p className="text-2xs text-text-muted">{head}</p>
+      {live.text !== undefined && live.text !== '' && (
+        <pre className="mt-1 max-h-48 overflow-y-auto whitespace-pre-wrap break-all font-mono text-2xs text-text-secondary">{live.text}</pre>
+      )}
+    </section>
   );
 }
 

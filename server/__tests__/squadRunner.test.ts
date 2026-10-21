@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {
+  createLiveReader,
   createOmpLeaderRunner,
   execLeaderProcess,
   leaderArgs,
@@ -25,6 +26,29 @@ function assistant(
 }
 
 const USER = { role: 'user', content: [{ type: 'text', text: 'prompt' }] };
+
+const delta = (type: string, text: string): string =>
+  `${JSON.stringify({ type: 'message_update', assistantMessageEvent: { type, contentIndex: 0, delta: text } })}\n`;
+
+describe('createLiveReader', () => {
+  it('counts reasoning without showing it, then shows the answer, across a line split between chunks, once a second', () => {
+    const seen: unknown[] = [];
+    let clock = 0;
+    const read = createLiveReader((live) => seen.push(live), () => clock);
+    read(delta('thinking_delta', 'bí mật'));
+    clock = 500;
+    read(delta('thinking_delta', 'xyz'));
+    clock = 1200;
+    const line = delta('text_delta', '{"assignments"');
+    read(line.slice(0, 20));
+    read(line.slice(20));
+    read('{"type":"turn_end"}\n');
+    expect(seen).toEqual([
+      { phase: 'thinking', chars: 6 },
+      { phase: 'writing', chars: 14, text: '{"assignments"' },
+    ]);
+  });
+});
 
 describe('leaderArgs', () => {
   it('runs print mode with no session, no tools, JSON output, and the prompt file last', () => {

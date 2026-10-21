@@ -43,6 +43,7 @@ import type {
   CompanyFileEntry,
   CompanyFolderBrowseMessage,
   CompanyRemoveChange,
+  CompanySquadLiveMessage,
   CompanySquadMessage,
   CompanyStateChangedMessage,
   CompanyWorkItemsMessage,
@@ -50,6 +51,7 @@ import type {
   HerdrSleepingSession,
   OmpSessionEntry,
   ServerMessage,
+  SquadLeaderLive,
 } from '../../../core/src/messages.js';
 import { type CommandResultView, failureNotice, viewCommandResult } from './commandResults.js';
 import {
@@ -335,6 +337,8 @@ export interface CompanyViewState extends FolderScope {
    * is replaced only by a newer revision, as its work items are.
    */
   squad: Record<string, FolderSquad>;
+  /** A running leader turn's progress, by run id. Gone when the turn ends; never stored. */
+  squadLive: Record<string, SquadLeaderLive>;
 }
 
 export function emptyCompanyState(
@@ -375,6 +379,7 @@ export function emptyCompanyState(
     usageSlots: emptyUsageState(),
     workItems: {},
     squad: {},
+    squadLive: {},
   };
 }
 
@@ -866,6 +871,14 @@ function applySquad(state: CompanyViewState, message: CompanySquadMessage): Comp
   };
 }
 
+/** A leader turn's progress replaces the last one; a message without live ends the turn. */
+function applySquadLive(state: CompanyViewState, message: CompanySquadLiveMessage): CompanyViewState {
+  const live = { ...state.squadLive };
+  if (message.live === undefined) delete live[message.runId];
+  else live[message.runId] = message.live;
+  return { ...state, squadLive: live };
+}
+
 /** Stores one folder's company data, then re-derives the view the board reads. */
 function withFolderScope(
   state: CompanyViewState,
@@ -1141,6 +1154,8 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
       return unchanged(applyWorkItems(state, message));
     case 'companySquad':
       return unchanged(applySquad(state, message));
+    case 'companySquadLive':
+      return unchanged(applySquadLive(state, message));
     case 'companyFolderBrowse': {
       // Only the listing that answers the latest browse is held; an older one is a late answer.
       const current = message.requestId === state.folderBrowseRequest;

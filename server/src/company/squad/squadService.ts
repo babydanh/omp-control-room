@@ -12,6 +12,7 @@
  */
 
 import type {
+  CompanySquadLiveMessage,
   CompanySquadMessage,
   CompanyWorkItemsMessage,
   SquadProposal,
@@ -91,7 +92,7 @@ export interface SquadPorts {
   members(): readonly SquadMember[];
   readonly leader: LeaderRunner;
   readonly persistence: SquadPersistence;
-  publish(message: CompanySquadMessage): void;
+  publish(message: CompanySquadMessage | CompanySquadLiveMessage): void;
   now(): number;
   newId(): string;
 }
@@ -480,6 +481,13 @@ export class SquadService {
     }
     const controller = new AbortController();
     this.controllers.set(run.id, controller);
+    // The turn's progress goes out as it streams; it is not stored, and a final message clears it.
+    const startedAt = this.iso();
+    const sendLive = (live?: CompanySquadLiveMessage['live']): void => {
+      if (this.disposed) return;
+      this.ports.publish({ type: 'companySquadLive', workspacePath: this.workspacePath, runId: run.id, ...(live === undefined ? {} : { live }) });
+    };
+    sendLive({ phase: 'thinking', chars: 0, startedAt });
     try {
       const reviews = run.pendingReviews.slice();
       const snapshot = this.ports.workItems.snapshot();
@@ -503,6 +511,7 @@ export class SquadService {
           turn: run.turns + 1,
         }),
         controller.signal,
+        (live) => sendLive({ ...live, startedAt }),
       );
       const checked = parseLeaderReply(output, members, catalog, openSequences);
       if (!checked.ok) throw new SquadLeaderError(checked.message);
@@ -518,6 +527,7 @@ export class SquadService {
         return;
       this.failRun(run, leaderFailureMessage(error));
     } finally {
+      sendLive();
       if (this.controllers.get(runId) === controller) this.controllers.delete(runId);
     }
   }

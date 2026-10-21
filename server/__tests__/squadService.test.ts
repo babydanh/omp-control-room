@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import type {
   AgentRole,
+  CompanySquadLiveMessage,
   CompanySquadMessage,
   CompanyWorkItemsMessage,
   OmpAgentInfo,
@@ -22,7 +23,7 @@ import {
   type SquadMember,
   type StoredSquadRun,
 } from '../src/company/squad/squadModel.js';
-import type { LeaderRunner } from '../src/company/squad/squadRunner.js';
+import type { LeaderLive, LeaderRunner } from '../src/company/squad/squadRunner.js';
 import {
   type SquadPersistence,
   SquadService,
@@ -279,8 +280,12 @@ class FakeLeader implements LeaderRunner {
     this.replies.push(value);
   }
 
-  async run(prompt: string): Promise<string> {
+  /** Progress the next turns report through onLive before they answer. */
+  live: LeaderLive[] = [];
+
+  async run(prompt: string, _signal?: AbortSignal, onLive?: (live: LeaderLive) => void): Promise<string> {
     this.prompts.push(prompt);
+    for (const live of this.live) onLive?.(live);
     const deferred = this.deferred;
     if (deferred !== null) {
       this.deferred = null;
@@ -298,6 +303,7 @@ class Harness {
   readonly leader = new FakeLeader();
   readonly persistence = new FakePersistence();
   readonly published: CompanySquadMessage[] = [];
+  readonly lives: CompanySquadLiveMessage[] = [];
   members: SquadMember[] = [MEMBER];
   readonly service: SquadService;
   private clock = CLOCK_START;
@@ -316,7 +322,8 @@ class Harness {
         leader: this.leader,
         persistence: this.persistence,
         publish: (message) => {
-          this.published.push(message);
+          if (message.type === 'companySquadLive') this.lives.push(message);
+          else this.published.push(message);
         },
         now: () => {
           this.clock += 1000;
@@ -421,6 +428,19 @@ describe('SquadService requests', () => {
     expect(h.leader.prompts[0]).toContain('- herdr:wA:p1');
     expect(h.leader.prompts[0]).toContain('role: "Frontend"');
     await waitFor(() => h.persistence.saves.at(-1)?.runs[0]?.status === 'proposed');
+  });
+
+  it('sends the leader turn progress while it runs, then a message that ends it', async () => {
+    const h = new Harness();
+    h.leader.live = [{ phase: 'thinking', chars: 120 }, { phase: 'writing', chars: 18, text: '{"assignments":[' }];
+    h.leader.reply(proposal('Viết form đăng nhập'));
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Làm trang đăng nhập' });
+    await waitFor(() => h.runOf(runId)?.status === 'proposed');
+
+    expect(h.lives.map((message) => message.live?.phase ?? 'ended')).toEqual(['thinking', 'thinking', 'writing', 'ended']);
+    expect(h.lives.every((message) => message.runId === runId && message.workspacePath === WORKSPACE)).toBe(true);
+    expect(h.lives[2]?.live).toMatchObject({ chars: 18, text: '{"assignments":[' });
+    expect(h.lives[2]?.live?.startedAt).toBe(h.lives[0]?.live?.startedAt);
   });
 
   it('answers a resent request with the same run and runs one leader turn', async () => {

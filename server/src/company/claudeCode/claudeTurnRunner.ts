@@ -68,8 +68,9 @@ export function createEngineRunner(options: {
   readonly agy: LeaderRunner;
 }): LeaderRunner {
   return {
-    run(prompt, signal) {
-      return options[options.engine()].run(prompt, signal);
+    run(prompt, signal, onLive) {
+      // Only the omp runner streams; Claude and agy runs ignore onLive.
+      return options[options.engine()].run(prompt, signal, onLive);
     },
   };
 }

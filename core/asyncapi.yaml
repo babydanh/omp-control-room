@@ -133,6 +133,7 @@ components:
         - $ref: '#/components/schemas/CompanyCommandResultMessage'
         - $ref: '#/components/schemas/CompanyWorkItemsMessage'
         - $ref: '#/components/schemas/CompanySquadMessage'
+        - $ref: '#/components/schemas/CompanySquadLiveMessage'
         - $ref: '#/components/schemas/CompanyFolderBrowseMessage'
         - $ref: '#/components/schemas/CompanyTextDeltaMessage'
         - $ref: '#/components/schemas/CompanySessionLogMessage'
@@ -4911,6 +4912,49 @@ components:
           maxItems: 50
           items:
             $ref: '#/components/schemas/SquadRun'
+
+    SquadLeaderLive:
+      type: object
+      additionalProperties: false
+      required: [phase, chars, startedAt]
+      description: >-
+        What the leader's running turn has produced so far. thinking counts the model's reasoning without
+        showing it; writing carries the tail of the answer it is writing (the proposal JSON).
+      properties:
+        phase:
+          type: string
+          enum: [thinking, writing]
+        chars:
+          type: integer
+          minimum: 0
+          description: Characters produced in this phase so far.
+        text:
+          type: string
+          maxLength: 2000
+          description: The last characters of the answer, while writing.
+        startedAt:
+          type: string
+          format: date-time
+
+    CompanySquadLiveMessage:
+      type: object
+      additionalProperties: false
+      required: [type, workspacePath, runId]
+      description: >-
+        A leader turn's progress, sent about once a second while it runs and once without live when it
+        ends. Not stored: the run itself arrives in companySquad.
+      properties:
+        type:
+          const: companySquadLive
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        runId:
+          type: string
+          format: uuid
+        live:
+          $ref: '#/components/schemas/SquadLeaderLive'
 
     CompanySquadRequestMessage:
       type: object
