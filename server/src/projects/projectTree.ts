@@ -28,8 +28,8 @@ export interface ProjectSessionSnapshot {
   readonly parentSessionId?: string;
   /** The herdr pane the session runs in, when herdr reports the same session. */
   readonly herdrPaneId?: string;
-  /** The checkout the session last edited. */
-  readonly editCheckout?: string;
+  /** The checkouts the session edited lately, newest first. */
+  readonly editCheckouts?: readonly string[];
 }
 
 export interface HerdrProjectSession {
@@ -101,7 +101,7 @@ type TitledSessionRow = SessionRow & {
   readonly boardSessionId?: string;
   readonly parentSessionId?: string;
   readonly herdrPaneId?: string;
-  readonly editCheckout?: string;
+  readonly editCheckouts?: readonly string[];
 };
 
 /**
@@ -158,24 +158,29 @@ function annotateLedgerRows(
   boardSessionFor: ((nativeSessionId: string) => string | undefined) | undefined,
 ): TitledSessionRow[] {
   const intents = new Map<string, string>();
-  const edited = new Map<string, string>();
+  // Events come oldest first, so re-adding a checkout moves it to the end; reversed below, newest first.
+  const edited = new Map<string, Set<string>>();
   for (const event of ledger.eventRows(formatLedgerTime(Date.now() - SESSION_INTENT_WINDOW_MS))) {
     const intent = event.intent?.trim();
     if (intent) intents.set(event.sessionId, intent);
-    if (event.checkout) edited.set(event.sessionId, event.checkout);
+    if (!event.checkout) continue;
+    const checkouts = edited.get(event.sessionId) ?? new Set<string>();
+    checkouts.delete(event.checkout);
+    checkouts.add(event.checkout);
+    edited.set(event.sessionId, checkouts);
   }
   const parents = parentSessions(rows);
   return rows.map((row) => {
     const intent = intents.get(row.sessionId);
     const boardSessionId = row.endedAt === null ? boardSessionFor?.(row.sessionId) : undefined;
     const parentSessionId = parents.get(row.sessionId);
-    const editCheckout = edited.get(row.sessionId);
+    const editCheckouts = [...(edited.get(row.sessionId) ?? [])].reverse();
     return {
       ...row,
       ...(intent === undefined ? {} : { intent }),
       ...(boardSessionId === undefined ? {} : { boardSessionId }),
       ...(parentSessionId === undefined ? {} : { parentSessionId }),
-      ...(editCheckout === undefined ? {} : { editCheckout }),
+      ...(editCheckouts.length === 0 ? {} : { editCheckouts }),
     };
   });
 }
@@ -240,7 +245,7 @@ function sessionsForCheckout(
       ...(row.boardSessionId === undefined ? {} : { boardSessionId: row.boardSessionId }),
       ...(row.parentSessionId === undefined ? {} : { parentSessionId: row.parentSessionId }),
       ...(row.herdrPaneId === undefined ? {} : { herdrPaneId: row.herdrPaneId }),
-      ...(row.editCheckout === undefined ? {} : { editCheckout: row.editCheckout }),
+      ...(row.editCheckouts === undefined ? {} : { editCheckouts: row.editCheckouts }),
     });
   }
   for (const agent of agents) {
@@ -599,7 +604,7 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
       ...(session.boardSessionId === undefined ? {} : { boardSessionId: session.boardSessionId }),
       ...(session.parentSessionId === undefined ? {} : { parentSessionId: session.parentSessionId }),
       ...(session.herdrPaneId === undefined ? {} : { herdrPaneId: session.herdrPaneId }),
-      ...(session.editCheckout === undefined ? {} : { editCheckout: session.editCheckout }),
+      ...(session.editCheckouts === undefined ? {} : { editCheckouts: [...session.editCheckouts] }),
     });
   }
 }

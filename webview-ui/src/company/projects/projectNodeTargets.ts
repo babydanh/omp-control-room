@@ -36,17 +36,71 @@ function descendants(nodes: readonly ProjectTreeNode[], node: ProjectTreeNode): 
 
 /**
  * The checkout a "changes" action on `node` opens: the node itself when it is a
- * checkout; for a session, the checkout it works in, else the one it last edited
- * (a session at a folder's root works across repos); otherwise the first checkout
- * below it (a repository's main worktree is listed first). Null when there is none.
+ * checkout; for a session, the first with uncommitted lines among the checkouts it
+ * edited (newest first) and the one it works in, else the one it works in, else the
+ * one it edited last (a session at a folder's root works across repos); otherwise the
+ * first checkout below it (a repository's main worktree is listed first). Null when
+ * there is none.
  */
 export function checkoutPathFor(
   nodes: readonly ProjectTreeNode[],
   node: ProjectTreeNode,
 ): string | null {
   if (node.kind === 'checkout') return node.path ?? null;
-  if (node.kind === 'session') return ancestorOf(nodes, node, 'checkout')?.path ?? node.editCheckout ?? null;
+  if (node.kind === 'session') {
+    const own = ancestorOf(nodes, node, 'checkout')?.path;
+    const edited = node.editCheckouts ?? [];
+    const changes = checkoutChangesByPath(nodes);
+    const busy = [...edited, ...(own === undefined ? [] : [own])].find((path) => {
+      const counts = changesAt(changes, path);
+      return counts !== null && counts.additions + counts.deletions > 0;
+    });
+    return busy ?? own ?? edited[0] ?? null;
+  }
   return descendants(nodes, node).find((candidate) => candidate.kind === 'checkout' && candidate.path !== undefined)?.path ?? null;
+}
+
+/** A path compared case-, separator- and trailing-slash-blind, as Windows paths are. */
+function pathKey(value: string): string {
+  return value.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * Lines each checkout in the tree adds and removes, keyed for `changesAt`. Only the
+ * full snapshot carries them; the quick one has no checkouts yet.
+ */
+export function checkoutChangesByPath(
+  nodes: readonly ProjectTreeNode[],
+): ReadonlyMap<string, { additions: number; deletions: number }> {
+  const changes = new Map<string, { additions: number; deletions: number }>();
+  for (const node of nodes) {
+    if (node.kind !== 'checkout' || node.path === undefined) continue;
+    changes.set(pathKey(node.path), { additions: node.additions ?? 0, deletions: node.deletions ?? 0 });
+  }
+  return changes;
+}
+
+/** The changes `checkoutChangesByPath` holds for `path`; null when the tree does not hold it. */
+export function changesAt(
+  changes: ReadonlyMap<string, { additions: number; deletions: number }>,
+  path: string,
+): { additions: number; deletions: number } | null {
+  return changes.get(pathKey(path)) ?? null;
+}
+
+/**
+ * The checkout each herdr pane works in, from the session the tree joined to it: a
+ * pane's own cwd is where its shell started (often a folder holding several repos),
+ * while the session knows the checkout it works in or last edited.
+ */
+export function paneCheckouts(nodes: readonly ProjectTreeNode[]): ReadonlyMap<string, string> {
+  const checkouts = new Map<string, string>();
+  for (const node of nodes) {
+    if (node.kind !== 'session' || node.herdrPaneId === undefined) continue;
+    const checkout = checkoutPathFor(nodes, node);
+    if (checkout !== null) checkouts.set(node.herdrPaneId, checkout);
+  }
+  return checkouts;
 }
 
 /** Folders under a Project or group: the ones "Phiên mới…" lets you pick. */

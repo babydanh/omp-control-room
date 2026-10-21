@@ -50,6 +50,8 @@ export interface AgentBoardCard {
   statusLabel: string;
   /** The git branch a pane works on; null when herdr reported none, and for a session. */
   branch: string | null;
+  /** The git checkout a pane works in (herdr's worktree root), whose changes the card counts; null when unknown, and for a session. */
+  checkout: string | null;
   /** The line the agent is doing now, from its screen or log; null when neither shows one. */
   activity: string | null;
   /** When the agent last changed, as an ISO time; null when none is known. */
@@ -120,6 +122,7 @@ function herdrCard(agent: HerdrAgent, screen: HerdrScreenView | undefined): Agen
     title: herdrSummary(agent.title, agent.cwd)?.text ?? `${agent.kind} · ${agent.paneId}`,
     statusLabel: HERDR_TONE_LABELS[tone],
     branch: agent.branch || null,
+    checkout: agent.worktreeRoot || null,
     activity: paneActivity(screen?.text),
     updatedAt: screen?.at ?? null,
   };
@@ -143,6 +146,7 @@ function sessionCard(
     title: session.name,
     statusLabel: tone === 'needs' ? HERDR_TONE_LABELS.needs : sessionStatusLabel(session.status),
     branch: null,
+    checkout: null,
     activity: latestLogLine(entries),
     updatedAt: session.lastUsedAt,
   };

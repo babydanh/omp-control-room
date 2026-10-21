@@ -97,6 +97,10 @@ export interface CompanyBoardProps {
   /** The client a squad card sends its approve, dismiss and retry commands through. */
   client: CompanyClient;
   onMenu: (request: AgentMenuRequest) => void;
+  /** A card's checkout and the lines it adds and removes; null when none is known. */
+  changesFor: (card: AgentBoardCard) => CheckoutChanges | null;
+  /** Opens the Thay đổi page on a checkout's diff. */
+  onOpenChanges: (checkout: string) => void;
   /** The folder a card's id belongs to, shown as a tag in all mode; null outside it. */
   identityOf: (id: string) => FolderIdentity | null;
   /** The folder whose squad settings the board's top shows; null when no folder is active. */
@@ -297,11 +301,20 @@ function TaskCard({
   );
 }
 
+/** A checkout and the lines it adds and removes against its last commit. */
+export interface CheckoutChanges {
+  checkout: string;
+  additions: number;
+  deletions: number;
+}
+
 /**
  * An agent with work of its own and no task card: a herdr pane or a company
  * session. Its status dot and project line set it apart from the company's own work. The
  * lane already names its status, so the card prints no status word. It shows the
- * project and branch, the title, the newest activity, and when it last changed.
+ * project and branch, the title, the newest activity, and when it last changed. A pane
+ * whose checkout has uncommitted lines shows them as +N −M; a click there opens that
+ * diff (a sibling button: a button cannot hold another).
  */
 function AgentCard({
   card,
@@ -311,6 +324,8 @@ function AgentCard({
   onMenu,
   now,
   folder,
+  changes,
+  onOpenChanges,
 }: {
   card: AgentBoardCard;
   index: number;
@@ -319,6 +334,8 @@ function AgentCard({
   onMenu: (request: AgentMenuRequest) => void;
   now: number;
   folder: FolderIdentity | null;
+  changes: CheckoutChanges | null;
+  onOpenChanges: (checkout: string) => void;
 }) {
   const { subject } = card;
   const target: PreviewTarget =
@@ -334,41 +351,60 @@ function AgentCard({
     () => actions.press(target),
   );
   const updated = card.updatedAt === null ? null : relativeTimeVi(card.updatedAt, now);
+  const showChanges = changes !== null && changes.additions + changes.deletions > 0;
   return (
-    <button
-      type="button"
-      onClick={onOpen}
-      {...previewTriggers(actions, target)}
-      {...triggers}
-      aria-pressed={selected}
-      title={`${card.tag} · ${card.project} · ${card.title} · ${card.statusLabel}`}
-      data-testid="agent-card"
-      data-agent-kind={subject.kind}
-      data-flight-key={card.key}
-      data-lane={card.lane}
-      data-index={index}
-      className="company-card flex w-full cursor-pointer flex-col gap-1 p-2 text-left"
-    >
-      <span className="flex min-w-0 items-center gap-1.5">
-        <span className="flex shrink-0">
-          <StatusDot tone={card.tone} />
-        </span>
-        <span className="min-w-0 flex-1 truncate text-2xs text-text-muted">{card.project}</span>
-        {card.branch !== null && (
-          <span className="min-w-0 max-w-[45%] truncate rounded-full bg-panel px-1.5 text-2xs text-text-muted">
-            {card.branch}
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onOpen}
+        {...previewTriggers(actions, target)}
+        {...triggers}
+        aria-pressed={selected}
+        title={`${card.tag} · ${card.project} · ${card.title} · ${card.statusLabel}`}
+        data-testid="agent-card"
+        data-agent-kind={subject.kind}
+        data-flight-key={card.key}
+        data-lane={card.lane}
+        data-index={index}
+        className="company-card flex w-full cursor-pointer flex-col gap-1 p-2 text-left"
+      >
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="flex shrink-0">
+            <StatusDot tone={card.tone} />
           </span>
+          <span className="min-w-0 flex-1 truncate text-2xs text-text-muted">{card.project}</span>
+          {card.branch !== null && (
+            <span className="min-w-0 max-w-[45%] truncate rounded-full bg-panel px-1.5 text-2xs text-text-muted">
+              {card.branch}
+            </span>
+          )}
+        </span>
+        <span className="line-clamp-3 break-normal text-sm font-medium leading-[1.3] text-text">
+          {card.title}
+        </span>
+        {folder !== null && <FolderTag identity={folder} />}
+        {card.activity !== null && (
+          <span className="line-clamp-2 break-words text-2xs text-text-muted">{card.activity}</span>
         )}
-      </span>
-      <span className="line-clamp-3 break-normal text-sm font-medium leading-[1.3] text-text">
-        {card.title}
-      </span>
-      {folder !== null && <FolderTag identity={folder} />}
-      {card.activity !== null && (
-        <span className="line-clamp-2 break-words text-2xs text-text-muted">{card.activity}</span>
+        {/* The change count sits over the right end of this line. */}
+        {(updated !== null || showChanges) && (
+          <span className="min-h-5 text-2xs text-text-muted">{updated === null ? '' : `cập nhật ${updated}`}</span>
+        )}
+      </button>
+      {showChanges && (
+        <button
+          type="button"
+          onClick={() => onOpenChanges(changes.checkout)}
+          aria-label={`Xem diff: thêm ${changes.additions} dòng, bớt ${changes.deletions} dòng`}
+          title={`Xem diff: ${changes.checkout}`}
+          data-testid="agent-card-changes"
+          className="absolute right-1.5 bottom-1.5 rounded px-1.5 font-mono text-xs hover:bg-hover"
+        >
+          <span className="text-status-success">+{changes.additions}</span>{' '}
+          <span className="text-status-error">−{changes.deletions}</span>
+        </button>
       )}
-      {updated !== null && <span className="text-2xs text-text-muted">cập nhật {updated}</span>}
-    </button>
+    </div>
   );
 }
 
@@ -414,6 +450,8 @@ export function CompanyBoard({
   onOpenSquad,
   client,
   onMenu,
+  changesFor,
+  onOpenChanges,
   identityOf,
   squadFolder,
 }: CompanyBoardProps) {
@@ -575,6 +613,8 @@ export function CompanyBoard({
                 }
                 onOpen={() => openAgent(agent.subject)}
                 onMenu={onMenu}
+                changes={changesFor(agent)}
+                onOpenChanges={onOpenChanges}
                 folder={
                   agent.subject.kind === 'session' ? identityOf(agent.subject.sessionId) : null
                 }

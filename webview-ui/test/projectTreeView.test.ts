@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectTreeNode } from '../../core/src/messages.js';
-import { checkoutPathFor, projectMenuContext } from '../src/company/projects/projectNodeTargets.js';
+import {
+  changesAt,
+  checkoutChangesByPath,
+  checkoutPathFor,
+  projectMenuContext,
+} from '../src/company/projects/projectNodeTargets.js';
 import {
   buildAgentTree,
   canMoveProjectNode,
@@ -123,7 +128,7 @@ describe('projectTreeView', () => {
   });
 
   it('opens the herdr pane and the last edited checkout of a session at a folder root', () => {
-    const root = node('root', 'session', 'folder', { agentKind: 'omp', state: 'running', herdrPaneId: 'w1:p5', editCheckout: '/work/repo' });
+    const root = node('root', 'session', 'folder', { agentKind: 'omp', state: 'running', herdrPaneId: 'w1:p5', editCheckouts: ['/work/repo'] });
     const all = [...nodes, root];
     const labels = projectNodeMenuItems(root, projectMenuContext(all, root)).map((item) => item.label);
     expect(labels.slice(0, 2)).toEqual(['Mở phiên', 'Xem thay đổi']);
@@ -132,6 +137,28 @@ describe('projectTreeView', () => {
     expect(folder?.children.find((child) => child.node.id === 'root')).toMatchObject({ checkoutPath: '/work/repo' });
     // The pane it runs in is not listed again below the tree.
     expect(herdrOutsideProjects(all, { agents: [{ paneId: 'w1:p5', status: 'working' }], sleeping: [] })).toEqual([]);
+  });
+
+  it('opens the changes of the newest edited checkout that still has uncommitted lines', () => {
+    const tree = [
+      node('f', 'folder', undefined, { path: '/w' }),
+      node('r', 'repository', 'f', { path: '/w' }),
+      node('root', 'checkout', 'r', { path: '/w', additions: 0, deletions: 0 }),
+      node('a', 'checkout', 'r', { path: '/w/a', additions: 0, deletions: 0 }),
+      node('b', 'checkout', 'r', { path: '/w/b', additions: 4, deletions: 1 }),
+      node('s', 'session', 'root', { editCheckouts: ['/w', '/w/a', '/w/b'] }),
+    ];
+    expect(checkoutPathFor(tree, tree[5]!)).toBe('/w/b');
+    // Nothing uncommitted anywhere: the checkout it works in.
+    const clean = tree.map((entry) => (entry.id === 'b' ? { ...entry, additions: 0, deletions: 0 } : entry));
+    expect(checkoutPathFor(clean, clean[5]!)).toBe('/w');
+  });
+
+  it('finds a checkout\u2019s added and removed lines by a path written the Windows way', () => {
+    const tree = [node('wt', 'checkout', 'repo', { path: 'V:/Work/Repo/.worktrees/feat', additions: 12, deletions: 3 })];
+    const byPath = checkoutChangesByPath(tree);
+    expect(changesAt(byPath, 'v:\\work\\repo\\.worktrees\\feat\\')).toEqual({ additions: 12, deletions: 3 });
+    expect(changesAt(byPath, 'V:/Work/Other')).toBeNull();
   });
 
   it('counts each session once across Projects, leaving hibernated, finished and unknown ones out', () => {

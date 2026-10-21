@@ -7971,11 +7971,14 @@ components:
           description: >-
             Session rows: the herdr pane the session runs in, when herdr reports the same
             session. Clicking the row opens that pane's terminal.
-        editCheckout:
-          type: string
+        editCheckouts:
+          type: array
+          items:
+            type: string
           description: >-
-            Session rows: the checkout the session last edited, from the ledger. Its changes
-            open there when the row sits outside every checkout.
+            Session rows: the checkouts the session edited in the last few hours, newest
+            first, from the ledger. A session at a folder's root works across repos; its
+            changes open in the newest of these that has uncommitted lines.
         state:
           type: string
         title:

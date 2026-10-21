@@ -45,7 +45,15 @@ import { ChangesPage } from '../projects/ChangesPage.js';
 import { LayeredSettingsDialog } from '../projects/LayeredSettingsDialog.js';
 import { NewSessionDialog } from '../projects/NewSessionDialog.js';
 import { projectStore } from '../projects/projectClient.js';
-import { ancestorOf, checkoutPathFor, engineForAction, type ProjectSessionEngine } from '../projects/projectNodeTargets.js';
+import {
+  ancestorOf,
+  changesAt,
+  checkoutChangesByPath,
+  checkoutPathFor,
+  engineForAction,
+  paneCheckouts,
+  type ProjectSessionEngine,
+} from '../projects/projectNodeTargets.js';
 import { useProjectState } from '../projects/projectStore.js';
 import { COMPANY_ROLES, roleProfile } from '../roleProfiles.js';
 import { startScrollFades } from '../scrollFades.js';
@@ -140,6 +148,8 @@ export interface BoardShellProps {
 
 export function BoardShell({ client }: BoardShellProps) {
   const projects = useProjectState(projectStore);
+  const checkoutChanges = useMemo(() => checkoutChangesByPath(projects.nodes), [projects.nodes]);
+  const paneCheckout = useMemo(() => paneCheckouts(projects.nodes), [projects.nodes]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectSettingsNode, setProjectSettingsNode] = useState<string | null>(null);
   const [newSessionNode, setNewSessionNode] = useState<{ nodeId: string; engine?: ProjectSessionEngine } | null>(null);
@@ -419,10 +429,11 @@ export function BoardShell({ client }: BoardShellProps) {
   }
 
   /**
-   * A board session opens in the drawer, a herdr pane in its screen; a session in a
-   * checkout shows that checkout's changes; one in a plain folder opens that folder's board.
+   * A board session opens in the drawer, a session in a herdr pane (a herdr row, or a
+   * ledger session herdr reports) in that pane's terminal. A session with neither has
+   * nothing to open: its changes are in its right-click menu.
    */
-  function openProjectSession(session: ProjectTreeNode, where: { readonly checkoutPath?: string; readonly folderPath?: string }): void {
+  function openProjectSession(session: ProjectTreeNode, where: { readonly folderPath?: string }): void {
     const id = session.sessionId;
     if (id === undefined) return;
     // The tree names omp sessions by their native id; the server adds the board session behind one.
@@ -432,7 +443,6 @@ export function BoardShell({ client }: BoardShellProps) {
     else if (session.herdrPaneId !== undefined) openHerdr(session.herdrPaneId);
     else if (session.agentKind === 'herdr' && session.state === 'sleeping') openSleeping(id);
     else if (session.agentKind === 'herdr') openHerdr(id);
-    else if (where.checkoutPath !== undefined) openProjectChanges(where.checkoutPath);
   }
 
   /** Menu actions that leave the menu: pages and dialogs. Tree edits run in the menu itself. */
@@ -451,12 +461,8 @@ export function BoardShell({ client }: BoardShellProps) {
       return;
     }
     if (action === 'openSession') {
-      const checkoutPath = checkoutPathFor(projects.nodes, node) ?? undefined;
       const folderPath = ancestorOf(projects.nodes, node, 'folder')?.path;
-      openProjectSession(node, {
-        ...(checkoutPath === undefined ? {} : { checkoutPath }),
-        ...(folderPath === undefined ? {} : { folderPath }),
-      });
+      openProjectSession(node, folderPath === undefined ? {} : { folderPath });
       return;
     }
     if (action === 'newSession' || action === 'newSessionOmp' || action === 'newSessionClaude' || action === 'newSessionAgy') {
@@ -833,6 +839,13 @@ export function BoardShell({ client }: BoardShellProps) {
               onOpenSquad={(ref) => setOpened({ kind: 'squad', ...ref })}
               client={client}
               onMenu={openMenu}
+              changesFor={(card) => {
+                // The session in the pane knows where it edits; the pane's own repo is the fallback.
+                const checkout = (card.subject.kind === 'herdr' ? paneCheckout.get(card.subject.paneId) : undefined) ?? card.checkout;
+                const changes = checkout === null ? null : changesAt(checkoutChanges, checkout);
+                return checkout === null || changes === null ? null : { checkout, ...changes };
+              }}
+              onOpenChanges={(checkout) => openProjectChanges(checkout)}
               identityOf={(id) => folderIdentityOf(state, id)}
             />
           )}

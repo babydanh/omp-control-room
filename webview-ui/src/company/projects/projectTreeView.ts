@@ -57,8 +57,8 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
     // unless that is just the folder the row sits under.
     const ownFolder = lastPathSegment(node.path);
     const where = checkout?.branch ?? checkout?.name ?? (ownFolder === lastPathSegment(folder.node.path) ? undefined : ownFolder);
-    // A session at the folder's root has no checkout of its own: its changes are where it last edited.
-    const checkoutPath = checkout?.path ?? node.editCheckout;
+    // A session at the folder's root has no checkout of its own: its changes are where it edits.
+    const checkoutPath = checkout?.path ?? node.editCheckouts?.[0];
     const row: ProjectTreeBranch = {
       node,
       children: [],

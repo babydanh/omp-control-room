@@ -68,8 +68,8 @@ export interface ProjectTreeProps {
   onOpenChanges: (checkoutId: string, tab?: 'diff' | 'merge') => void;
   onOpenSettings: (nodeId: string | null) => void;
   onNewSession: (nodeId: string, engine?: 'omp' | 'claude' | 'agy') => void;
-  /** Opens a session row; the branch carries where it works (checkout, Project folder). */
-  onOpenSession: (session: ProjectTreeNode, where: { readonly checkoutPath?: string; readonly folderPath?: string }) => void;
+  /** Opens a session row's terminal; the branch carries the Project folder it works under. */
+  onOpenSession: (session: ProjectTreeNode, where: { readonly folderPath?: string }) => void;
   onMenu: (request: AgentMenuRequest) => void;
 }
 
