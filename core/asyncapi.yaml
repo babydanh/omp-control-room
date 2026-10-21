@@ -5886,7 +5886,7 @@ components:
     LibraryClaudeRole:
       type: object
       additionalProperties: false
-      required: [id, name, source, description, model, effort, writesFiles, editable, enabled]
+      required: [id, name, source, description, model, effort, writesFiles, editable, enabled, overridden]
       properties:
         id:
           type: string
@@ -5908,6 +5908,8 @@ components:
         editable:
           type: boolean
         enabled:
+          type: boolean
+        overridden:
           type: boolean
 
     LibraryClaudeRolesSnapshot:
@@ -5944,6 +5946,8 @@ components:
         effort:
           type: [string, 'null']
         enabled:
+          type: boolean
+        reset:
           type: boolean
 
     LibraryMcpSnapshot:

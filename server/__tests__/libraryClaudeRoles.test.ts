@@ -67,13 +67,12 @@ describe('Claude roles', () => {
     expect(await readFile(path.join(home, '.claude', 'agents', 'writer.md'), 'utf8')).toBe('---\nname: writer\n---\nbody\n');
   });
 
-  it('rejects invalid models, unknown and traversal names, and built-in edits', async () => {
+  it('rejects invalid models, unknown and traversal names', async () => {
     const home = await fixture();
     await addRole(home, 'writer.md', '---\nname: writer\n---\n');
     await expect(setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '1', name: 'writer', model: 'bogus' })).rejects.toThrow('Model không hợp lệ.');
     await expect(setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '2', name: 'missing', model: 'opus' })).rejects.toThrow('Không tìm thấy role.');
     await expect(setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '3', name: '..', model: 'opus' })).rejects.toThrow('Không tìm thấy role.');
-    await expect(setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '4', name: 'Explore', model: 'opus' })).rejects.toThrow('Role này không sửa được model');
   });
 
   it('disables and enables a role without dropping other settings or deny entries', async () => {
@@ -85,5 +84,50 @@ describe('Claude roles', () => {
     await setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '1', name: 'writer', enabled: false });
     await setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '2', name: 'writer', enabled: true });
     expect(JSON.parse(await readFile(settingsPath, 'utf8'))).toEqual(original);
+  });
+  it('does not replace a documentation file named after a built-in role', async () => {
+    const home = await fixture();
+    await addRole(home, 'Explore.md', 'This is documentation, not a Claude role.\\n');
+    await expect(setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '1', name: 'Explore', model: 'opus' }))
+      .rejects.toThrow('đã tồn tại');
+    expect(await readFile(path.join(home, '.claude', 'agents', 'Explore.md'), 'utf8')).toBe('This is documentation, not a Claude role.\\n');
+  });
+  it('creates an Explore override with official role metadata and avoids duplicating it as a user role', async () => {
+    const home = await fixture();
+    await setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '1', name: 'Explore', model: 'sonnet', effort: 'high' });
+    const filePath = path.join(home, '.claude', 'agents', 'Explore.md');
+    const content = await readFile(filePath, 'utf8');
+    expect(content).toContain('description: Fast read-only agent for searching and understanding a codebase. Use to find files, search code, and answer questions about how code works without changing it.');
+    expect(content).toContain('tools: Read, Grep, Glob, Bash');
+    expect(content).toContain('disallowedTools: Write, Edit');
+    expect(content).toContain('omitClaudeMd: true');
+    expect(content).toContain('color: cyan');
+    expect(content.split('---')[2].trimStart()).toMatch(/^<!-- board-override: role có sẵn, Agent Board tạo;/);
+    const frontmatter = content.split('---')[1];
+    const keys = [...frontmatter.matchAll(/^([A-Za-z][\w]*):/gm)].map((match) => match[1]);
+    expect(keys.every((key) => ['name', 'description', 'tools', 'disallowedTools', 'omitClaudeMd', 'model', 'effort', 'color'].includes(key))).toBe(true);
+    const roles = await scanClaudeRoles(home);
+    expect(roles.find((role) => role.name === 'Explore')).toMatchObject({ source: 'builtin', editable: true, overridden: true, model: 'sonnet', effort: 'high' });
+    expect(roles.filter((role) => role.name === 'Explore')).toHaveLength(1);
+  });
+
+  it('updates an existing built-in override and resets only board-owned overrides', async () => {
+    const home = await fixture();
+    await setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '1', name: 'Explore', model: 'sonnet' });
+    await setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '2', name: 'Explore', effort: 'xhigh' });
+    expect((await scanClaudeRoles(home)).find((role) => role.name === 'Explore')).toMatchObject({ overridden: true, model: 'sonnet', effort: 'xhigh' });
+    await setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '3', name: 'Explore', reset: true } as Parameters<typeof setClaudeRole>[1]);
+    await expect(readFile(path.join(home, '.claude', 'agents', 'Explore.md'))).rejects.toMatchObject({ code: 'ENOENT' });
+    await addRole(home, 'Plan.md', '---\nname: Plan\n---\nTự viết\n');
+    await expect(setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '4', name: 'Plan', reset: true } as Parameters<typeof setClaudeRole>[1])).rejects.toThrow('Không thể xoá bản ghi đè do người dùng tạo.');
+  });
+
+  it('creates a general-purpose override without a tools restriction', async () => {
+    const home = await fixture();
+    await setClaudeRole(home, { type: 'libraryClaudeRoleSet', requestId: '1', name: 'general-purpose', model: 'opus' });
+    const content = await readFile(path.join(home, '.claude', 'agents', 'general-purpose.md'), 'utf8');
+    expect(content).toContain('description: General-purpose agent for complex multi-step tasks that need both research and code changes. Use when a task does not fit a more specialized agent.');
+    expect(content).toContain('color: green');
+    expect(content).not.toMatch(/^tools:/m);
   });
 });
