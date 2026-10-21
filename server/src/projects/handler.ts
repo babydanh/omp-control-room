@@ -133,8 +133,9 @@ async function runProjectRequest(
           await store.renameProject(request.nodeId, request.name);
         } else {
           const node = findNode(state.projects.flatMap((project) => project.children), request.nodeId);
-          if (node?.type !== 'group') throw new LibraryUserError('Không tìm thấy nhóm cần đổi tên.');
-          await store.renameGroup(request.nodeId, request.name);
+          if (node?.type === 'group') await store.renameGroup(request.nodeId, request.name);
+          else if (node?.type === 'folder') await store.renameFolder(request.nodeId, request.name);
+          else throw new LibraryUserError('Không tìm thấy mục cần đổi tên.');
         }
         send(commandResult(requestId, 'update', true, '', request.nodeId));
         await sendTreeSnapshot(requestId, send, store, context);

@@ -74,6 +74,9 @@ describe('ProjectStore', () => {
     expect(store.snapshot().projects[1]?.children).toContainEqual(folder);
 
     await store.renameGroup(inner.id, 'Nested');
+    // A folder's display name changes; its path does not.
+    await store.renameFolder(folder.id, 'Backend');
+    expect(store.snapshot().projects[1]?.children).toContainEqual({ ...folder, name: 'Backend' });
     await store.moveNode(folder.id, projectA.id, inner.id);
     await store.deleteGroup(outer.id);
     // Deleting a group keeps what it held: Inner (with its folder) moves up.

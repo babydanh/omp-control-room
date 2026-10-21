@@ -248,6 +248,17 @@ export class ProjectStore {
     });
   }
 
+  /** Sets a folder's display name; its path stays. */
+  async renameFolder(folderId: string, name: string): Promise<void> {
+    await this.change(async () => {
+      const folder = this.requireNode(folderId, 'folder');
+      const siblings = findParentList(this.state.projects, folderId);
+      const index = siblings?.findIndex((node) => node.id === folderId) ?? -1;
+      if (siblings === null || index < 0) throw new Error('Không tìm thấy thư mục.');
+      siblings[index] = { ...folder, name: this.requiredName(name) };
+    });
+  }
+
   async deleteGroup(groupId: string): Promise<void> {
     await this.removeNode(groupId, 'group');
   }

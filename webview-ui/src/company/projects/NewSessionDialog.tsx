@@ -3,6 +3,7 @@ import './NewSessionDialog.css';
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
+import { foldersUnder } from './projectNodeTargets.js';
 import { type ProjectStore, useProjectState } from './projectStore.js';
 
 export interface NewSessionDialogProps {
@@ -18,7 +19,18 @@ type SessionEngine = 'omp' | 'claude' | 'agy';
 
 export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStarted }: NewSessionDialogProps) {
   const state = useProjectState(store);
-  const target = state.nodes.find((node) => node.id === nodeId);
+  const requested = state.nodes.find((node) => node.id === nodeId);
+  // Opened on a Project or group: pick which of its folders the session runs in.
+  const folderChoices = useMemo(
+    () => (requested?.kind === 'project' || requested?.kind === 'group' ? foldersUnder(state.nodes, requested) : []),
+    [requested, state.nodes],
+  );
+  const [folderId, setFolderId] = useState('');
+  useEffect(() => {
+    if (folderChoices.length === 1) setFolderId(folderChoices[0]?.id ?? '');
+  }, [folderChoices]);
+  const target = folderChoices.length > 0 ? folderChoices.find((folder) => folder.id === folderId) : requested;
+  const targetId = target?.id ?? nodeId;
   const candidateRepos = useMemo(() => getCandidateRepos(target, state.nodes), [target, state.nodes]);
   const [repoId, setRepoId] = useState(candidateRepos.length === 1 ? candidateRepos[0]?.id ?? '' : '');
   const [engine, setEngine] = useState<SessionEngine>(initialEngine ?? 'omp');
@@ -28,17 +40,17 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
   const [requestId, setRequestId] = useState<string | null>(null);
 
   useEffect(() => {
-    store.requestSettings(nodeId);
-  }, [nodeId, store]);
+    store.requestSettings(targetId);
+  }, [targetId, store]);
 
   useEffect(() => {
     if (initialEngine !== undefined) {
       setEngine(initialEngine);
       return;
     }
-    const defaultEngine = state.settings?.nodeId === nodeId ? state.settings.values.engineLeader : undefined;
+    const defaultEngine = state.settings?.nodeId === targetId ? state.settings.values.engineLeader : undefined;
     if (defaultEngine === 'omp' || defaultEngine === 'claude' || defaultEngine === 'agy') setEngine(defaultEngine);
-  }, [initialEngine, nodeId, state.settings]);
+  }, [initialEngine, targetId, state.settings]);
 
   useEffect(() => {
     if (candidateRepos.length === 1) setRepoId(candidateRepos[0]?.id ?? '');
@@ -78,9 +90,9 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (selectedRepo === undefined && !plainFolder) return;
+    if (target === undefined || (selectedRepo === undefined && !plainFolder)) return;
     const nextRequestId = store.startSession({
-      nodeId: target?.kind === 'checkout' || selectedRepo === undefined ? nodeId : selectedRepo.id,
+      nodeId: target.kind === 'checkout' || selectedRepo === undefined ? target.id : selectedRepo.id,
       engine,
       worktree,
       taskName: taskName.trim(),
@@ -96,6 +108,15 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
           <h2 id="project-session-title">Phiên mới</h2>
           <button type="button" aria-label="Đóng" onClick={onClose}>×</button>
         </header>
+        {folderChoices.length > 0 && (
+          <label>
+            Thư mục
+            <select value={folderId} onChange={(event) => setFolderId(event.target.value)} required>
+              {folderChoices.length > 1 && <option value="">Chọn thư mục</option>}
+              {folderChoices.map((folder) => <option key={folder.id} value={folder.id}>{folder.name}</option>)}
+            </select>
+          </label>
+        )}
         <label>
           Engine
           <select value={engine} onChange={(event) => setEngine(event.target.value as SessionEngine)}>

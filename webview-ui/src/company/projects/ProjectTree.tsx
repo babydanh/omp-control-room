@@ -3,6 +3,7 @@ import { type DragEvent, useEffect, useMemo, useState } from 'react';
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
+import { projectMenuContext } from './projectNodeTargets.js';
 import type { ProjectStore } from './projectStore.js';
 import {
   buildAgentTree,
@@ -140,7 +141,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   const { node, children } = branch;
   const isCollapsed = collapsed.has(node.id);
   const menu = useAgentMenuGestures<HTMLButtonElement>(
-    useMemo(() => ({ kind: 'projectNode' as const, node }), [node]),
+    useMemo(() => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node) }), [node, props.nodes]),
     props.onMenu,
   );
   const isSession = node.kind === 'session';

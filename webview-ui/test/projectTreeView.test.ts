@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectTreeNode } from '../../core/src/messages.js';
+import { checkoutPathFor, projectMenuContext } from '../src/company/projects/projectNodeTargets.js';
 import {
   buildAgentTree,
   canMoveProjectNode,
@@ -56,12 +57,23 @@ describe('projectTreeView', () => {
     expect(live[0]?.children[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['session', 'waiting']);
   });
 
-  it('provides menu actions for each node category', () => {
-    expect(projectNodeMenuItems(nodes[0]!).map((item) => item.action.kind === 'projectNodeAction' ? item.action.action : '')).toContain('delete');
-    expect(projectNodeMenuItems(nodes[1]!).map((item) => item.label)).toContain('Tạo nhóm con…');
-    expect(projectNodeMenuItems(nodes[2]!).map((item) => item.action.kind === 'projectNodeAction' ? item.action.action : '')).toContain('removeFolder');
-    expect(projectNodeMenuItems(nodes[3]!).map((item) => item.label)).toContain('Thử gộp với…');
-    expect(projectNodeMenuItems(nodes[4]!).map((item) => item.action.kind === 'projectNodeAction' ? item.action.action : '')).toContain('copyBranch');
+  it('offers only what works for each node, from the tree around it', () => {
+    const actions = (id: string) => {
+      const target = nodes.find((entry) => entry.id === id)!;
+      return projectNodeMenuItems(target, projectMenuContext(nodes, target))
+        .map((entry) => (entry.action.kind === 'projectNodeAction' ? entry.action.action : ''));
+    };
+    // A Project with folders starts a session (choosing the folder in the dialog).
+    expect(actions('project')[0]).toBe('newSession');
+    // A Project with no folder cannot: adding one comes first.
+    expect(actions('other')[0]).toBe('addFolder');
+    expect(actions('folder')).toEqual(expect.arrayContaining(['newSessionClaude', 'changes', 'removeFolder']));
+    // A folder that is not a git repo has no diff to show.
+    expect(actions('empty')).not.toContain('changes');
+    expect(actions('checkout')).toEqual(expect.arrayContaining(['merge', 'copyBranch']));
+    // Session rows open, show their worktree's changes, and copy their id.
+    expect(actions('session')).toEqual(['openSession', 'changes', 'copySessionId', 'copyPath']);
+    expect(checkoutPathFor(nodes, nodes.find((entry) => entry.id === 'session')!)).toBe('/work/repo/.worktrees/feature');
   });
 
   it('rejects drag destinations inside the dragged node subtree', () => {

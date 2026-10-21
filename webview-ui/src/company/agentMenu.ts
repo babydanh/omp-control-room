@@ -39,7 +39,17 @@ export type ProjectNodeAction =
   | 'merge'
   | 'copyPath'
   | 'copyBranch'
-  | 'removeFolder';
+  | 'removeFolder'
+  | 'openSession'
+  | 'copySessionId';
+
+/** What a project-tree menu needs beyond the node: whether git rows sit under it, and its folders. */
+export interface ProjectNodeMenuContext {
+  /** A checkout lies under (or above, for a session) this node: Thay đổi / Thử gộp apply. */
+  readonly hasCheckout: boolean;
+  /** Folders under a Project or group: zero hides "Phiên mới". */
+  readonly folderCount: number;
+}
 
 /** A drawer header that opened the menu: whether the drawer is currently maximized. */
 export interface DrawerView {
@@ -68,7 +78,7 @@ export type AgentMenuSubject =
   | { kind: 'herdr'; paneId: string; drawer: DrawerView | null }
   | { kind: 'sleeping'; paneId: string; drawer: DrawerView | null }
   | { kind: 'project'; project: ProjectMenuFacts }
-  | { kind: 'projectNode'; node: ProjectTreeNode };
+  | { kind: 'projectNode'; node: ProjectTreeNode; menu?: ProjectNodeMenuContext };
 
 export type SessionControlAction =
   'interrupt' | 'pause' | 'resume' | 'restart' | 'kill' | 'archive' | 'delete';
@@ -736,8 +746,14 @@ export function projectMenuItems(project: ProjectMenuFacts): AgentMenuItem[] {
   ];
 }
 
-/** Project-tree actions; execution stays with the shared context menu. */
-export function projectNodeMenuItems(node: ProjectTreeNode): AgentMenuItem[] {
+/**
+ * Project-tree actions; execution stays with the shared context menu. Most used first,
+ * and nothing that cannot work for this node (no diff for a folder without git).
+ */
+export function projectNodeMenuItems(
+  node: ProjectTreeNode,
+  context: ProjectNodeMenuContext = { hasCheckout: true, folderCount: 1 },
+): AgentMenuItem[] {
   const add = (
     id: string,
     label: string,
@@ -753,47 +769,59 @@ export function projectNodeMenuItems(node: ProjectTreeNode): AgentMenuItem[] {
     startsGroup,
     danger,
   });
+  const newSessions = (startsGroup = false): AgentMenuItem[] => [
+    add('new-omp', 'Phiên mới · omp', 'plus', 'newSessionOmp', startsGroup),
+    add('new-claude', 'Phiên mới · Claude', 'plus', 'newSessionClaude'),
+    add('new-agy', 'Phiên mới · agy', 'plus', 'newSessionAgy'),
+  ];
+  const changes = (startsGroup: boolean): AgentMenuItem[] =>
+    context.hasCheckout ? [add('changes', 'Xem thay đổi', 'file-text', 'changes', startsGroup)] : [];
   switch (node.kind) {
     case 'project':
       return [
-        add('new-session', 'Phiên mới', 'plus', 'newSession'),
-        add('add-folder', 'Thêm thư mục…', 'folder', 'addFolder'),
-        add('create-group', 'Tạo nhóm…', 'plus', 'createGroup', true),
+        ...(context.folderCount > 0 ? [add('new-session', 'Phiên mới…', 'plus', 'newSession')] : []),
+        add('add-folder', 'Thêm thư mục…', 'folder', 'addFolder', context.folderCount > 0),
+        add('create-group', 'Tạo nhóm…', 'plus', 'createGroup'),
         add('rename', 'Đổi tên…', 'pencil', 'rename', true),
         add('settings', 'Cài đặt…', 'settings', 'settings'),
         add('delete', 'Xoá project…', 'trash', 'delete', true, true),
       ];
     case 'group':
       return [
+        ...(context.folderCount > 0 ? [add('new-session', 'Phiên mới…', 'plus', 'newSession')] : []),
+        add('add-folder', 'Thêm thư mục…', 'folder', 'addFolder', context.folderCount > 0),
         add('create-group', 'Tạo nhóm con…', 'plus', 'createGroup'),
-        add('add-folder', 'Thêm thư mục…', 'folder', 'addFolder'),
         add('rename', 'Đổi tên…', 'pencil', 'rename', true),
         add('move-to', 'Chuyển tới…', 'folder', 'moveTo'),
         add('delete', 'Xoá nhóm…', 'trash', 'delete', true, true),
       ];
     case 'folder':
       return [
-        add('new-omp', 'Phiên mới · omp', 'plus', 'newSessionOmp'),
-        add('new-claude', 'Phiên mới · Claude', 'plus', 'newSessionClaude'),
-        add('new-agy', 'Phiên mới · agy', 'plus', 'newSessionAgy'),
-        add('changes', 'Xem thay đổi', 'file-text', 'changes', true),
-        add('settings', 'Cài đặt…', 'settings', 'settings'),
-        add('rename', 'Đổi tên hiển thị…', 'pencil', 'rename'),
+        ...newSessions(),
+        ...changes(true),
+        add('rename', 'Đổi tên hiển thị…', 'pencil', 'rename', !context.hasCheckout),
         add('move-to', 'Chuyển tới…', 'folder', 'moveTo'),
-        add('copy-path', 'Sao chép đường dẫn', 'copy', 'copyPath'),
+        add('settings', 'Cài đặt…', 'settings', 'settings'),
+        add('copy-path', 'Sao chép đường dẫn', 'copy', 'copyPath', true),
         add('remove-folder', 'Bỏ khỏi project…', 'trash', 'removeFolder', true, true),
       ];
     case 'repository':
     case 'checkout':
       return [
-        add('new-session', 'Phiên mới', 'plus', 'newSession'),
-        add('changes', 'Xem thay đổi', 'file-text', 'changes', true),
+        ...newSessions(),
+        ...changes(true),
         add('merge', 'Thử gộp với…', 'git-branch', 'merge'),
         add('copy-path', 'Sao chép đường dẫn', 'copy', 'copyPath', true),
         ...(node.branch === undefined ? [] : [add('copy-branch', 'Sao chép nhánh', 'copy', 'copyBranch')]),
       ];
-    case 'file-agg':
     case 'session':
+      return [
+        add('open-session', 'Mở phiên', 'external', 'openSession'),
+        ...changes(true),
+        add('copy-session', 'Sao chép mã phiên', 'copy', 'copySessionId', true),
+        add('copy-path', 'Sao chép thư mục làm việc', 'copy', 'copyPath'),
+      ];
+    case 'file-agg':
       return [];
   }
 }

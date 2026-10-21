@@ -45,7 +45,7 @@ import { ChangesPage } from '../projects/ChangesPage.js';
 import { LayeredSettingsDialog } from '../projects/LayeredSettingsDialog.js';
 import { NewSessionDialog } from '../projects/NewSessionDialog.js';
 import { projectStore } from '../projects/projectClient.js';
-import { checkoutPathFor, engineForAction, type ProjectSessionEngine } from '../projects/projectNodeTargets.js';
+import { ancestorOf, checkoutPathFor, engineForAction, type ProjectSessionEngine } from '../projects/projectNodeTargets.js';
 import { useProjectState } from '../projects/projectStore.js';
 import { COMPANY_ROLES, roleProfile } from '../roleProfiles.js';
 import { startScrollFades } from '../scrollFades.js';
@@ -442,6 +442,15 @@ export function BoardShell({ client }: BoardShellProps) {
     }
     if (action === 'settings') {
       openProjectSettings(node.id);
+      return;
+    }
+    if (action === 'openSession') {
+      const checkoutPath = checkoutPathFor(projects.nodes, node) ?? undefined;
+      const folderPath = ancestorOf(projects.nodes, node, 'folder')?.path;
+      openProjectSession(node, {
+        ...(checkoutPath === undefined ? {} : { checkoutPath }),
+        ...(folderPath === undefined ? {} : { folderPath }),
+      });
       return;
     }
     if (action === 'newSession' || action === 'newSessionOmp' || action === 'newSessionClaude' || action === 'newSessionAgy') {

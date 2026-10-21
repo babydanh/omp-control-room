@@ -237,7 +237,7 @@ function itemsFor(subject: AgentMenuSubject, facts: MenuFacts): AgentMenuItem[] 
     case 'project':
       return projectMenuItems(subject.project);
     case 'projectNode':
-      return projectNodeMenuItems(subject.node);
+      return projectNodeMenuItems(subject.node, subject.menu);
   }
 }
 
@@ -287,7 +287,12 @@ function headerLines(
     case 'project':
       return { title: subject.project.name, subtitle: subject.project.path ?? '' };
     case 'projectNode':
-      return { title: subject.node.name, subtitle: subject.node.path ?? subject.node.branch ?? subject.node.kind };
+      return {
+        title: subject.node.name,
+        subtitle: subject.node.kind === 'session'
+          ? [subject.node.agentKind, subject.node.state].filter(Boolean).join(' · ')
+          : subject.node.path ?? subject.node.branch ?? '',
+      };
   }
 }
 
@@ -400,6 +405,14 @@ export function AgentContextMenu({
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [projectPathDraft, setProjectPathDraft] = useState('');
+  // Recent board folders not yet in any Project: one click instead of typing a path.
+  const folderSuggestions = (state.workspaces ?? []).filter((entry) => {
+    if (entry.missing === true) return false;
+    const key = entry.path.replaceAll('\\', '/').toLowerCase();
+    return !(projectStore?.getSnapshot().nodes ?? []).some(
+      (node) => node.kind === 'folder' && node.path?.replaceAll('\\', '/').toLowerCase() === key,
+    );
+  }).slice(0, 6);
   const [pendingSquadRemoval, setPendingSquadRemoval] = useState<{
     runId: string;
     workspacePath: string;
@@ -579,8 +592,8 @@ export function AgentContextMenu({
   function executeProjectNodeAction(action: ProjectNodeAction): void {
     if (subject.kind !== 'projectNode') return;
     const node = subject.node;
-    if (action === 'copyPath' || action === 'copyBranch') {
-      const text = action === 'copyPath' ? node.path : node.branch;
+    if (action === 'copyPath' || action === 'copyBranch' || action === 'copySessionId') {
+      const text = action === 'copyPath' ? node.path : action === 'copyBranch' ? node.branch : node.sessionId;
       if (text !== undefined) void copyText(text).then((copied) => setNotice({
         text: copied ? `Đã sao chép: ${text}` : COPY_FAILED_NOTICE,
         failed: !copied,
@@ -951,9 +964,25 @@ export function AgentContextMenu({
         </form>
       ) : mode === 'project-add-folder' ? (
         <form onSubmit={submitProjectNodeCreate} className="flex flex-col gap-2 px-3 py-2">
+          {folderSuggestions.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <p className="text-text-muted">Thư mục gần đây</p>
+              {folderSuggestions.map((entry) => (
+                <button
+                  key={entry.path}
+                  type="button"
+                  title={entry.path}
+                  onClick={() => setProjectPathDraft(entry.path)}
+                  className={`truncate rounded-(--company-radius-sm) px-2 py-1 text-left hover:bg-hover ${projectPathDraft === entry.path ? 'bg-selected text-text' : 'text-text-secondary'}`}
+                >
+                  {entry.name ?? entry.path}
+                </button>
+              ))}
+            </div>
+          )}
           <label className="flex flex-col gap-1 text-text-muted">
             Đường dẫn thư mục
-            <input ref={inputRef} autoFocus value={projectPathDraft} onChange={(event) => setProjectPathDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
+            <input ref={inputRef} autoFocus value={projectPathDraft} placeholder="D:\du-an\thu-muc" onChange={(event) => setProjectPathDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
           </label>
           <label className="flex flex-col gap-1 text-text-muted">
             Tên hiển thị (tuỳ chọn)
