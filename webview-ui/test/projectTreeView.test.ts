@@ -122,6 +122,18 @@ describe('projectTreeView', () => {
     expect(projectNodeMenuItems(awake, projectMenuContext([...nodes, awake], awake)).map((item) => item.label)).not.toContain('Đánh thức');
   });
 
+  it('opens the herdr pane and the last edited checkout of a session at a folder root', () => {
+    const root = node('root', 'session', 'folder', { agentKind: 'omp', state: 'running', herdrPaneId: 'w1:p5', editCheckout: '/work/repo' });
+    const all = [...nodes, root];
+    const labels = projectNodeMenuItems(root, projectMenuContext(all, root)).map((item) => item.label);
+    expect(labels.slice(0, 2)).toEqual(['Mở phiên', 'Xem thay đổi']);
+    expect(checkoutPathFor(all, root)).toBe('/work/repo');
+    const folder = buildAgentTree(all)[0]?.children[0]?.children[0];
+    expect(folder?.children.find((child) => child.node.id === 'root')).toMatchObject({ checkoutPath: '/work/repo' });
+    // The pane it runs in is not listed again below the tree.
+    expect(herdrOutsideProjects(all, { agents: [{ paneId: 'w1:p5', status: 'working' }], sleeping: [] })).toEqual([]);
+  });
+
   it('counts each session once across Projects, leaving hibernated, finished and unknown ones out', () => {
     const shared = [
       node('a', 'session', 'folder', { sessionId: 's1', state: 'running' }),

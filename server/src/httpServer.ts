@@ -299,12 +299,14 @@ function registerWebSocketRoute(
         const snapshot = options.herdr?.snapshot();
         if (snapshot === undefined) return [];
         const toSession = (
-          session: { paneId: string; cwd?: string; status?: string; title?: string; name?: string },
+          session: { paneId: string; cwd?: string; status?: string; title?: string; name?: string; sessionFile?: string; sessionId?: string },
         ): HerdrProjectSession[] => session.cwd === undefined ? [] : [{
           id: session.paneId,
           cwd: session.cwd,
           status: session.status ?? 'sleeping',
           title: session.title ?? session.name ?? '',
+          ...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
+          ...(session.sessionId === undefined ? {} : { sessionId: session.sessionId }),
         }];
         return [...snapshot.agents.flatMap(toSession), ...snapshot.sleeping.flatMap(toSession)];
       },

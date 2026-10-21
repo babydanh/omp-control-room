@@ -57,11 +57,13 @@ export function buildAgentTree(nodes: readonly ProjectTreeNode[]): ProjectTreeBr
     // unless that is just the folder the row sits under.
     const ownFolder = lastPathSegment(node.path);
     const where = checkout?.branch ?? checkout?.name ?? (ownFolder === lastPathSegment(folder.node.path) ? undefined : ownFolder);
+    // A session at the folder's root has no checkout of its own: its changes are where it last edited.
+    const checkoutPath = checkout?.path ?? node.editCheckout;
     const row: ProjectTreeBranch = {
       node,
       children: [],
       ...(where === undefined ? {} : { where }),
-      ...(checkout?.path === undefined ? {} : { checkoutPath: checkout.path }),
+      ...(checkoutPath === undefined ? {} : { checkoutPath }),
       ...(folder.node.path === undefined ? {} : { folderPath: folder.node.path }),
     };
     // Keyed per folder: two Projects holding one folder each nest their own copy.
@@ -201,7 +203,11 @@ export function herdrOutsideProjects(
   },
 ): OutsideHerdrRow[] {
   const shown = new Set(
-    nodes.flatMap((node) => (node.kind === 'session' && node.agentKind === 'herdr' && node.sessionId !== undefined ? [node.sessionId] : [])),
+    nodes.flatMap((node) => {
+      if (node.kind !== 'session') return [];
+      if (node.herdrPaneId !== undefined) return [node.herdrPaneId];
+      return node.agentKind === 'herdr' && node.sessionId !== undefined ? [node.sessionId] : [];
+    }),
   );
   const where = (cwd: string | undefined) => lastPathSegment(cwd) ?? cwd ?? '';
   return [

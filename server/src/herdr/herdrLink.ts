@@ -312,6 +312,8 @@ interface AgentInfo {
   readonly terminal_title_stripped?: unknown;
   readonly cwd?: unknown;
   readonly focused?: unknown;
+  /** What the agent reported to herdr: `{kind: 'path' | 'id', value}`. */
+  readonly agent_session?: unknown;
 }
 
 /** Shared by `agent.read` replies. */
@@ -1175,6 +1177,10 @@ function toHerdrAgent(info: AgentInfo): HerdrAgent | undefined {
   if (title !== undefined) agent.title = title;
   if (typeof info.cwd === 'string' && info.cwd !== '') agent.cwd = info.cwd;
   if (typeof info.focused === 'boolean') agent.focused = info.focused;
+  const session = info.agent_session;
+  const value = nonEmptyString(jsonField(session, 'value'));
+  if (value !== undefined && jsonField(session, 'kind') === 'path') agent.sessionFile = value;
+  else if (value !== undefined && jsonField(session, 'kind') === 'id') agent.sessionId = value;
   return agent;
 }
 

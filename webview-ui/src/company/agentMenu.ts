@@ -820,8 +820,8 @@ export function projectNodeMenuItems(
         ...(node.agentKind === 'herdr' && node.state === 'sleeping'
           ? [add('wake', 'Đánh thức', 'play', 'wake')]
           : []),
-        // Only sessions the board can show: one it runs, or a herdr pane. Others have just their changes.
-        ...(node.boardSessionId !== undefined || node.agentKind === 'herdr'
+        // Only sessions the board can show: one it runs, or one in a herdr pane. Others have just their changes.
+        ...(node.boardSessionId !== undefined || node.herdrPaneId !== undefined || node.agentKind === 'herdr'
           ? [add('open-session', 'Mở phiên', 'external', 'openSession')]
           : []),
         ...changes(true),

@@ -26,6 +26,10 @@ export interface ProjectSessionSnapshot {
   readonly boardSessionId?: string;
   /** The session that spawned this one, when the ledger links them. */
   readonly parentSessionId?: string;
+  /** The herdr pane the session runs in, when herdr reports the same session. */
+  readonly herdrPaneId?: string;
+  /** The checkout the session last edited. */
+  readonly editCheckout?: string;
 }
 
 export interface HerdrProjectSession {
@@ -33,6 +37,10 @@ export interface HerdrProjectSession {
   readonly cwd: string;
   readonly status: string;
   readonly title: string;
+  /** The agent's transcript, when it reported one to herdr; joins the pane to its ledger session. */
+  readonly sessionFile?: string;
+  /** The agent's session id, when it reported an id instead. */
+  readonly sessionId?: string;
 }
 
 export interface ProjectTreeSnapshot {
@@ -87,11 +95,13 @@ function agentKindForLedger(row: SessionRow): ProjectAgentKind {
   return 'omp';
 }
 
-/** A ledger session row with its latest intent, the board session behind it, and its spawner, when known. */
+/** A ledger session row with its latest intent, the board session behind it, its spawner, its herdr pane and its last edited checkout, when known. */
 type TitledSessionRow = SessionRow & {
   readonly intent?: string;
   readonly boardSessionId?: string;
   readonly parentSessionId?: string;
+  readonly herdrPaneId?: string;
+  readonly editCheckout?: string;
 };
 
 /**
@@ -141,29 +151,59 @@ export function parentSessions(rows: readonly SessionRow[]): Map<string, string>
   return parents;
 }
 
-/** Adds each session's latest non-empty intent (last few hours), its board session id and its spawner. */
+/** Adds each session's latest non-empty intent and last edited checkout (last few hours), its board session id and its spawner. */
 function annotateLedgerRows(
   rows: readonly SessionRow[],
   ledger: LedgerSource,
   boardSessionFor: ((nativeSessionId: string) => string | undefined) | undefined,
 ): TitledSessionRow[] {
   const intents = new Map<string, string>();
+  const edited = new Map<string, string>();
   for (const event of ledger.eventRows(formatLedgerTime(Date.now() - SESSION_INTENT_WINDOW_MS))) {
     const intent = event.intent?.trim();
     if (intent) intents.set(event.sessionId, intent);
+    if (event.checkout) edited.set(event.sessionId, event.checkout);
   }
   const parents = parentSessions(rows);
   return rows.map((row) => {
     const intent = intents.get(row.sessionId);
     const boardSessionId = row.endedAt === null ? boardSessionFor?.(row.sessionId) : undefined;
     const parentSessionId = parents.get(row.sessionId);
+    const editCheckout = edited.get(row.sessionId);
     return {
       ...row,
       ...(intent === undefined ? {} : { intent }),
       ...(boardSessionId === undefined ? {} : { boardSessionId }),
       ...(parentSessionId === undefined ? {} : { parentSessionId }),
+      ...(editCheckout === undefined ? {} : { editCheckout }),
     };
   });
+}
+
+/**
+ * Joins each live ledger session to the herdr pane that reports the same session
+ * (by transcript file, else by id). A joined pane is not listed again: its session's
+ * row carries the pane id, so a click opens the pane's terminal.
+ */
+export function linkHerdrPanes(
+  rows: readonly TitledSessionRow[],
+  panes: readonly HerdrProjectSession[],
+): { rows: TitledSessionRow[]; panes: HerdrProjectSession[] } {
+  const byFile = new Map<string, string>();
+  const byId = new Map<string, string>();
+  for (const pane of panes) {
+    if (pane.sessionFile !== undefined) byFile.set(fileStem(pane.sessionFile), pane.id);
+    if (pane.sessionId !== undefined) byId.set(pane.sessionId, pane.id);
+  }
+  const joined = new Set<string>();
+  const linked = rows.map((row) => {
+    if (row.endedAt !== null) return row;
+    const paneId = (row.sessionFile ? byFile.get(fileStem(row.sessionFile)) : undefined) ?? byId.get(row.sessionId);
+    if (paneId === undefined) return row;
+    joined.add(paneId);
+    return { ...row, herdrPaneId: paneId };
+  });
+  return { rows: linked, panes: panes.filter((pane) => !joined.has(pane.id)) };
 }
 
 function ledgerStatus(row: SessionRow): string {
@@ -199,6 +239,8 @@ function sessionsForCheckout(
       cwd: row.cwd,
       ...(row.boardSessionId === undefined ? {} : { boardSessionId: row.boardSessionId }),
       ...(row.parentSessionId === undefined ? {} : { parentSessionId: row.parentSessionId }),
+      ...(row.herdrPaneId === undefined ? {} : { herdrPaneId: row.herdrPaneId }),
+      ...(row.editCheckout === undefined ? {} : { editCheckout: row.editCheckout }),
     });
   }
   for (const agent of agents) {
@@ -214,7 +256,7 @@ function sessionsForCheckout(
   }
   for (const session of herdrSessions) {
     if (!owns(session.cwd)) continue;
-    sessions.push({ engine: 'herdr', agentKind: 'herdr', ...session });
+    sessions.push({ engine: 'herdr', agentKind: 'herdr', id: session.id, cwd: session.cwd, status: session.status, title: session.title });
   }
   return sessions;
 }
@@ -556,6 +598,8 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
       path: session.cwd,
       ...(session.boardSessionId === undefined ? {} : { boardSessionId: session.boardSessionId }),
       ...(session.parentSessionId === undefined ? {} : { parentSessionId: session.parentSessionId }),
+      ...(session.herdrPaneId === undefined ? {} : { herdrPaneId: session.herdrPaneId }),
+      ...(session.editCheckout === undefined ? {} : { editCheckout: session.editCheckout }),
     });
   }
 }
@@ -565,11 +609,15 @@ export async function buildProjectTreeSnapshot(
   options: ProjectTreeOptions,
 ): Promise<ProjectTreeSnapshot> {
   const state = await store.load();
-  const ledgerRows = annotateLedgerRows(options.ledger.sessionRows(), options.ledger, options.boardSessionFor);
+  const linked = linkHerdrPanes(
+    annotateLedgerRows(options.ledger.sessionRows(), options.ledger, options.boardSessionFor),
+    options.herdrSessions?.() ?? [],
+  );
+  const ledgerRows = linked.rows;
   const pendingCheckouts = new Set(options.ledger.pendingRows().map((row) => canonicalKey(row.checkout)));
   const overlapScans = options.sessionsOnly === true ? [] : await (options.overlapScans?.() ?? Promise.resolve([]));
   const agents = [...(options.agents ?? [])];
-  const herdrSessions = options.herdrSessions?.() ?? [];
+  const herdrSessions = linked.panes;
   const nodes: ProjectTreeNode[] = [];
   const aggregates = new Map<string, NodeAggregate>();
   for (const project of state.projects) {

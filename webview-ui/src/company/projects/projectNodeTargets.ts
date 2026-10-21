@@ -36,15 +36,16 @@ function descendants(nodes: readonly ProjectTreeNode[], node: ProjectTreeNode): 
 
 /**
  * The checkout a "changes" action on `node` opens: the node itself when it is a
- * checkout, the checkout a session works in, otherwise the first checkout below it
- * (a repository's main worktree is listed first). Null when there is none.
+ * checkout; for a session, the checkout it works in, else the one it last edited
+ * (a session at a folder's root works across repos); otherwise the first checkout
+ * below it (a repository's main worktree is listed first). Null when there is none.
  */
 export function checkoutPathFor(
   nodes: readonly ProjectTreeNode[],
   node: ProjectTreeNode,
 ): string | null {
   if (node.kind === 'checkout') return node.path ?? null;
-  if (node.kind === 'session') return ancestorOf(nodes, node, 'checkout')?.path ?? null;
+  if (node.kind === 'session') return ancestorOf(nodes, node, 'checkout')?.path ?? node.editCheckout ?? null;
   return descendants(nodes, node).find((candidate) => candidate.kind === 'checkout' && candidate.path !== undefined)?.path ?? null;
 }
 

@@ -429,6 +429,7 @@ export function BoardShell({ client }: BoardShellProps) {
     const boardKey = session.boardSessionId ?? (state.sessions[id] !== undefined ? id : null);
     if (boardKey !== null && state.sessions[boardKey] !== undefined) selectSession(boardKey);
     else if (boardKey !== null && where.folderPath !== undefined) selectWorkspaceSession(where.folderPath, boardKey);
+    else if (session.herdrPaneId !== undefined) openHerdr(session.herdrPaneId);
     else if (session.agentKind === 'herdr' && session.state === 'sleeping') openSleeping(id);
     else if (session.agentKind === 'herdr') openHerdr(id);
     else if (where.checkoutPath !== undefined) openProjectChanges(where.checkoutPath);

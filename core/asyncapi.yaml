@@ -6922,6 +6922,12 @@ components:
         workspacePath:
           type: string
           description: Canonical path of the open Company folder that contains the agent's cwd, the deepest match. Absent when the cwd is outside every open folder.
+        sessionFile:
+          type: string
+          description: The agent's transcript file, when the agent reported it to herdr (omp does).
+        sessionId:
+          type: string
+          description: The agent's session id, when the agent reported an id instead of a file.
 
     HerdrSleepingSession:
       type: object
@@ -7960,6 +7966,16 @@ components:
           description: >-
             Session rows: the session that spawned this one (a subagent's main session), when
             the ledger links them. The sidebar nests the row under that session.
+        herdrPaneId:
+          type: string
+          description: >-
+            Session rows: the herdr pane the session runs in, when herdr reports the same
+            session. Clicking the row opens that pane's terminal.
+        editCheckout:
+          type: string
+          description: >-
+            Session rows: the checkout the session last edited, from the ledger. Its changes
+            open there when the row sits outside every checkout.
         state:
           type: string
         title:

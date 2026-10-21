@@ -11,7 +11,7 @@ import type { ProcessResult } from '../src/ledger/processRunner.js';
 import { toPathKey } from '../src/pathKey.js';
 import { handleProjectMessage } from '../src/projects/handler.js';
 import { ProjectStore } from '../src/projects/projectStore.js';
-import { buildProjectTreeSnapshot, parentSessions } from '../src/projects/projectTree.js';
+import { buildProjectTreeSnapshot, linkHerdrPanes, parentSessions } from '../src/projects/projectTree.js';
 import { sessionRow } from './ledgerFixtures.js';
 
 function processResult(stdout = '', code = 0, ok = code === 0): ProcessResult {
@@ -254,6 +254,25 @@ describe('parentSessions', () => {
       sessionRow('sub-x', { pid: 12, agentKind: 'sub' }),
     ];
     expect(parentSessions(rows).has('sub-x')).toBe(false);
+  });
+});
+
+describe('linkHerdrPanes', () => {
+  it('gives a live session the herdr pane reporting its transcript or id, and lists only the panes left over', () => {
+    const rows = [
+      sessionRow('omp-1', { sessionFile: 'C:\\s\\a.jsonl' }),
+      sessionRow('claude-1'),
+      sessionRow('ended', { sessionFile: 'C:\\s\\old.jsonl', endedAt: '2026-10-20' }),
+    ];
+    const pane = (id: string, extra: object = {}) => ({ id, cwd: 'C:/w', status: 'working', title: id, ...extra });
+    const { rows: linked, panes } = linkHerdrPanes(rows, [
+      pane('w1:p1', { sessionFile: 'c:/s/a.jsonl' }),
+      pane('w1:p2', { sessionId: 'claude-1' }),
+      pane('w1:p3', { sessionFile: 'C:\\s\\old.jsonl' }),
+      pane('w1:p4'),
+    ]);
+    expect(linked.map((row) => row.herdrPaneId)).toEqual(['w1:p1', 'w1:p2', undefined]);
+    expect(panes.map((entry) => entry.id)).toEqual(['w1:p3', 'w1:p4']);
   });
 });
 

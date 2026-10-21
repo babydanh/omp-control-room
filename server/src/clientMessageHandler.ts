@@ -228,6 +228,8 @@ export function handleClientMessage(
               cwd: agent.cwd,
               status: agent.status,
               title: agent.title ?? agent.name ?? '',
+              ...(agent.sessionFile === undefined ? {} : { sessionFile: agent.sessionFile }),
+              ...(agent.sessionId === undefined ? {} : { sessionId: agent.sessionId }),
             }],
           ),
           ...snapshot.sleeping.flatMap((session) =>
