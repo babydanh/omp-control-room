@@ -31,6 +31,7 @@ import type {
   WorkItemBlocker,
   WorkItemVerdict,
 } from '../../../../core/src/messages.js';
+import { withoutTerminalEscapes } from '../../../../core/src/terminalText.js';
 import {
   blockerOf,
   blockerReason,
@@ -318,9 +319,9 @@ function describe(error: unknown): string {
   return error instanceof Error ? clip(error.message, 200) : 'lỗi không rõ';
 }
 
-/** The last non-empty screen lines, as a result. Undefined when the screen is empty. */
+/** The last non-empty screen lines, as a result, without terminal colour codes. Undefined when the screen is empty. */
 function summarizeScreen(text: string): string | undefined {
-  const lines = text
+  const lines = withoutTerminalEscapes(text)
     .split('\n')
     .map((line) => line.trimEnd())
     .filter((line) => line.trim() !== '');
@@ -2127,7 +2128,8 @@ export class WorkItemService {
       agent: item.agent,
       role: item.role,
       readOnly: this.isReadOnly(item.agent),
-      result: item.result === undefined ? undefined : clip(item.result, JUDGE_RESULT_MAX_CHARS),
+      // A result saved before colour codes were dropped still carries them; the judge reads plain text.
+      result: item.result === undefined ? undefined : clip(withoutTerminalEscapes(item.result), JUDGE_RESULT_MAX_CHARS),
       conflicts: report === undefined ? [] : describeConflicts(report),
       evidenceAsked: item.judgeEvidenceAsked === true,
     };

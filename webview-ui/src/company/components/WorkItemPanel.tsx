@@ -9,6 +9,7 @@
 import { type FormEvent, useEffect, useRef, useState } from 'react';
 
 import type { WorkItem, WorkItemEvent } from '../../../../core/src/messages.js';
+import { withoutTerminalEscapes } from '../../../../core/src/terminalText.js';
 import { priorityLabel } from '../../../../core/src/workItemGraph.js';
 import type { WorkItemMenuAction } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
@@ -338,7 +339,8 @@ export function WorkItemPanel({
             data-testid="work-item-result"
             className="company-work-result whitespace-pre-wrap break-words rounded-(--company-radius-sm) bg-well p-2 font-mono text-2xs text-text"
           >
-            {item.result}
+            {/* Results saved before the board dropped colour codes still carry them. */}
+            {withoutTerminalEscapes(item.result)}
           </pre>
         </section>
       )}
