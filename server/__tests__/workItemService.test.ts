@@ -69,6 +69,8 @@ class Fixture {
   poolFull = false;
   readonly worktreesMade: { repo: string; shortId: string }[] = [];
   worktreeError: Error | null = null;
+  /** Whether a made worktree's directory is still on disk. */
+  worktreeOnDisk = true;
   readonly saves: WorkItemsFile[] = [];
   saveError: Error | null = null;
   repos: string[] = [];
@@ -142,6 +144,7 @@ class Fixture {
           return { path: `${repo}/.worktrees/squad-${shortId}`, branch: `squad-${shortId}` };
         },
         remove: async () => 'removed',
+        exists: () => this.worktreeOnDisk,
       },
       judge: () => new Promise<string>(() => undefined),
       overlaps: async () => [],
@@ -1310,6 +1313,28 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       status: 'running',
       worktree: { path: worktreeOf(id), branch: `squad-${id.slice(0, 8)}` },
     });
+  });
+
+  it('keeps a failed item whose worktree is still on disk, and removes it once the worktree is gone', async () => {
+    const f = await repoFixture();
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa API',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+    });
+    await f.service.mark({ requestId: randomUUID(), id, verdict: 'failed' });
+
+    await expect(f.service.cancel({ requestId: randomUUID(), id })).rejects.toMatchObject({
+      code: 'work_item_status',
+      message: expect.stringContaining('Worktree của việc này còn trên đĩa'),
+    });
+    expect(itemOf(f, id).status).toBe('failed');
+
+    f.worktreeOnDisk = false;
+    await f.service.cancel({ requestId: randomUUID(), id });
+    expect(f.service.snapshot().items).toEqual([]);
   });
 
   it('opens a read-only agent in the repo itself, with no worktree', async () => {

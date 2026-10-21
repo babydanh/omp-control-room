@@ -75,6 +75,7 @@ class Fixture {
           return { path: `${repo}/.worktrees/squad-${shortId}`, branch: `squad-${shortId}` };
         },
         remove: async () => 'removed',
+        exists: () => true,
       },
       judge: () => new Promise<string>(() => undefined),
       overlaps: async () => [],

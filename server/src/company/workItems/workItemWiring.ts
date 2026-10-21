@@ -4,6 +4,7 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { freemem, homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -186,6 +187,7 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
         }),
       remove: (repo, worktree) =>
         removeSquadWorktree({ repo, worktree, gitWt: findOnPath('git-wt'), run: runCommand }),
+      exists: (worktree) => existsSync(worktree.path),
     },
     judge: (prompt, signal) => options.judge.run(prompt, signal),
     overlaps: () => options.ledger.overlapScans(),

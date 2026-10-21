@@ -409,7 +409,7 @@ export function WorkItemPanel({
             message={
               confirming === 'cancel'
                 ? removes
-                  ? 'Xoá việc này khỏi bảng? Worktree của việc (nếu có) vẫn giữ trên đĩa.'
+                  ? 'Xoá việc này khỏi bảng? Không hoàn tác được.'
                   : 'Huỷ việc này? Việc đang chạy sẽ dừng.'
                 : confirming === 'failed'
                   ? 'Đánh dấu việc này thất bại?'

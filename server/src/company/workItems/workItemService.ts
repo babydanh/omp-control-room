@@ -206,6 +206,8 @@ export interface WorkItemWorktrees {
   create(repo: string, shortId: string): Promise<SquadWorktree>;
   /** Removes a finished item's worktree. Refuses, never forces, when it is dirty or unmerged. */
   remove(repo: string, worktree: SquadWorktree): Promise<WorktreeRemoval>;
+  /** Whether the worktree's directory is still on disk. */
+  exists(worktree: SquadWorktree): boolean;
 }
 
 /** Everything the service reaches outside itself. */
@@ -285,6 +287,8 @@ const MESSAGE = {
   worktreeDirty: 'Worktree còn thay đổi chưa commit nên chưa dọn.',
   worktreeUnmerged: 'Nhánh của worktree chưa merge vào origin/main nên chưa dọn.',
   worktreeRemoved: 'Đã dọn worktree.',
+  worktreeKept:
+    'Worktree của việc này còn trên đĩa, xoá việc sẽ mất đường dọn nó. Việc đã xong: bấm "Dọn worktree" trước; việc lỗi: gộp hoặc xoá worktree đó trước rồi mới xoá việc.',
 } as const;
 
 /** Vietnamese refusals for a wait list, by the reason the core check gives. */
@@ -622,11 +626,16 @@ export class WorkItemService {
     if (command.verdict === 'done') await this.reconcileAfterSave();
   }
 
-  /** Removes an item nobody works on: a queued one never sent, or a finished one (done, failed). */
+  /**
+   * Removes an item nobody works on: a queued one never sent, or a finished one (done, failed).
+   * Refused while the item's worktree is still on disk: the item is the board's only way back to it.
+   */
   async cancel(command: WorkItemCommand & { id: string }): Promise<void> {
     if (this.replay(command.requestId) !== undefined) return;
     const item = this.requireItem(command.id);
     if (!canCancel(item.status)) this.refuseStatus(item);
+    if (item.worktree !== undefined && item.worktreeRemoved !== true && this.ports.worktrees.exists(item.worktree))
+      throw new CompanyError('work_item_status', MESSAGE.worktreeKept);
     const waiters = this.openWaitersOf(item.id);
     if (waiters.length > 0)
       throw new CompanyError(

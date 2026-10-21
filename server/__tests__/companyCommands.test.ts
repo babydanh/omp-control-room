@@ -1216,6 +1216,7 @@ describe('company client commands', () => {
             branch: `squad-${shortId}`,
           }),
           remove: async () => 'removed',
+          exists: () => true,
         },
         judge: () => new Promise<string>(() => undefined),
         overlaps: async () => [],

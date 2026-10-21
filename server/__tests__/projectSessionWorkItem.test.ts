@@ -54,6 +54,7 @@ function createService(input: {
         return { path, branch: `squad-${shortId}` };
       },
       remove: async () => 'removed',
+      exists: () => true,
     },
     ...(input.prepareWorktree === undefined ? {} : { prepareWorktree: input.prepareWorktree }),
     publish: (message) => published.push(message),

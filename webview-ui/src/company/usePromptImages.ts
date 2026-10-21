@@ -1,6 +1,7 @@
 /**
  * usePromptImages: sends the prompt box's images to the server and appends each
  * saved path to the draft (see `promptImages.ts` for why a path, not bytes).
+ * Each saved image keeps a local preview while its path is still in the draft.
  */
 
 import { useEffect, useState } from 'react';
@@ -18,6 +19,12 @@ import {
   withImagePath,
 } from './promptImages.js';
 
+/** One saved image: its path in the draft and a browser URL of its bytes. */
+export interface PromptImagePreview {
+  readonly path: string;
+  readonly url: string;
+}
+
 function base64Of(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -30,27 +37,49 @@ function base64Of(file: File): Promise<string> {
   });
 }
 
-/** `onNotice` hears refusals; `saving` counts the images still on their way. */
+/**
+ * `draftText` is the prompt as typed: a preview lives only while its path is in it, so deleting
+ * the path or sending the prompt drops the preview. `onNotice` hears refusals; `saving` counts the
+ * images still on their way.
+ */
 export function usePromptImages(
   client: CompanyClient,
   onNotice: (text: string) => void,
-): { attach: (files: readonly File[]) => void; saving: number } {
+  draftText: string,
+): {
+  attach: (files: readonly File[]) => void;
+  saving: number;
+  previews: readonly PromptImagePreview[];
+} {
   const projects = useProjectState(projectStore);
-  const [pending, setPending] = useState<readonly string[]>([]);
+  const [pending, setPending] = useState<readonly { id: string; url: string }[]>([]);
+  const [saved, setSaved] = useState<readonly PromptImagePreview[]>([]);
 
   useEffect(() => {
-    const done = pending.filter((id) => projects.results[id] !== undefined);
+    const done = pending.filter((entry) => projects.results[entry.id] !== undefined);
     if (done.length === 0) return;
-    for (const id of done) {
-      const result = projects.results[id];
+    const added: PromptImagePreview[] = [];
+    for (const entry of done) {
+      const result = projects.results[entry.id];
       if (result?.type === 'projectImageSaved') {
         client.setDraftText(withImagePath(client.getState().prompt.text, result.path));
+        added.push({ path: result.path, url: entry.url });
       } else {
+        URL.revokeObjectURL(entry.url);
         onNotice((result !== undefined && 'reason' in result && result.reason) || IMAGE_SAVE_FALLBACK);
       }
     }
-    setPending((current) => current.filter((id) => !done.includes(id)));
+    setPending((current) => current.filter((entry) => !done.includes(entry)));
+    if (added.length > 0) setSaved((current) => [...current, ...added]);
   }, [client, onNotice, pending, projects.results]);
+
+  // A preview whose path left the draft frees its bytes.
+  useEffect(() => {
+    const gone = saved.filter((preview) => !draftText.includes(preview.path));
+    if (gone.length === 0) return;
+    for (const preview of gone) URL.revokeObjectURL(preview.url);
+    setSaved((current) => current.filter((preview) => !gone.includes(preview)));
+  }, [draftText, saved]);
 
   const attach = (files: readonly File[]) => {
     for (const file of files) {
@@ -69,12 +98,16 @@ export function usePromptImages(
             mediaType: file.type as ProjectImageSaveMessage['mediaType'],
             dataBase64,
           });
-          setPending((current) => [...current, id]);
+          setPending((current) => [...current, { id, url: URL.createObjectURL(file) }]);
         },
         () => onNotice(IMAGE_SAVE_FALLBACK),
       );
     }
   };
 
-  return { attach, saving: pending.length };
+  return {
+    attach,
+    saving: pending.length,
+    previews: saved.filter((preview) => draftText.includes(preview.path)),
+  };
 }

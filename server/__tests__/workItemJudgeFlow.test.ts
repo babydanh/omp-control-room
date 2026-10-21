@@ -80,6 +80,7 @@ class JudgeFixture {
           branch: `squad-${shortId}`,
         }),
         remove: async () => 'removed',
+        exists: () => true,
       },
       publish: () => undefined,
       now: () => this.now,

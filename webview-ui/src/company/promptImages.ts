@@ -23,6 +23,11 @@ export function withImagePath(text: string, path: string): string {
   return `${text}${gap}${path} `;
 }
 
+/** The draft with every copy of an image path taken out, with the space that followed it. */
+export function withoutImagePath(text: string, path: string): string {
+  return text.split(`${path} `).join('').split(path).join('');
+}
+
 /** The images among pasted or dropped items; other files are left to the browser. */
 export function imageFiles(files: Iterable<File>): File[] {
   return [...files].filter((file) => file.type.startsWith('image/'));

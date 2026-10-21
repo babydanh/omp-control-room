@@ -53,7 +53,7 @@ import {
 import { sendMenuEntries, type SendMenuEntryId } from '../composerSendMenu.js';
 import { showsAllFolders } from '../folderIdentity.js';
 import { focusFolder, FOLDER_LIST_LOADING_MESSAGE, folderListLoading } from '../folderView.js';
-import { imageFiles } from '../promptImages.js';
+import { imageFiles, withoutImagePath } from '../promptImages.js';
 import { isCompanyChord, promptBlockReason, type PromptRoute } from '../promptSubmission.js';
 import { draftAfterSend, herdrAgentFor, sendPrompt } from '../promptTargets.js';
 import { matchShortcut } from '../shortcuts.js';
@@ -153,7 +153,7 @@ export function PromptComposer({ client }: PromptComposerProps) {
   const [squadRequest, setSquadRequest] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
-  const images = usePromptImages(client, setNotice);
+  const images = usePromptImages(client, setNotice, draft.text);
   /** The height the user dragged the box to, or null when it has never been dragged. */
   const [savedHeight, setSavedHeight] = useState<number | null>(() =>
     readComposerHeight(composerStorage()),
@@ -552,6 +552,29 @@ export function PromptComposer({ client }: PromptComposerProps) {
       >
         <span aria-hidden="true" className="h-0.5 w-8 rounded-full bg-border" />
       </div>
+      {images.previews.length > 0 && (
+        <ul aria-label="Ảnh đính kèm" data-testid="prompt-image-previews" className="mb-1.5 flex flex-wrap gap-1.5">
+          {images.previews.map((preview) => (
+            <li key={preview.path} className="relative">
+              <img
+                src={preview.url}
+                alt={preview.path}
+                title={preview.path}
+                className="h-16 w-16 rounded-[var(--company-radius-sm)] border border-hairline object-cover"
+              />
+              <button
+                type="button"
+                aria-label="Bỏ ảnh này"
+                title="Bỏ ảnh này"
+                onClick={() => client.setDraftText(withoutImagePath(draft.text, preview.path))}
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-hairline bg-raised text-2xs text-text-muted hover:text-text"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="flex flex-wrap items-end gap-1.5">
         <textarea
           ref={inputRef}
