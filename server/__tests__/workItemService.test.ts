@@ -1678,7 +1678,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     stop();
   });
 
-  it('opens a board session for a compact item when herdr is down, and still carries its report', async () => {
+  it('keeps a compact item waiting while herdr is down, then opens its herdr tab', async () => {
     const f = await repoFixture();
     f.herdrAvailable = false;
     const squadRunId = randomUUID();
@@ -1688,19 +1688,16 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       { squadRunId },
     );
     if (id === undefined) throw new Error('expected a work item');
-    await vi.waitFor(() => expect(f.sessions).toHaveLength(1));
+    await f.service.reconcileNow();
+    expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'agent' } });
+    expect(f.chatsOpened).toBe(0);
     expect(f.herdrOpened).toHaveLength(0);
-    const [session] = f.sessions;
-    if (session === undefined) throw new Error('expected a session');
-    f.sessions[0] = { ...session, status: 'busy' };
+
+    f.herdrAvailable = true;
     await f.service.reconcileNow();
-    f.sessionReply = 'Đã sửa API: src/api.ts:12, npm test exit 0';
-    f.sessions[0] = { ...session, status: 'idle' };
-    await f.service.reconcileNow();
-    expect(itemOf(f, id)).toMatchObject({
-      status: 'done',
-      result: 'Đã sửa API: src/api.ts:12, npm test exit 0',
-    });
+    await vi.waitFor(() => expect(f.herdrOpened).toHaveLength(1));
+    expect(f.chatsOpened).toBe(0);
+    expect(itemOf(f, id).status).toBe('running');
   });
 
   it('continues to judge ordinary work items', async () => {

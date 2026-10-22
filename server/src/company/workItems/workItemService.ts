@@ -1340,14 +1340,19 @@ export class WorkItemService {
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {
+      // A compact squad item runs in its own herdr tab, as the user chose: while herdr cannot open
+      // one, the item waits rather than running in a board session the user does not watch.
+      const compactItem = item.assignee.kind === 'new-session' &&
+        item.squadRunId !== undefined &&
+        this.ports.isCompactSquadProposal?.(item.squadRunId) === true;
+      const openAgent = this.ports.roster.openAgent;
+      const compactHerdr = compactItem && openAgent !== undefined && this.ports.roster.panes().available;
+      if (compactItem && !compactHerdr) {
+        this.hold(item, { kind: 'agent', detail: 'Chờ herdr để mở tab cho việc này.' });
+        return;
+      }
       const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
       if (cwd === undefined) return;
-      const openAgent = this.ports.roster.openAgent;
-      const compactHerdr = item.assignee.kind === 'new-session' &&
-        item.squadRunId !== undefined &&
-        this.ports.isCompactSquadProposal?.(item.squadRunId) === true &&
-        openAgent !== undefined &&
-        this.ports.roster.panes().available;
       if (compactHerdr) {
         const repoName = checkoutName(item.repo ?? decision.cwd)
           .toLowerCase()
