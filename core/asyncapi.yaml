@@ -293,6 +293,7 @@ components:
         - $ref: '#/components/schemas/LibrarySnapshotRequest'
         - $ref: '#/components/schemas/LibrarySkillPreviewRequest'
         - $ref: '#/components/schemas/LibraryClaudeRoleSet'
+        - $ref: '#/components/schemas/LibrarySkillModeSet'
         - $ref: '#/components/schemas/LibraryStorageSearchRequest'
         - $ref: '#/components/schemas/LibraryWorkItemRestore'
         - $ref: '#/components/schemas/LibraryAccountLogin'
@@ -5897,7 +5898,7 @@ components:
     LedgerToolUsageMessage:
       type: object
       additionalProperties: false
-      required: [type, requestId, ok, running, generatedAt, days, transcripts, rows, unusedSkills, reason]
+      required: [type, requestId, ok, running, generatedAt, days, transcripts, rows, unusedSkills, tokenUsage, nameOnlyCandidates, reason]
       properties:
         type:
           const: ledgerToolUsage
@@ -5920,7 +5921,49 @@ components:
           additionalProperties:
             type: array
             items: { type: string }
+        tokenUsage:
+          $ref: '#/components/schemas/LedgerTokenUsage'
+        nameOnlyCandidates:
+          type: array
+          description: Claude skills installed in ~/.claude/skills, unused in the window and still fully loaded (no skillOverrides entry or `on`).
+          items: { type: string }
         reason: { type: string }
+
+    LedgerTokenUsage:
+      type: object
+      additionalProperties: false
+      required: [totalUnits, rows]
+      description: >-
+        Estimated Claude token usage from local transcripts, in units of Sonnet input tokens (cache write 1.25,
+        cache read 0.1, output 5; Opus 5/3, Haiku 1/3). Skill and plugin rows overlap main and subagent rows.
+      properties:
+        totalUnits: { type: number }
+        rows:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerTokenUsageRow'
+
+    LedgerTokenUsageRow:
+      type: object
+      additionalProperties: false
+      required: [kind, name, input, cacheWrite, cacheRead, output, messages, units, share, models]
+      properties:
+        kind:
+          type: string
+          enum: [main, subagent, skill, plugin]
+        name: { type: string }
+        input: { type: integer }
+        cacheWrite: { type: integer }
+        cacheRead: { type: integer }
+        output: { type: integer }
+        messages: { type: integer }
+        units: { type: number }
+        share:
+          type: number
+          description: units / totalUnits, 0..1.
+        models:
+          type: array
+          items: { type: string }
 
     LedgerToolUsageRow:
       type: object
@@ -6247,6 +6290,28 @@ components:
         reset:
           type: boolean
 
+    LibrarySkillModeSet:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, names, mode]
+      description: Writes skillOverrides in ~/.claude/settings.json for user skills; answered by libraryCommandResult setSkillMode.
+      properties:
+        type:
+          const: librarySkillModeSet
+        requestId:
+          type: string
+          format: uuid
+        names:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+        mode:
+          const: name-only
+
     LibraryMcpSnapshot:
       type: object
       additionalProperties: false
@@ -6318,7 +6383,7 @@ components:
           format: uuid
         command:
           type: string
-          enum: [restoreWorkItem, login, checkMcp, setClaudeRole]
+          enum: [restoreWorkItem, login, checkMcp, setClaudeRole, setSkillMode]
         ok:
           type: boolean
         reason:

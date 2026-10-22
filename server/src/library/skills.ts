@@ -4,6 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import type { LibrarySkill } from '../../../core/src/messages.js';
+import { mutateClaudeSettings } from '../providers/hook/claude/claudeHookInstaller.js';
 import { LibraryUserError } from './libraryError.js';
 
 const PREVIEW_LIMIT_BYTES = 64 * 1024;
@@ -363,6 +364,46 @@ export async function readSkills(refresh: boolean): Promise<LibrarySkill[]> {
   cachedSkills = result.skills;
   skillPaths = result.paths;
   return cachedSkills;
+}
+
+const SKILL_DIR_NAME = /^(?!\.{1,2}$)[\w.-]{1,128}$/;
+
+/**
+ * Writes `skillOverrides[name] = mode` in ~/.claude/settings.json for skills of ~/.claude/skills.
+ * Only skills still fully loaded (no entry, or `on`) change, so a deliberate `off` or
+ * `user-invocable-only` is never loosened. Returns the names that changed.
+ */
+export async function setClaudeSkillMode(
+  homeDir: string,
+  names: readonly string[],
+  mode: 'name-only',
+): Promise<string[]> {
+  const installed: string[] = [];
+  for (const name of new Set(names)) {
+    if (!SKILL_DIR_NAME.test(name)) continue;
+    try {
+      await fs.access(path.join(homeDir, '.claude', 'skills', name, 'SKILL.md'));
+      installed.push(name);
+    } catch {
+      // Not a user skill of Claude (plugin skill, removed, or omp-only): nothing to override.
+    }
+  }
+  if (installed.length === 0) throw new LibraryUserError('Không có skill nào trong ~/.claude/skills khớp tên đã chọn.');
+  let changed: string[] = [];
+  await mutateClaudeSettings((settings) => {
+    const current = settings.skillOverrides;
+    if (current !== undefined && (!current || typeof current !== 'object' || Array.isArray(current))) {
+      throw new LibraryUserError('Không thể cập nhật vì skillOverrides trong settings.json không hợp lệ.');
+    }
+    const overrides = (current ?? {}) as Record<string, unknown>;
+    changed = installed.filter((name) => modeForSkill(overrides, name) === 'on');
+    if (changed.length === 0) return false;
+    for (const name of changed) overrides[name] = mode;
+    settings.skillOverrides = overrides;
+    return true;
+  }, homeDir);
+  cachedSkills = undefined;
+  return changed;
 }
 
 export async function previewSkillFromIndex(

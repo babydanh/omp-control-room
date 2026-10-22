@@ -1,10 +1,10 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { previewSkillFromIndex, scanSkills } from '../src/library/skills.js';
+import { previewSkillFromIndex, scanSkills, setClaudeSkillMode } from '../src/library/skills.js';
 
 const tempDirs: string[] = [];
 
@@ -162,5 +162,34 @@ describe('scanSkills', () => {
     const preview = await previewSkillFromIndex('opaque-id', index);
     expect(preview.content).toHaveLength(64 * 1024);
     expect(preview.truncated).toBe(true);
+  });
+});
+
+describe('setClaudeSkillMode', () => {
+  async function claudeHome(overrides: Record<string, unknown>): Promise<string> {
+    const home = await fixture();
+    for (const name of ['idle', 'kept-off', 'already']) {
+      await addSkill(path.join(home, '.claude', 'skills'), name, `---\nname: ${name}\n---\n`);
+    }
+    await writeFile(path.join(home, '.claude', 'settings.json'), JSON.stringify({ model: 'sonnet', skillOverrides: overrides }));
+    return home;
+  }
+
+  async function settingsOf(home: string): Promise<Record<string, unknown>> {
+    return JSON.parse(await readFile(path.join(home, '.claude', 'settings.json'), 'utf8')) as Record<string, unknown>;
+  }
+
+  it('turns fully loaded user skills to name-only, never loosens off, and keeps other settings', async () => {
+    const home = await claudeHome({ 'kept-off': 'off', already: 'name-only' });
+    const changed = await setClaudeSkillMode(home, ['idle', 'kept-off', 'already', 'plugin:skill', '../escape'], 'name-only');
+    expect(changed).toEqual(['idle']);
+    const settings = await settingsOf(home);
+    expect(settings.model).toBe('sonnet');
+    expect(settings.skillOverrides).toEqual({ 'kept-off': 'off', already: 'name-only', idle: 'name-only' });
+  });
+
+  it('refuses when no chosen name is a Claude user skill', async () => {
+    const home = await claudeHome({});
+    await expect(setClaudeSkillMode(home, ['missing', '..'], 'name-only')).rejects.toThrow('~/.claude/skills');
   });
 });

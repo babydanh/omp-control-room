@@ -119,6 +119,15 @@ async function runLibraryRequest(
         });
         return;
       }
+      case 'librarySkillModeSet': {
+        const names = Array.isArray(msg.names) ? msg.names.filter((name): name is string => typeof name === 'string') : [];
+        if (msg.mode !== 'name-only' || names.length === 0) {
+          throw new LibraryUserError('Yêu cầu đổi chế độ skill không hợp lệ.');
+        }
+        const changed = await skills.setClaudeSkillMode(os.homedir(), names, 'name-only');
+        send({ type: 'libraryCommandResult', requestId, command: 'setSkillMode', ok: true, target: changed.join(', ') });
+        return;
+      }
     }
   } catch (error) {
     const reason = error instanceof LibraryUserError ? error.message : LIBRARY_OPERATION_FAILED_REASON;
@@ -158,6 +167,8 @@ function errorMessage(msg: Record<string, unknown>, requestId: string, reason: s
       return { type: 'libraryCommandResult', requestId, command: 'login', ok: false, reason };
     case 'libraryClaudeRoleSet':
       return { type: 'libraryCommandResult', requestId, command: 'setClaudeRole', ok: false, reason };
+    case 'librarySkillModeSet':
+      return { type: 'libraryCommandResult', requestId, command: 'setSkillMode', ok: false, reason };
     default:
       return { type: 'libraryCommandResult', requestId, command: 'checkMcp', ok: false, reason };
   }

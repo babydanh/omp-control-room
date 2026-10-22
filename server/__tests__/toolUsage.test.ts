@@ -70,4 +70,58 @@ describe('readToolUsage', () => {
     ]);
     expect(result.unusedSkills).toEqual({ claude: ['seo'] });
   });
+
+  it('maps token usage rows and name-only candidates, dropping unknown kinds', async () => {
+    const file = await usageFile(
+      JSON.stringify({
+        generated_at: '2026-10-22T10:00:00',
+        days: 1,
+        rows: [],
+        token_usage: {
+          total_units: 410,
+          rows: [
+            {
+              kind: 'subagent',
+              name: 'feature-dev:code-explorer',
+              input: 0,
+              cache_write: 40,
+              cache_read: 1000,
+              output: 0,
+              messages: 1,
+              units: 150,
+              share: 0.3659,
+              models: ['claude-sonnet-5-5', 3],
+            },
+            { kind: 'tool', name: 'Bash', units: 1 },
+          ],
+        },
+        name_only_candidates: ['idle-skill', 7],
+      }),
+    );
+    const result = await readToolUsage('req', file);
+    expect(result.tokenUsage).toEqual({
+      totalUnits: 410,
+      rows: [
+        {
+          kind: 'subagent',
+          name: 'feature-dev:code-explorer',
+          input: 0,
+          cacheWrite: 40,
+          cacheRead: 1000,
+          output: 0,
+          messages: 1,
+          units: 150,
+          share: 0.3659,
+          models: ['claude-sonnet-5-5'],
+        },
+      ],
+    });
+    expect(result.nameOnlyCandidates).toEqual(['idle-skill']);
+  });
+
+  it('reads a file from before token usage as an empty table', async () => {
+    const file = await usageFile(JSON.stringify({ generated_at: '2026-10-01T00:00:00', days: 14, rows: [] }));
+    const result = await readToolUsage('req', file);
+    expect(result).toMatchObject({ ok: true, tokenUsage: { totalUnits: 0, rows: [] }, nameOnlyCandidates: [] });
+  });
 });

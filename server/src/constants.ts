@@ -204,6 +204,7 @@ export const LIBRARY_PROOF_ROUTE = '/api/library/proofs/:proofId';
 export const LIBRARY_REQUEST_TYPES: Record<string, true> = {
   librarySnapshotRequest: true,
   libraryClaudeRoleSet: true,
+  librarySkillModeSet: true,
   librarySkillPreviewRequest: true,
   libraryStorageSearchRequest: true,
   libraryWorkItemRestore: true,

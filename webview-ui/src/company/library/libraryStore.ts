@@ -9,6 +9,7 @@ import type {
   LibraryCommandResult,
   LibraryMcpCheckRequest,
   LibraryMcpSnapshot,
+  LibrarySkillModeSet,
   LibrarySkillPreview,
   LibrarySkillPreviewRequest,
   LibrarySkillsSnapshot,
@@ -26,6 +27,7 @@ export type LibraryStorageKind = LibraryStorageSearchRequest['kind'];
 type LibraryRequest =
   | LibrarySnapshotRequest
   | LibraryClaudeRoleSet
+  | LibrarySkillModeSet
   | LibrarySkillPreviewRequest
   | LibraryStorageSearchRequest
   | LibraryWorkItemRestore
@@ -68,6 +70,8 @@ export interface LibraryStore {
   searchStorage: (kind: LibraryStorageKind, options?: Omit<LibraryStorageSearchRequest, 'type' | 'requestId' | 'kind'>) => string;
   previewSkill: (id: string, sourceId?: string) => string;
   setClaudeRole: (name: string, updates: Omit<LibraryClaudeRoleSet, 'type' | 'requestId' | 'name'>) => string;
+  /** Turns Claude user skills to `name-only` in ~/.claude/settings.json (skills already narrowed are left alone). */
+  setSkillMode: (names: readonly string[]) => string;
   restoreWorkItem: (workItemId: string) => string;
   loginAccount: (tool: LibraryAccountLogin['tool'], provider?: string) => string;
   checkMcp: (name: string) => string;
@@ -109,6 +113,7 @@ function requestSection(request: LibraryRequest): string {
     case 'libraryAccountLogin': return 'command:login';
     case 'libraryMcpCheckRequest': return 'command:checkMcp';
     case 'libraryClaudeRoleSet': return 'command:setClaudeRole';
+    case 'librarySkillModeSet': return 'command:setSkillMode';
   }
 }
 
@@ -122,6 +127,7 @@ function requestKey(request: LibraryRequest): string {
     case 'libraryAccountLogin': return `login:${request.tool}`;
     case 'libraryMcpCheckRequest': return `mcp:${request.name}`;
     case 'libraryClaudeRoleSet': return `claudeRole:${request.name}`;
+    case 'librarySkillModeSet': return 'skillMode';
   }
 }
 
@@ -149,7 +155,8 @@ function responseMatches(request: LibraryRequest, message: LibraryServerMessage)
         (request.type === 'libraryWorkItemRestore' && message.command === 'restoreWorkItem') ||
         (request.type === 'libraryAccountLogin' && message.command === 'login') ||
         (request.type === 'libraryMcpCheckRequest' && message.command === 'checkMcp') ||
-        (request.type === 'libraryClaudeRoleSet' && message.command === 'setClaudeRole')
+        (request.type === 'libraryClaudeRoleSet' && message.command === 'setClaudeRole') ||
+        (request.type === 'librarySkillModeSet' && message.command === 'setSkillMode')
       );
   }
 }
@@ -229,6 +236,9 @@ export function createLibraryStore(options: LibraryStoreOptions): LibraryStore {
         if (message.command === 'setClaudeRole' && message.ok) {
           transmit({ type: 'librarySnapshotRequest', requestId: newRequestId(), section: 'claudeRoles' });
         }
+        if (message.command === 'setSkillMode' && message.ok) {
+          transmit({ type: 'librarySnapshotRequest', requestId: newRequestId(), section: 'skills', refresh: true });
+        }
         return;
     }
   }
@@ -248,6 +258,8 @@ export function createLibraryStore(options: LibraryStoreOptions): LibraryStore {
       transmit({ type: 'librarySkillPreviewRequest', requestId: newRequestId(), id, sourceId }),
     setClaudeRole: (name, updates) =>
       transmit({ type: 'libraryClaudeRoleSet', requestId: newRequestId(), name, ...updates }),
+    setSkillMode: (names) =>
+      transmit({ type: 'librarySkillModeSet', requestId: newRequestId(), names: [...names], mode: 'name-only' }),
     restoreWorkItem: (workItemId) =>
       transmit({ type: 'libraryWorkItemRestore', requestId: newRequestId(), workItemId }),
     loginAccount: (tool, provider) =>

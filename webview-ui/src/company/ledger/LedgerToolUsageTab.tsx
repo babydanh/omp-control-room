@@ -4,6 +4,7 @@ import type { LedgerToolUsageRow } from '../../../../core/src/messages.js';
 import { ledgerStore } from './ledgerClient.js';
 import { formatLedgerStamp } from './ledgerFormat.js';
 import type { LedgerState } from './ledgerStore.js';
+import { LedgerNameOnlySection, LedgerTokenUsageSection } from './LedgerTokenUsage.js';
 
 const CLIS = ['omp', 'claude', 'agy'] as const;
 const KINDS = ['skill', 'mcp', 'tool'] as const;
@@ -123,6 +124,7 @@ export function LedgerToolUsageTab({ ledger }: { ledger: LedgerState }) {
           </table>
         </div>
       </section>
+      <LedgerTokenUsageSection usage={usage?.tokenUsage} />
       <section className="rounded-lg border border-border p-3">
         <h3 className="text-sm font-semibold text-text">Skill đã cài mà không ai dùng</h3>
         <div className="mt-2 flex flex-col gap-2">
@@ -141,6 +143,7 @@ export function LedgerToolUsageTab({ ledger }: { ledger: LedgerState }) {
           })}
         </div>
       </section>
+      <LedgerNameOnlySection candidates={usage?.nameOnlyCandidates ?? []} days={usage?.days ?? null} />
     </div>
   );
 }

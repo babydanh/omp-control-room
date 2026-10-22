@@ -1,11 +1,20 @@
 /**
  * Reads the tool-usage statistics that `~/.omp/scripts/tool-usage.py` writes: how often each
- * skill, MCP tool and built-in tool of omp, Claude and agy was called, and how often it failed.
+ * skill, MCP tool and built-in tool of omp, Claude and agy was called, and how often it failed;
+ * plus the estimated Claude token usage per main session / subagent / skill / plugin and the
+ * unused Claude skills still loaded in full.
  */
 
 import * as fs from 'node:fs/promises';
 
-import type { LedgerToolUsageMessage, LedgerToolUsageRow } from '../../../core/src/messages.js';
+import type {
+  LedgerTokenUsage,
+  LedgerTokenUsageRow,
+  LedgerToolUsageMessage,
+  LedgerToolUsageRow,
+} from '../../../core/src/messages.js';
+
+const TOKEN_KINDS: ReadonlySet<string> = new Set(['main', 'subagent', 'skill', 'plugin']);
 
 const GENERATE_HINT = 'Chạy: python ~/.omp/scripts/tool-usage.py';
 
@@ -36,6 +45,8 @@ export async function readToolUsage(
       transcripts: numberRecord(record.transcripts),
       rows: record.rows.map(usageRow).filter((row): row is LedgerToolUsageRow => row !== null),
       unusedSkills: stringListRecord(record.unused_skills),
+      tokenUsage: tokenUsage(record.token_usage),
+      nameOnlyCandidates: stringList(record.name_only_candidates),
       reason: '',
     };
   } catch (error) {
@@ -61,6 +72,8 @@ export function toolUsageFailure(requestId: string, reason: string): LedgerToolU
     transcripts: {},
     rows: [],
     unusedSkills: {},
+    tokenUsage: { totalUnits: 0, rows: [] },
+    nameOnlyCandidates: [],
     reason,
   };
 }
@@ -82,6 +95,42 @@ function usageRow(value: unknown): LedgerToolUsageRow | null {
     last: typeof row.last === 'string' ? row.last : null,
     topErrors: Array.isArray(row.top_errors) ? row.top_errors.filter(isErrorCount) : [],
   };
+}
+
+/** Files written before token usage existed have no `token_usage`: an empty table, not a failure. */
+function tokenUsage(value: unknown): LedgerTokenUsage {
+  if (typeof value !== 'object' || value === null) return { totalUnits: 0, rows: [] };
+  const record = value as Record<string, unknown>;
+  return {
+    totalUnits: numberValue(record.total_units),
+    rows: Array.isArray(record.rows)
+      ? record.rows.map(tokenRow).filter((row): row is LedgerTokenUsageRow => row !== null)
+      : [],
+  };
+}
+
+function tokenRow(value: unknown): LedgerTokenUsageRow | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const row = value as Record<string, unknown>;
+  if (typeof row.kind !== 'string' || !TOKEN_KINDS.has(row.kind) || typeof row.name !== 'string') {
+    return null;
+  }
+  return {
+    kind: row.kind as LedgerTokenUsageRow['kind'],
+    name: row.name,
+    input: numberValue(row.input),
+    cacheWrite: numberValue(row.cache_write),
+    cacheRead: numberValue(row.cache_read),
+    output: numberValue(row.output),
+    messages: numberValue(row.messages),
+    units: numberValue(row.units),
+    share: numberValue(row.share),
+    models: stringList(row.models),
+  };
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
 function isErrorCount(value: unknown): value is [string, number] {

@@ -336,6 +336,8 @@ describe('ledger store: coordination requests', () => {
       transcripts: {},
       rows: [],
       unusedSkills: {},
+      tokenUsage: { totalUnits: 0, rows: [] },
+      nameOnlyCandidates: [],
       reason: '',
     });
     expect(store.getSnapshot().coordination).toEqual({ messages: [], handoffs: [] });
