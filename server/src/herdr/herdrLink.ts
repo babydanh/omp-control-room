@@ -197,6 +197,21 @@ export interface HerdrLinkOptions {
   readonly workspaceFor?: (cwd: string) => Promise<string | undefined>;
 }
 
+/** A newly created herdr tab and its shell pane. */
+export interface HerdrOpenedAgent {
+  readonly paneId: string;
+  readonly tabId: string;
+}
+
+/** Parameters for opening an agent in a new herdr tab. */
+export interface HerdrOpenAgentOptions {
+  readonly cwd: string;
+  readonly kind: string;
+  readonly label: string;
+  readonly name: string;
+  readonly workspaceId?: string;
+}
+
 export interface HerdrLink {
   /** Starts connecting in the background and keeps reconnecting until stopped. */
   start(): void;
@@ -225,6 +240,8 @@ export interface HerdrLink {
    * given. Refuses unless herdr and the sleep registry still show the pane holding that session.
    */
   wake(paneId: string, prompt?: string): Promise<void>;
+  /** Opens a new herdr tab in `cwd` and starts a `kind` agent there, ready for a prompt. */
+  openAgent?(options: HerdrOpenAgentOptions): Promise<HerdrOpenedAgent>;
 }
 
 export { isHerdrPaneId };
@@ -522,6 +539,40 @@ class HerdrLinkImpl implements HerdrLink {
     assertPaneId(paneId);
     assertPrompt(text);
     await this.call('agent.prompt', { target: paneId, text }, PROMPT_TIMEOUT_MS);
+  }
+
+  async openAgent(options: HerdrOpenAgentOptions): Promise<HerdrOpenedAgent> {
+    if (
+      typeof options.cwd !== 'string' ||
+      options.cwd.length === 0 ||
+      typeof options.kind !== 'string' ||
+      options.kind.length === 0 ||
+      typeof options.label !== 'string' ||
+      options.label.length === 0
+    ) {
+      throw new HerdrError('invalid_request', INVALID_REPLY_MESSAGE);
+    }
+    assertAgentName(options.name);
+    const result = await this.call('tab.create', {
+      cwd: options.cwd,
+      focus: false,
+      label: options.label,
+      workspace_id: options.workspaceId ?? null,
+    });
+    const tab = jsonField(result, 'tab');
+    const rootPane = jsonField(result, 'root_pane');
+    const tabId = jsonField(tab, 'tab_id');
+    const paneId = jsonField(rootPane, 'pane_id');
+    if (typeof tabId !== 'string' || typeof paneId !== 'string' || !isHerdrPaneId(paneId)) {
+      throw new HerdrError('herdr_rejected', 'herdr không trả về mã tab hoặc pane hợp lệ.');
+    }
+    await this.call(
+      'agent.start',
+      { name: options.name, kind: options.kind, pane_id: paneId, timeout_ms: 90_000 },
+      95_000,
+    );
+    if (this.running) this.scheduleRefresh();
+    return { paneId, tabId };
   }
 
   async keys(paneId: string, keys: readonly HerdrKey[]): Promise<void> {

@@ -113,6 +113,7 @@ import {
   checkoutKey,
   checkoutName,
   decideStart,
+  isInsideRepo,
   type SchedulerContext,
   type SchedulerDecision,
   type SchedulerHold,
@@ -140,6 +141,8 @@ export interface WorkItemPaneView {
   readonly status: HerdrAgent['status'];
   /** The checkout the pane runs in, when herdr reports one. */
   readonly cwd?: string;
+  /** The herdr workspace holding the pane, such as `wA`. */
+  readonly workspaceId?: string;
   /** The agent herdr sees in the pane: omp, claude, agy… Absent when herdr does not say. */
   readonly kind?: string;
 }
@@ -162,6 +165,14 @@ export interface WorkItemRoster {
    * screen holds only its last lines. Undefined when the transcript is unknown. Absent = no reader.
    */
   lastReply?(paneId: string): Promise<string | undefined>;
+  /** Opens a new herdr tab in `cwd` and starts a `kind` agent there, ready for a prompt. */
+  openAgent?(options: {
+    cwd: string;
+    kind: string;
+    label: string;
+    name: string;
+    workspaceId?: string;
+  }): Promise<{ paneId: string; tabId: string }>;
 }
 
 /** One omp session, as far as work items care. */
@@ -1331,28 +1342,63 @@ export class WorkItemService {
     } else if (decision.kind === 'open') {
       const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
       if (cwd === undefined) return;
-      let sessionId: string;
-      try {
-        sessionId = await this.ports.sessions.openChat({
-          cwd,
-          role: decision.role,
-          workstreamKey: squadWorkstreamKey(decision.role, cwd),
-        });
-      } catch (error) {
-        // A full omp runner pool is temporary: the item waits and the next pass tries it again.
-        if (error instanceof CompanyError && error.code === 'company_pool_full') {
-          this.hold(item, { kind: 'pool_full' });
+      const openAgent = this.ports.roster.openAgent;
+      const compactHerdr = item.assignee.kind === 'new-session' &&
+        item.squadRunId !== undefined &&
+        this.ports.isCompactSquadProposal?.(item.squadRunId) === true &&
+        openAgent !== undefined &&
+        this.ports.roster.panes().available;
+      if (compactHerdr) {
+        const repoName = checkoutName(item.repo ?? decision.cwd)
+          .toLowerCase()
+          .replace(/[^a-z0-9-]+/g, '-')
+          .replace(/^-+|-+$/g, '');
+        const workspaceId = this.ports.roster.panes().panes.find(
+          (pane) => pane.workspaceId !== undefined && pane.cwd !== undefined &&
+            isInsideRepo(decision.cwd, pane.cwd),
+        )?.workspaceId;
+        try {
+          const opened = await openAgent!({
+            cwd,
+            kind: this.settings.engineWorker,
+            ...(workspaceId === undefined ? {} : { workspaceId }),
+            label: `Đội ${item.sequence} · ${repoName}`,
+            name: `doi-${item.sequence}-${repoName}`.slice(0, 32),
+          });
+          this.recordSquadSession(opened.paneId, decision.cwd);
+          item.assignee = { kind: 'herdr', paneId: opened.paneId };
+          this.pushEvent(
+            item,
+            makeEvent(this.iso(), 'assigned', `Đã mở tab herdr ${opened.paneId} (${this.settings.engineWorker}) trong ${checkoutName(cwd)}.`),
+          );
+        } catch (error) {
+          this.fail(item, WORK_ITEM_REASON.openFailed, describe(error));
           return;
         }
-        this.fail(item, WORK_ITEM_REASON.openFailed, describe(error));
-        return;
+      } else {
+        let sessionId: string;
+        try {
+          sessionId = await this.ports.sessions.openChat({
+            cwd,
+            role: decision.role,
+            workstreamKey: squadWorkstreamKey(decision.role, cwd),
+          });
+        } catch (error) {
+          // A full omp runner pool is temporary: the item waits and the next pass tries it again.
+          if (error instanceof CompanyError && error.code === 'company_pool_full') {
+            this.hold(item, { kind: 'pool_full' });
+            return;
+          }
+          this.fail(item, WORK_ITEM_REASON.openFailed, describe(error));
+          return;
+        }
+        this.recordSquadSession(sessionId, decision.cwd);
+        item.assignee = { kind: 'session', sessionId };
+        const message = auto
+          ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
+          : 'Mở phiên omp mới cho việc này.';
+        this.pushEvent(item, makeEvent(this.iso(), 'assigned', message));
       }
-      this.recordSquadSession(sessionId, decision.cwd);
-      item.assignee = { kind: 'session', sessionId };
-      const message = auto
-        ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
-        : 'Mở phiên omp mới cho việc này.';
-      this.pushEvent(item, makeEvent(this.iso(), 'assigned', message));
     } else if (auto) {
       item.assignee = normalizeAssignee(decision.member.assignee);
       this.pushEvent(
@@ -1487,7 +1533,8 @@ export class WorkItemService {
       });
     }
     const squadSessionsOpen = this.squadSessionIds.filter((id) =>
-      view.sessions.some((session) => session.id === id && observeSessionStatus(session.status) !== 'gone'),
+      view.sessions.some((session) => id === session.id && observeSessionStatus(session.status) !== 'gone') ||
+      view.roster.panes.some((pane) => pane.paneId === id),
     ).length;
     return {
       members,

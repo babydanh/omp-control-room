@@ -71,6 +71,7 @@ class Fixture {
   readonly submits: { sessionId: string; text: string; mode: 'chat' | 'company' }[] = [];
   chatsOpened = 0;
   readonly openedWith: { cwd: string; role: string }[] = [];
+  readonly herdrOpened: { cwd: string; kind: string; label: string; name: string }[] = [];
   readonly compactSquadRunIds = new Set<string>();
   poolFull = false;
   readonly worktreesMade: { repo: string; shortId: string }[] = [];
@@ -107,6 +108,12 @@ class Fixture {
         },
         screenText: async () => this.screen,
         lastReply: async () => this.reply,
+        openAgent: async (input) => {
+          this.herdrOpened.push(input);
+          const paneId = `wA:p${this.herdrOpened.length}`;
+          this.panes.push({ paneId, status: 'working', cwd: input.cwd, kind: input.kind });
+          return { paneId, tabId: `wA:t${this.herdrOpened.length}` };
+        },
       },
       sessions: {
         list: () => this.sessions.map((session) => ({ ...session })),
@@ -1626,7 +1633,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     stop();
   });
 
-  it('gives a compact new-session item the session report, and the question when it stops', async () => {
+  it('gives a compact new-session item the herdr report, and the question when it stops', async () => {
     const f = await repoFixture();
     const squadRunId = randomUUID();
     f.compactSquadRunIds.add(squadRunId);
@@ -1640,23 +1647,25 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       { squadRunId },
     );
     if (done === undefined || asking === undefined) throw new Error('expected two work items');
-    await vi.waitFor(() => expect(f.sessions).toHaveLength(2));
-    const [first, second] = f.sessions;
-    if (first === undefined || second === undefined) throw new Error('expected two sessions');
-    f.sessions[0] = { ...first, status: 'busy' };
-    f.sessions[1] = { ...second, status: 'busy' };
+    await vi.waitFor(() => expect(f.herdrOpened).toHaveLength(2));
+    expect(f.chatsOpened).toBe(0);
+    expect(f.herdrOpened[0]?.cwd).toContain(`${REPO}/.worktrees/squad-`);
+    expect(f.herdrOpened[0]?.kind).toBe('omp');
+    expect(f.prompts).toHaveLength(2);
     await f.service.reconcileNow();
-
-    f.sessionReply = 'Đã sửa API: src/api.ts:12, npm test exit 0';
-    f.sessions[0] = { ...first, status: 'idle' };
+    const first = f.panes[0];
+    const second = f.panes[1];
+    if (first === undefined || second === undefined) throw new Error('expected two panes');
+    f.panes[0] = { ...first, status: 'idle' };
+    f.reply = 'Đã sửa API: src/api.ts:12, npm test exit 0';
     await f.service.reconcileNow();
     expect(itemOf(f, done)).toMatchObject({
       status: 'done',
       result: 'Đã sửa API: src/api.ts:12, npm test exit 0',
     });
 
-    f.sessionReply = 'Cần URL API của staging?';
-    f.sessions[1] = { ...second, status: 'waiting_input' };
+    f.reply = 'Cần URL API của staging?';
+    f.panes[1] = { ...second, status: 'blocked' };
     await f.service.reconcileNow();
     expect(itemOf(f, asking)).toMatchObject({
       status: 'failed',
@@ -1667,6 +1676,31 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       'Agent dừng chờ trả lời: Cần URL API của staging?',
     ]);
     stop();
+  });
+
+  it('opens a board session for a compact item when herdr is down, and still carries its report', async () => {
+    const f = await repoFixture();
+    f.herdrAvailable = false;
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const [id] = await f.service.createWorkItems(
+      [{ text: 'Sửa API', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' }],
+      { squadRunId },
+    );
+    if (id === undefined) throw new Error('expected a work item');
+    await vi.waitFor(() => expect(f.sessions).toHaveLength(1));
+    expect(f.herdrOpened).toHaveLength(0);
+    const [session] = f.sessions;
+    if (session === undefined) throw new Error('expected a session');
+    f.sessions[0] = { ...session, status: 'busy' };
+    await f.service.reconcileNow();
+    f.sessionReply = 'Đã sửa API: src/api.ts:12, npm test exit 0';
+    f.sessions[0] = { ...session, status: 'idle' };
+    await f.service.reconcileNow();
+    expect(itemOf(f, id)).toMatchObject({
+      status: 'done',
+      result: 'Đã sửa API: src/api.ts:12, npm test exit 0',
+    });
   });
 
   it('continues to judge ordinary work items', async () => {

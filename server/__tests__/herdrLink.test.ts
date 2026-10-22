@@ -496,6 +496,34 @@ describe('HerdrLink against a herdr socket', () => {
     await fake.close();
   });
 
+  it('opens a new tab and starts the requested agent in its shell pane', async () => {
+    fake.reply('tab.create', () => ({
+      tab: { tab_id: 'wA:tD' },
+      root_pane: { pane_id: 'wA:pS' },
+    }));
+    fake.reply('agent.start', () => ({ type: 'ok' }));
+
+    await expect(link.openAgent!({
+      cwd: 'C:/repo/worktree',
+      kind: 'claude',
+      label: 'Đội 2 · repo',
+      name: 'doi-2-repo',
+      workspaceId: 'wA',
+    })).resolves.toEqual({ paneId: 'wA:pS', tabId: 'wA:tD' });
+    expect(fake.requestsTo('tab.create')[0]?.params).toEqual({
+      cwd: 'C:/repo/worktree',
+      focus: false,
+      label: 'Đội 2 · repo',
+      workspace_id: 'wA',
+    });
+    expect(fake.requestsTo('agent.start')[0]?.params).toEqual({
+      name: 'doi-2-repo',
+      kind: 'claude',
+      pane_id: 'wA:pS',
+      timeout_ms: 90_000,
+    });
+  });
+
   it('publishes the roster after the ping and agent.list handshake', async () => {
     fake.reply('agent.list', () => ({
       agents: [

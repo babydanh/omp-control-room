@@ -36,7 +36,7 @@ import {
 import { WorkItemFileStore } from './workItemStore.js';
 
 /** The herdr calls work items make. The process-level link satisfies this. */
-export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read'>;
+export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read' | 'openAgent'>;
 
 /** Screen lines read when a pane's result is taken; enough for the last non-empty lines. */
 const RESULT_SCREEN_LINES = 40;
@@ -92,6 +92,7 @@ function rosterFor(herdr: WorkItemHerdr | undefined): WorkItemRoster {
           paneId: agent.paneId,
           status: agent.status,
           ...(agent.cwd === undefined ? {} : { cwd: agent.cwd }),
+          workspaceId: agent.workspaceId,
           kind: agent.kind,
         })),
       };
@@ -107,6 +108,10 @@ function rosterFor(herdr: WorkItemHerdr | undefined): WorkItemRoster {
     lastReply: async (paneId) => {
       const agent = herdr?.snapshot().agents.find((entry) => entry.paneId === paneId);
       return agent === undefined ? undefined : lastAgentReply(agent);
+    },
+    openAgent: async (options) => {
+      if (herdr?.openAgent === undefined) throw new Error('herdr không hỗ trợ mở agent.');
+      return herdr.openAgent(options);
     },
   };
 }
