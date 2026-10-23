@@ -1430,4 +1430,14 @@ describe('SquadService compact runs', () => {
     await h.service.remove({ requestId: randomUUID(), runId });
     expect(h.runOf(runId)).toBeUndefined();
   });
+
+  it('removes a completed run still waiting for the user, without closing it first', async () => {
+    const h = new Harness();
+    h.workItems.settings.compactSquad = true;
+    h.leader.reply(DONE_REPLY);
+    const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn thiện tính năng' });
+    await waitFor(() => h.runOf(runId)?.status === 'done');
+    await h.service.remove({ requestId: randomUUID(), runId });
+    expect(h.runOf(runId)).toBeUndefined();
+  });
 });

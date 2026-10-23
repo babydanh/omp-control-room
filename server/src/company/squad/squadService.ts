@@ -412,12 +412,14 @@ export class SquadService {
     await this.flush();
   }
 
-  /** Removes a finished run without changing any work item. */
+  /**
+   * Removes a finished run without changing any work item. A compact run that is done but still
+   * waits for the user's reply counts as finished: removing it is the user dropping that reply.
+   */
   async remove(command: SquadCommand & { runId: string }): Promise<void> {
     if (this.answers.has(command.requestId)) return;
     const run = this.requireRun(command.runId);
-    if (!REMOVABLE_STATUSES.includes(run.status) || (run.compact && run.status === 'done' && !run.closed))
-      throw new CompanyError('squad_status', MESSAGE.removeNotFinished);
+    if (!REMOVABLE_STATUSES.includes(run.status)) throw new CompanyError('squad_status', MESSAGE.removeNotFinished);
     this.runs.delete(run.id);
     this.remember(command.requestId, run.id);
     this.commit();
