@@ -2493,7 +2493,9 @@ class NativeCompanyRuntime implements CompanyRuntime {
 
   private async onSettingsUpdated(profiles: Record<string, RoleProfile>): Promise<void> {
     for (const run of this.runs.values()) {
-      const next = profiles[run.role];
+      // A squad chat session runs on its key's role, so that role's profile is the one it follows.
+      const workstreamId = this.state().sessions[run.sessionId]?.workstreamId ?? '';
+      const next = profiles[modelRoleOf(run.role, workstreamId)];
       // A live run keeps the profile it started with: switching models between
       // tool calls is exactly what the settings contract forbids.
       if (next === undefined || next.requestedModel !== run.profile.requestedModel) continue;
