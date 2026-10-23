@@ -25,13 +25,13 @@
  *   opens in the repo itself.
  */
 
+import { COMPANY_HOST_ROLE_BY_ROLE } from '../../../../core/src/company.js';
 import type {
   CompanyRole,
   WorkItemAssignee,
   WorkItemAssigneeKind,
   WorkItemBlocker,
 } from '../../../../core/src/messages.js';
-import { COMPANY_HOST_ROLE_BY_ROLE } from '../../../../core/src/company.js';
 import { blockerReason } from '../../../../core/src/workItemGraph.js';
 import { DEFAULT_AGENT } from './dispatchPrompt.js';
 import { GIB } from './squadSettings.js';

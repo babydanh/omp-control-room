@@ -1116,6 +1116,12 @@ class NativeCompanyRuntime implements CompanyRuntime {
       throw new CompanyError('company_pool_full', decision.detail);
     }
     if (decision.kind === 'reuse') {
+      // An idle session whose process still runs is handed back as it is: reopening it would start a
+      // second run for the same session, which the PTY host refuses ("Session already exists").
+      if (decision.session.status !== 'parked' && this.hasLiveRun(decision.session)) {
+        this.pool.upsert(decision.session);
+        return decision.session;
+      }
       await this.reopenSession(decision.session, decision.runEpoch);
       return { ...decision.session, runEpoch: decision.runEpoch, status: 'starting' };
     }
@@ -1201,8 +1207,13 @@ class NativeCompanyRuntime implements CompanyRuntime {
     const workstreamId =
       input.workstreamKey ?? (role === 'chat' ? `chat-${randomUUID()}` : `squad-${randomUUID()}`);
     const session = await this.acquireNewSession(role, workstreamId, input.cwd);
-    await this.startRun(session, undefined, true, input.resumeFile);
+    if (!this.hasLiveRun(session)) await this.startRun(session, undefined, true, input.resumeFile);
     return this.state().sessions[session.id] ?? session;
+  }
+
+  /** Whether the session's current run epoch has a process the runtime still drives. */
+  private hasLiveRun(session: CompanySession): boolean {
+    return this.runs.get(session.id)?.runEpoch === session.runEpoch;
   }
 
   // ── Run lifecycle ────────────────────────────────────────────────────────

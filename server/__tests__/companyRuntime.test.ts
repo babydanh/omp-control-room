@@ -900,6 +900,26 @@ describe('chat sessions', () => {
     expect(sessions[plain]?.requestedModel).toBe(settings.roleProfiles.chat?.requestedModel);
   });
 
+  it('hands back the idle live session of a squad key without starting a second run for it', async () => {
+    const h = await harness();
+    const repo = path.join(WORKSPACE, 'repo-a');
+    await fs.promises.mkdir(repo, { recursive: true });
+    const key = 'squad:worker:repo-a';
+
+    const first = await h.coordinator.openNewChat({ cwd: repo, role: 'chat', workstreamKey: key });
+    await h.coordinator.submitPrompt({ requestId: 'p-1', text: 'Tính 3 + 3', delivery: 'prompt', targetSessionId: first, mode: 'chat' });
+    // The turn ends: the bridge reports the run quiet, and the session settles idle with its process alive.
+    h.runners[0]?.listener?.({ event: { k: 'quiescent', idle: true } } as never);
+    await vi.waitFor(() => expect(h.coordinator.readState().sessions[first]?.status).toBe('idle'));
+
+    const again = await h.coordinator.openNewChat({ cwd: repo, role: 'chat', workstreamKey: key });
+
+    expect(again).toBe(first);
+    expect(h.runners).toHaveLength(1);
+    expect(h.runners[0]?.started).toBe(1);
+    expect(h.coordinator.readState().sessions[first]?.status).toBe('idle');
+  });
+
   it('reopens a parked chat session on its own omp file under the same session record', async () => {
     const h = await harness();
     const file = path.join(WORKSPACE, 'parked.jsonl');
