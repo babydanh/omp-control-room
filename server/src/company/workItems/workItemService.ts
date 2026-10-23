@@ -681,9 +681,10 @@ export class WorkItemService {
   /** Removes the worktree of an item being deleted; refuses, naming the cause, when that would lose work. */
   private async removeWorktreeOf(item: StoredWorkItem, worktree: SquadWorktree): Promise<void> {
     const path = worktree.path;
-    const pane = this.ports.roster.panes().panes.find((entry) => isInsideRepo(entry.cwd, path));
+    const pane = [...this.ports.roster.panes().panes, ...(this.ports.roster.sleeping?.() ?? [])]
+      .find((entry) => isInsideRepo(entry.cwd, path));
     if (pane !== undefined)
-      throw new CompanyError('work_item_status', `Phiên herdr ${pane.paneId} còn mở trong worktree của việc này (${path}). Đóng phiên đó rồi bấm Xoá lại.`);
+      throw new CompanyError('work_item_status', `Phiên herdr ${pane.paneId} còn mở (kể cả đang ngủ) trong worktree của việc này (${path}). Đóng phiên đó rồi bấm Xoá lại.`);
     const key = checkoutKey(path);
     const live = this.ports.sessions.list().some(
       (session) => session.cwd !== undefined && checkoutKey(session.cwd) === key &&
@@ -1867,10 +1868,11 @@ export class WorkItemService {
       }
       return;
     }
+    // Guarded before the first await: a pass while the baseline reply is read must not finish it.
+    this.sending.add(item.id);
     const paneId = item.assignee.kind === 'herdr' ? item.assignee.paneId : undefined;
     const previous = paneId === undefined ? undefined : await this.ports.roster.lastReply?.(paneId).catch(() => undefined);
     if (previous !== undefined) this.replyAtSend.set(item.id, previous);
-    this.sending.add(item.id);
     try {
       await this.send(item, item.pendingPrompt);
     } catch (error) {

@@ -1439,6 +1439,12 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     f.panes.length = 0;
     // The board session the item opened there is closed too.
     f.sessions.length = 0;
+    // A hibernated session there would wake into a folder that is gone.
+    f.sleepingPanes.push({ paneId: 'wD:pB', cwd: path });
+    await expect(f.service.cancel({ requestId: randomUUID(), id })).rejects.toMatchObject({
+      message: expect.stringContaining('wD:pB'),
+    });
+    f.sleepingPanes.length = 0;
 
     f.removeOutcome = 'unmerged';
     await expect(f.service.cancel({ requestId: randomUUID(), id })).rejects.toMatchObject({
