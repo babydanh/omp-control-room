@@ -71,7 +71,9 @@ class Fixture {
   readonly submits: { sessionId: string; text: string; mode: 'chat' | 'company' }[] = [];
   chatsOpened = 0;
   readonly openedWith: { cwd: string; role: string }[] = [];
-  readonly herdrOpened: { cwd: string; kind: string; label: string; name: string }[] = [];
+  /** Hibernated herdr sessions; waking one moves it to `panes`, idle. */
+  readonly sleepingPanes: { paneId: string; cwd: string }[] = [];
+  readonly woken: string[] = [];
   readonly compactSquadRunIds = new Set<string>();
   poolFull = false;
   readonly worktreesMade: { repo: string; shortId: string }[] = [];
@@ -108,11 +110,13 @@ class Fixture {
         },
         screenText: async () => this.screen,
         lastReply: async () => this.reply,
-        openAgent: async (input) => {
-          this.herdrOpened.push(input);
-          const paneId = `wA:p${this.herdrOpened.length}`;
-          this.panes.push({ paneId, status: 'working', cwd: input.cwd, kind: input.kind });
-          return { paneId, tabId: `wA:t${this.herdrOpened.length}` };
+        sleeping: () => this.sleepingPanes.map((pane) => ({ ...pane })),
+        wake: async (paneId) => {
+          const index = this.sleepingPanes.findIndex((pane) => pane.paneId === paneId);
+          const [pane] = this.sleepingPanes.splice(index, 1);
+          if (pane === undefined) throw new Error('not sleeping');
+          this.woken.push(paneId);
+          this.panes.push({ paneId, status: 'idle', cwd: pane.cwd });
         },
       },
       sessions: {
@@ -1633,8 +1637,12 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     stop();
   });
 
-  it('gives a compact new-session item the herdr report, and the question when it stops', async () => {
+  it('gives compact items to the repo sessions the user has, waking a sleeping one, with no tab or worktree', async () => {
     const f = await repoFixture();
+    f.panes.push({ paneId: 'wA:p1', status: 'idle', cwd: REPO });
+    f.sleepingPanes.push({ paneId: 'wA:p2', cwd: `${REPO}/src` });
+    // A session in another repo is not the squad's to take.
+    f.panes.push({ paneId: 'wB:p9', status: 'idle', cwd: '/elsewhere/repo' });
     const squadRunId = randomUUID();
     f.compactSquadRunIds.add(squadRunId);
     const settled: WorkItem[] = [];
@@ -1647,16 +1655,15 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       { squadRunId },
     );
     if (done === undefined || asking === undefined) throw new Error('expected two work items');
-    await vi.waitFor(() => expect(f.herdrOpened).toHaveLength(2));
+    await vi.waitFor(() => expect(f.prompts).toHaveLength(2));
+    expect(f.prompts.map((entry) => entry.paneId)).toEqual(['wA:p1', 'wA:p2']);
+    expect(f.woken).toEqual(['wA:p2']);
     expect(f.chatsOpened).toBe(0);
-    expect(f.herdrOpened[0]?.cwd).toContain(`${REPO}/.worktrees/squad-`);
-    expect(f.herdrOpened[0]?.kind).toBe('omp');
-    expect(f.prompts).toHaveLength(2);
+    expect(f.worktreesMade).toHaveLength(0);
+    f.setPane('wA:p1', 'working');
+    f.setPane('wA:p2', 'working');
     await f.service.reconcileNow();
-    const first = f.panes[0];
-    const second = f.panes[1];
-    if (first === undefined || second === undefined) throw new Error('expected two panes');
-    f.panes[0] = { ...first, status: 'idle' };
+    f.setPane('wA:p1', 'idle');
     f.reply = 'Đã sửa API: src/api.ts:12, npm test exit 0';
     await f.service.reconcileNow();
     expect(itemOf(f, done)).toMatchObject({
@@ -1665,7 +1672,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     });
 
     f.reply = 'Cần URL API của staging?';
-    f.panes[1] = { ...second, status: 'blocked' };
+    f.setPane('wA:p2', 'blocked');
     await f.service.reconcileNow();
     expect(itemOf(f, asking)).toMatchObject({
       status: 'failed',
@@ -1678,7 +1685,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     stop();
   });
 
-  it('keeps a compact item waiting while herdr is down, then opens its herdr tab', async () => {
+  it('keeps a compact item waiting while its repo has no session, then gives it the first one there', async () => {
     const f = await repoFixture();
     f.herdrAvailable = false;
     const squadRunId = randomUUID();
@@ -1690,14 +1697,18 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     if (id === undefined) throw new Error('expected a work item');
     await f.service.reconcileNow();
     expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'agent' } });
-    expect(f.chatsOpened).toBe(0);
-    expect(f.herdrOpened).toHaveLength(0);
 
     f.herdrAvailable = true;
     await f.service.reconcileNow();
-    await vi.waitFor(() => expect(f.herdrOpened).toHaveLength(1));
+    // herdr answers, but no session runs in the repo: it still waits, and opens nothing.
+    expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'agent' } });
     expect(f.chatsOpened).toBe(0);
-    expect(itemOf(f, id).status).toBe('running');
+    expect(f.worktreesMade).toHaveLength(0);
+
+    f.panes.push({ paneId: 'wA:p3', status: 'idle', cwd: REPO });
+    await f.service.reconcileNow();
+    expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'herdr', paneId: 'wA:p3' } });
+    expect(f.prompts.map((entry) => entry.paneId)).toEqual(['wA:p3']);
   });
 
   it('continues to judge ordinary work items', async () => {

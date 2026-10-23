@@ -36,7 +36,10 @@ import {
 import { WorkItemFileStore } from './workItemStore.js';
 
 /** The herdr calls work items make. The process-level link satisfies this. */
-export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read' | 'openAgent'>;
+export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read' | 'wake'>;
+
+/** How long a woken session may take to show its agent again before its prompt is sent anyway. */
+const WAKE_READY_WAIT_MS = 90_000;
 
 /** Screen lines read when a pane's result is taken; enough for the last non-empty lines. */
 const RESULT_SCREEN_LINES = 40;
@@ -109,11 +112,34 @@ function rosterFor(herdr: WorkItemHerdr | undefined): WorkItemRoster {
       const agent = herdr?.snapshot().agents.find((entry) => entry.paneId === paneId);
       return agent === undefined ? undefined : lastAgentReply(agent);
     },
-    openAgent: async (options) => {
-      if (herdr?.openAgent === undefined) throw new Error('herdr không hỗ trợ mở agent.');
-      return herdr.openAgent(options);
+    sleeping: () =>
+      (herdr?.snapshot().sleeping ?? []).map((session) => ({
+        paneId: session.paneId,
+        ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
+      })),
+    wake: async (paneId) => {
+      if (herdr === undefined) throw new Error('herdr is not linked');
+      await herdr.wake(paneId);
+      await agentBack(herdr, paneId);
     },
   };
+}
+
+/** Resolves once herdr lists an agent in the pane again, or after WAKE_READY_WAIT_MS. */
+function agentBack(herdr: WorkItemHerdr, paneId: string): Promise<void> {
+  const listed = (): boolean => herdr.snapshot().agents.some((agent) => agent.paneId === paneId);
+  if (listed()) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = (): void => {
+      clearTimeout(timer);
+      stop();
+      resolve();
+    };
+    const timer = setTimeout(done, WAKE_READY_WAIT_MS);
+    const stop = herdr.onAgents(() => {
+      if (listed()) done();
+    });
+  });
 }
 
 function sessionsFor(coordinator: WorkItemCoordinator): WorkItemSessions {
