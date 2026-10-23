@@ -56,6 +56,11 @@ export const WORK_ITEM_FINISHED_KEEP = 200;
  */
 export const WORK_ITEM_GRACE_MS = 10_000;
 /**
+ * How long a herdr item waits for its agent to write a reply other than the one it had when the
+ * item was sent, before the item finishes on what the pane shows.
+ */
+export const WORK_ITEM_STALE_REPLY_MS = 5 * 60_000;
+/**
  * How long a queued item waits before the board tries it again when the omp runner pool was full or
  * its isolated worktree could not be created.
  */

@@ -106,6 +106,7 @@ import {
   WORK_ITEM_REASON_MAX_CHARS,
   WORK_ITEM_RESULT_LINES,
   WORK_ITEM_RESULT_MAX_CHARS,
+  WORK_ITEM_STALE_REPLY_MS,
   type WorkItemDraft,
   type WorkItemsFile,
 } from './workItemModel.js';
@@ -383,6 +384,13 @@ export class WorkItemService {
   private catalog: WorkItemCatalog = { repos: [], agents: BUNDLED_AGENTS, claudeAgents: [] };
   /** Items the agent was seen working on, so its return to free means it finished. */
   private readonly observedBusy = new Set<string>();
+  /** Items whose prompt is still being sent: a woken agent may take a while to take it. */
+  private readonly sending = new Set<string>();
+  /**
+   * A herdr agent's last reply when its item was sent. herdr may report the pane idle before the
+   * agent starts; while the reply is still this one, the agent has not answered the item yet.
+   */
+  private readonly replyAtSend = new Map<string, string>();
   /** Answers to recent commands by request id; the work item id for a create, '' otherwise. */
   private readonly answers = new Map<string, string>();
   private readonly cancelTimers = new Set<() => void>();
@@ -1718,9 +1726,27 @@ export class WorkItemService {
     // A judge that held the item for the user keeps it in needs-input until the user acts.
     if (item.status === 'needs_input' && item.reason?.startsWith(JUDGE_NOT_MET_PREFIX) === true)
       return;
+    if (this.sending.has(item.id)) return;
     const dispatchedMs = item.dispatchedAt === undefined ? 0 : Date.parse(item.dispatchedAt);
     const elapsed = this.ports.now() - dispatchedMs;
-    if (this.observedBusy.has(item.id) || elapsed >= WORK_ITEM_GRACE_MS) await this.complete(item);
+    if (!this.observedBusy.has(item.id) && elapsed < WORK_ITEM_GRACE_MS) return;
+    if (await this.replyUnchanged(item, elapsed)) {
+      // An idle pane sends no event when its transcript grows: look again after a while.
+      this.scheduleGraceCheck();
+      return;
+    }
+    this.replyAtSend.delete(item.id);
+    await this.complete(item);
+  }
+
+  /** True while a herdr agent's last reply is still the one it had when the item was sent. */
+  private async replyUnchanged(item: StoredWorkItem, elapsed: number): Promise<boolean> {
+    const before = this.replyAtSend.get(item.id);
+    if (before === undefined || item.assignee.kind !== 'herdr') return false;
+    // An agent that never writes a new reply (its transcript moved) still finishes in the end.
+    if (elapsed >= WORK_ITEM_STALE_REPLY_MS) return false;
+    const now = await this.ports.roster.lastReply?.(item.assignee.paneId ?? '');
+    return now === undefined || now === before;
   }
 
   private setStatus(
@@ -1841,15 +1867,24 @@ export class WorkItemService {
       }
       return;
     }
+    const paneId = item.assignee.kind === 'herdr' ? item.assignee.paneId : undefined;
+    const previous = paneId === undefined ? undefined : await this.ports.roster.lastReply?.(paneId).catch(() => undefined);
+    if (previous !== undefined) this.replyAtSend.set(item.id, previous);
+    this.sending.add(item.id);
     try {
       await this.send(item, item.pendingPrompt);
     } catch (error) {
+      this.replyAtSend.delete(item.id);
       if (item.status === 'running' && item.dispatchedAt === at) {
         const detail = describe(error);
         this.fail(item, WORK_ITEM_REASON.sendFailed(detail), detail);
       }
       return;
+    } finally {
+      this.sending.delete(item.id);
     }
+    // The grace window runs from when the agent took the prompt, not from when sending began.
+    if (item.status === 'running' && item.dispatchedAt === at) item.dispatchedAt = this.iso();
     item.pendingPrompt = '';
     this.commit();
     this.scheduleGraceCheck();

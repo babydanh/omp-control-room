@@ -19,6 +19,7 @@ import {
   WORK_ITEM_GRACE_MS,
   WORK_ITEM_HOLD_RETRY_MS,
   WORK_ITEM_REASON,
+  WORK_ITEM_STALE_REPLY_MS,
   WORK_ITEM_TEXT_MAX_BYTES,
   type WorkItemDraft,
   type WorkItemsFile,
@@ -1610,6 +1611,40 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     await f.service.mark({ requestId: randomUUID(), id: reviewed, verdict: 'done' });
     expect(settled).toEqual([`review:${reviewed}`, `failed:${failed}`, `done:${reviewed}`]);
     stop();
+  });
+
+  it('keeps a herdr item running while its agent still shows the reply it had when the item was sent', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    f.reply = 'Câu trả lời cũ của phiên';
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const [id] = await f.service.createWorkItems([{ text: 'Tính 2 + 2', assignee: herdr(PANE_A) }], { squadRunId });
+    if (id === undefined) throw new Error('expected a work item');
+
+    // herdr shows the woken pane idle and never busy: past the grace window, the old reply is not the answer.
+    await f.elapse(WORK_ITEM_GRACE_MS);
+    await f.service.reconcileNow();
+    expect(itemOf(f, id).status).toBe('running');
+
+    f.reply = '2 + 2 = 4';
+    await f.service.reconcileNow();
+    expect(itemOf(f, id)).toMatchObject({ status: 'done', result: '2 + 2 = 4' });
+  });
+
+  it('finishes a herdr item whose reply never changes once the wait ends, without another pane event', async () => {
+    const f = await openFixture();
+    f.panes.push({ paneId: PANE_A, status: 'idle' });
+    f.reply = 'Câu trả lời cũ của phiên';
+    f.screen = 'màn hình cuối';
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const [id] = await f.service.createWorkItems([{ text: 'Tính 2 + 2', assignee: herdr(PANE_A) }], { squadRunId });
+    if (id === undefined) throw new Error('expected a work item');
+    await f.elapse(WORK_ITEM_GRACE_MS);
+    expect(itemOf(f, id).status).toBe('running');
+    await f.elapse(WORK_ITEM_STALE_REPLY_MS);
+    expect(itemOf(f, id).status).toBe('done');
   });
 
   it('finishes a compact squad item without calling the judge', async () => {
