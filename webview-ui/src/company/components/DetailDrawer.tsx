@@ -21,6 +21,7 @@ import {
   useState,
 } from 'react';
 
+import type { WorkItemAssignee } from '../../../../core/src/messages.js';
 import {
   type AgentMenuRequest,
   type AgentMenuSubject,
@@ -293,6 +294,20 @@ export function DetailDrawer({
 function DrawerContent(props: ContentProps) {
   const { subject, client, state, lanes, artifactId, onOpen, onOpenArtifact, onClearArtifact } =
     props;
+  // Opens the session an item runs in: a herdr pane's live screen (its log), a sleeping pane's
+  // wake panel, or a board session's terminal.
+  const openHolder = (assignee: WorkItemAssignee): void => {
+    const paneId = assignee.kind === 'herdr' ? (assignee.paneId ?? '') : '';
+    if (paneId !== '' && state.herdrRoster.sleeping.some((entry) => entry.paneId === paneId)) {
+      onOpen({ kind: 'sleeping', paneId });
+    } else if (paneId !== '') {
+      onOpen({ kind: 'herdr', paneId });
+      props.onHerdrTab('screen');
+      client.select({ herdrPaneId: paneId });
+    } else if (assignee.kind === 'session' && assignee.sessionId) {
+      props.onOpenSessionTab(assignee.sessionId, 'terminal');
+    }
+  };
   switch (subject.kind) {
     case 'task':
       return (
@@ -350,19 +365,7 @@ function DrawerContent(props: ContentProps) {
           id={subject.id}
           actionRequest={props.workItemAction}
           onActionHandled={props.onWorkItemActionHandled}
-          onOpenHolder={(assignee) => {
-            const paneId = assignee.kind === 'herdr' ? (assignee.paneId ?? '') : '';
-            if (paneId !== '' && state.herdrRoster.sleeping.some((entry) => entry.paneId === paneId)) {
-              // A sleeping pane has no live screen; its own panel says how to wake it.
-              onOpen({ kind: 'sleeping', paneId });
-            } else if (paneId !== '') {
-              onOpen({ kind: 'herdr', paneId });
-              props.onHerdrTab('screen');
-              client.select({ herdrPaneId: paneId });
-            } else if (assignee.kind === 'session' && assignee.sessionId) {
-              props.onOpenSessionTab(assignee.sessionId, 'terminal');
-            }
-          }}
+          onOpenHolder={openHolder}
         />
       );
     case 'squad':
@@ -375,6 +378,7 @@ function DrawerContent(props: ContentProps) {
           runId={subject.runId}
           onRemoved={props.onClose}
           onOpenWorkItem={(id) => onOpen({ kind: 'workItem', id, workspacePath: subject.workspacePath })}
+          onOpenHolder={openHolder}
         />
       );
     case 'files':

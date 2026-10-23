@@ -604,6 +604,9 @@ export class SquadService {
         run,
         squadEvent(at, 'done', reply.note === '' ? MESSAGE.doneDefault : reply.note),
       );
+    } else if (reply.assignments.length === 0) {
+      // A wait: the leader's items are still running, and it is asked again when one settles.
+      run.status = 'working';
     } else {
       const rows = rowsOf(reply.assignments);
       proposed = {

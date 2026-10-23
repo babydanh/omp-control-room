@@ -491,7 +491,8 @@ export function parseLeaderReply(
   if (done && assignments.length > 0) {
     return { ok: false, message: 'Đội trưởng vừa báo xong vừa giao việc. Chỉ một trong hai.' };
   }
-  if (!done && assignments.length === 0) {
+  // No new work and not done is a wait, valid only while items the leader was shown are still open.
+  if (!done && assignments.length === 0 && openSequences.size === 0) {
     return { ok: false, message: 'Đội trưởng không giao việc nào và chưa báo xong.' };
   }
   return {
@@ -673,8 +674,8 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
       ? '{"assignments":[{"assignee":"new-session","agent":"task","repo":"<đường dẫn repo>","role":"worker","areas":["web:src/app"],"text":"<yêu cầu>","reason":"<lý do>","acceptance":"<điều kiện xong>","priority":2,"dependsOn":[]}],"note":"<tóm tắt hoặc câu hỏi>","done":false}'
       : '{"assignments":[{"assignee":"auto","agent":"task","repo":"<repo path>","role":"worker","areas":["web:src/app"],"text":"<prompt>","reason":"<one short sentence>","acceptance":"<done when>","priority":2,"dependsOn":[]}],"note":"<one short sentence for the user>","done":false}',
     input.compact
-      ? 'Chỉ đặt "done" thành true khi mọi việc đã hoàn thành. Note cuối phải có tóm tắt theo repo, nhánh/worktree, test và mã thoát, phần còn lại, mục "Cần bạn quyết:".'
-      : 'Set "done" to true only when the request is complete, judged from the results below. Then "assignments" must be [].',
+      ? 'Chỉ đặt "done" thành true khi mọi việc đã hoàn thành. Note cuối phải có tóm tắt theo repo, nhánh/worktree, test và mã thoát, phần còn lại, mục "Cần bạn quyết:". Còn việc đang chạy và chưa cần giao thêm: "assignments": [], "done": false (board chờ các việc đó xong rồi hỏi lại bạn).'
+      : 'Set "done" to true only when the request is complete, judged from the results below. Then "assignments" must be []. While items are still open and nothing new is needed, reply "assignments": [] with "done": false: the board waits for them and asks you again.',
     '',
     input.compact ? '## Yêu cầu' : '## Request',
     input.request,

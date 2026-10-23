@@ -200,7 +200,7 @@ describe('parseLeaderReply', () => {
     expect(checked.ok).toBe(false);
   });
 
-  it('refuses a finished reply that still assigns, and an unfinished one that assigns nothing', () => {
+  it('refuses a finished reply that still assigns, and a wait with nothing left open', () => {
     const both = parseReply({
       assignments: [{ assignee: 'session:s1', text: 'Làm' }],
       note: '',
@@ -209,6 +209,11 @@ describe('parseLeaderReply', () => {
     expect(both.ok).toBe(false);
     const neither = parseReply({ assignments: [], note: '', done: false });
     expect(neither.ok).toBe(false);
+  });
+
+  it('accepts a wait (nothing new, not done) while items it was shown are still open', () => {
+    const wait = parseReply({ assignments: [], note: 'Chờ việc App xong.', done: false }, new Set([17]));
+    expect(wait).toMatchObject({ ok: true, value: { assignments: [], done: false } });
   });
 
   it('refuses a reply missing its done flag', () => {

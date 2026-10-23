@@ -7,7 +7,7 @@
 
 import { useRef, useState } from 'react';
 
-import type { SquadDependency, SquadEvent, SquadLeaderLive, SquadProposal } from '../../../../core/src/messages.js';
+import type { SquadDependency, SquadEvent, SquadLeaderLive, SquadProposal, WorkItemAssignee } from '../../../../core/src/messages.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import { assigneeOptionsFor } from '../assigneeOptions.js';
 import type { CompanyClient } from '../companyClient.js';
@@ -32,6 +32,7 @@ import {
 } from '../squadView.js';
 import { useCommandDialog } from '../useCommandDialog.js';
 import { useNow } from '../useNow.js';
+import { summaryLine } from '../workItemNextStep.js';
 import { assigneeLabel, statusWordVi, workItemCardHead, workItemsOf } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
@@ -49,6 +50,8 @@ export interface SquadRunPanelProps {
   runId: string;
   onRemoved: () => void;
   onOpenWorkItem: (workItemId: string) => void;
+  /** Opens the session a child item runs in: its herdr screen is the session's log. */
+  onOpenHolder: (assignee: WorkItemAssignee) => void;
 }
 
 
@@ -59,6 +62,7 @@ export function SquadRunPanel({
   runId,
   onRemoved,
   onOpenWorkItem,
+  onOpenHolder,
 }: SquadRunPanelProps) {
   const now = useNow();
   const [confirming, setConfirming] = useState<'cancel' | 'remove' | null>(null);
@@ -175,19 +179,23 @@ export function SquadRunPanel({
           <h3 className="mb-1 text-2xs font-semibold text-text-muted">Việc con</h3>
           <ol className="flex flex-col gap-1.5">
             {childItems.map((item) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className="flex w-full flex-col gap-0.5 rounded-(--company-radius-sm) bg-well p-2 text-left hover:bg-well-hover"
-                  onClick={() => onOpenWorkItem(item.id)}
-                >
+              <li key={item.id} className="flex flex-col gap-1 rounded-(--company-radius-sm) bg-well p-2">
+                <button type="button" className="flex flex-col gap-0.5 text-left hover:underline" onClick={() => onOpenWorkItem(item.id)}>
                   <span className="break-words text-text">
                     #{item.sequence} · {item.repo ?? 'Thư mục gốc'} · {workItemCardHead(item.text)}
                   </span>
-                  <span className="text-2xs text-text-muted">
-                    {statusWordVi(item.status)} · {assigneeLabel(item.assignee, state, workspacePath)}
-                  </span>
                 </button>
+                {summaryLine(item.result, 140) !== undefined && (
+                  <span className="break-words text-2xs text-text-secondary">Agent báo: {summaryLine(item.result, 140)}</span>
+                )}
+                <span className="flex flex-wrap items-center gap-2 text-2xs text-text-muted">
+                  {statusWordVi(item.status)} · {assigneeLabel(item.assignee, state, workspacePath)}
+                  {(item.assignee.kind === 'herdr' || item.assignee.kind === 'session') && (
+                    <button type="button" className="text-accent hover:underline" onClick={() => onOpenHolder(item.assignee)}>
+                      Xem phiên
+                    </button>
+                  )}
+                </span>
               </li>
             ))}
           </ol>
