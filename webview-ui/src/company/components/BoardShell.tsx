@@ -494,12 +494,13 @@ export function BoardShell({ client }: BoardShellProps) {
 
   /**
    * A squad child opens straight onto the session that runs it, as a session row does: its log
-   * is what the card is for. A failed or review item, or one not handed out yet, opens its panel.
+   * is what the card is for while it runs or once it is done. Any other status asks something of
+   * the user (an answer, a review, a retry) or has no session yet, so it opens the item's panel.
    */
   function openWorkItemCard(ref: { id: string; workspacePath: string }): void {
     const item = workItemsOf(state, ref.workspacePath).items.find((entry) => entry.id === ref.id);
     const assignee = item?.assignee;
-    const showsLog = item?.squadRunId !== undefined && item.status !== 'failed' && item.status !== 'review';
+    const showsLog = item?.squadRunId !== undefined && (item.status === 'running' || item.status === 'done');
     if (showsLog && assignee?.kind === 'herdr' && assignee.paneId) {
       if (state.herdrRoster.sleeping.some((entry) => entry.paneId === assignee.paneId)) openSleeping(assignee.paneId);
       else openHerdr(assignee.paneId);

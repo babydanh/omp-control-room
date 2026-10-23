@@ -186,7 +186,9 @@ export function SquadRunPanel({
           <ol className="flex flex-col gap-1">
             {childItems.map((item) => {
               const result = summaryLine(item.result, 60);
-              const hasLog = item.assignee.kind === 'herdr' || item.assignee.kind === 'session';
+              const hasLog =
+                (item.assignee.kind === 'herdr' || item.assignee.kind === 'session') &&
+                (item.status === 'running' || item.status === 'done');
               return (
                 <li key={item.id}>
                   <button
