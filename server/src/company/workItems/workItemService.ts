@@ -2134,6 +2134,12 @@ export class WorkItemService {
       worktree = await this.ports.worktrees.create(repo, item.id.slice(0, 8));
     } catch (error) {
       const detail = clip(describe(error), WORK_ITEM_BLOCKER_DETAIL_MAX_CHARS);
+      // A folder that is not a git repo has nothing to isolate: the item runs in the folder itself,
+      // instead of waiting for a worktree that can never be made.
+      if (/not a git repository/i.test(detail)) {
+        this.pushEvent(item, makeEvent(this.iso(), 'note', 'Thư mục này không phải repo git: chạy ngay trong thư mục, không tạo worktree.'));
+        return repo;
+      }
       this.hold(item, { kind: 'worktree', detail });
       return undefined;
     }

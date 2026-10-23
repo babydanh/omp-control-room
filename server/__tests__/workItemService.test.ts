@@ -1477,6 +1477,21 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     });
   });
 
+  it('runs an editing item in a folder that is not a git repo in the folder itself, never waiting on a worktree', async () => {
+    const f = await repoFixture();
+    f.worktreeError = new Error('git fetch origin lỗi: fatal: not a git repository (or any of the parent directories): .git');
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Tính 1 + 1',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+    });
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+    expect(itemOf(f, id)).toMatchObject({ status: 'running' });
+    expect(itemOf(f, id).blocker).toBeUndefined();
+  });
+
   it('waits for a free runner slot when the omp pool is full, and keeps the worktree it made', async () => {
     const f = await repoFixture();
     f.poolFull = true;
