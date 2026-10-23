@@ -78,6 +78,8 @@ export interface SchedulerHold {
   readonly sequence: number;
   readonly readOnly: boolean;
   readonly areas: readonly string[];
+  /** The repo the holding item works in, as SchedulerItem.repo names it: its areas live there. */
+  readonly repo: string;
   /** The holding member's checkout, if known. */
   readonly checkout: string | undefined;
 }
@@ -318,9 +320,11 @@ function conflictWith(
     ) {
       return { kind: 'area', sequence: hold.sequence, area: checkoutName(checkout) };
     }
-    const area = item.areas.find((mine) =>
-      hold.areas.some((theirs) => areasOverlap(mine, theirs)),
-    );
+    // Areas are paths inside a repo: the same path in another repo is another file.
+    const sameRepo = checkoutKey(hold.repo) === checkoutKey(item.repo);
+    const area = sameRepo
+      ? item.areas.find((mine) => hold.areas.some((theirs) => areasOverlap(mine, theirs)))
+      : undefined;
     if (area !== undefined) return { kind: 'area', sequence: hold.sequence, area };
   }
   if (checkout !== undefined && isLockedByBusyMember(checkout, ctx)) {

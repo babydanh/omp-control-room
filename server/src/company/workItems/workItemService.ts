@@ -1525,6 +1525,7 @@ export class WorkItemService {
         sequence: item.sequence,
         readOnly: this.isReadOnly(item.agent),
         areas: item.areas ?? [],
+        repo: item.repo ?? this.workspacePath,
         checkout: item.inPlace === true ? item.repo : checkouts.get(memberKey),
       });
     }

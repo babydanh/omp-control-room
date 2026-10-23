@@ -33,7 +33,7 @@ import {
 import { useCommandDialog } from '../useCommandDialog.js';
 import { useNow } from '../useNow.js';
 import { summaryLine } from '../workItemNextStep.js';
-import { assigneeLabel, statusWordVi, workItemCardHead, workItemsOf } from '../workItemView.js';
+import { assigneeLabel, statusWordVi, workItemsOf } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
 import { SquadPlanRow, type SquadRowChange } from './SquadPlanRow.js';
@@ -79,8 +79,9 @@ export function SquadRunPanel({
     run.status === 'failed' &&
     run.proposal?.status === 'pending' &&
     run.history.some((event) => event.message?.startsWith('Không tự duyệt được đề xuất:'));
+  // A compact proposal approves itself; its form shows only when that failed and a person must act.
   const proposal =
-    run.status === 'proposed' || autoApprovalFailed ? run.proposal : undefined;
+    (run.status === 'proposed' && !isCompact) || autoApprovalFailed ? run.proposal : undefined;
   const progress = progressLabel(run.progress);
   const note = (run.note ?? '').trim();
   const error = run.status === 'failed' ? run.error?.trim() || 'Đội gặp lỗi.' : null;
@@ -120,7 +121,12 @@ export function SquadRunPanel({
         </span>
         {progress !== null && <span className="tabular-nums">{progress}</span>}
       </div>
-      <p className="whitespace-pre-wrap break-words text-text">{run.request}</p>
+      <p className={`whitespace-pre-wrap break-words text-text ${isCompact ? 'line-clamp-3' : ''}`} title={run.request}>
+        {run.request}
+      </p>
+      {isCompact && run.status === 'proposed' && !autoApprovalFailed && (
+        <p className="text-text-muted">Đang chia việc cho các phiên…</p>
+      )}
       <LeaderLiveBlock live={state.squadLive[run.id]} now={now} />
       {proposal !== undefined && (
         <ProposalEditor
@@ -177,27 +183,26 @@ export function SquadRunPanel({
       {isCompact && childItems.length > 0 && (
         <section aria-label="Việc con">
           <h3 className="mb-1 text-2xs font-semibold text-text-muted">Việc con</h3>
-          <ol className="flex flex-col gap-1.5">
-            {childItems.map((item) => (
-              <li key={item.id} className="flex flex-col gap-1 rounded-(--company-radius-sm) bg-well p-2">
-                <button type="button" className="flex flex-col gap-0.5 text-left hover:underline" onClick={() => onOpenWorkItem(item.id)}>
-                  <span className="break-words text-text">
-                    #{item.sequence} · {item.repo ?? 'Thư mục gốc'} · {workItemCardHead(item.text)}
-                  </span>
-                </button>
-                {summaryLine(item.result, 140) !== undefined && (
-                  <span className="break-words text-2xs text-text-secondary">Agent báo: {summaryLine(item.result, 140)}</span>
-                )}
-                <span className="flex flex-wrap items-center gap-2 text-2xs text-text-muted">
-                  {statusWordVi(item.status)} · {assigneeLabel(item.assignee, state, workspacePath)}
-                  {(item.assignee.kind === 'herdr' || item.assignee.kind === 'session') && (
-                    <button type="button" className="text-accent hover:underline" onClick={() => onOpenHolder(item.assignee)}>
-                      Xem phiên
-                    </button>
-                  )}
-                </span>
-              </li>
-            ))}
+          <ol className="flex flex-col gap-1">
+            {childItems.map((item) => {
+              const result = summaryLine(item.result, 60);
+              const hasLog = item.assignee.kind === 'herdr' || item.assignee.kind === 'session';
+              return (
+                <li key={item.id}>
+                  <button
+                    type="button"
+                    className="flex w-full flex-wrap items-center gap-x-2 rounded-(--company-radius-sm) bg-well px-2 py-1.5 text-left hover:bg-hover"
+                    title={item.text}
+                    onClick={() => (hasLog ? onOpenHolder(item.assignee) : onOpenWorkItem(item.id))}
+                  >
+                    <span className="font-medium text-text">{repoName(item.repo)}</span>
+                    <span className="text-text-muted">{assigneeLabel(item.assignee, state, workspacePath)}</span>
+                    <span className="text-text-muted">{statusWordVi(item.status)}</span>
+                    {result !== undefined && <span className="break-words text-text-secondary">{result}</span>}
+                  </button>
+                </li>
+              );
+            })}
           </ol>
         </section>
       )}
@@ -229,16 +234,35 @@ export function SquadRunPanel({
           onCancel={() => setConfirming(null)}
         />
       )}
-      <section aria-label="Lịch sử">
-        <h3 className="mb-1 text-2xs font-semibold text-text-muted">Lịch sử</h3>
-        <ol className="flex flex-col gap-1.5">
-          {run.history.map((event, index) => (
-            <HistoryRow key={`${index}:${event.at}`} event={event} now={now} />
-          ))}
-        </ol>
-      </section>
+      {isCompact ? (
+        <details>
+          <summary className="cursor-pointer text-2xs font-semibold text-text-muted">Lịch sử</summary>
+          <HistoryList events={run.history} now={now} />
+        </details>
+      ) : (
+        <section aria-label="Lịch sử">
+          <h3 className="mb-1 text-2xs font-semibold text-text-muted">Lịch sử</h3>
+          <HistoryList events={run.history} now={now} />
+        </section>
+      )}
     </div>
   );
+}
+
+function HistoryList({ events, now }: { events: readonly SquadEvent[]; now: number }) {
+  return (
+    <ol className="flex flex-col gap-1.5">
+      {events.map((event, index) => (
+        <HistoryRow key={`${index}:${event.at}`} event={event} now={now} />
+      ))}
+    </ol>
+  );
+}
+
+/** A repo path by its last segment; the folder root when the item names none. */
+function repoName(repo: string | undefined): string {
+  if (repo === undefined || repo === '') return 'Thư mục gốc';
+  return repo.split(/[\\/]/).filter(Boolean).pop() ?? repo;
 }
 
 /** A running leader turn as it streams: how long, how much reasoning, then the answer being written. */

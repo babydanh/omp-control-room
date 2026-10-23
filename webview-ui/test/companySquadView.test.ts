@@ -136,9 +136,10 @@ describe('squad lanes', () => {
   ])('shows a %s run in the %s lane', (status, lane) => {
     expect(squadLaneFor(run({ status }))).toBe(lane);
   });
-  it('puts compact results in Chờ bạn until closed and maps terminal states correctly', () => {
-    expect(squadLaneFor(run({ compact: true, status: 'done' }))).toBe('needs_input');
-    expect(squadLaneFor(run({ compact: true, status: 'done', closed: true }))).toBe('done');
+  it('hides a working compact run behind its children and files its result under Xong', () => {
+    expect(squadLaneFor(run({ compact: true, status: 'planning' }))).toBe('planned');
+    expect(squadLaneFor(run({ compact: true, status: 'working' }))).toBeNull();
+    expect(squadLaneFor(run({ compact: true, status: 'done' }))).toBe('done');
     expect(squadLaneFor(run({ compact: true, status: 'failed' }))).toBe('failed');
     expect(squadLaneFor(run({ compact: true, status: 'stopped' }))).toBe('done');
     expect(squadLaneFor(run({ status: 'done' }))).toBe('done');

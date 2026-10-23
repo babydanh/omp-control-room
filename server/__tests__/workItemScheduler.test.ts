@@ -62,6 +62,7 @@ function hold(memberKey: string, overrides: Partial<SchedulerHold> = {}): Schedu
     sequence: 9,
     readOnly: false,
     areas: [],
+    repo: REPO,
     checkout: undefined,
     ...overrides,
   };
@@ -166,6 +167,17 @@ describe('decideStart: named herdr pane or session', () => {
       ctx({ members: [herdr('A')], holds: [hold('herdr:B', { sequence: 5, areas: ['web'] })] }),
     );
     expect(blockerOf(decision)).toEqual({ kind: 'area', sequence: 5, area: 'web/ui' });
+  });
+
+  it('does not hold an area named the same in another repo', () => {
+    const decision = decideStart(
+      item({ kind: 'herdr', memberKey: 'herdr:A', areas: ['readme.md'] }),
+      ctx({
+        members: [herdr('A')],
+        holds: [hold('herdr:B', { areas: ['readme.md'], repo: 'v:\\work\\folder\\other' })],
+      }),
+    );
+    expect(usedKey(decision)).toBe('herdr:A');
   });
 
   it('treats a shared prefix as overlap only at a folder boundary', () => {

@@ -1,6 +1,6 @@
 # Handoff: Agent Board — đội nhiều vai, chế độ gọn, thống kê tool
 <!-- Đọc file này TRƯỚC khi làm tiếp nhánh. Cập nhật TRƯỚC khi báo xong, fast-handoff, hoặc hết phiên. -->
-Cập nhật: 2026-10-22 11:40 · bởi: omp (phiên …e73e90a0) · nhánh: feat/multi-role-company · OpenSpec: không có
+Cập nhật: 2026-10-24 01:55 · bởi: omp · nhánh: feat/multi-role-company · OpenSpec: không có
 
 ## Mục tiêu
 Board điều phối đội agent (trưởng đội chia việc, chế độ gọn mỗi repo một phiên trong tab herdr riêng), cây git có tab "Phối hợp" và "Thống kê tool". Lần này: tab "Thống kê tool" hiện % usage token Claude theo phiên chính/subagent/skill/plugin và nút chuyển skill Claude không dùng sang `name-only`.
@@ -12,9 +12,12 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
   - `b2ccea4`: `acquireNewSession` dùng lại phiên rảnh còn sống thì trả nguyên, `openChatSession` không `startRun` lần hai (`hasLiveRun`). Trước đó lượt sau ném `HostError: Session already exists`.
 - Bằng chứng: vitest server cả bộ 164 file, 2667 pass / 12 skip; test mới `companyRuntime.test.ts` "runs a squad chat session opened under a role key on that role model…" và "hands back the idle live session…" (tắt bản sửa thì đỏ: 2 runner); `tsc` + eslint sạch; build, board pid 4036. Chạy thật 2 lượt qua WS (`companySquadRequest`, workspace `V:\Duancanhan\Project_QuanLyGiaiDau`): lượt 1 App → S8, Web → S9 (kết quả 6, 8); lượt 2 dùng lại đúng S8, S9 (7, 9), không phiên mới, không Director, trưởng đội chờ đúng rồi `done`.
 - Cài đặt đội đổi qua WS: `engineLeader` claude (Opus) → `omp` (trưởng đội = vai plan host = `zai/glm-5.3:max`), theo ý người dùng bỏ Opus.
+- Xong (24/10), người dùng chê thẻ đội "một đống form, không như session": việc con của đội gọn giờ là thẻ thường đi Sẵn sàng → Đang làm → Xong (`workItemView.ts` `visibleWorkItems` bỏ lọc). Thẻ đội gọn chỉ hiện lúc trưởng đội lập kế hoạch và khi xong (vào cột Xong, không còn "Chờ bạn"), ẩn khi đang chạy (`squadView.ts` `squadLaneFor`). Bấm thẻ việc con mở thẳng log phiên chạy nó (`BoardShell.tsx` `openWorkItemCard`; lỗi/review hoặc chưa giao thì mở panel). Thẻ phiên trùng với thẻ việc bị ẩn (`boardView.ts` thêm phiên đang giữ việc vào `carded`). Khung đội gọn bỏ form duyệt (tự duyệt), việc con mỗi dòng bấm mở phiên, lịch sử thu gọn (`SquadRunPanel.tsx`).
+- Xong (24/10): khoá vùng code chỉ tính trong cùng repo (`workItemScheduler.ts` `conflictWith`, `SchedulerHold.repo`). Trước đó 2 việc đọc README.md ở 2 repo khác nhau chặn nhau ("Vùng readme.md đang có việc khác giữ").
+- Bằng chứng 24/10: vitest webview 106 file / 1552 pass; server scheduler + work item 209 pass, test mới "does not hold an area named the same in another repo"; `tsc` gốc + `server/tsconfig.test.json` sạch; build, board pid 32180. Chạy thật qua giao diện (nút Đội), lượt 5: #43 App → S8, #44 Backend → S10 chạy song song, bấm #43 mở terminal S8, xong cả hai vào cột Xong. Ảnh ở `build/reports/squad-smoke-20261024/sau-khi-sua/` (không commit).
 - Trước đó: commit `a5311e2` (thống kê tool, usage token, nút name-only).
 - Đang dở: không. Chưa push nhánh (upstream đang là `mine/main`).
-- Tiếp theo: chạy test webview trước khi gộp. Hồ sơ vai của board (`state.settings.roleProfiles`) KHÔNG tự theo `omp config get modelRoles`; 23/10 đã đồng bộ tay qua `companySettingsUpdate` (director `gpt-6.1-sol:high` → `zai/glm-5.3:max`, vai khác vốn đã khớp). Đổi vai trong omp sau này thì phải đồng bộ lại (hoặc làm tự đồng bộ lúc khởi động, cẩn thận ghi đè lựa chọn trong RolesDialog).
+- Tiếp theo: hồ sơ vai của board (`state.settings.roleProfiles`) KHÔNG tự theo `omp config get modelRoles`; 23/10 đã đồng bộ tay qua `companySettingsUpdate`. Đổi vai trong omp sau này thì phải đồng bộ lại. Việc thử 24–44 trên bảng là của các lượt kiểm thử, tự vào Lưu trữ sau 7 ngày. Cột Xong xếp cũ trước nên việc mới nằm cuối cột.
 
 ## Đã thử
 | Cách | Kết quả | Vì sao / bằng chứng |
@@ -34,6 +37,8 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
 - Đổi: chế độ gọn KHÔNG còn giao việc cho phiên herdr có sẵn của người dùng; chạy trên phiên chat của board dưới khoá vai (2 test cũ thay bằng `runs compact items on board omp sessions per role…` / `holds a compact item while the omp pool is full…`). Người dùng chọn cách này ngày 23/10 ("làm đi").
 - Đổi: phiên chat có khoá `squad:<vai>:<repo>` chạy model của vai đó, không phải model chat.
 - Bỏ: cổng `WorkItemRoster.wake`; `WorkItemHerdr` không còn `wake`.
+- Đổi (24/10): việc con đội gọn hiện trên bảng như việc thường (trước bị giấu trong thẻ đội); đội gọn xong vào Xong, không chờ bấm "Đóng". Test cũ đổi theo: `companySquadView.test.ts` "hides a working compact run…", `companyWorkItemView.test.ts` "shows compact-run children as cards…".
+- Đổi (24/10): area cùng tên ở repo khác không còn chặn nhau.
 
 ## Câu hỏi còn mở
 - Người dùng chưa bấm thử nút chuyển name-only thật (sẽ sửa `~/.claude/settings.json`).

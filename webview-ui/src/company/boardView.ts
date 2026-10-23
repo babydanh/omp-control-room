@@ -362,13 +362,18 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
 
   // Creation order is the server's order; Object.values keeps it, and sorting
   // by it would invent a sequence the company never declared.
-  // A session that already holds a task, or plans a prompt, is shown by that card.
+  // A session that already holds a task, plans a prompt, or runs a work item is shown by that card.
   const carded = new Set(tasks.flatMap((task) => (task.sessionId ? [task.sessionId] : [])));
   for (const prompt of planningPrompts(state)) {
     if (prompt.session !== null) carded.add(prompt.session.id);
   }
-  const agents = buildAgentCards(state, carded);
   const workItems = workItemCards(state);
+  for (const { item } of visibleWorkItems(state)) {
+    if (item.assignee.kind === 'session' && item.assignee.sessionId && laneForWorkItem(item.status) !== 'done') {
+      carded.add(item.assignee.sessionId);
+    }
+  }
+  const agents = buildAgentCards(state, carded);
   const squads = squadCards(state);
   return COMPANY_LANE_ORDER.map((id) => ({
     id,

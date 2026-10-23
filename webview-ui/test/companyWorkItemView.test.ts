@@ -303,7 +303,7 @@ describe('visibleWorkItems', () => {
     expect(visible.every((entry) => entry.folder !== null)).toBe(true);
     expect(visible[1]?.folder?.path).toBe(OTHER);
   });
-  it('hides compact-run children but keeps manual and regular squad items in the columns', () => {
+  it('shows compact-run children as cards of their own, like manual and regular squad items', () => {
     let state = withWorkItems(boardWithRoster('all'), ACTIVE, [
       item({ id: 'manual', sequence: 1 }),
       item({ id: 'compact-child', sequence: 2, squadRunId: 'proposal-1' }),
@@ -330,6 +330,7 @@ describe('visibleWorkItems', () => {
     }).state;
     expect(visibleWorkItems(state).map((entry) => entry.item.id)).toEqual([
       'manual',
+      'compact-child',
       'regular-child',
     ]);
   });

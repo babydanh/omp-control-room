@@ -492,6 +492,27 @@ export function BoardShell({ client }: BoardShellProps) {
     dismissSheet();
   }
 
+  /**
+   * A squad child opens straight onto the session that runs it, as a session row does: its log
+   * is what the card is for. A failed or review item, or one not handed out yet, opens its panel.
+   */
+  function openWorkItemCard(ref: { id: string; workspacePath: string }): void {
+    const item = workItemsOf(state, ref.workspacePath).items.find((entry) => entry.id === ref.id);
+    const assignee = item?.assignee;
+    const showsLog = item?.squadRunId !== undefined && item.status !== 'failed' && item.status !== 'review';
+    if (showsLog && assignee?.kind === 'herdr' && assignee.paneId) {
+      if (state.herdrRoster.sleeping.some((entry) => entry.paneId === assignee.paneId)) openSleeping(assignee.paneId);
+      else openHerdr(assignee.paneId);
+      return;
+    }
+    if (showsLog && assignee?.kind === 'session' && assignee.sessionId) {
+      if (state.sessions[assignee.sessionId] !== undefined) selectSession(assignee.sessionId);
+      else selectWorkspaceSession(ref.workspacePath, assignee.sessionId);
+      return;
+    }
+    setOpened({ kind: 'workItem', ...ref });
+  }
+
   function openSessionTab(sessionId: string, tab: CompanyDrawerTab): void {
     setOpened(null);
     setTabPrefs({ session: tab });
@@ -844,7 +865,7 @@ export function BoardShell({ client }: BoardShellProps) {
               selectedPaneId={selectedPaneId}
               selectedSessionId={selectedSessionId}
               selectedWorkItem={selectedWorkItem}
-              onOpenWorkItem={(ref) => setOpened({ kind: 'workItem', ...ref })}
+              onOpenWorkItem={openWorkItemCard}
               selectedSquad={selectedSquad}
               onOpenSquad={(ref) => setOpened({ kind: 'squad', ...ref })}
               client={client}

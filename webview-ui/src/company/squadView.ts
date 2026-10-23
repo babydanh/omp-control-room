@@ -142,14 +142,16 @@ const EVENT_LABEL_VI: Readonly<Record<SquadEventKind, string>> = {
   stopped: 'Đã dừng',
 };
 
-/** The lane a run is shown in, or null when the board hides it. */
+/**
+ * The lane a run is shown in, or null when the board hides it. A compact run's children are
+ * cards of their own, so its card shows only while the leader plans and once the run settles.
+ */
 export function squadLaneFor(
   run: Pick<SquadRun, 'status' | 'compact' | 'closed'>,
 ): CompanyLaneId | null {
   if (run.compact) {
-    if (run.status === 'done') return run.closed ? 'done' : 'needs_input';
+    if (run.status === 'working') return null;
     if (run.status === 'failed') return 'failed';
-    if (run.status === 'stopped') return 'done';
   }
   return LANE_BY_RUN_STATUS[run.status];
 }
