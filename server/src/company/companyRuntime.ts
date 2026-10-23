@@ -185,6 +185,7 @@ import {
 } from './sessionPool.js';
 import type { UsageLedger } from './usageService.js';
 import { discoverVerificationProfiles } from './verificationDiscovery.js';
+import { squadWorkstreamRole } from './workItems/workItemScheduler.js';
 import { WorkspaceLockTable } from './workspaceLocks.js';
 
 /** Image media types the native bridge can actually carry. */
@@ -1099,7 +1100,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
     const request: SessionRequest = {
       role,
       workstreamId,
-      requestedModel: this.profileFor(state, role).requestedModel,
+      requestedModel: this.profileFor(state, modelRoleOf(role, workstreamId)).requestedModel,
       requireLiveRunner: true,
     };
     let decision = this.pool.plan(request);
@@ -1317,7 +1318,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
     /** A session file to resume exactly; set only when the board reopens an omp session. */
     resumeFile?: string,
   ): Promise<ActiveRun> {
-    const launch = await this.selectLaunchProfile(session.role);
+    const launch = await this.selectLaunchProfile(modelRoleOf(session.role, session.workstreamId));
     const profile = launch.profile;
     const runner = this.deps.createRunner({
       ptyClient: this.ptyClient,
@@ -3764,4 +3765,12 @@ export async function createCompanyRuntime(
   options: CompanyRuntimeOptions,
 ): Promise<CompanyRuntime> {
   return NativeCompanyRuntime.open(options);
+}
+
+/**
+ * The role whose model a session runs: its own, except a chat session a squad opened under a role
+ * key (`squad:worker:<repo>`), which runs as that role's model while it takes prompts directly.
+ */
+function modelRoleOf(role: CompanyRole, workstreamId: string): CompanyRole {
+  return role === 'chat' ? (squadWorkstreamRole(workstreamId) ?? role) : role;
 }

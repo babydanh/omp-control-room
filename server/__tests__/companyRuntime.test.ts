@@ -872,6 +872,34 @@ describe('chat sessions', () => {
     });
   });
 
+  it('runs a squad chat session opened under a role key on that role model, and a plain chat on its own', async () => {
+    const h = await harness();
+    const settings = h.coordinator.readState().settings;
+    await seed(h, [
+      {
+        entity: 'settings',
+        op: 'put',
+        id: 'settings',
+        value: {
+          ...settings,
+          roleProfiles: {
+            ...settings.roleProfiles,
+            worker: { ...settings.roleProfiles.worker, requestedModel: 'provider/worker-model' },
+          },
+        },
+      },
+    ]);
+    const repo = path.join(WORKSPACE, 'repo-a');
+    await fs.promises.mkdir(repo, { recursive: true });
+
+    const squad = await h.coordinator.openNewChat({ cwd: repo, role: 'chat', workstreamKey: 'squad:worker:repo-a' });
+    const plain = await h.coordinator.openNewChat({ cwd: repo, role: 'chat' });
+
+    const sessions = h.coordinator.readState().sessions;
+    expect(sessions[squad]).toMatchObject({ role: 'chat', requestedModel: 'provider/worker-model' });
+    expect(sessions[plain]?.requestedModel).toBe(settings.roleProfiles.chat?.requestedModel);
+  });
+
   it('reopens a parked chat session on its own omp file under the same session record', async () => {
     const h = await harness();
     const file = path.join(WORKSPACE, 'parked.jsonl');

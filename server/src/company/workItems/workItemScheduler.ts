@@ -31,6 +31,7 @@ import type {
   WorkItemAssigneeKind,
   WorkItemBlocker,
 } from '../../../../core/src/messages.js';
+import { COMPANY_HOST_ROLE_BY_ROLE } from '../../../../core/src/company.js';
 import { blockerReason } from '../../../../core/src/workItemGraph.js';
 import { DEFAULT_AGENT } from './dispatchPrompt.js';
 import { GIB } from './squadSettings.js';
@@ -134,6 +135,16 @@ export function checkoutKey(path: string): string {
  */
 export function squadWorkstreamKey(role: CompanyRole, cwd: string): string {
   return `squad:${role}:${checkoutKey(cwd)}`;
+}
+
+/**
+ * The role a squad workstream key names, or undefined for any other workstream. A compact squad runs
+ * its work in a chat session (prompted directly, no contract) under its item's role key, and that
+ * role picks the session's model: the key is persisted with the session, so park and resume keep it.
+ */
+export function squadWorkstreamRole(workstreamId: string): CompanyRole | undefined {
+  const role = /^squad:([a-z]+):/.exec(workstreamId)?.[1];
+  return role !== undefined && Object.hasOwn(COMPANY_HOST_ROLE_BY_ROLE, role) ? (role as CompanyRole) : undefined;
 }
 
 /** Whether a checkout is the repo itself or a folder inside it. Undefined is never inside. */

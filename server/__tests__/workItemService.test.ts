@@ -1723,22 +1723,27 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     );
     if (api === undefined || page === undefined || check === undefined) throw new Error('expected three work items');
 
+    // Chat sessions take the prompt directly (an execution role would need a contract and the Director);
+    // the role sits in the workstream key, one per repo and role, which picks the role's model and lets
+    // the pool resume that role's parked or idle session next time.
     expect(f.openedWith).toEqual([
-      { cwd: REPO, role: 'worker' },
-      { cwd: REPO, role: 'worker' },
-      { cwd: REPO, role: 'qa' },
+      { cwd: REPO, role: 'chat' },
+      { cwd: REPO, role: 'chat' },
+      { cwd: REPO, role: 'chat' },
     ]);
-    // One workstream per repo and role: the pool resumes that role's parked or idle session (its model) next time.
     expect(f.openedKeys).toEqual([
       squadWorkstreamKey('worker', REPO),
       squadWorkstreamKey('worker', REPO),
       squadWorkstreamKey('qa', REPO),
     ]);
-    expect(f.openedKeys[0]).not.toBe(f.openedKeys[2]);
     expect(f.prompts).toHaveLength(0);
     expect(f.worktreesMade).toHaveLength(0);
     expect(itemOf(f, api)).toMatchObject({ status: 'running', assignee: { kind: 'session', sessionId: 'chat-1' } });
-    expect(f.submits.map((entry) => entry.sessionId)).toEqual(['chat-1', 'chat-2', 'chat-3']);
+    expect(f.submits.map((entry) => [entry.sessionId, entry.mode])).toEqual([
+      ['chat-1', 'chat'],
+      ['chat-2', 'chat'],
+      ['chat-3', 'chat'],
+    ]);
   });
 
   it('holds a compact item while the omp pool is full, then runs it in the repo without a worktree', async () => {
@@ -1756,7 +1761,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     f.poolFull = false;
     await f.elapse(WORK_ITEM_HOLD_RETRY_MS);
     expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'session', sessionId: 'chat-1' } });
-    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'chat' }]);
     expect(f.worktreesMade).toHaveLength(0);
   });
 

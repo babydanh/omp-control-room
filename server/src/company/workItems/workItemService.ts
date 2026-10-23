@@ -1361,10 +1361,11 @@ export class WorkItemService {
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {
-      // A compact squad item runs in the repo itself, never a worktree, on the board's own omp session
-      // for its role: the pool resumes the parked or idle session of that repo and role (same model),
-      // opens one when none is free, and holds the item while the pool is full. No herdr pane is taken,
-      // since a pane's model is unknown and the user may be typing in it.
+      // A compact squad item runs in the repo itself, never a worktree, on a board omp session the
+      // item's prompt reaches directly: a chat session (an execution role would need a contract and
+      // route through the Director) under the item role's key, which picks that role's model. The pool
+      // resumes the parked or idle session of that repo and role, opens one when none is free, and
+      // holds the item while the pool is full. No herdr pane is taken: its model is unknown.
       const compactItem = item.assignee.kind === 'new-session' &&
         item.squadRunId !== undefined &&
         this.ports.isCompactSquadProposal?.(item.squadRunId) === true;
@@ -1374,7 +1375,7 @@ export class WorkItemService {
       try {
         sessionId = await this.ports.sessions.openChat({
           cwd,
-          role: decision.role,
+          role: compactItem ? 'chat' : decision.role,
           workstreamKey: squadWorkstreamKey(decision.role, cwd),
         });
       } catch (error) {
