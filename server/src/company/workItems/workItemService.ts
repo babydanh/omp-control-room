@@ -168,8 +168,6 @@ export interface WorkItemRoster {
   lastReply?(paneId: string): Promise<string | undefined>;
   /** Hibernated sessions herdr keeps, each in its pane. Absent = none. */
   sleeping?(): readonly { readonly paneId: string; readonly cwd?: string }[];
-  /** Wakes a hibernated session in its pane; resolves once its agent is back and can take a prompt. */
-  wake?(paneId: string): Promise<void>;
 }
 
 /** One omp session, as far as work items care. */
@@ -1363,28 +1361,14 @@ export class WorkItemService {
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {
-      // A compact squad item goes to a session the user already has in that repo, woken when it
-      // sleeps, in the repo itself. No new tab and no worktree: with no session there it waits.
+      // A compact squad item runs in the repo itself, never a worktree, on the board's own omp session
+      // for its role: the pool resumes the parked or idle session of that repo and role (same model),
+      // opens one when none is free, and holds the item while the pool is full. No herdr pane is taken,
+      // since a pane's model is unknown and the user may be typing in it.
       const compactItem = item.assignee.kind === 'new-session' &&
         item.squadRunId !== undefined &&
         this.ports.isCompactSquadProposal?.(item.squadRunId) === true;
-      if (compactItem) {
-        const where = checkoutName(decision.cwd);
-        const claimed = this.ports.roster.panes().available ? await this.claimRepoPane(decision.cwd) : undefined;
-        if (claimed === undefined) {
-          this.hold(item, { kind: 'agent', detail: `Chờ một phiên rảnh trong ${where} (mở hoặc đánh thức một phiên ở đó, việc tự giao).` });
-          return;
-        }
-        item.assignee = { kind: 'herdr', paneId: claimed.paneId };
-        this.pushEvent(
-          item,
-          makeEvent(this.iso(), 'assigned', claimed.woke ? `Đánh thức phiên ${claimed.paneId} trong ${where} rồi giao việc.` : `Giao cho phiên có sẵn ${claimed.paneId} trong ${where}.`),
-        );
-        this.held.delete(item.id);
-        await this.dispatch(item);
-        return;
-      }
-      const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
+      const cwd = decision.isolate && !compactItem ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
       if (cwd === undefined) return;
       let sessionId: string;
       try {
@@ -1404,9 +1388,11 @@ export class WorkItemService {
       }
       this.recordSquadSession(sessionId, decision.cwd);
       item.assignee = { kind: 'session', sessionId };
-      const message = auto
-        ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
-        : 'Mở phiên omp mới cho việc này.';
+      const message = compactItem
+        ? `Phiên omp vai ${decision.role} trong ${checkoutName(decision.cwd)} (dùng lại phiên rảnh hoặc đang đậu nếu có).`
+        : auto
+          ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
+          : 'Mở phiên omp mới cho việc này.';
       this.pushEvent(item, makeEvent(this.iso(), 'assigned', message));
     } else if (auto) {
       item.assignee = normalizeAssignee(decision.member.assignee);
@@ -1417,32 +1403,6 @@ export class WorkItemService {
     }
     this.held.delete(item.id);
     await this.dispatch(item);
-  }
-
-  /**
-   * A session the user already has in `repo` for a compact squad item: an idle awake pane first,
-   * else a hibernated one, woken. A pane another item holds is never taken. Undefined when the repo
-   * has none, or waking fails (the item then opens its own tab, as before).
-   */
-  private async claimRepoPane(repo: string): Promise<{ paneId: string; woke: boolean } | undefined> {
-    const held = new Set<string>();
-    for (const other of this.items.values()) {
-      if (other.assignee.kind === 'herdr' && other.assignee.paneId !== undefined && occupiesAgent(other.status)) {
-        held.add(other.assignee.paneId);
-      }
-    }
-    const inRepo = (pane: { readonly paneId: string; readonly cwd?: string }): boolean =>
-      !held.has(pane.paneId) && isInsideRepo(pane.cwd, repo);
-    const awake = this.ports.roster.panes().panes.find((pane) => (pane.status === 'idle' || pane.status === 'done') && inRepo(pane));
-    if (awake !== undefined) return { paneId: awake.paneId, woke: false };
-    const sleeping = this.ports.roster.sleeping?.().find(inRepo);
-    if (sleeping === undefined || this.ports.roster.wake === undefined) return undefined;
-    try {
-      await this.ports.roster.wake(sleeping.paneId);
-    } catch {
-      return undefined;
-    }
-    return { paneId: sleeping.paneId, woke: true };
   }
 
   /**

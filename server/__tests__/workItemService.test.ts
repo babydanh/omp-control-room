@@ -24,6 +24,7 @@ import {
   type WorkItemDraft,
   type WorkItemsFile,
 } from '../src/company/workItems/workItemModel.js';
+import { squadWorkstreamKey } from '../src/company/workItems/workItemScheduler.js';
 import {
   type WorkItemPaneView,
   WorkItemService,
@@ -72,9 +73,9 @@ class Fixture {
   readonly submits: { sessionId: string; text: string; mode: 'chat' | 'company' }[] = [];
   chatsOpened = 0;
   readonly openedWith: { cwd: string; role: string }[] = [];
-  /** Hibernated herdr sessions; waking one moves it to `panes`, idle. */
+  readonly openedKeys: string[] = [];
+  /** Hibernated herdr sessions. */
   readonly sleepingPanes: { paneId: string; cwd: string }[] = [];
-  readonly woken: string[] = [];
   readonly compactSquadRunIds = new Set<string>();
   poolFull = false;
   readonly worktreesMade: { repo: string; shortId: string }[] = [];
@@ -115,13 +116,6 @@ class Fixture {
         screenText: async () => this.screen,
         lastReply: async () => this.reply,
         sleeping: () => this.sleepingPanes.map((pane) => ({ ...pane })),
-        wake: async (paneId) => {
-          const index = this.sleepingPanes.findIndex((pane) => pane.paneId === paneId);
-          const [pane] = this.sleepingPanes.splice(index, 1);
-          if (pane === undefined) throw new Error('not sleeping');
-          this.woken.push(paneId);
-          this.panes.push({ paneId, status: 'idle', cwd: pane.cwd });
-        },
       },
       sessions: {
         list: () => this.sessions.map((session) => ({ ...session })),
@@ -138,6 +132,7 @@ class Fixture {
           this.chatsOpened += 1;
           const id = `chat-${this.chatsOpened}`;
           this.openedWith.push({ cwd: input.cwd, role: input.role });
+          this.openedKeys.push(input.workstreamKey);
           this.sessions.push({ id, status: 'idle', role: input.role, cwd: input.cwd });
           return id;
         },
@@ -1711,57 +1706,44 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     stop();
   });
 
-  it('gives compact items to the repo sessions the user has, waking a sleeping one, with no tab or worktree', async () => {
+  it('runs compact items on board omp sessions per role in the repo itself, never a herdr pane or a worktree', async () => {
     const f = await repoFixture();
+    // The user's own sessions in the repo, awake and asleep: their model is unknown, so none is taken.
     f.panes.push({ paneId: 'wA:p1', status: 'idle', cwd: REPO });
     f.sleepingPanes.push({ paneId: 'wA:p2', cwd: `${REPO}/src` });
-    // A session in another repo is not the squad's to take.
-    f.panes.push({ paneId: 'wB:p9', status: 'idle', cwd: '/elsewhere/repo' });
     const squadRunId = randomUUID();
     f.compactSquadRunIds.add(squadRunId);
-    const settled: WorkItem[] = [];
-    const stop = f.service.onItemSettled((item) => settled.push(item));
-    const [done, asking] = await f.service.createWorkItems(
+    const [api, page, check] = await f.service.createWorkItems(
       [
         { text: 'Sửa API', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' },
         { text: 'Sửa trang', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' },
+        { text: 'Kiểm lại', assignee: { kind: 'new-session' }, repo: REPO, role: 'qa' },
       ],
       { squadRunId },
     );
-    if (done === undefined || asking === undefined) throw new Error('expected two work items');
-    await vi.waitFor(() => expect(f.prompts).toHaveLength(2));
-    expect(f.prompts.map((entry) => entry.paneId)).toEqual(['wA:p1', 'wA:p2']);
-    expect(f.woken).toEqual(['wA:p2']);
-    expect(f.chatsOpened).toBe(0);
-    expect(f.worktreesMade).toHaveLength(0);
-    f.setPane('wA:p1', 'working');
-    f.setPane('wA:p2', 'working');
-    await f.service.reconcileNow();
-    f.setPane('wA:p1', 'idle');
-    f.reply = 'Đã sửa API: src/api.ts:12, npm test exit 0';
-    await f.service.reconcileNow();
-    expect(itemOf(f, done)).toMatchObject({
-      status: 'done',
-      result: 'Đã sửa API: src/api.ts:12, npm test exit 0',
-    });
+    if (api === undefined || page === undefined || check === undefined) throw new Error('expected three work items');
 
-    f.reply = 'Cần URL API của staging?';
-    f.setPane('wA:p2', 'blocked');
-    await f.service.reconcileNow();
-    expect(itemOf(f, asking)).toMatchObject({
-      status: 'failed',
-      result: 'Agent dừng chờ trả lời: Cần URL API của staging?',
-    });
-    expect(settled.map((item) => item.result)).toEqual([
-      'Đã sửa API: src/api.ts:12, npm test exit 0',
-      'Agent dừng chờ trả lời: Cần URL API của staging?',
+    expect(f.openedWith).toEqual([
+      { cwd: REPO, role: 'worker' },
+      { cwd: REPO, role: 'worker' },
+      { cwd: REPO, role: 'qa' },
     ]);
-    stop();
+    // One workstream per repo and role: the pool resumes that role's parked or idle session (its model) next time.
+    expect(f.openedKeys).toEqual([
+      squadWorkstreamKey('worker', REPO),
+      squadWorkstreamKey('worker', REPO),
+      squadWorkstreamKey('qa', REPO),
+    ]);
+    expect(f.openedKeys[0]).not.toBe(f.openedKeys[2]);
+    expect(f.prompts).toHaveLength(0);
+    expect(f.worktreesMade).toHaveLength(0);
+    expect(itemOf(f, api)).toMatchObject({ status: 'running', assignee: { kind: 'session', sessionId: 'chat-1' } });
+    expect(f.submits.map((entry) => entry.sessionId)).toEqual(['chat-1', 'chat-2', 'chat-3']);
   });
 
-  it('keeps a compact item waiting while its repo has no session, then gives it the first one there', async () => {
+  it('holds a compact item while the omp pool is full, then runs it in the repo without a worktree', async () => {
     const f = await repoFixture();
-    f.herdrAvailable = false;
+    f.poolFull = true;
     const squadRunId = randomUUID();
     f.compactSquadRunIds.add(squadRunId);
     const [id] = await f.service.createWorkItems(
@@ -1769,20 +1751,13 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       { squadRunId },
     );
     if (id === undefined) throw new Error('expected a work item');
-    await f.service.reconcileNow();
-    expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'agent' } });
+    expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'pool_full' } });
 
-    f.herdrAvailable = true;
-    await f.service.reconcileNow();
-    // herdr answers, but no session runs in the repo: it still waits, and opens nothing.
-    expect(itemOf(f, id)).toMatchObject({ status: 'queued', blocker: { kind: 'agent' } });
-    expect(f.chatsOpened).toBe(0);
+    f.poolFull = false;
+    await f.elapse(WORK_ITEM_HOLD_RETRY_MS);
+    expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'session', sessionId: 'chat-1' } });
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
     expect(f.worktreesMade).toHaveLength(0);
-
-    f.panes.push({ paneId: 'wA:p3', status: 'idle', cwd: REPO });
-    await f.service.reconcileNow();
-    expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'herdr', paneId: 'wA:p3' } });
-    expect(f.prompts.map((entry) => entry.paneId)).toEqual(['wA:p3']);
   });
 
   it('continues to judge ordinary work items', async () => {

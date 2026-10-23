@@ -626,7 +626,7 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
       ? '- "agent" phải là "task" cho mọi việc được giao.'
       : `- "agent" is one name under "Agents". Omitted means "${SQUAD_DEFAULT_AGENT}", the default worker. Read-only agents only report; "${SQUAD_DEFAULT_AGENT}" changes code.`,
     input.compact
-      ? '- "role" có thể là advisor, worker, qa, judge hoặc chat.'
+      ? '- "role" (advisor, worker, qa, judge hoặc chat) chọn phiên và model chạy việc: worker sửa code, qa kiểm thử, advisor đọc và đánh giá. Việc cùng repo và cùng role dùng lại một phiên.'
       : '- "role" is one of: advisor, worker, qa, judge, chat. Omitted means no role.',
     input.compact
       ? '- "areas" ghi các vùng code phù hợp, tối đa 8 mục.'
