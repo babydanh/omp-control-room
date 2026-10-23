@@ -59,6 +59,9 @@ const OMP_PROCESS_PATTERN = /^omp(\.exe)?$/i;
 const REQUEST_TIMEOUT_MS = 5_000;
 const READ_TIMEOUT_MS = 15_000;
 const PROMPT_TIMEOUT_MS = 10_000;
+/** How long a prompt waits for an agent herdr just started or woke to accept it. */
+const PROMPT_READY_WAIT_MS = 90_000;
+const PROMPT_READY_RETRY_MS = 2_000;
 const GIT_TIMEOUT_MS = 5_000;
 /** Upper bound for reading one omp transcript, so a slow disk cannot stall the board. */
 const OMP_TRANSCRIPT_TIMEOUT_MS = 5_000;
@@ -145,6 +148,13 @@ export class HerdrError extends Error {
     super(message);
     this.name = 'HerdrError';
     this.code = code;
+  }
+}
+
+/** herdr's agent_not_ready: the agent is still starting. Shown as herdr_rejected when it never gets ready. */
+class AgentNotReadyError extends HerdrError {
+  constructor() {
+    super('herdr_rejected', 'Agent trong pane chưa sẵn sàng nhận việc (agent_not_ready).');
   }
 }
 
@@ -535,10 +545,22 @@ class HerdrLinkImpl implements HerdrLink {
     void this.readScreen(watch);
   }
 
+  /**
+   * Sends a prompt. An agent herdr just started or woke is not ready for a few seconds and herdr
+   * answers agent_not_ready: the prompt is sent again until it is taken or PROMPT_READY_WAIT_MS ends.
+   */
   async prompt(paneId: string, text: string): Promise<void> {
     assertPaneId(paneId);
     assertPrompt(text);
-    await this.call('agent.prompt', { target: paneId, text }, PROMPT_TIMEOUT_MS);
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await this.call('agent.prompt', { target: paneId, text }, PROMPT_TIMEOUT_MS);
+        return;
+      } catch (error) {
+        if (!(error instanceof AgentNotReadyError) || attempt * PROMPT_READY_RETRY_MS >= PROMPT_READY_WAIT_MS) throw error;
+      }
+      await new Promise<void>((resolve) => this.scheduler.schedule(resolve, PROMPT_READY_RETRY_MS));
+    }
   }
 
   async openAgent(options: HerdrOpenAgentOptions): Promise<HerdrOpenedAgent> {
@@ -1180,6 +1202,8 @@ function parseLine(line: string): HerdrEnvelope {
 
 function herdrRequestError(code: string): HerdrError {
   switch (code) {
+    case 'agent_not_ready':
+      return new AgentNotReadyError();
     case 'agent_blocked':
       return new HerdrError('agent_blocked', AGENT_BLOCKED_MESSAGE);
     case 'agent_not_found':

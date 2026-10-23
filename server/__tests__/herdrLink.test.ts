@@ -732,6 +732,26 @@ describe('HerdrLink against a herdr socket', () => {
     expect(fake.requestsTo('agent.prompt')).toHaveLength(1);
   });
 
+  it('sends again while an agent herdr just started or woke is not ready, then delivers once', async () => {
+    let refusals = 2;
+    fake.reply('agent.prompt', () => {
+      if (refusals > 0) {
+        refusals -= 1;
+        throw new ReplyError('agent_not_ready');
+      }
+      return { type: 'ok' };
+    });
+
+    const sent = link.prompt('wA:p2', 'việc 1');
+    await scheduler.whenScheduled(2000);
+    scheduler.fire(2000);
+    await scheduler.whenScheduled(2000);
+    scheduler.fire(2000);
+    await sent;
+
+    expect(fake.requestsTo('agent.prompt')).toHaveLength(3);
+  });
+
   it('sends only known, bounded key sequences', async () => {
     await link.keys('wA:p2', ['down', 'enter']);
 
