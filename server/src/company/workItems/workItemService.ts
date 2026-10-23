@@ -307,8 +307,6 @@ const MESSAGE = {
   worktreeUnmerged: 'Nhánh của worktree chưa merge vào origin/main nên chưa dọn.',
   worktreeRemoved: 'Đã dọn worktree.',
   worktreeMaking: 'Đang tạo worktree riêng cho việc này (fetch, checkout, script chuẩn bị); repo lớn có thể mất vài phút. Việc sẽ tự gửi khi xong.',
-  worktreeKept:
-    'Worktree của việc này còn trên đĩa, xoá việc sẽ mất đường dọn nó. Việc đã xong: bấm "Dọn worktree" trước; việc lỗi: gộp hoặc xoá worktree đó trước rồi mới xoá việc.',
 } as const;
 
 /** Vietnamese refusals for a wait list, by the reason the core check gives. */
@@ -648,25 +646,45 @@ export class WorkItemService {
 
   /**
    * Removes an item nobody works on: a queued one never sent, or a finished one (done, failed).
-   * Refused while the item's worktree is still on disk: the item is the board's only way back to it.
+   * Its worktree goes with it when nothing in it is lost (clean, branch merged, no session in it);
+   * otherwise the delete is refused with what is in the way, so the worktree is never orphaned.
    */
   async cancel(command: WorkItemCommand & { id: string }): Promise<void> {
     if (this.replay(command.requestId) !== undefined) return;
     const item = this.requireItem(command.id);
     if (!canCancel(item.status)) this.refuseStatus(item);
-    if (item.worktree !== undefined && item.worktreeRemoved !== true && this.ports.worktrees.exists(item.worktree))
-      throw new CompanyError('work_item_status', MESSAGE.worktreeKept);
     const waiters = this.openWaitersOf(item.id);
     if (waiters.length > 0)
       throw new CompanyError(
         'work_item_awaited',
         awaitedMessage(waiters.map((waiter) => waiter.sequence)),
       );
+    if (item.worktree !== undefined && item.worktreeRemoved !== true && this.ports.worktrees.exists(item.worktree))
+      await this.removeWorktreeOf(item, item.worktree);
+    // The item may have been removed by another command while its worktree was removed.
+    if (this.items.get(item.id) !== item) return;
     this.held.delete(item.id);
     this.items.delete(item.id);
     this.remember(command.requestId, '');
     this.commit();
     await this.flush();
+  }
+
+  /** Removes the worktree of an item being deleted; refuses, naming the cause, when that would lose work. */
+  private async removeWorktreeOf(item: StoredWorkItem, worktree: SquadWorktree): Promise<void> {
+    const path = worktree.path;
+    const pane = this.ports.roster.panes().panes.find((entry) => isInsideRepo(entry.cwd, path));
+    if (pane !== undefined)
+      throw new CompanyError('work_item_status', `Phiên herdr ${pane.paneId} còn mở trong worktree của việc này (${path}). Đóng phiên đó rồi bấm Xoá lại.`);
+    const key = checkoutKey(path);
+    const live = this.ports.sessions.list().some(
+      (session) => session.cwd !== undefined && checkoutKey(session.cwd) === key &&
+        session.status !== 'parked' && observeSessionStatus(session.status) !== 'gone',
+    );
+    if (live) throw new CompanyError('work_item_status', MESSAGE.worktreeInUse);
+    const outcome = await this.ports.worktrees.remove(item.repo ?? this.workspacePath, worktree);
+    if (outcome === 'dirty') throw new CompanyError('work_item_status', `${MESSAGE.worktreeDirty} Gộp hoặc xoá tay ${path} rồi xoá việc.`);
+    if (outcome === 'unmerged') throw new CompanyError('work_item_status', `${MESSAGE.worktreeUnmerged} Gộp hoặc xoá tay ${path} rồi xoá việc.`);
   }
 
   /**

@@ -80,6 +80,9 @@ class Fixture {
   worktreeError: Error | null = null;
   /** Whether a made worktree's directory is still on disk. */
   worktreeOnDisk = true;
+  /** What removing a worktree reports; 'removed' records the path. */
+  removeOutcome: 'removed' | 'dirty' | 'unmerged' = 'removed';
+  readonly worktreesRemoved: string[] = [];
   /** While set, making a worktree waits on it: a slow `git worktree add`. */
   worktreeGate: Promise<void> | null = null;
   readonly saves: WorkItemsFile[] = [];
@@ -166,7 +169,10 @@ class Fixture {
           this.worktreesMade.push({ repo, shortId });
           return { path: `${repo}/.worktrees/squad-${shortId}`, branch: `squad-${shortId}` };
         },
-        remove: async () => 'removed',
+        remove: async (_repo, worktree) => {
+          if (this.removeOutcome === 'removed') this.worktreesRemoved.push(worktree.path);
+          return this.removeOutcome;
+        },
         exists: () => this.worktreeOnDisk,
       },
       judge: this.judge,
@@ -1411,7 +1417,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     expect(f.openedWith).toEqual([]);
   });
 
-  it('keeps a failed item whose worktree is still on disk, and removes it once the worktree is gone', async () => {
+  it('removes a failed item with its clean worktree, and refuses while a session or unmerged work is in it', async () => {
     const f = await repoFixture();
     const id = await f.service.create({
       requestId: randomUUID(),
@@ -1421,15 +1427,27 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       role: 'worker',
     });
     await f.service.mark({ requestId: randomUUID(), id, verdict: 'failed' });
+    const path = worktreeOf(id);
 
+    // A herdr session still works in it: deleting would pull the folder from under it.
+    f.panes.push({ paneId: 'wD:pA', status: 'idle', cwd: path });
     await expect(f.service.cancel({ requestId: randomUUID(), id })).rejects.toMatchObject({
       code: 'work_item_status',
-      message: expect.stringContaining('Worktree của việc này còn trên đĩa'),
+      message: expect.stringContaining('wD:pA'),
+    });
+    f.panes.length = 0;
+    // The board session the item opened there is closed too.
+    f.sessions.length = 0;
+
+    f.removeOutcome = 'unmerged';
+    await expect(f.service.cancel({ requestId: randomUUID(), id })).rejects.toMatchObject({
+      message: expect.stringContaining(path),
     });
     expect(itemOf(f, id).status).toBe('failed');
 
-    f.worktreeOnDisk = false;
+    f.removeOutcome = 'removed';
     await f.service.cancel({ requestId: randomUUID(), id });
+    expect(f.worktreesRemoved).toEqual([path]);
     expect(f.service.snapshot().items).toEqual([]);
   });
 
