@@ -650,6 +650,30 @@ export function BoardShell({ client }: BoardShellProps) {
     });
   }
 
+  /** The board's controls: inside the page header on a desktop, in a row of their own on a phone. */
+  function boardTopBar(inHeader: boolean) {
+    return (
+      <BoardTopBar
+        state={state}
+        client={client}
+        sidebarCollapsed={sidebarCollapsed}
+        mode={mode}
+        onToggleSidebar={toggleSidebar}
+        filesOpen={opened?.kind === 'files'}
+        onToggleFiles={toggleFiles}
+        ledgerAvailable={ledgerAvailable}
+        ledgerOpen={ledgerShown}
+        onToggleLedger={toggleActiveLedgerPage}
+        isMac={IS_MAC}
+        onOpenPalette={() => setPaletteOpen(true)}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
+        onOpenRoles={() => setRolesOpen(true)}
+        onOpenUsage={() => selectPage('usage')}
+        inHeader={inHeader}
+      />
+    );
+  }
+
   return (
     <div
       className="company-ui company-shell-root flex h-full w-full flex-col overflow-hidden bg-bg"
@@ -690,6 +714,7 @@ export function BoardShell({ client }: BoardShellProps) {
             </button>
           ))}
         </nav>
+        {(activePage === 'board' || activePage === 'ledger') && boardTopBar(true)}
       </header>
       {mobileViewport && mobileNavOpen && (
         <>
@@ -711,23 +736,7 @@ export function BoardShell({ client }: BoardShellProps) {
       {activePage === 'board' || activePage === 'ledger' ? (
       <>
       <div key={activePage} className="company-shell-page flex min-h-0 flex-1 flex-col">
-      <BoardTopBar
-        state={state}
-        client={client}
-        sidebarCollapsed={sidebarCollapsed}
-        mode={mode}
-        onToggleSidebar={toggleSidebar}
-        filesOpen={opened?.kind === 'files'}
-        onToggleFiles={toggleFiles}
-        ledgerAvailable={ledgerAvailable}
-        ledgerOpen={ledgerShown}
-        onToggleLedger={toggleActiveLedgerPage}
-        isMac={IS_MAC}
-        onOpenPalette={() => setPaletteOpen(true)}
-        onOpenShortcuts={() => setShortcutsOpen(true)}
-        onOpenRoles={() => setRolesOpen(true)}
-        onOpenUsage={() => selectPage('usage')}
-      />
+      {mobileViewport && boardTopBar(false)}
       {state.needsSnapshot && (
         <p className="bg-warning/12 px-3 py-1.5 text-2xs text-warning">
           {snapshotNoticeText(state)}

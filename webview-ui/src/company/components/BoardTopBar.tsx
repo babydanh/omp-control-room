@@ -37,6 +37,8 @@ export interface BoardTopBarProps {
   onOpenRoles: () => void;
   /** Opens the usage page: a route of its own, so the board is not drawn beneath it. */
   onOpenUsage: () => void;
+  /** Drawn inside the shell's page header: only the board controls, with no row or heading of their own. */
+  inHeader?: boolean;
 }
 
 /** The key label of a registry shortcut, or null when the registry has none. */
@@ -146,6 +148,7 @@ export function BoardTopBar({
   onOpenShortcuts,
   onOpenRoles,
   onOpenUsage,
+  inHeader = false,
 }: BoardTopBarProps) {
   const phone = mode === 'phone';
   const searchLabel = withShortcut('Tìm kiếm và lệnh', 'board.palette', isMac);
@@ -199,14 +202,33 @@ export function BoardTopBar({
     },
   ];
 
+  if (inHeader) {
+    return (
+      <div className="flex shrink-0 items-center gap-2">
+        <ChatNewButton client={client} compact={false} />
+        <StatusPill client={client} state={state} />
+        <button
+          type="button"
+          onClick={onOpenPalette}
+          aria-label={searchLabel}
+          title={searchLabel}
+          className="company-icon-btn touch-target shrink-0 gap-1.5 px-2 text-2xs"
+        >
+          <Icon name="search" />
+          <span>Tìm…</span>
+        </button>
+        <ToolsMenu items={tools} isMac={isMac} />
+      </div>
+    );
+  }
+
   return (
     <header
       className={
         phone ? 'flex items-center gap-1.5 px-2 py-1.5' : 'flex items-center gap-3 px-3 py-2'
       }
     >
-      {/* The shell header already names the board; the heading stays for screen readers. */}
-      <h1 className="sr-only">Agent Board</h1>
+      <h1 className={phone ? 'sr-only' : 'shrink-0 text-base text-text'}>Agent Board</h1>
       {!phone && <div className="min-w-0 flex-1" />}
       <ChatNewButton client={client} compact={phone} />
       <StatusPill client={client} state={state} />
