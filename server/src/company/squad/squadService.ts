@@ -670,6 +670,9 @@ export class SquadService {
     if (this.disposed || item.squadRunId === undefined) return;
     const run = this.runForApprovedProposal(item.squadRunId);
     if (run === undefined || FINISHED_STATUSES.includes(run.status)) return;
+    // A compact squad planned once, even a run approved before it ended at approval: its items run
+    // to their end on their own sessions, and their settles never ask the leader again.
+    if (run.compact === true) return;
     const conflicts = itemConflicts(item);
     const key = `${item.id}|${item.status}|${item.updatedAt}|${conflicts ?? ''}`;
     if (this.settles.has(key)) return;
@@ -685,7 +688,6 @@ export class SquadService {
       snapshot.settings.autoJudge,
       finished,
       conflicts !== undefined,
-      run.compact === true,
     );
     if (outcome === undefined) return;
     const result = item.result ?? (item.status === 'failed' ? item.reason : undefined);
@@ -892,14 +894,7 @@ function settleOutcome(
   autoJudge: boolean,
   finished: boolean,
   conflicted: boolean,
-  compact: boolean,
 ): SquadReviewOutcome | undefined {
-  if (compact) {
-    if (item.status === 'review') return 'done';
-    if (item.status === 'failed') return 'failed';
-    if (item.status === 'done') return 'done';
-    return undefined;
-  }
   if (item.status === 'review') return autoJudge && !conflicted ? undefined : 'review';
   if (item.status === 'failed') return 'failed';
   if (item.status === 'done') return autoJudge || finished ? 'done' : undefined;
