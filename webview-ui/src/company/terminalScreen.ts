@@ -363,24 +363,30 @@ export function plainScreen(text: string): ScreenLine[] {
 
 /** A monospace glyph's width as a share of the font size, used until the real font is measured. */
 export const MONO_CHAR_EM = 0.6;
-/** The smallest and largest font a fitted screen uses; below the floor it scrolls sideways. */
-const FIT_MIN_PX = 7;
+/**
+ * The smallest and largest font a fitted screen uses; below the floor it scrolls sideways. The floor
+ * stays readable: a 200-column agent screen in a side drawer otherwise shrinks to unreadable dots.
+ */
+const FIT_MIN_PX = 10;
 const FIT_MAX_PX = 12;
+/** A row drawn only with rules and spaces: a TUI divider stretched to the terminal's full width. */
+const RULE_ROW = /^[\s─━═│┃║┄┅┈┉╌╍-]*$/;
 
 /**
- * The font size, in pixels, at which the widest row fits `widthPx`, so a terminal screen keeps its
- * columns instead of wrapping. `charEm` is the font's glyph width per pixel of font size. Undefined
- * before the frame has a width or when there are no rows.
+ * The font size, in pixels, at which the widest row of content fits `widthPx`, so a terminal screen
+ * keeps its columns instead of wrapping. Divider rows and trailing spaces do not count: they span
+ * the whole terminal however little text it shows. `charEm` is the font's glyph width per pixel of
+ * font size. Undefined before the frame has a width or when there are no rows.
  */
 export function screenFitPx(
   lines: readonly ScreenLine[],
   widthPx: number,
   charEm: number = MONO_CHAR_EM,
 ): number | undefined {
-  const columns = lines.reduce(
-    (widest, line) => Math.max(widest, line.reduce((length, segment) => length + segment.text.length, 0)),
-    0,
-  );
+  const columns = lines.reduce((widest, line) => {
+    const text = line.map((segment) => segment.text).join('').trimEnd();
+    return RULE_ROW.test(text) ? widest : Math.max(widest, text.length);
+  }, 0);
   if (widthPx <= 0 || columns === 0 || charEm <= 0) return undefined;
   const fit = Math.floor((widthPx / (columns * charEm)) * 10) / 10;
   return Math.min(FIT_MAX_PX, Math.max(FIT_MIN_PX, fit));
