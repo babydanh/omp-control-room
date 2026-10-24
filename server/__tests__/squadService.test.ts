@@ -1335,7 +1335,7 @@ describe('SquadService compact runs', () => {
       done: false,
     }));
     const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn thiện tính năng' });
-    await waitFor(() => h.runOf(runId)?.status === 'working');
+    await waitFor(() => h.runOf(runId)?.status === 'done');
     expect(h.runOf(runId)?.compact).toBe(true);
     expect(h.runOf(runId)?.proposal?.warnings.length).toBeGreaterThan(0);
     expect(h.workItems.creates).toHaveLength(1);
@@ -1360,50 +1360,23 @@ describe('SquadService compact runs', () => {
 
 
   it.each(['review', 'done', 'failed'] as const)(
-    'sends a child %s result to the leader without waiting for judging',
+    'plans once: the run ends at approval, and a child settled as %s asks the leader nothing',
     async (status) => {
       const h = new Harness();
       h.workItems.settings.compactSquad = true;
       h.leader.reply(proposal('Làm việc', 'new-session'));
       const runId = await h.service.request({ requestId: randomUUID(), text: 'Hoàn thiện tính năng' });
-      await waitFor(() => h.workItems.creates.length === 1);
+      await waitFor(() => h.workItems.creates.length === 1 && h.runOf(runId)?.status === 'done');
       const item = h.workItems.items[0];
       if (item === undefined) throw new Error('no compact child');
-      h.leader.reply(DONE_REPLY);
+
       h.workItems.settle(item.id, status, h.stamp(), `Kết quả ${status}`);
-      await waitFor(() => h.runOf(runId)?.status === 'done');
-      expect(h.leader.prompts).toHaveLength(2);
-      expect(h.leader.prompts[1]).toContain(`Kết quả ${status}`);
+
+      expect(h.runOf(runId)?.status).toBe('done');
+      expect(h.runOf(runId)?.turns).toBe(1);
+      expect(h.leader.prompts).toHaveLength(1);
     },
   );
-
-  it('lets the leader wait while one child still runs, then finishes when it settles', async () => {
-    const h = new Harness();
-    h.workItems.settings.compactSquad = true;
-    h.leader.reply(JSON.stringify({
-      assignments: [
-        { assignee: 'new-session', repo: REPO_APP, text: 'Tính 1 + 1', reason: 'Thử' },
-        { assignee: 'new-session', repo: REPO_APP, text: 'Tính 2 + 2', reason: 'Thử' },
-      ],
-      note: 'Chia 2 việc',
-      done: false,
-    }));
-    const runId = await h.service.request({ requestId: randomUUID(), text: 'Chia 2 việc' });
-    await waitFor(() => h.workItems.creates.length === 1 && h.workItems.items.length === 2);
-    const [first, second] = h.workItems.items;
-    if (first === undefined || second === undefined) throw new Error('expected two children');
-
-    // One child is back, the other still runs: the leader waits instead of failing the run.
-    h.leader.reply(JSON.stringify({ assignments: [], note: 'Chờ việc còn lại.', done: false }));
-    h.workItems.settle(first.id, 'done', h.stamp(), '1 + 1 = 2');
-    await waitFor(() => h.leader.prompts.length === 2 && h.runOf(runId)?.status === 'working');
-    expect(h.runOf(runId)?.error).toBeUndefined();
-
-    h.leader.reply(DONE_REPLY);
-    h.workItems.settle(second.id, 'done', h.stamp(), '2 + 2 = 4');
-    await waitFor(() => h.runOf(runId)?.status === 'done');
-    expect(h.leader.prompts[2]).toContain('2 + 2 = 4');
-  });
   it('saves a user reply in history and includes it in the next leader prompt', async () => {
     const h = new Harness();
     h.workItems.settings.compactSquad = true;

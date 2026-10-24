@@ -137,6 +137,7 @@ const MESSAGE = {
   interrupted: 'Đội trưởng bị gián đoạn khi board tắt. Thử lại để hỏi lại.',
   retried: 'Thử lại.',
   doneDefault: 'Đội đã xong.',
+  compactPlanned: 'Đã chia việc. Mỗi phiên tự làm việc của mình tới hết; đội trưởng không được hỏi lại.',
   unknownError: 'lỗi không rõ',
   requestShape:
     'Yêu cầu đội cần đúng một trong hai: nội dung, hoặc việc đã xong để hỏi đội trưởng bước tiếp.',
@@ -493,11 +494,19 @@ export class SquadService {
     proposal.status = 'approved';
     proposal.rows = approval.rows;
     proposal.warnings = warningsOf(approval.rows, this.catalog());
-    run.status = 'working';
     delete run.error;
     const count = approval.drafts.length;
     const message = automatic ? `Tự duyệt: đã giao ${count} việc.` : `Đã giao ${count} việc.`;
     appendEvent(run, squadEvent(at, 'approved', message));
+    // A compact squad plans once: each item runs to its end on its own session, and no settle asks
+    // the leader again. A regular run keeps reviewing its items' results turn by turn.
+    if (run.compact === true) {
+      run.status = 'done';
+      run.pendingReviews = [];
+      appendEvent(run, squadEvent(at, 'done', MESSAGE.compactPlanned));
+    } else {
+      run.status = 'working';
+    }
     this.remember(requestId, run.id);
     this.commit();
     await this.flush();
