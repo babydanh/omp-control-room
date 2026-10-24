@@ -709,12 +709,27 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
         >
           {voice.state === 'recording' ? `● ${voice.seconds}s` : voice.state === 'transcribing' ? '…' : '🎤'}
         </button>
+        {voice.mics.length > 1 && (
+          <select
+            aria-label="Chọn mic"
+            title="Mic dùng để nói. Tên mic hiện sau lần đầu cho trình duyệt dùng micro."
+            value={voice.mics.some((mic) => mic.id === voice.micId) ? voice.micId : ''}
+            onChange={(event) => voice.chooseMic(event.target.value)}
+            data-testid="prompt-mic"
+            className="max-md:hidden w-5 shrink-0 cursor-pointer appearance-none rounded-[var(--company-radius-md)] bg-transparent py-2 text-center text-2xs text-text-muted hover:bg-hover hover:text-text"
+          >
+            <option value="" className="bg-raised text-text">▾ Mic mặc định của trình duyệt</option>
+            {voice.mics.map((mic) => (
+              <option key={mic.id} value={mic.id} className="bg-raised text-text">{mic.label}</option>
+            ))}
+          </select>
+        )}
         <button
           type="button"
           onClick={startCapture}
           disabled={capture !== null}
           aria-label="Chụp màn hình và đánh dấu"
-          title={`Chụp cả màn hình sau ${CAPTURE_DELAY_SECONDS} giây (chuyển sang cửa sổ cần chụp), rồi khoanh, đánh số, làm mờ trước khi gắn vào prompt`}
+          title={`Chụp cả màn hình sau ${CAPTURE_DELAY_SECONDS} giây (chuyển sang cửa sổ cần chụp), rồi khoanh, đánh số, che kín chỗ riêng tư trước khi gắn vào prompt`}
           data-testid="prompt-capture"
           className="touch-target shrink-0 rounded-[var(--company-radius-md)] px-2 py-2 text-sm text-text-muted hover:bg-hover hover:text-text"
         >

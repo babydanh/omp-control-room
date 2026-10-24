@@ -26,18 +26,44 @@ async function errorOf(response: Response, fallback: string): Promise<string> {
   return typeof body?.error === 'string' ? body.error : fallback;
 }
 
+const MIC_KEY = 'company.voice.mic.v1';
+
+export interface VoiceMic {
+  readonly id: string;
+  readonly label: string;
+}
+
 export function useVoiceInput(onText: (text: string) => void, onError: (message: string) => void): {
   readonly state: VoiceState;
   readonly seconds: number;
   readonly toggle: () => void;
+  /** The microphones the browser lists; names appear once the page has been allowed to use one. */
+  readonly mics: readonly VoiceMic[];
+  /** The chosen microphone's id, or '' for the browser's default. */
+  readonly micId: string;
+  readonly chooseMic: (id: string) => void;
 } {
   const [state, setState] = useState<VoiceState>('idle');
   const [seconds, setSeconds] = useState(0);
+  const [mics, setMics] = useState<readonly VoiceMic[]>([]);
+  const [micId, setMicId] = useState(() => window.localStorage.getItem(MIC_KEY) ?? '');
   const recorder = useRef<MediaRecorder | null>(null);
   /** Set from the press until recording starts: a second press meanwhile opens no second microphone. */
   const starting = useRef(false);
   const handlers = useRef({ onText, onError });
   handlers.current = { onText, onError };
+
+  const listMics = async () => {
+    const devices = await navigator.mediaDevices?.enumerateDevices().catch(() => []) ?? [];
+    setMics(devices
+      .filter((device) => device.kind === 'audioinput' && device.deviceId !== 'default' && device.deviceId !== 'communications')
+      .map((device, index) => ({ id: device.deviceId, label: device.label || `Mic ${index + 1}` })));
+  };
+  useEffect(() => {
+    void listMics();
+    navigator.mediaDevices?.addEventListener('devicechange', listMics);
+    return () => navigator.mediaDevices?.removeEventListener('devicechange', listMics);
+  }, []);
 
   useEffect(() => {
     if (state !== 'recording') return undefined;
@@ -53,7 +79,9 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
     starting.current = true;
     let stream: MediaStream | null = null;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // A chosen mic that was unplugged falls back to the browser's default.
+      stream = await navigator.mediaDevices.getUserMedia({ audio: micId === '' ? true : { deviceId: { ideal: micId } } });
+      void listMics();
       const opened = stream;
       const chunks: Blob[] = [];
       const next = new MediaRecorder(opened);
@@ -109,6 +137,16 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
   return {
     state,
     seconds,
+    mics,
+    micId,
+    chooseMic: (id) => {
+      setMicId(id);
+      try {
+        window.localStorage.setItem(MIC_KEY, id);
+      } catch {
+        // Storage is optional in embedded and restricted browser contexts.
+      }
+    },
     toggle: () => {
       if (state === 'recording') recorder.current?.stop();
       else if (state === 'idle') void start();
@@ -123,18 +161,25 @@ export async function captureScreen(): Promise<File> {
   return new File([await response.blob()], `man-hinh-${Date.now()}.png`, { type: 'image/png' });
 }
 
-/** RMS level (0–1) that counts as someone speaking; room noise stays well below it. */
+/** RMS level (0–1) that counts as someone speaking; room noise stays well below it. Not tuned on a real mic yet. */
 const SPEECH_LEVEL = 0.02;
 
-/** Follows the microphone's loudness while recording; `stop` returns the loudest RMS heard. */
+/**
+ * Follows the microphone's loudness while recording; `stop` returns the loudest RMS heard, or
+ * Infinity when the audio graph never ran (a suspended context measures nothing, which is not silence).
+ */
 function listenLevel(stream: MediaStream): { stop: () => number } {
   const context = new AudioContext();
+  void context.resume();
   const analyser = context.createAnalyser();
   analyser.fftSize = 2048;
   context.createMediaStreamSource(stream).connect(analyser);
   const samples = new Float32Array(analyser.fftSize);
   let loudest = 0;
+  let measured = false;
   const timer = window.setInterval(() => {
+    if (context.state !== 'running') return;
+    measured = true;
     analyser.getFloatTimeDomainData(samples);
     let sum = 0;
     for (const sample of samples) sum += sample * sample;
@@ -144,7 +189,7 @@ function listenLevel(stream: MediaStream): { stop: () => number } {
     stop: () => {
       window.clearInterval(timer);
       void context.close();
-      return loudest;
+      return measured ? loudest : Number.POSITIVE_INFINITY;
     },
   };
 }

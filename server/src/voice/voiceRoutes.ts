@@ -120,27 +120,31 @@ async function transcribeWithGroq(audio: Buffer, contentType: string, key: strin
   return spokenText(await response.json());
 }
 
-/** Above this, Whisper itself judges a segment to hold no speech: its text is a guess, not what was said. */
+/** Above this, Whisper itself judges a segment to hold no speech. */
 const NO_SPEECH_LIMIT = 0.5;
 /**
- * Sentences Whisper writes over silence or noise in Vietnamese (YouTube outros it was trained on).
- * Groq reports no_speech_prob 0 for them, so they are dropped by their wording.
+ * Whole sentences Whisper writes over silence in Vietnamese (YouTube outros it was trained on);
+ * Groq still reports no_speech_prob 0 for them. Only a transcript that is nothing but one of them
+ * is dropped: the same words inside a real prompt ("thêm nút đăng ký kênh") stay.
  */
-const SILENCE_PHRASES = /subscribe cho kênh|ghiền mì gõ|đăng ký kênh|không bỏ lỡ những video|cảm ơn các bạn đã (theo dõi|xem)|amara\.org|subtitles by/iu;
+const SILENCE_OUTROS: readonly RegExp[] = [
+  /^(hãy )?(subscribe|đăng ký) cho kênh\b.{0,60}$/iu,
+  /^.{0,20}(để )?(không|đừng) bỏ lỡ những video.{0,30}$/iu,
+  /^cảm ơn các bạn đã (theo dõi|xem|lắng nghe).{0,30}$/iu,
+  /^(subtitles by|phụ đề bởi).{0,40}$/iu,
+];
 
-/** The text of the segments that hold speech; a reply without segments keeps its whole text. */
+/**
+ * What was said. When every segment is judged speechless, or the whole transcript is a known
+ * outro, nothing was said; otherwise the text stays whole, so a pause mid-sentence loses nothing.
+ */
 export function spokenText(body: unknown): string {
   const record = typeof body === 'object' && body !== null ? (body as { text?: unknown; segments?: unknown }) : {};
-  const heard = (text: string) => (SILENCE_PHRASES.test(text) ? '' : text.trim());
-  if (!Array.isArray(record.segments)) return typeof record.text === 'string' ? heard(record.text) : '';
-  return record.segments
-    .flatMap((segment: unknown) => {
-      const { text, no_speech_prob: noSpeech } = (segment ?? {}) as { text?: unknown; no_speech_prob?: unknown };
-      if (typeof text !== 'string') return [];
-      return typeof noSpeech === 'number' && noSpeech > NO_SPEECH_LIMIT ? [] : [heard(text)];
-    })
-    .filter((text) => text !== '')
-    .join(' ');
+  const segments = Array.isArray(record.segments) ? (record.segments as { text?: unknown; no_speech_prob?: unknown }[]) : [];
+  const texts = segments.flatMap((segment) => (typeof segment?.text === 'string' ? [segment.text.trim()] : []));
+  const text = (texts.length > 0 ? texts.join(' ') : typeof record.text === 'string' ? record.text : '').replace(/\s+/g, ' ').trim();
+  const speechless = segments.length > 0 && segments.every((segment) => typeof segment?.no_speech_prob === 'number' && segment.no_speech_prob > NO_SPEECH_LIMIT);
+  return speechless || SILENCE_OUTROS.some((outro) => outro.test(text)) ? '' : text;
 }
 
 async function captureWithCuaDriver(): Promise<Buffer> {

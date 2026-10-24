@@ -57,14 +57,16 @@ describe('voice routes', () => {
 });
 
 describe('spokenText', () => {
-  it('drops what Whisper invents over silence and keeps what was said', () => {
+  it('drops a transcript that is only what Whisper invents over silence, and keeps every word of real speech', () => {
     // The reply Groq gave for one second of silence, no_speech_prob 0 included.
     expect(spokenText({ segments: [{ text: ' Hãy subscribe cho kênh Ghiền Mì Gõ Để không bỏ lỡ những video hấp dẫn', no_speech_prob: 0 }] })).toBe('');
+    expect(spokenText({ segments: [{ text: ' ồn', no_speech_prob: 0.9 }, { text: ' ồn', no_speech_prob: 0.8 }] })).toBe('');
+    // A pause mid-sentence, and the same words inside a real prompt, lose nothing.
     expect(spokenText({ segments: [
-      { text: ' sửa nút đăng nhập', no_speech_prob: 0.01 },
-      { text: ' tiếng ồn', no_speech_prob: 0.9 },
+      { text: ' thêm nút đăng ký kênh', no_speech_prob: 0.01 },
+      { text: ' ở trang chủ', no_speech_prob: 0.9 },
       { text: ' rồi gửi đi', no_speech_prob: 0.02 },
-    ] })).toBe('sửa nút đăng nhập rồi gửi đi');
+    ] })).toBe('thêm nút đăng ký kênh ở trang chủ rồi gửi đi');
     expect(spokenText({ text: ' chỉ có chữ ' })).toBe('chỉ có chữ');
   });
 });
