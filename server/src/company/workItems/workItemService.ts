@@ -2056,7 +2056,11 @@ export class WorkItemService {
   ): Promise<string | undefined | null> {
     const roster = this.ports.roster;
     if (roster.startAgent === undefined || !roster.panes().available) return undefined;
-    const args = kind === 'claude' ? ['--permission-mode', readOnly ? 'plan' : this.settings.claudePermission] : [];
+    // An unattended omp in a large TypeScript worktree starts its own tsserver (about 1 GB each, measured on
+    // the Backend); the agent checks types with the repo's own `tsc` anyway, so board runs go without LSP.
+    const args = kind === 'claude'
+      ? ['--permission-mode', readOnly ? 'plan' : this.settings.claudePermission]
+      : kind === 'omp' ? ['--no-lsp'] : [];
     try {
       return await roster.startAgent({ cwd, kind, name: `${kind}-${item.id.slice(0, 8)}`, args });
     } catch (error) {
