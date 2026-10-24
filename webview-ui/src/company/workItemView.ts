@@ -117,6 +117,17 @@ export const WORK_ITEM_CLOUD_LABELS: Readonly<Record<WorkItemCloudState, string>
   closed: 'Issue đã đóng',
 };
 
+/** A cloud run reports within hours (cloud-watch gives up after 8): an older Issue with no summary is not "running". */
+const CLOUD_SILENT_AFTER_MS = 8 * 3_600_000;
+
+/** The state word of an Issue no board item holds: nothing pulls it, and a silent old one is not "running". */
+export function cloudIssueLabel(issue: { readonly state: 'running' | 'finished'; readonly createdAt: string }, now: number): string {
+  if (issue.state === 'finished') return 'Cloud xong · kéo tay';
+  const created = Date.parse(issue.createdAt);
+  return Number.isFinite(created) && now - created > CLOUD_SILENT_AFTER_MS
+    ? 'Chưa có tổng kết sau 8 giờ'
+    : WORK_ITEM_CLOUD_LABELS.running;
+}
 
 const EVENT_LABEL_VI: Readonly<Record<string, string>> = {
   created: 'Tạo việc',

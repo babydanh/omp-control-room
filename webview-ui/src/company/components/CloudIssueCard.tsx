@@ -1,9 +1,11 @@
 import type { BoardCloudIssue } from '../boardView.js';
-import { WORK_ITEM_CLOUD_LABELS } from '../workItemView.js';
+import { useNow } from '../useNow.js';
+import { cloudIssueLabel } from '../workItemView.js';
 import { FolderTag } from './FolderTag.js';
 
 export function CloudIssueCard({ card, index }: { card: BoardCloudIssue; index: number }) {
   const { issue } = card;
+  const now = useNow();
   const branch = `omp/issue-${issue.issue}`;
   return (
     <a
@@ -19,7 +21,7 @@ export function CloudIssueCard({ card, index }: { card: BoardCloudIssue; index: 
     >
       <span className="flex min-w-0 items-center justify-between gap-2 text-2xs text-text-muted">
         <span className="shrink-0 tabular-nums">Issue #{issue.issue}</span>
-        <span className="truncate">{WORK_ITEM_CLOUD_LABELS[issue.state]}</span>
+        <span className="truncate">{cloudIssueLabel(issue, now)}</span>
       </span>
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         {issue.title}

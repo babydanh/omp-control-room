@@ -348,10 +348,21 @@ export function formatStatus(answer: StatusAnswer): string {
   if (answer.cloudIssues.length > 0) {
     lines.push('', `Issue [Handoff] ngoài board (${answer.cloudIssues.length}):`);
     lines.push(...answer.cloudIssues.map((issue) =>
-      `  #${issue.issue} [${CLOUD_STATE_LABEL[issue.state]}] ${clip(issue.title, 100)} · ${issue.folder}${issue.repo ? ` · ${issue.repo}` : ''}\n      ${issue.url}`,
+      `  #${issue.issue} [${cloudIssueLabel(issue, Date.now())}] ${clip(issue.title, 100)} · ${issue.folder}${issue.repo ? ` · ${issue.repo}` : ''}\n      ${issue.url}`,
     ));
   }
   return lines.join('\n');
+}
+
+/** A cloud run reports within hours (cloud-watch gives up after 8): an older Issue with no summary is not "running". */
+const CLOUD_SILENT_AFTER_MS = 8 * 3_600_000;
+
+function cloudIssueLabel(issue: { readonly state: WorkItemCloudState; readonly createdAt: string }, now: number): string {
+  const created = Date.parse(issue.createdAt);
+  if (issue.state === 'running' && Number.isFinite(created) && now - created > CLOUD_SILENT_AFTER_MS) {
+    return 'chưa có tổng kết sau 8 giờ: xem Issue';
+  }
+  return CLOUD_STATE_LABEL[issue.state];
 }
 
 export function formatTask(answer: TaskAnswer): string {
