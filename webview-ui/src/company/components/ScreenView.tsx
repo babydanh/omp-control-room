@@ -28,20 +28,26 @@ export interface ScreenViewProps {
   testId?: string;
   /** Receives the `<pre>`, so a selection inside the screen can be watched and copied. */
   preRef?: RefObject<HTMLPreElement | null>;
+  /**
+   * A font size, in pixels, that fits the screen's widest row to its frame. Set, the rows keep
+   * their columns (no wrap) at that size, the way the terminal draws them.
+   */
+  fitPx?: number;
 }
 
-export function ScreenView({ lines, className = '', testId, preRef }: ScreenViewProps) {
-  const wrap = useContext(WrapLinesContext);
+export function ScreenView({ lines, className = '', testId, preRef, fitPx }: ScreenViewProps) {
+  const wrap = useContext(WrapLinesContext) && fitPx === undefined;
   // Wrapped lines keep the screen whole at the drawer's width; unwrapped lines keep
   // their columns and scroll sideways inside the screen's own frame.
   const wrapClass = wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre';
+  const style = fitPx === undefined ? SCREEN_COLORS : { ...SCREEN_COLORS, fontSize: `${fitPx}px`, lineHeight: 1.3 };
   return (
     <pre
       ref={preRef}
       data-testid={testId}
       data-wrap={wrap ? 'on' : 'off'}
       className={`m-0 min-w-0 max-w-full select-text font-mono text-2xs leading-4 ${wrapClass} ${className}`}
-      style={SCREEN_COLORS}
+      style={style}
     >
       {lines.map((line, row) => (
         <ScreenRow key={row} line={line} newline={row < lines.length - 1} />

@@ -361,6 +361,26 @@ export function plainScreen(text: string): ScreenLine[] {
   return splitLines(text).map((line) => (line === '' ? [] : [{ text: line, style: {} }]));
 }
 
+/** A monospace glyph's width as a share of the font size; close for the board's mono fonts. */
+const MONO_CHAR_EM = 0.6;
+/** The smallest and largest font a fitted screen uses; below the floor it scrolls sideways. */
+const FIT_MIN_PX = 7;
+const FIT_MAX_PX = 12;
+
+/**
+ * The font size, in pixels, at which the widest row fits `widthPx`, so a terminal screen keeps its
+ * columns instead of wrapping. Undefined before the frame has a width or when there are no rows.
+ */
+export function screenFitPx(lines: readonly ScreenLine[], widthPx: number): number | undefined {
+  const columns = lines.reduce(
+    (widest, line) => Math.max(widest, line.reduce((length, segment) => length + segment.text.length, 0)),
+    0,
+  );
+  if (widthPx <= 0 || columns === 0) return undefined;
+  const fit = Math.floor((widthPx / (columns * MONO_CHAR_EM)) * 10) / 10;
+  return Math.min(FIT_MAX_PX, Math.max(FIT_MIN_PX, fit));
+}
+
 /** The last `count` lines after dropping trailing lines that hold no visible character. */
 export function tailScreen(lines: readonly ScreenLine[], count: number): ScreenLine[] {
   if (count <= 0) return [];

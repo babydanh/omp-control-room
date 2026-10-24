@@ -230,7 +230,7 @@ export function DetailDrawer({
           onPrefsChange((current) => ({ ...current, maximized: !current.maximized }))
         }
         {...(headerTriggers ?? {})}
-        className="flex select-none items-center gap-3 px-3.5 py-2.5"
+        className="flex select-none items-center gap-2 px-3 py-1.5"
       >
         {presentation === 'fullscreen' && (
           <button
@@ -254,6 +254,18 @@ export function DetailDrawer({
             </span>
           )}
         </div>
+        {wrapToggleShown && (
+          <button
+            type="button"
+            aria-pressed={!prefs.wrapLines}
+            title="Giữ nguyên chiều rộng dòng và cuộn ngang khi dòng dài"
+            onClick={() => onPrefsChange((current) => ({ ...current, wrapLines: !current.wrapLines }))}
+            onDoubleClick={(event) => event.stopPropagation()}
+            className="company-toggle shrink-0"
+          >
+            Không ngắt dòng
+          </button>
+        )}
         {presentation !== 'fullscreen' && (
           <button
             type="button"
@@ -267,21 +279,6 @@ export function DetailDrawer({
           </button>
         )}
       </header>
-      {wrapToggleShown && (
-        <div className="flex justify-end px-3.5 py-1">
-          <button
-            type="button"
-            aria-pressed={!prefs.wrapLines}
-            title="Giữ nguyên chiều rộng dòng và cuộn ngang khi dòng dài"
-            onClick={() =>
-              onPrefsChange((current) => ({ ...current, wrapLines: !current.wrapLines }))
-            }
-            className="company-toggle touch-target"
-          >
-            Không ngắt dòng
-          </button>
-        </div>
-      )}
       <WrapLinesContext.Provider value={prefs.wrapLines}>
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">
           <DrawerContent {...rest} subject={retained} onClose={onClose} />
@@ -427,7 +424,7 @@ function headingFor(
     case 'herdr': {
       const agent = state.herdr.agents.find((entry) => entry.paneId === subject.paneId);
       return {
-        title: agent?.name ?? 'herdr',
+        title: agent?.title?.trim() || agent?.name || 'herdr',
         status: agent ? HERDR_TONE_LABELS[herdrToneFor(agent.status)] : null,
       };
     }

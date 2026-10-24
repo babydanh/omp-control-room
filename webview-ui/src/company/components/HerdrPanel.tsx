@@ -10,26 +10,21 @@
  */
 
 import type { RefObject } from 'react';
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 
 import type { HerdrKey } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
-import {
-  HERDR_CHOICE_KEYS,
-  HERDR_DRAWER_TAB_LABELS,
-  HERDR_TONE_LABELS,
-  type HerdrDrawerTab,
-  herdrToneFor,
-} from '../herdrView.js';
+import { HERDR_CHOICE_KEYS, HERDR_DRAWER_TAB_LABELS, type HerdrDrawerTab } from '../herdrView.js';
 import { formatLogTime } from '../sessionLogView.js';
-import type { ScreenLine } from '../terminalScreen.js';
+import { screenFitPx,type ScreenLine } from '../terminalScreen.js';
 import { useCoalescedFrame } from '../useCoalescedFrame.js';
 import { useHerdrScreenWatch } from '../useHerdrScreenWatch.js';
 import { useParsedScreen } from '../useParsedScreen.js';
 import { useScreenSelection } from '../useScreenSelection.js';
 import { useStickToBottom } from '../useStickToBottom.js';
+import { WrapLinesContext } from '../wrapLines.js';
 import { HerdrInfoTab } from './AgentInfoTab.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ScreenFreezeChip } from './ScreenFrame.js';
@@ -85,36 +80,33 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-2 p-2" data-testid="herdr-panel">
-      <div className="flex flex-col gap-1 text-2xs text-text-muted">
-        <p>
-          {agent.kind} &middot; {HERDR_TONE_LABELS[herdrToneFor(agent.status)]}
+    <div className="flex min-h-0 flex-1 flex-col gap-1.5 px-2 pb-2" data-testid="herdr-panel">
+      {/* One row: the tabs, then where the agent works and when the screen was read. */}
+      <div className="flex min-w-0 items-center gap-2">
+        <nav aria-label="Phần của agent herdr" className="flex shrink-0 gap-1">
+          {HERDR_TABS.map((entry) => (
+            <button
+              key={entry}
+              type="button"
+              onClick={() => onTabChange(entry)}
+              aria-current={tab === entry}
+              className={`relative cursor-pointer px-2 py-1 text-2xs ${
+                tab === entry
+                  ? 'text-text after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-accent'
+                  : 'text-text-muted hover:text-text'
+              }`}
+            >
+              {HERDR_DRAWER_TAB_LABELS[entry]}
+            </button>
+          ))}
+        </nav>
+        <p
+          className="min-w-0 flex-1 truncate text-right text-2xs text-text-muted"
+          title={[agent.title, agent.cwd].filter(Boolean).join('\n')}
+        >
+          {[agent.kind, agent.cwd, screen ? formatLogTime(screen.at) : null].filter(Boolean).join(' · ')}
         </p>
-        {agent.title && <p className="truncate text-text">{agent.title}</p>}
-        {agent.cwd && (
-          <p className="truncate" title={agent.cwd}>
-            {agent.cwd}
-          </p>
-        )}
       </div>
-
-      <nav aria-label="Phần của agent herdr" className="flex gap-1">
-        {HERDR_TABS.map((entry) => (
-          <button
-            key={entry}
-            type="button"
-            onClick={() => onTabChange(entry)}
-            aria-current={tab === entry}
-            className={`relative cursor-pointer px-2 py-1.5 text-2xs ${
-              tab === entry
-                ? 'text-text after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-accent'
-                : 'text-text-muted hover:text-text'
-            }`}
-          >
-            {HERDR_DRAWER_TAB_LABELS[entry]}
-          </button>
-        ))}
-      </nav>
 
       {tab === 'info' ? (
         <HerdrInfoTab
@@ -136,9 +128,6 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
           )}
 
           <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-1">
-            {screen && (
-              <p className="text-2xs text-text-muted">màn hình lúc {formatLogTime(screen.at)}</p>
-            )}
             {frozen && <ScreenFreezeChip />}
             {screen ? (
               <HerdrScreenView lines={screenLines} preRef={screenRef} />
@@ -160,7 +149,10 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
   );
 }
 
-/** The herdr screen, pinned to its newest line until the reader scrolls up. */
+/**
+ * The herdr screen, pinned to its newest line until the reader scrolls up. With wrapping on, the
+ * font shrinks so the terminal's widest row fits the frame: rows keep their columns, as in herdr.
+ */
 function HerdrScreenView({
   lines,
   preRef,
@@ -170,13 +162,28 @@ function HerdrScreenView({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const onScroll = useStickToBottom(scrollRef);
+  const fit = useContext(WrapLinesContext);
+  const [widthPx, setWidthPx] = useState(0);
+  useEffect(() => {
+    const frame = scrollRef.current;
+    if (frame === null) return undefined;
+    // The frame's inner width: its padding (p-1.5, 6px a side) is not room for text.
+    const observer = new ResizeObserver(([entry]) => setWidthPx(Math.max(0, (entry?.contentRect.width ?? 0))));
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, []);
   return (
     <div
       ref={scrollRef}
       onScroll={onScroll}
-      className="min-h-0 min-w-0 flex-1 overflow-auto rounded-(--company-radius-sm) bg-well p-2"
+      className="min-h-0 min-w-0 flex-1 overflow-auto rounded-(--company-radius-sm) bg-well p-1.5"
     >
-      <ScreenView testId="herdr-screen" lines={lines} preRef={preRef} />
+      <ScreenView
+        testId="herdr-screen"
+        lines={lines}
+        preRef={preRef}
+        {...(fit && screenFitPx(lines, widthPx) !== undefined ? { fitPx: screenFitPx(lines, widthPx) } : {})}
+      />
     </div>
   );
 }

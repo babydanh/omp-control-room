@@ -9,6 +9,7 @@ import {
   paletteColor,
   parseAnsiScreen,
   plainScreen,
+  screenFitPx,
   type ScreenLine,
   type ScreenStyle,
   tailScreen,
@@ -399,5 +400,21 @@ describe('bufferLineSegments', () => {
       { text: 'ab', style: { bold: true, inverse: true } },
       { text: 'c', style: {} },
     ]);
+  });
+});
+
+describe('screenFitPx', () => {
+  const row = (columns: number): ScreenLine => [{ text: '─'.repeat(columns), style: {} }];
+
+  it('shrinks the font so the widest row fits, within the 7-12 px bounds', () => {
+    // 100 columns at 0.6 em a glyph fit 600 px at 10 px.
+    expect(screenFitPx([row(40), row(100)], 600)).toBe(10);
+    expect(screenFitPx([row(20)], 600)).toBe(12);
+    expect(screenFitPx([row(300)], 600)).toBe(7);
+  });
+
+  it('has no size before the frame is measured or when the screen is empty', () => {
+    expect(screenFitPx([row(80)], 0)).toBeUndefined();
+    expect(screenFitPx([], 600)).toBeUndefined();
   });
 });
