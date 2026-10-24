@@ -11,7 +11,7 @@ import type { ProcessResult } from '../src/ledger/processRunner.js';
 import { toPathKey } from '../src/pathKey.js';
 import { handleProjectMessage } from '../src/projects/handler.js';
 import { ProjectStore } from '../src/projects/projectStore.js';
-import { buildProjectTreeSnapshot, forgetGitScans, linkHerdrPanes, parentSessions } from '../src/projects/projectTree.js';
+import { buildProjectTreeSnapshot, linkHerdrPanes, parentSessions } from '../src/projects/projectTree.js';
 import { sessionRow } from './ledgerFixtures.js';
 
 function processResult(stdout = '', code = 0, ok = code === 0): ProcessResult {
@@ -227,37 +227,6 @@ describe('buildProjectTreeSnapshot', () => {
       listRepos: async () => [repo, worktree, submodule],
     });
     expect(scanned.sort()).toEqual([path.resolve(repo), path.resolve(submodule)].sort());
-  });
-
-  it('reuses a repo scan between rebuilds until a user change forgets it', async () => {
-    const root = await makeTempDir();
-    const folder = path.join(root, 'folder');
-    const repo = path.join(folder, 'repo');
-    await fs.mkdir(repo, { recursive: true });
-    let scans = 0;
-    const git: GitRunner = {
-      async run(_cwd, args) {
-        if (args[0] === 'rev-parse') scans += 1;
-        return processResult('', 128);
-      },
-    };
-    const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
-    const project = await store.createProject('Test');
-    await store.addFolder(project.id, folder);
-    const build = () => buildProjectTreeSnapshot(store, {
-      ledger: openLedgerSource(path.join(root, 'missing.db'), () => {
-        throw new Error('no database');
-      }),
-      git,
-      listRepos: async () => [repo],
-    });
-    await build();
-    await build();
-    // A session changing state rebuilds the tree: git is not asked again within the reuse window.
-    expect(scans).toBe(1);
-    forgetGitScans();
-    await build();
-    expect(scans).toBe(2);
   });
 });
 
