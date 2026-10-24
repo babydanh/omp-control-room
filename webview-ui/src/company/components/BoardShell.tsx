@@ -866,7 +866,7 @@ export function BoardShell({ client }: BoardShellProps) {
           ) : (
             <CompanyBoard
               lanes={lanes}
-              flow={boardFlow(lanes, state.settings?.maxWorkers ?? null)}
+              flow={boardFlow(lanes, squadFolder?.settings?.maxParallel ?? state.settings?.maxWorkers ?? null)}
               squadFolder={squadFolder}
               planning={planningPrompts(state)}
               onSelectSession={selectSession}

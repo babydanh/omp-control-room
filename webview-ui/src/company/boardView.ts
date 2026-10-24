@@ -451,7 +451,7 @@ function waitReasonFor(
  */
 export interface BoardFlow {
   running: number;
-  /** `settings.maxWorkers`, or null before the first snapshot. */
+  /** The squad's `maxParallel` when the folder has squad settings, else `settings.maxWorkers`; null before either arrives. */
   runningLimit: number | null;
   ready: number;
   blocked: number;
@@ -464,18 +464,24 @@ export interface BoardFlow {
 
 export function boardFlow(lanes: readonly BoardLane[], maxWorkers: number | null): BoardFlow {
   const cards = lanes.flatMap((lane) => lane.cards);
+  const items = lanes.flatMap((lane) => lane.workItems);
   const count = (predicate: (card: BoardCard) => boolean) =>
     cards.filter((card) => predicate(card)).length;
-  const running = count((card) => card.lane === 'running');
-  const ready = count((card) => card.lane === 'ready');
+  // Work item cards move through the same lanes as task cards, so they count the same way.
+  const inLane = (id: CompanyLaneId) =>
+    count((card) => card.lane === id) + items.filter((item) => item.lane === id).length;
+  const running = inLane('running');
+  const ready = inLane('ready');
   return {
     running,
     runningLimit: maxWorkers,
     ready,
     blocked: count((card) => card.waitReason === 'blocked_by_dependencies'),
-    awaitingAnswer: count((card) => card.waitReason === 'awaiting_answer'),
-    done: count((card) => card.lane === 'done'),
-    failed: count((card) => card.lane === 'failed'),
+    awaitingAnswer:
+      count((card) => card.waitReason === 'awaiting_answer') +
+      items.filter((item) => item.status === 'needs_input').length,
+    done: inLane('done'),
+    failed: inLane('failed'),
     queuedBehindWip: ready > 0 && maxWorkers !== null && running >= maxWorkers,
   };
 }

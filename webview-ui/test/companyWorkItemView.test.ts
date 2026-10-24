@@ -7,7 +7,7 @@ import type {
   SquadSettings,
   WorkItem,
 } from '../../core/src/messages.js';
-import { buildBoardLanes } from '../src/company/boardView.js';
+import { boardFlow, buildBoardLanes } from '../src/company/boardView.js';
 import {
   applyCompanyMessage,
   type CompanyViewState,
@@ -370,5 +370,22 @@ describe('buildBoardLanes and work items', () => {
     });
     expect(ready?.workItems[0]?.assignee).toBe('Dev A');
     expect(done?.workItems.map((card) => card.id)).toEqual(['d']);
+  });
+
+  it('counts work item cards in the flow strip, so running work never reads as 0', () => {
+    const state = withWorkItems(boardWithRoster('all'), ACTIVE, [
+      item({ id: 'a', sequence: 1, status: 'running' }),
+      item({ id: 'b', sequence: 2, status: 'running' }),
+      item({ id: 'c', sequence: 3, status: 'needs_input' }),
+      item({ id: 'd', sequence: 4, status: 'done' }),
+      item({ id: 'e', sequence: 5, status: 'failed' }),
+    ]);
+    expect(boardFlow(buildBoardLanes(state), 12)).toMatchObject({
+      running: 2,
+      runningLimit: 12,
+      awaitingAnswer: 1,
+      done: 1,
+      failed: 1,
+    });
   });
 });
