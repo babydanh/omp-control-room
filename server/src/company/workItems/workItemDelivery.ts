@@ -43,14 +43,21 @@ export function deliveryNextStep(facts: DeliveryFacts, stage: WorkItemDeliverySt
   const where = facts.worktreePath ?? `nhánh ${facts.branch} (worktree đã dọn: mở lại bằng git worktree add <đường dẫn> ${facts.branch})`;
   const checkout = facts.worktreePath ?? '<worktree mở lại từ nhánh>';
   switch (stage) {
-    case 'uncommitted':
-      return `Còn ${facts.dirtyFiles} file chưa commit trong ${where}. Commit hẹp trên nhánh ${facts.branch} (git add đúng file, không git add .), rồi mới lên staging.`;
+    case 'uncommitted': {
+      // The committed part may already be on staging or in main: say so, and only ask for a resync.
+      const landed = facts.inMain
+        ? ' Phần đã commit đã có trong origin/main; file chưa commit là thay đổi mới, commit xong thì gộp lại như một việc mới.'
+        : facts.inStaging === true
+          ? ' Phần đã commit đã lên staging; commit xong thì chạy lại staging-sync để staging có bản mới.'
+          : ' Commit xong mới lên staging.';
+      return `Còn ${facts.dirtyFiles} file chưa commit trong ${where}. Commit hẹp trên nhánh ${facts.branch} (git add đúng file, không git add .).${landed}`;
+    }
     case 'no_commits':
       return `Nhánh ${facts.branch} chưa có commit nào ngoài origin/main: chưa có gì để gộp. Agent cần làm và commit trên ${where}.`;
     case 'branch':
       return facts.inStaging === null
         ? `Đã commit ${facts.commitsAhead} commit, repo không có nhánh staging. Lên main (deploy production): python ${SCRIPTS}\\merge-lane.py ${checkout} --check "<test liên quan>" --push`
-        : `Đã commit ${facts.commitsAhead} commit, chưa lên staging. Lên staging: python ${SCRIPTS}\\staging-sync.py với worktree ${checkout} --branch ${facts.branch} (người dùng nói "lên staging").`;
+        : `Đã commit ${facts.commitsAhead} commit, chưa lên staging. Khi người dùng nói "lên staging": python ${SCRIPTS}\\staging-sync.py ${checkout} --branch ${facts.branch} (việc có phần Backend lẫn Web cùng tên nhánh thì truyền cả hai worktree; commit hết trước).`;
     case 'staging':
       return `Đã lên staging, chưa vào main. Kiểm trên staging.sporto.asia rồi lên main (deploy production): python ${SCRIPTS}\\merge-lane.py ${checkout} --check "<test liên quan>" --push`;
     case 'main':
@@ -134,20 +141,24 @@ async function contentIn(repo: string, run: CommandRunner, target: string, branc
 
 /**
  * Reads the facts for one item's branch from the repo (origin refs as last fetched) and its worktree.
- * Undefined when the branch no longer exists or origin/main is unknown.
+ * Undefined when the branch no longer exists or origin/main is unknown; null when a check could not
+ * run (git failed or timed out), so the caller keeps what it knew instead of a false all-clear.
  */
 export async function probeDelivery(
   repo: string,
   worktree: SquadWorktree,
   worktreePresent: boolean,
   run: CommandRunner,
-): Promise<DeliveryFacts | undefined> {
+): Promise<DeliveryFacts | undefined | null> {
   if ((await git(repo, run, 'rev-parse', '--verify', '--quiet', `refs/heads/${worktree.branch}`)) === undefined) return undefined;
   if ((await git(repo, run, 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/main')) === undefined) return undefined;
   const ahead = Number(await git(repo, run, 'rev-list', '--count', `origin/main..${worktree.branch}`));
   const hasStaging = (await git(repo, run, 'rev-parse', '--verify', '--quiet', 'refs/remotes/origin/staging')) !== undefined;
-  const status = worktreePresent ? await git(worktree.path, run, 'status', '--porcelain') : '';
-  const dirtyFiles = (status ?? '')
+  // Read raw: porcelain lines start with a status column that may be a space, which a trim would eat.
+  const status = worktreePresent ? await run('git', ['status', '--porcelain'], worktree.path, GIT_TIMEOUT_MS) : undefined;
+  // A check that could not run says nothing: "0 uncommitted files" would be a false all-clear.
+  if (!Number.isFinite(ahead) || (status !== undefined && status.code !== 0)) return null;
+  const dirtyFiles = (status?.stdout ?? '')
     .split(/\r?\n/)
     .filter((line) => line.trim() !== '' && !IGNORED_DIRTY.test(line.slice(3).trim().replace(/\\/g, '/')))
     .length;
@@ -155,7 +166,7 @@ export async function probeDelivery(
     branch: worktree.branch,
     worktreePath: worktreePresent ? worktree.path : undefined,
     dirtyFiles,
-    commitsAhead: Number.isFinite(ahead) ? ahead : 0,
+    commitsAhead: ahead,
     inMain: await contentIn(repo, run, 'origin/main', worktree.branch),
     inStaging: hasStaging ? await contentIn(repo, run, 'origin/staging', worktree.branch) : null,
   };

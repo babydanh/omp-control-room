@@ -285,7 +285,11 @@ export function WorkItemPanel({
             <p className="mt-1 text-xs text-text">
               <span className="font-medium">{delivery.text}</span>
               <span className="text-text-muted">
-                {' '}· nhánh {item.delivery.branch} · {item.delivery.commitsAhead} commit chưa có trên main
+                {' '}· nhánh {item.delivery.branch}
+                {/* After a squash merge the branch's own commits stay unknown to main by hash; the content is there. */}
+                {item.delivery.inMain
+                  ? ' · nội dung đã có trong main'
+                  : ` · ${item.delivery.commitsAhead} commit chưa có trên main`}
                 {item.delivery.inStaging === null ? ' · repo không có staging' : ''}
               </span>
             </p>

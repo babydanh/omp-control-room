@@ -221,6 +221,23 @@ describe('removeSquadWorktree', () => {
 
     await expect(removeSquadWorktree({ repo: REPO, worktree, gitWt: undefined, run })).resolves.toBe('dirty');
   });
+
+  it('removes a clean worktree whose branch landed by squash: not an ancestor, but its content is in main', async () => {
+    const runFor = (mergedTree: string) => recordingRunner((line) => {
+      if (line === 'git status --porcelain') return OK;
+      if (line.startsWith('git merge-base')) return { code: 1, stdout: '', stderr: '' };
+      if (line === 'git rev-parse origin/main^{tree}') return { code: 0, stdout: 'tree-main\n', stderr: '' };
+      if (line.startsWith('git merge-tree --write-tree origin/main')) return { code: 0, stdout: `${mergedTree}\n`, stderr: '' };
+      if (line === `git worktree remove ${worktree.path}`) return OK;
+      return unexpected(line);
+    });
+
+    const landed = runFor('tree-main');
+    await expect(removeSquadWorktree({ repo: REPO, worktree, gitWt: undefined, run: landed.run })).resolves.toBe('removed');
+    const pending = runFor('tree-with-branch-changes');
+    await expect(removeSquadWorktree({ repo: REPO, worktree, gitWt: undefined, run: pending.run })).resolves.toBe('unmerged');
+    expect(pending.calls.some((call) => call.line.startsWith('git worktree remove'))).toBe(false);
+  });
 });
 
 describe('worktreeOnBranch', () => {

@@ -184,7 +184,8 @@ export interface RemoveWorktreeOptions {
 
 /**
  * Removes one squad worktree once nothing in it is lost: no uncommitted change, and its branch is
- * already in origin/main. Never forces. A dirty or unmerged worktree is refused and left as it is.
+ * already in origin/main, by ancestry or by content (merge-lane squashes, so a landed branch is
+ * usually not an ancestor). Never forces. A dirty or unmerged worktree is refused and left as it is.
  * Tracked files that differ only in line endings (a generator such as `flutter pub get` rewrote
  * them) lose nothing, so they are put back first and do not count as dirty.
  */
@@ -199,9 +200,9 @@ export async function removeSquadWorktree(
     repo,
     LIST_TIMEOUT_MS,
   );
-  // Exit 1 means the branch has commits origin/main lacks; anything else is a failed check.
-  if (merged.code === 1) return 'unmerged';
-  requireOk(merged, 'git merge-base');
+  // Exit 1 means the branch has commits origin/main lacks by hash; anything else is a failed check.
+  if (merged.code !== 0 && merged.code !== 1) requireOk(merged, 'git merge-base');
+  if (merged.code === 1 && !(await contentInMain(repo, worktree.branch, run))) return 'unmerged';
   const removed =
     gitWt === undefined
       ? await run('git', ['worktree', 'remove', worktree.path], repo, LIST_TIMEOUT_MS)
@@ -228,4 +229,11 @@ async function isCleanApartFromLineEndings(path: string, run: CommandRunner): Pr
   const after = await run('git', ['status', '--porcelain'], path, LIST_TIMEOUT_MS);
   requireOk(after, 'git status');
   return after.stdout.trim() === '';
+}
+
+/** Whether merging the branch into origin/main changes nothing: its content already landed (a squash). */
+async function contentInMain(repo: string, branch: string, run: CommandRunner): Promise<boolean> {
+  const tree = await run('git', ['rev-parse', 'origin/main^{tree}'], repo, LIST_TIMEOUT_MS);
+  const merged = await run('git', ['merge-tree', '--write-tree', 'origin/main', branch], repo, LIST_TIMEOUT_MS);
+  return tree.code === 0 && merged.code === 0 && merged.stdout.split(/\r?\n/)[0] === tree.stdout.trim();
 }

@@ -85,4 +85,32 @@ describe('probeDelivery', { timeout: 120_000 }, () => {
     const { repo, worktree } = repoWithBranch();
     expect(await probeDelivery(repo, { path: worktree, branch: 'gone' }, true, runCommand)).toBeUndefined();
   });
+
+  it('reads nothing, rather than a clean worktree, when git status fails', async () => {
+    const { repo, worktree } = repoWithBranch();
+    const failingStatus: typeof runCommand = (file, argv, cwd, timeoutMs) =>
+      argv[0] === 'status' ? Promise.resolve({ code: 128, stdout: '', stderr: 'fatal: index.lock' }) : runCommand(file, argv, cwd, timeoutMs);
+
+    expect(await probeDelivery(repo, { path: worktree, branch: 'squad-1' }, true, failingStatus)).toBeNull();
+  });
+});
+
+describe('deliveryNextStep', () => {
+  const base = { branch: 'squad-1', worktreePath: 'D:/w/squad-1', commitsAhead: 2 } as const;
+
+  it('keeps what already landed in view while files are uncommitted', () => {
+    const staged = toDelivery({ ...base, dirtyFiles: 3, inMain: false, inStaging: true }, 't');
+    const landed = toDelivery({ ...base, dirtyFiles: 1, inMain: true, inStaging: true }, 't');
+
+    expect(staged.stage).toBe('uncommitted');
+    expect(staged.nextStep).toContain('đã lên staging');
+    expect(staged.nextStep).toContain('chạy lại staging-sync');
+    expect(landed.nextStep).toContain('đã có trong origin/main');
+  });
+
+  it('names the runnable staging-sync command with the worktree and branch', () => {
+    const step = toDelivery({ ...base, dirtyFiles: 0, inMain: false, inStaging: false }, 't').nextStep;
+
+    expect(step).toContain('staging-sync.py D:/w/squad-1 --branch squad-1');
+  });
 });

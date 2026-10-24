@@ -280,7 +280,8 @@ export interface WorkItemPorts {
   readonly delivery?: {
     /** Fetches origin for the repo; false when git failed. */
     fetch(repo: string): Promise<boolean>;
-    probe(repo: string, worktree: SquadWorktree, worktreePresent: boolean): Promise<DeliveryFacts | undefined>;
+    /** Undefined when the branch is gone; null when git could not answer (the last delivery stays). */
+    probe(repo: string, worktree: SquadWorktree, worktreePresent: boolean): Promise<DeliveryFacts | undefined | null>;
   };
 }
 
@@ -533,8 +534,8 @@ export class WorkItemService {
       if (worktree === undefined || fetchedAt === undefined) continue;
       const present = item.worktreeRemoved !== true && this.ports.worktrees.exists(worktree);
       const facts = await port.probe(repo, worktree, present);
-      // The item may have been removed or replaced while git ran.
-      if (this.items.get(item.id) !== item) continue;
+      // The item may have been removed or replaced while git ran; an unreadable check changes nothing.
+      if (this.items.get(item.id) !== item || facts === null) continue;
       const next = facts === undefined ? undefined : toDelivery(facts, fetchedAt);
       if (sameDelivery(item.delivery, next)) continue;
       if (next === undefined) delete item.delivery;
