@@ -274,6 +274,18 @@ export function WorkItemPanel({
       className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto py-2"
     >
       <NextStepBanner step={step} busy={busy} onAction={runStep} />
+
+      {item.claudeRun?.sessionId !== undefined && (
+        <details open className="px-2.5">
+          <summary className="cursor-pointer text-xs text-text">Nhật ký Claude</summary>
+          <ClaudeRunLog
+            client={client}
+            state={state}
+            sessionId={item.claudeRun.sessionId}
+            running={status === 'running'}
+          />
+        </details>
+      )}
       <dl className="grid grid-cols-[72px_minmax(0,1fr)] gap-x-3 gap-y-1.5 px-2.5 text-2xs">
         <dt className="text-text-muted">Trạng thái</dt>
         <dd className="text-text">{statusWordVi(status)}</dd>
@@ -376,18 +388,6 @@ export function WorkItemPanel({
             {/* Results saved before the board dropped colour codes still carry them. */}
             {withoutTerminalEscapes(item.result)}
           </pre>
-        </details>
-      )}
-
-      {item.claudeRun?.sessionId !== undefined && (
-        <details open className="px-2.5">
-          <summary className="cursor-pointer text-xs text-text">Nhật ký Claude</summary>
-          <ClaudeRunLog
-            client={client}
-            state={state}
-            sessionId={item.claudeRun.sessionId}
-            running={status === 'running'}
-          />
         </details>
       )}
 

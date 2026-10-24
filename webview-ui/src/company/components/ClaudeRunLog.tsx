@@ -29,7 +29,7 @@ export function ClaudeRunLog({ client, state, sessionId, running }: ClaudeRunLog
   }, [client, sessionId, running]);
 
   return (
-    <div data-testid="claude-run-log" className="mt-1 max-h-96 overflow-y-auto">
+    <div data-testid="claude-run-log" className="mt-1 max-h-[60vh] overflow-y-auto">
       <SessionActivityTab state={state} sessionId={sessionId} taskId={null} live={false} onJump={() => {}} />
     </div>
   );

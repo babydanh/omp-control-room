@@ -504,21 +504,21 @@ export function BoardShell({ client }: BoardShellProps) {
   }
 
   /**
-   * A squad child opens straight onto the session that runs it, as a session row does: its log
-   * is what the card is for while it runs or once it is done. Any other status asks something of
-   * the user (an answer, a review, a retry) or has no session yet, so it opens the item's panel.
+   * A work item card opens onto the agent that holds it, as a session row does: its live terminal
+   * and log are what the user wants to see, whatever the item's status. The composer below talks
+   * to that agent. Only an item no omp session or herdr pane holds (queued, or run by Claude Code)
+   * opens the item's panel, which leads with the Claude log.
    */
   function openWorkItemCard(ref: { id: string; workspacePath: string }): void {
     const item = workItemsOf(state, ref.workspacePath).items.find((entry) => entry.id === ref.id);
     const assignee = item?.assignee;
-    const showsLog = item?.squadRunId !== undefined && (item.status === 'running' || item.status === 'done');
-    if (showsLog && assignee?.kind === 'herdr' && assignee.paneId) {
+    if (assignee?.kind === 'herdr' && assignee.paneId) {
       if (state.herdrRoster.sleeping.some((entry) => entry.paneId === assignee.paneId)) openSleeping(assignee.paneId);
       else openHerdr(assignee.paneId);
       return;
     }
-    if (showsLog && assignee?.kind === 'session' && assignee.sessionId) {
-      if (state.sessions[assignee.sessionId] !== undefined) selectSession(assignee.sessionId);
+    if (assignee?.kind === 'session' && assignee.sessionId) {
+      if (state.sessions[assignee.sessionId] !== undefined) openSessionTab(assignee.sessionId, 'terminal');
       else selectWorkspaceSession(ref.workspacePath, assignee.sessionId);
       return;
     }
