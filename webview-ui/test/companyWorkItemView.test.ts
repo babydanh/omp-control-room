@@ -26,6 +26,7 @@ import {
   visibleWorkItems,
   WORK_ITEM_HEAD_MAX_CHARS,
   workItemCardHead,
+  workItemCardTarget,
   workItemKey,
   workItemsOf,
 } from '../src/company/workItemView.js';
@@ -411,5 +412,18 @@ describe('buildBoardLanes and work items', () => {
 
     expect(lanes.find((lane) => lane.id === 'running')?.workItems).toMatchObject([{ id: 'own', blocker: null }]);
     expect(lanes.find((lane) => lane.id === 'ready')?.workItems.map((card) => card.id)).toEqual(['other']);
+  });
+});
+
+describe('workItemCardTarget', () => {
+  it('TC-FEAT-01: opens a live pane\'s screen, and the item panel once its herdr tab is closed', () => {
+    const state = withWorkItems(boardWithRoster('all'), ACTIVE, [
+      item({ id: 'live', sequence: 1, status: 'done', assignee: { kind: 'herdr', paneId: 'p1' } }),
+      item({ id: 'closed', sequence: 2, status: 'done', assignee: { kind: 'herdr', paneId: 'gone' } }),
+    ]);
+    const items = workItemsOf(state, ACTIVE).items;
+
+    expect(workItemCardTarget(state, items.find((entry) => entry.id === 'live'))).toEqual({ kind: 'herdr', paneId: 'p1' });
+    expect(workItemCardTarget(state, items.find((entry) => entry.id === 'closed'))).toEqual({ kind: 'panel' });
   });
 });

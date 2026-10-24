@@ -75,7 +75,7 @@ import { useCompanyState } from '../useCompanyState.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useSessionLogBackfill } from '../useSessionLogBackfill.js';
 import { closeUsagePage, openUsagePage, useUsageRoute } from '../useUsageRoute.js';
-import { workItemsOf } from '../workItemView.js';
+import { workItemCardTarget, workItemsOf } from '../workItemView.js';
 import { AgentContextMenu } from './AgentContextMenu.js';
 import { AgentRail } from './AgentRail.js';
 import { AgentSidebar } from './AgentSidebar.js';
@@ -485,27 +485,23 @@ export function BoardShell({ client }: BoardShellProps) {
    */
   function openWorkItemCard(ref: { id: string; workspacePath: string }): void {
     const item = workItemsOf(state, ref.workspacePath).items.find((entry) => entry.id === ref.id);
-    const assignee = item?.assignee;
-    if (assignee?.kind === 'herdr' && assignee.paneId) {
-      const paneId = assignee.paneId;
-      if (state.herdrRoster.sleeping.some((entry) => entry.paneId === paneId)) {
-        openSleeping(paneId);
+    const target = workItemCardTarget(state, item);
+    switch (target.kind) {
+      case 'sleeping':
+        openSleeping(target.paneId);
         return;
-      }
-      if (state.herdr.agents.some((agent) => agent.paneId === paneId)) {
-        openHerdr(paneId);
+      case 'herdr':
+        openHerdr(target.paneId);
         return;
-      }
-      // The tab was closed: an empty "no longer in herdr" screen shows nothing, the item's panel does.
-      setOpened({ kind: 'workItem', ...ref });
-      return;
+      case 'session':
+        openSessionTab(target.sessionId, 'terminal');
+        return;
+      case 'workspaceSession':
+        selectWorkspaceSession(ref.workspacePath, target.sessionId);
+        return;
+      case 'panel':
+        setOpened({ kind: 'workItem', ...ref });
     }
-    if (assignee?.kind === 'session' && assignee.sessionId) {
-      if (state.sessions[assignee.sessionId] !== undefined) openSessionTab(assignee.sessionId, 'terminal');
-      else selectWorkspaceSession(ref.workspacePath, assignee.sessionId);
-      return;
-    }
-    setOpened({ kind: 'workItem', ...ref });
   }
 
   function openSessionTab(sessionId: string, tab: CompanyDrawerTab): void {

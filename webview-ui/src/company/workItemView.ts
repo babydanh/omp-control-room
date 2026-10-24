@@ -558,3 +558,32 @@ export function visibleWorkItems(state: CompanyViewState): VisibleWorkItem[] {
   }
   return rows;
 }
+
+/** Where a work item card opens: its agent's live view, or the item's own panel when no live agent holds it. */
+export type WorkItemCardTarget =
+  | { kind: 'herdr'; paneId: string }
+  | { kind: 'sleeping'; paneId: string }
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'workspaceSession'; sessionId: string }
+  | { kind: 'panel' };
+
+/**
+ * A card opens onto the agent that holds its item: a herdr pane (asleep or live) or a board session.
+ * A pane herdr no longer lists, its tab closed, opens the item's panel: an empty "no longer in
+ * herdr" screen shows nothing, the panel shows the result and history.
+ */
+export function workItemCardTarget(state: CompanyViewState, item: WorkItem | undefined): WorkItemCardTarget {
+  const assignee = item?.assignee;
+  if (assignee?.kind === 'herdr' && assignee.paneId) {
+    const paneId = assignee.paneId;
+    if (state.herdrRoster.sleeping.some((entry) => entry.paneId === paneId)) return { kind: 'sleeping', paneId };
+    if (state.herdr.agents.some((agent) => agent.paneId === paneId)) return { kind: 'herdr', paneId };
+    return { kind: 'panel' };
+  }
+  if (assignee?.kind === 'session' && assignee.sessionId) {
+    return state.sessions[assignee.sessionId] !== undefined
+      ? { kind: 'session', sessionId: assignee.sessionId }
+      : { kind: 'workspaceSession', sessionId: assignee.sessionId };
+  }
+  return { kind: 'panel' };
+}
