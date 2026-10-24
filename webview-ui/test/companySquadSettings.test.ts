@@ -15,6 +15,7 @@ const SETTINGS: SquadSettings = {
   maxSquadSessions: 12,
   maxPerRepo: 4,
   minFreeRamGb: 2,
+  minFreeDiskGb: 10,
   autoJudge: true,
   autoApproveNext: false,
   compactSquad: true,
@@ -44,6 +45,7 @@ describe('squadSettingsDraftOf', () => {
       maxSquadSessions: '12',
       maxPerRepo: '4',
       minFreeRamGb: '2',
+      minFreeDiskGb: '10',
       autoJudge: true,
       autoApproveNext: false,
       compactSquad: true,
@@ -156,6 +158,19 @@ describe('squadSettingsFromDraft', () => {
       expect(squadSettingsFromDraft(draftWith({ minFreeRamGb }))).toEqual({
         ok: false,
         reason: 'RAM trống tối thiểu là số GB, từ 0 trở lên.',
+      });
+    }
+  });
+
+  it('accepts the disk threshold range and refuses values outside 0 to 500 GB', () => {
+    expect(squadSettingsFromDraft(draftWith({ minFreeDiskGb: '12.5' }))).toEqual({
+      ok: true,
+      settings: { ...SETTINGS, minFreeDiskGb: 12.5 },
+    });
+    for (const minFreeDiskGb of ['-1', '500.1', '', 'abc']) {
+      expect(squadSettingsFromDraft(draftWith({ minFreeDiskGb }))).toEqual({
+        ok: false,
+        reason: 'Ổ đĩa trống tối thiểu là số GB, từ 0 đến 500.',
       });
     }
   });

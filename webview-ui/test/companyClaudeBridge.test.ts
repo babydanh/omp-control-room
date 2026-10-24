@@ -40,6 +40,7 @@ const SETTINGS: SquadSettings = {
   maxSquadSessions: 3,
   maxPerRepo: 4,
   minFreeRamGb: 2,
+  minFreeDiskGb: 10,
   autoJudge: true,
   autoApproveNext: false,
   compactSquad: false,

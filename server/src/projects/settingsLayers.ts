@@ -55,6 +55,7 @@ export function createProjectSettingsServices(runtime: ProjectSettingsRuntime): 
       claudeModelLeader: SQUAD_SETTINGS_DEFAULT.claudeModelLeader,
       claudeModelJudge: SQUAD_SETTINGS_DEFAULT.claudeModelJudge,
       maxParallel: SQUAD_SETTINGS_DEFAULT.maxParallel,
+      minFreeDiskGb: SQUAD_SETTINGS_DEFAULT.minFreeDiskGb ?? 10,
       maxClaudeRuns: SQUAD_SETTINGS_DEFAULT.maxClaudeRuns,
       maxAgyRuns: SQUAD_SETTINGS_DEFAULT.maxAgyRuns,
       ...(await runtime.globalSettings()),
@@ -79,7 +80,7 @@ function settingsFile(): DurableJsonFile<ParsedProjectSettingsFile> {
 }
 const SETTING_FIELDS: readonly ProjectSettingField[] = [
   'engineLeader', 'engineJudge', 'engineWorker', 'claudeModelLeader', 'claudeModelJudge',
-  'maxParallel', 'maxPerRepo', 'maxClaudeRuns', 'maxAgyRuns', 'worktreePrepare',
+  'maxParallel', 'maxPerRepo', 'minFreeDiskGb', 'maxClaudeRuns', 'maxAgyRuns', 'worktreePrepare',
 ];
 const SQUAD_FIELDS: readonly Exclude<ProjectSettingField, 'worktreePrepare'>[] =
   SETTING_FIELDS.filter((field): field is Exclude<ProjectSettingField, 'worktreePrepare'> => field !== 'worktreePrepare');
@@ -118,6 +119,10 @@ function validSetting(field: ProjectSettingField, value: unknown): boolean {
     case 'maxPerRepo':
       return typeof value === 'number' && Number.isInteger(value) &&
         value >= SQUAD_SETTINGS_BOUNDS.maxPerRepo.min && value <= SQUAD_SETTINGS_BOUNDS.maxPerRepo.max;
+    case 'minFreeDiskGb':
+      return typeof value === 'number' && Number.isFinite(value) &&
+        value >= SQUAD_SETTINGS_BOUNDS.minFreeDiskGb.min &&
+        value <= SQUAD_SETTINGS_BOUNDS.minFreeDiskGb.max;
     case 'maxClaudeRuns':
       return typeof value === 'number' && Number.isInteger(value) &&
         value >= SQUAD_SETTINGS_BOUNDS.maxClaudeRuns.min && value <= SQUAD_SETTINGS_BOUNDS.maxClaudeRuns.max;

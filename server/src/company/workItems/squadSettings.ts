@@ -10,7 +10,7 @@ import { isClaudeMcpServerName } from '../claudeCode/claudeMcp.js';
 import { isRecord } from '../typeGuards.js';
 
 export type SquadEngine = 'omp' | 'claude' | 'agy';
-/** Bytes in one gibibyte, the unit the RAM threshold is kept in. */
+/** Bytes in one gibibyte, the unit RAM and disk thresholds are kept in. */
 export const GIB = 1024 ** 3;
 
 /**
@@ -48,11 +48,12 @@ const CLAUDE_ALLOWED_TOOLS_DEFAULT: readonly string[] = [
 /** The settings a folder starts with, before the user changes any. */
 export const SQUAD_SETTINGS_DEFAULT: SquadSettings = {
   compactSquad: true,
+  autoJudge: true,
   maxParallel: 12,
   maxSquadSessions: 12,
   maxPerRepo: 4,
   minFreeRamGb: 2,
-  autoJudge: true,
+  minFreeDiskGb: 10,
   autoApproveNext: false,
   engineLeader: 'omp',
   engineJudge: 'omp',
@@ -74,6 +75,7 @@ export const SQUAD_SETTINGS_BOUNDS = {
   maxSquadSessions: { min: 0, max: 24 },
   maxPerRepo: { min: 1, max: 8 },
   minFreeRamGb: { min: 0, max: 256 },
+  minFreeDiskGb: { min: 0, max: 500 },
   maxClaudeRuns: { min: 1, max: 4 },
   maxAgyRuns: { min: 1, max: 4 },
   claudeMaxTurns: { min: 1, max: 200 },
@@ -155,6 +157,7 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
     maxSquadSessions,
     maxPerRepo,
     minFreeRamGb,
+    minFreeDiskGb,
     maxClaudeRuns,
     maxAgyRuns,
     claudeMaxTurns,
@@ -165,6 +168,8 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
     isIntegerIn(value.maxSquadSessions, maxSquadSessions.min, maxSquadSessions.max) &&
     (value.maxPerRepo === undefined || isIntegerIn(value.maxPerRepo, maxPerRepo.min, maxPerRepo.max)) &&
     isNumberIn(value.minFreeRamGb, minFreeRamGb.min, minFreeRamGb.max) &&
+    (value.minFreeDiskGb === undefined ||
+      isNumberIn(value.minFreeDiskGb, minFreeDiskGb.min, minFreeDiskGb.max)) &&
     typeof value.autoJudge === 'boolean' &&
     typeof value.compactSquad === 'boolean' &&
     typeof value.autoApproveNext === 'boolean' &&
@@ -198,6 +203,7 @@ export function parseSquadSettings(value: unknown): SquadSettings {
     maxSquadSessions,
     maxPerRepo,
     minFreeRamGb,
+    minFreeDiskGb,
     maxClaudeRuns,
     maxAgyRuns,
     claudeMaxTurns,
@@ -220,6 +226,9 @@ export function parseSquadSettings(value: unknown): SquadSettings {
     minFreeRamGb: isNumberIn(value.minFreeRamGb, minFreeRamGb.min, minFreeRamGb.max)
       ? value.minFreeRamGb
       : base.minFreeRamGb,
+    minFreeDiskGb: isNumberIn(value.minFreeDiskGb, minFreeDiskGb.min, minFreeDiskGb.max)
+      ? value.minFreeDiskGb
+      : base.minFreeDiskGb,
     autoJudge: typeof value.autoJudge === 'boolean' ? value.autoJudge : base.autoJudge,
     compactSquad:
       typeof value.compactSquad === 'boolean' ? value.compactSquad : base.compactSquad,

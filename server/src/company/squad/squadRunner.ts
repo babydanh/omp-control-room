@@ -21,6 +21,14 @@ const LEADER_MAX_OUTPUT_BYTES = 8 * 1024 * 1024;
 /** The name a turn carries in the errors the user reads, when the caller gives none. */
 const LEADER_LABEL = 'Đội trưởng';
 
+/** High keeps leader planning accurate without the extra latency of xhigh or max. */
+export const SQUAD_LEADER_THINKING = 'high';
+
+export function capSquadLeaderThinking(thinking: string): string | null {
+  if (thinking === '') return null;
+  return thinking === 'xhigh' || thinking === 'max' ? SQUAD_LEADER_THINKING : thinking;
+}
+
 const execFileAsync = promisify(execFile);
 
 /** A turn failure whose message is shown to the user as it is. */

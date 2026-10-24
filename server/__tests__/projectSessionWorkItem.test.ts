@@ -63,6 +63,7 @@ function createService(input: {
     schedule: () => () => undefined,
     catalog: async () => ({ repos: [REPO, SHARED_CHECKOUT], agents: [], claudeAgents: [] }),
     freeMemoryBytes: () => 8 * GIB,
+    freeDiskBytes: async () => 20 * GIB,
     judge: async () => '',
     overlaps: async () => [],
     boardWatching: () => false,

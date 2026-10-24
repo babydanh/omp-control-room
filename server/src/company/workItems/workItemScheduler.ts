@@ -72,7 +72,7 @@ export interface SchedulerMember {
   readonly squadRepo: string | undefined;
 }
 
-/** An item that holds a member right now. */
+/** An active item or preparation that reserves scheduler capacity. */
 export interface SchedulerHold {
   readonly memberKey: string;
   readonly sequence: number;

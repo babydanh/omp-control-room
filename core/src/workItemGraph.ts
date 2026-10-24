@@ -167,6 +167,9 @@ export function blockerReason(blocker: WorkItemBlocker): string {
   if (blocker.kind === 'worktree') {
     return `Chưa tạo được worktree riêng cho việc này: ${blocker.detail ?? 'lỗi không rõ'}.`;
   }
+  if (blocker.kind === 'disk_full') {
+    return blocker.detail ?? 'Ổ đĩa trống chưa đủ để tạo worktree, việc vẫn đang chờ.';
+  }
   return `Việc #${blocker.sequence ?? 0} bị lỗi, gỡ chờ hoặc giao lại.`;
 }
 

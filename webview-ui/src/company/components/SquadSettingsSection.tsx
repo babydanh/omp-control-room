@@ -13,6 +13,7 @@ import type { CompanyClient } from '../companyClient.js';
 import {
   CLAUDE_SETTING_LIMITS,
   CLI_SETTING_LIMITS,
+  DISK_SETTING_LIMITS,
   permissionOf,
   SQUAD_COUNT_LIMITS,
   type SquadEngine,
@@ -107,6 +108,7 @@ function SquadSettingsForm({
   const parallel = SQUAD_COUNT_LIMITS.maxParallel;
   const sessions = SQUAD_COUNT_LIMITS.maxSquadSessions;
   const perRepo = SQUAD_COUNT_LIMITS.maxPerRepo;
+  const disk = DISK_SETTING_LIMITS.minFreeDiskGb;
   const models = CLAUDE_SETTING_LIMITS.modelChars;
   const claudeRuns = CLI_SETTING_LIMITS.maxClaudeRuns;
   const agyRuns = CLI_SETTING_LIMITS.maxAgyRuns;
@@ -169,6 +171,17 @@ function SquadSettingsForm({
         step={0.5}
         disabled={command.pending}
         onChange={(value) => setDraft((current) => ({ ...current, minFreeRamGb: value }))}
+      />
+      <NumberSetting
+        id="squad-setting-min-free-disk"
+        label="Ổ đĩa trống tối thiểu (GB)"
+        hint={`Dưới mức này thì chờ trước khi tạo worktree, từ ${disk.min} đến ${disk.max} GB.`}
+        value={draft.minFreeDiskGb}
+        min={disk.min}
+        max={disk.max}
+        step={0.5}
+        disabled={command.pending}
+        onChange={(value) => setDraft((current) => ({ ...current, minFreeDiskGb: value }))}
       />
       <ToggleSetting
         id="squad-setting-auto-judge"

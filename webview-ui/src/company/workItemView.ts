@@ -287,6 +287,8 @@ export function blockerChip(item: {
         : { text: `Repo đầy ${blocker.running}/${blocker.limit}`, tone: 'muted' };
     case 'pool_full':
       return { text: 'Hết phiên chạy', tone: 'muted' };
+    case 'disk_full':
+      return { text: 'Chờ ổ đĩa', tone: 'muted' };
   }
 }
 
@@ -331,6 +333,8 @@ export function blockerSentence(blocker: WorkItemBlocker | null | undefined): st
       return blocker.running === undefined || blocker.limit === undefined
         ? `Repo ${blocker.area ?? ''} đang đầy, chờ có chỗ trống.`
         : `Repo ${blocker.area ?? ''} đang chạy ${blocker.running}/${blocker.limit} việc, chờ có chỗ trống.`;
+    case 'disk_full':
+      return blocker.detail ?? 'Ổ đĩa trống chưa đủ để tạo worktree, việc vẫn đang chờ.';
   }
 }
 

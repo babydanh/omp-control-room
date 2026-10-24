@@ -3,6 +3,7 @@ import * as fs from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 import {
+  capSquadLeaderThinking,
   createLiveReader,
   createOmpLeaderRunner,
   execLeaderProcess,
@@ -76,6 +77,20 @@ describe('leaderArgs', () => {
     expect(at).toBeGreaterThan(-1);
     expect(args[at + 1]).toBe('high');
     expect(args.at(-1)).toBe('@/tmp/p/prompt.md');
+  });
+
+  it('caps leader thinking at high and preserves lower director levels', () => {
+    const args = leaderArgs(
+      COMMAND,
+      'm',
+      capSquadLeaderThinking('max'),
+      '/tmp/p/prompt.md',
+    );
+    const at = args.indexOf('--thinking');
+    expect(args.slice(at, at + 2)).toEqual(['--thinking', 'high']);
+    expect(capSquadLeaderThinking('xhigh')).toBe('high');
+    expect(capSquadLeaderThinking('medium')).toBe('medium');
+    expect(capSquadLeaderThinking('')).toBeNull();
   });
 });
 

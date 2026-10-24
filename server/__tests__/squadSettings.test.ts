@@ -11,6 +11,7 @@ const VALID = {
   maxSquadSessions: 12,
   maxPerRepo: 4,
   minFreeRamGb: 2,
+  minFreeDiskGb: 10,
   autoJudge: true,
   autoApproveNext: false,
   compactSquad: true,
@@ -55,6 +56,7 @@ describe('parseSquadSettings', () => {
       maxParallel: SQUAD_SETTINGS_DEFAULT.maxParallel,
       maxPerRepo: SQUAD_SETTINGS_DEFAULT.maxPerRepo,
       maxSquadSessions: 2,
+      minFreeDiskGb: SQUAD_SETTINGS_DEFAULT.minFreeDiskGb,
       minFreeRamGb: 1.5,
       autoJudge: SQUAD_SETTINGS_DEFAULT.autoJudge,
       compactSquad: SQUAD_SETTINGS_DEFAULT.compactSquad,
@@ -72,6 +74,11 @@ describe('parseSquadSettings', () => {
       claudeAllowedTools: SQUAD_SETTINGS_DEFAULT.claudeAllowedTools,
       claudeWorkerMcp: SQUAD_SETTINGS_DEFAULT.claudeWorkerMcp,
     });
+  });
+  it('defaults the optional disk threshold and keeps valid fractional values', () => {
+    expect(parseSquadSettings({}).minFreeDiskGb).toBe(10);
+    expect(parseSquadSettings({ minFreeDiskGb: 20.5 }).minFreeDiskGb).toBe(20.5);
+    expect(parseSquadSettings({ minFreeDiskGb: 501 }).minFreeDiskGb).toBe(10);
   });
   it('migrates legacy engines while preferring valid current fields', () => {
     expect(parseSquadSettings({ brain: 'claude', preferClaude: true })).toMatchObject({
@@ -153,6 +160,7 @@ describe('isSquadSettings', () => {
   it('accepts bounds and an older settings object without maxPerRepo', () => {
     expect(isSquadSettings({ ...VALID, maxParallel: 24, maxSquadSessions: 24, maxPerRepo: 8 })).toBe(true);
     expect(isSquadSettings({ ...VALID, maxParallel: 1, maxSquadSessions: 0 })).toBe(true);
+    expect(isSquadSettings({ ...VALID, minFreeDiskGb: undefined })).toBe(true);
   });
 
   it('refuses values outside bounds or a fraction for an integer setting', () => {
@@ -161,6 +169,8 @@ describe('isSquadSettings', () => {
     expect(isSquadSettings({ ...VALID, maxSquadSessions: 25 })).toBe(false);
     expect(isSquadSettings({ ...VALID, maxPerRepo: 9 })).toBe(false);
     expect(isSquadSettings({ ...VALID, minFreeRamGb: -1 })).toBe(false);
+    expect(isSquadSettings({ ...VALID, minFreeDiskGb: -1 })).toBe(false);
+    expect(isSquadSettings({ ...VALID, minFreeDiskGb: 501 })).toBe(false);
     expect(isSquadSettings({ ...VALID, autoJudge: undefined })).toBe(false);
     expect(isSquadSettings({ ...VALID, compactSquad: undefined })).toBe(false);
     expect(isSquadSettings(null)).toBe(false);

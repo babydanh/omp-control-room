@@ -78,6 +78,7 @@ class Fixture {
   readonly sleepingPanes: { paneId: string; cwd: string }[] = [];
   readonly compactSquadRunIds = new Set<string>();
   poolFull = false;
+  readonly worktreesStarted: { repo: string; shortId: string }[] = [];
   readonly worktreesMade: { repo: string; shortId: string }[] = [];
   worktreeError: Error | null = null;
   /** Whether a made worktree's directory is still on disk. */
@@ -87,11 +88,13 @@ class Fixture {
   readonly worktreesRemoved: string[] = [];
   /** While set, making a worktree waits on it: a slow `git worktree add`. */
   worktreeGate: Promise<void> | null = null;
+  readonly diskChecks: string[] = [];
   readonly saves: WorkItemsFile[] = [];
   saveError: Error | null = null;
   repos: string[] = [];
   agents: readonly OmpAgentInfo[] = BUNDLED_AGENTS;
   freeBytes = 8 * GIB;
+  freeDiskBytes = 20 * GIB;
   readonly published: CompanyWorkItemsMessage[] = [];
   now = T0;
   readonly claude = new FakeClaudeRuns();
@@ -164,8 +167,13 @@ class Fixture {
       },
       catalog: async () => ({ repos: this.repos, agents: this.agents, claudeAgents: [] }),
       freeMemoryBytes: () => this.freeBytes,
+      freeDiskBytes: async (repoPath) => {
+        this.diskChecks.push(repoPath);
+        return this.freeDiskBytes;
+      },
       worktrees: {
         create: async (repo, shortId) => {
+          this.worktreesStarted.push({ repo, shortId });
           if (this.worktreeError !== null) throw this.worktreeError;
           if (this.worktreeGate !== null) await this.worktreeGate;
           this.worktreesMade.push({ repo, shortId });
@@ -1375,6 +1383,68 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     await f.service.reconcileNow();
     expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'chat' }]);
     expect(itemOf(f, id).status).toBe('running');
+  });
+
+  it('waits for free disk only when a new worktree is needed', async () => {
+    const f = await repoFixture();
+    f.freeDiskBytes = 8.3 * GIB;
+    const editingId = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa API',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+    });
+    const editing = itemOf(f, editingId);
+    expect(editing).toMatchObject({ status: 'queued', blocker: { kind: 'disk_full' } });
+    expect(editing.reason).toMatch(/^Ổ .+ còn 8,3 GB, cần 10 GB để tạo worktree\.$/);
+
+    expect(f.diskChecks).toEqual([REPO]);
+    expect(f.worktreesMade).toEqual([]);
+
+    const readOnly = await repoFixture();
+    readOnly.freeDiskBytes = 8.3 * GIB;
+    const readOnlyId = await readOnly.service.create({
+      requestId: randomUUID(),
+      text: 'Đọc API',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+      role: 'worker',
+      agent: 'scout',
+    });
+    expect(itemOf(readOnly, readOnlyId).status).toBe('running');
+    expect(readOnly.diskChecks).toEqual([]);
+    expect(readOnly.worktreesMade).toEqual([]);
+    expect(readOnly.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+  });
+
+  it('starts worktree preparations concurrently while reserving the per-repo cap', async () => {
+    const f = await repoFixture();
+    let release = (): void => undefined;
+    f.worktreeGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const creating = f.service.createWorkItems(
+      Array.from({ length: 5 }, (_, index) => ({
+        text: `Sửa phần ${index + 1}`,
+        assignee: { kind: 'new-session' as const },
+        repo: REPO,
+        role: 'worker' as const,
+      })),
+      { squadRunId: randomUUID() },
+    );
+
+    await vi.waitFor(() => expect(f.worktreesStarted).toHaveLength(4));
+    expect(f.worktreesMade).toHaveLength(0);
+    expect(f.service.snapshot().items[4]).toMatchObject({
+      status: 'queued',
+      blocker: { kind: 'repo_full', running: 4, limit: 4 },
+    });
+
+    release();
+    await creating;
+    expect(f.worktreesMade).toHaveLength(4);
+    expect(f.openedWith).toHaveLength(4);
   });
 
   it('runs an editing new session in its own worktree, made before its session opens', async () => {

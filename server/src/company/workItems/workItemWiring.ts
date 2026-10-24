@@ -5,6 +5,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
+import { statfs } from 'node:fs/promises';
 import { freemem, homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -194,6 +195,10 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     },
     catalog: () => catalogFor(options.workspacePath),
     freeMemoryBytes: () => freemem(),
+    freeDiskBytes: async (repoPath) => {
+      const { bavail, bsize } = await statfs(repoPath);
+      return bavail * bsize;
+    },
     worktrees: {
       create: (repo, shortId) =>
         createSquadWorktree({

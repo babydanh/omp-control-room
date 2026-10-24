@@ -3910,7 +3910,7 @@ components:
 
     WorkItemBlockerKind:
       type: string
-      enum: [agent, dependency, failed, capacity, area, no_member, busy_checkout, pool_full, repo_full, worktree]
+      enum: [agent, dependency, failed, capacity, area, no_member, busy_checkout, pool_full, repo_full, worktree, disk_full]
 
     WorkItemBlocker:
       type: object
@@ -3925,6 +3925,7 @@ components:
         this item needs; area names the checkout. pool_full: the omp runner pool has no free slot; the item retries
         on its own. repo_full: the repo has reached its running-item limit; running and limit give the count and area
         names the repo. worktree: the squad could not create the isolated worktree for this item; detail says why.
+        disk_full: free disk space is below the worktree threshold; detail gives the drive and amounts.
       properties:
         kind:
           $ref: '#/components/schemas/WorkItemBlockerKind'
@@ -4180,8 +4181,9 @@ components:
       description: >-
         Per-folder limits and CLI choices for the squad scheduler. maxParallel caps running work items in the folder.
         maxPerRepo caps running work items in one repo. maxSquadSessions caps the omp sessions the squad opens.
-        minFreeRamGb is the free memory needed before opening one. engineLeader, engineJudge, and engineWorker select
-        a CLI independently for leader, judge, and automatic worker runs. All three default to omp. autoJudge is read
+        minFreeRamGb is the free memory needed before opening one. minFreeDiskGb is the free space needed before
+        creating a worktree. engineLeader, engineJudge, and engineWorker select a CLI independently for leader, judge,
+        and automatic worker runs. All three default to omp. autoJudge is read
         by the judge in a later phase. autoApproveNext approves a leader's proposal by itself, the first one of a run
         included, when it has no completeness warning.
       properties:
@@ -4201,6 +4203,10 @@ components:
           type: number
           minimum: 0
           maximum: 256
+        minFreeDiskGb:
+          type: number
+          minimum: 0
+          maximum: 500
         autoJudge:
           type: boolean
         autoApproveNext:
@@ -8739,7 +8745,7 @@ components:
 
     ProjectSettingField:
       type: string
-      enum: [engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxParallel, maxPerRepo, maxClaudeRuns, maxAgyRuns, worktreePrepare]
+      enum: [engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxParallel, maxPerRepo, minFreeDiskGb, maxClaudeRuns, maxAgyRuns, worktreePrepare]
 
     ProjectSettingValue:
       anyOf:
@@ -8754,6 +8760,9 @@ components:
           minimum: 1
           maximum: 8
         - $ref: '#/components/schemas/ProjectPrepareScript'
+        - type: number
+          minimum: 0
+          maximum: 500
 
     ProjectEngine:
       type: string
@@ -8789,6 +8798,10 @@ components:
           type: integer
           minimum: 1
           maximum: 8
+        minFreeDiskGb:
+          type: number
+          minimum: 0
+          maximum: 500
         maxClaudeRuns:
           type: integer
           minimum: 1
@@ -8841,6 +8854,9 @@ components:
           type: string
           enum: [global, project, folder]
         maxPerRepo:
+          type: string
+          enum: [global, project, folder]
+        minFreeDiskGb:
           type: string
           enum: [global, project, folder]
         maxClaudeRuns:

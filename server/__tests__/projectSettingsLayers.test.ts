@@ -127,8 +127,37 @@ describe('project settings layers', () => {
       type: 'projectSettingsSet', requestId: 'bad', scope: 'folder', nodeId: folderId,
       field: 'maxParallel', value: 0,
     }, deps)).rejects.toThrow('Giá trị cài đặt không hợp lệ.');
+    await expect(setProjectSettings({
+      type: 'projectSettingsSet', requestId: 'bad-disk', scope: 'folder', nodeId: folderId,
+      field: 'minFreeDiskGb', value: 501,
+    }, deps)).rejects.toThrow('Giá trị cài đặt không hợp lệ.');
     expect(applied).toHaveLength(0);
     expect(folderSettings.maxParallel).toBe(SQUAD_SETTINGS_DEFAULT.maxParallel);
+  });
+
+  it('layers the disk threshold and applies it to the active folder', async () => {
+    await setProjectSettings({
+      type: 'projectSettingsSet', requestId: 'project-disk', scope: 'project', nodeId: projectId,
+      field: 'minFreeDiskGb', value: 24.5,
+    }, deps);
+    await setProjectSettings({
+      type: 'projectSettingsSet', requestId: 'folder-disk', scope: 'folder', nodeId: folderId,
+      field: 'minFreeDiskGb', value: 7.5,
+    }, deps);
+
+    let result = await getProjectSettings({ type: 'projectSettingsRequest', requestId: 'disk-read', nodeId: folderId }, deps);
+    expect(result.values.minFreeDiskGb).toBe(7.5);
+    expect(result.sources.minFreeDiskGb).toBe('folder');
+    expect(folderSettings.minFreeDiskGb).toBe(7.5);
+
+    await clearProjectSettings({
+      type: 'projectSettingsClear', requestId: 'folder-disk-clear', scope: 'folder', nodeId: folderId,
+      field: 'minFreeDiskGb',
+    }, deps);
+    result = await getProjectSettings({ type: 'projectSettingsRequest', requestId: 'disk-read-project', nodeId: folderId }, deps);
+    expect(result.values.minFreeDiskGb).toBe(24.5);
+    expect(result.sources.minFreeDiskGb).toBe('project');
+    expect(folderSettings.minFreeDiskGb).toBe(24.5);
   });
 
   it('migrates legacy folder settings that differ from defaults as folder overrides', async () => {

@@ -94,6 +94,7 @@ class JudgeFixture {
       },
       catalog: async () => ({ repos: [], agents: BUNDLED_AGENTS, claudeAgents: [] }),
       freeMemoryBytes: () => 8 * GIB,
+      freeDiskBytes: async () => 20 * GIB,
       judge: (prompt, signal) =>
         new Promise<string>((resolve, reject) => {
           this.judgeTurns.push({ prompt, signal, resolve, reject });

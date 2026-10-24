@@ -69,6 +69,7 @@ class Fixture {
         claudeAgents: ['reviewer'],
       }),
       freeMemoryBytes: () => 8 * GIB,
+      freeDiskBytes: async () => 20 * GIB,
       worktrees: {
         create: async (repo, shortId) => {
           this.worktreesMade.push(shortId);

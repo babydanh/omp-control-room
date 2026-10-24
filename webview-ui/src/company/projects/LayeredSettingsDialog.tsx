@@ -25,6 +25,7 @@ interface SettingFieldDefinition {
   type: 'engine' | 'model' | 'number' | 'prepare';
   min?: number;
   max?: number;
+  step?: number;
 }
 
 const FIELDS: readonly SettingFieldDefinition[] = [
@@ -35,6 +36,7 @@ const FIELDS: readonly SettingFieldDefinition[] = [
   { field: 'claudeModelJudge', label: 'Model Claude · Thẩm định', type: 'model' },
   { field: 'maxParallel', label: 'Việc chạy song song', type: 'number', min: 1, max: 24 },
   { field: 'maxPerRepo', label: 'Mỗi repo chạy cùng lúc', type: 'number', min: 1, max: 8 },
+  { field: 'minFreeDiskGb', label: 'Ổ đĩa trống tối thiểu (GB)', type: 'number', min: 0, max: 500, step: 0.5 },
   { field: 'maxClaudeRuns', label: 'Phiên Claude đồng thời', type: 'number', min: 1, max: 4 },
   { field: 'maxAgyRuns', label: 'Phiên agy đồng thời', type: 'number', min: 1, max: 4 },
   { field: 'worktreePrepare', label: 'Chuẩn bị worktree', type: 'prepare' },
@@ -188,7 +190,7 @@ function SettingInput({ definition, value, onChange }: {
     );
   }
   if (definition.type === 'number') {
-    return <input className={fieldClass} type="number" min={definition.min} max={definition.max} step={1} value={typeof value === 'number' ? value : ''} onChange={(event) => onChange(Number(event.target.value))} />;
+    return <input className={fieldClass} type="number" min={definition.min} max={definition.max} step={definition.step ?? 1} value={typeof value === 'number' ? value : ''} onChange={(event) => onChange(Number(event.target.value))} />;
   }
   if (definition.type === 'prepare') {
     const script = isPrepareScript(value) ? value : { argv: [], timeoutMs: 60_000 };

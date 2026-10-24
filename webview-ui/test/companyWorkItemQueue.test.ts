@@ -116,6 +116,10 @@ describe('blockerChip', () => {
       text: 'Hết phiên chạy',
       tone: 'muted',
     });
+    expect(blockerChip({ blocker: { kind: 'disk_full' } })).toEqual({
+      text: 'Chờ ổ đĩa',
+      tone: 'muted',
+    });
   });
 });
 

@@ -107,7 +107,7 @@ import {
 } from './hostModelRoles.js';
 import type { OmpRunnerCommand } from './ompRunner.js';
 import { SQUAD_LEADER_REPLY_SCHEMA } from './squad/squadLeaderSchema.js';
-import { createOmpLeaderRunner } from './squad/squadRunner.js';
+import { capSquadLeaderThinking, createOmpLeaderRunner } from './squad/squadRunner.js';
 import { type SquadWiring, startSquad } from './squad/squadWiring.js';
 import { UsageLedger } from './usageService.js';
 import type { PrerequisiteCheck } from './verificationRunner.js';
@@ -1174,7 +1174,7 @@ async function openOwnerCompanyHost(
           command: hostModelRolesCommand(options),
           cwd: store.workspacePath,
           model: director.model,
-          thinking: director.thinking === '' ? null : director.thinking,
+          thinking: capSquadLeaderThinking(director.thinking),
         }),
         claude: createClaudeTurnRunner({
           cwd: store.workspacePath,

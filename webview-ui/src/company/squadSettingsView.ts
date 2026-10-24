@@ -13,6 +13,10 @@ export const SQUAD_COUNT_LIMITS = {
   maxPerRepo: { min: 1, max: 8 },
 } as const;
 
+export const DISK_SETTING_LIMITS = {
+  minFreeDiskGb: { min: 0, max: 500 },
+} as const;
+
 /** The bounds of external CLI run counts. The server enforces the same bounds. */
 export const CLI_SETTING_LIMITS = {
   maxClaudeRuns: { min: 1, max: 4 },
@@ -43,6 +47,7 @@ export interface SquadSettingsDraft {
   maxSquadSessions: string;
   maxPerRepo: string;
   minFreeRamGb: string;
+  minFreeDiskGb: string;
   autoJudge: boolean;
   autoApproveNext: boolean;
   compactSquad: boolean;
@@ -83,6 +88,7 @@ export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraf
     maxSquadSessions: String(settings.maxSquadSessions),
     maxPerRepo: String(settings.maxPerRepo ?? 4),
     minFreeRamGb: String(settings.minFreeRamGb),
+    minFreeDiskGb: String(settings.minFreeDiskGb ?? 10),
     autoJudge: settings.autoJudge,
     compactSquad: settings.compactSquad,
     autoApproveNext: settings.autoApproveNext,
@@ -163,6 +169,11 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
   const minFreeRamGb = numberOf(draft.minFreeRamGb);
   if (minFreeRamGb === null || minFreeRamGb < 0) {
     return { ok: false, reason: 'RAM trống tối thiểu là số GB, từ 0 trở lên.' };
+  }
+  const disk = DISK_SETTING_LIMITS.minFreeDiskGb;
+  const minFreeDiskGb = numberIn(draft.minFreeDiskGb, disk.min, disk.max);
+  if (minFreeDiskGb === null) {
+    return { ok: false, reason: `Ổ đĩa trống tối thiểu là số GB, từ ${disk.min} đến ${disk.max}.` };
   }
   const models = CLAUDE_SETTING_LIMITS.modelChars;
   const claudeModelLeader = modelIn(draft.claudeModelLeader, models.min, models.max);
@@ -246,6 +257,7 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
       maxSquadSessions,
       maxPerRepo,
       minFreeRamGb,
+      minFreeDiskGb,
       autoJudge: draft.autoJudge,
       compactSquad: draft.compactSquad,
       autoApproveNext: draft.autoApproveNext,

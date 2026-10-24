@@ -18,6 +18,8 @@
  * Phase 2 (squad leader) creates items through {@link WorkItemService.createWorkItems}.
  */
 
+import { parse as parsePath } from 'node:path';
+
 import type {
   AgentRole,
   CompanyRole,
@@ -242,6 +244,8 @@ export interface WorkItemPorts {
   catalog(): Promise<WorkItemCatalog>;
   /** Free memory in bytes, read whenever the scheduler may open a session. */
   freeMemoryBytes(): number;
+  /** Free disk space in bytes on the filesystem containing the repo path. */
+  freeDiskBytes(repoPath: string): Promise<number>;
   /** Runs one judge turn and resolves with its raw text. Rejects when the turn fails or aborts. */
   judge(prompt: string, signal: AbortSignal): Promise<string>;
   /** The ledger's overlap scans, read fresh. Rejects when the ledger cannot answer. */
@@ -324,10 +328,24 @@ function awaitedMessage(sequences: readonly number[]): string {
   return `Không huỷ được: ${names} đang chờ việc này. Hãy bỏ việc này khỏi danh sách chờ của các việc đó trước.`;
 }
 
-/** The folder's herdr and session views, read once for a pass or a snapshot. */
+/** The folder's herdr and session views, read together for a scheduling decision or snapshot. */
 interface FolderView {
   readonly roster: WorkItemRosterView;
   readonly sessions: readonly WorkItemSessionView[];
+}
+
+const DISK_GB_FORMAT = new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 });
+
+function diskDriveLabel(repo: string): string {
+  const root = parsePath(repo).root;
+  return root.replace(/[\\/]+$/, '') || root || repo;
+}
+
+function needsNewWorktree(item: StoredWorkItem, decision: StartDecision): boolean {
+  if (item.worktree !== undefined || item.inPlace === true) return false;
+  if (decision.kind === 'open') return decision.isolate;
+  if (decision.kind === 'claude' || decision.kind === 'agy') return !decision.readOnly;
+  return false;
 }
 
 /** Keeps a short text of an error for a reason line. */
@@ -402,8 +420,10 @@ export class WorkItemService {
   private disposed = false;
   private readonly changeListeners = new Set<() => void>();
   private readonly settledListeners = new Set<(item: WorkItem) => void>();
-  /** Items held back with the reason they cannot start yet: the omp pool is full or the worktree failed. */
+  /** Items held with the reason their attempted start is waiting: pool, worktree, or disk space. */
   private readonly held = new Map<string, WorkItemBlocker>();
+  /** Starts selected items once; queued items in this map reserve their scheduler slots. */
+  private readonly inFlightStarts = new Map<string, StartDecision>();
   private holdRetryPending = false;
   /** Judge turns in flight by item id: the run that may still apply, and the handle that aborts it. */
   private readonly judgeRuns = new Map<string, { runId: number; controller: AbortController }>();
@@ -1346,22 +1366,68 @@ export class WorkItemService {
     }
     this.reconcileClaudeRuns();
     this.reconcileAgyRuns();
-    await this.startQueued(view);
+    await this.startQueued();
   }
 
-  /** Starts each ready queued item the scheduler lets go, in queue order, one decision at a time. */
-  private async startQueued(view: FolderView): Promise<void> {
+  /** Makes sequential scheduling decisions, then waits for all selected worktree starts together. */
+  private async startQueued(): Promise<void> {
+    const parallelStarts: Promise<void>[] = [];
     for (const candidate of this.queueOrder()) {
-      // An earlier start may have saved, failed or cancelled items, so each is checked as it comes.
-      if (this.items.get(candidate.id) !== candidate || candidate.status !== 'queued') continue;
+      // Earlier starts may save, fail or cancel items, so each candidate gets a fresh context.
+      if (
+        this.items.get(candidate.id) !== candidate ||
+        candidate.status !== 'queued' ||
+        this.inFlightStarts.has(candidate.id)
+      ) continue;
       if (!this.isReady(candidate)) continue;
-      const decision = decideStart(this.schedulerItem(candidate), this.schedulerContext(view));
+      const decision = decideStart(this.schedulerItem(candidate), this.schedulerContext(this.view()));
       if (decision.kind === 'wait') {
         if (this.held.delete(candidate.id)) this.ports.publish(this.snapshot());
         continue;
       }
-      await this.start(candidate, decision);
+      const createsWorktree = needsNewWorktree(candidate, decision);
+      this.held.delete(candidate.id);
+      this.inFlightStarts.set(candidate.id, decision);
+      const starting = (async (): Promise<void> => {
+        if (createsWorktree) {
+          const blocker = await this.worktreeDiskBlocker(candidate.repo ?? this.workspacePath);
+          if (blocker !== undefined) {
+            if (this.items.get(candidate.id) === candidate && candidate.status === 'queued') {
+              this.hold(candidate, blocker);
+            }
+            return;
+          }
+        }
+        await this.start(candidate, decision);
+      })().finally(() => this.inFlightStarts.delete(candidate.id));
+      if (createsWorktree) parallelStarts.push(starting);
+      else await starting;
     }
+    await Promise.all(parallelStarts);
+  }
+
+  private async worktreeDiskBlocker(repo: string): Promise<WorkItemBlocker | undefined> {
+    const drive = diskDriveLabel(repo);
+    let freeBytes: number;
+    try {
+      freeBytes = await this.ports.freeDiskBytes(repo);
+    } catch (error) {
+      return {
+        kind: 'disk_full',
+        area: drive,
+        detail: clip(
+          `Không đọc được dung lượng trống của ổ ${drive}: ${describe(error)}. Chờ kiểm tra lại trước khi tạo worktree.`,
+          WORK_ITEM_BLOCKER_DETAIL_MAX_CHARS,
+        ),
+      };
+    }
+    const requiredGb = this.settings.minFreeDiskGb ?? 10;
+    if (freeBytes >= requiredGb * GIB) return undefined;
+    return {
+      kind: 'disk_full',
+      area: drive,
+      detail: `Ổ ${drive} còn ${DISK_GB_FORMAT.format(freeBytes / GIB)} GB, cần ${DISK_GB_FORMAT.format(requiredGb)} GB để tạo worktree.`,
+    };
   }
 
   /**
@@ -1490,9 +1556,12 @@ export class WorkItemService {
     // Agents are judged by the scheduler below; the dependency check never reads them.
     const blocker = blockerOf(item.dependsOn, (id) => this.dependencyState(item, id), false);
     if (blocker !== null) return { ...wire, blocker, reason: blockerReason(blocker) };
+    const held = this.held.get(item.id);
+    if (this.inFlightStarts.has(item.id)) {
+      return held === undefined ? wire : { ...wire, blocker: held, reason: blockerReason(held) };
+    }
     const decision = decideStart(this.schedulerItem(item), this.schedulerContext(view));
     if (decision.kind === 'wait') return { ...wire, blocker: decision.blocker, reason: decision.reason };
-    const held = this.held.get(item.id);
     if (held === undefined) return wire;
     return { ...wire, blocker: held, reason: blockerReason(held) };
   }
@@ -1548,17 +1617,34 @@ export class WorkItemService {
         checkout: item.inPlace === true ? item.repo : checkouts.get(memberKey),
       });
     }
+    for (const [id] of this.inFlightStarts) {
+      const item = this.items.get(id);
+      if (item === undefined || item.status !== 'queued') continue;
+      holds.push({
+        memberKey: `preparing:${id}`,
+        sequence: item.sequence,
+        readOnly: this.isReadOnly(item.agent),
+        areas: item.areas ?? [],
+        repo: item.repo ?? this.workspacePath,
+        checkout: item.inPlace === true ? item.repo : undefined,
+      });
+    }
     const squadSessionsOpen = this.squadSessionIds.filter((id) =>
       view.sessions.some((session) => id === session.id && observeSessionStatus(session.status) !== 'gone') ||
       view.roster.panes.some((pane) => pane.paneId === id),
     ).length;
+    const preparingSessions = [...this.inFlightStarts].filter(([id, decision]) => {
+      if (decision.kind !== 'open') return false;
+      const item = this.items.get(id);
+      return item !== undefined && item.status === 'queued' && item.assignee.kind !== 'session';
+    }).length;
     return {
       members,
       holds,
       maxParallel: this.settings.maxParallel,
       maxPerRepo: this.settings.maxPerRepo ?? 4,
       maxSquadSessions: this.settings.maxSquadSessions,
-      squadSessionsOpen,
+      squadSessionsOpen: squadSessionsOpen + preparingSessions,
       freeBytes: this.ports.freeMemoryBytes(),
       minFreeBytes: this.settings.minFreeRamGb * GIB,
       claudeRunsOpen: this.claudeRunsOpen(),

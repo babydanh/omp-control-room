@@ -1210,6 +1210,7 @@ describe('company client commands', () => {
         schedule: () => () => undefined,
         catalog: async () => ({ repos: [], agents: [], claudeAgents: [] }),
         freeMemoryBytes: () => 8 * 1024 ** 3,
+        freeDiskBytes: async () => 20 * 1024 ** 3,
         worktrees: {
           create: async (repo, shortId) => ({
             path: path.join(repo, '.worktrees', `squad-${shortId}`),

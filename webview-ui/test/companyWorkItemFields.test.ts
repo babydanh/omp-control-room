@@ -140,6 +140,9 @@ describe('blockerSentence', () => {
     expect(blockerSentence({ kind: 'pool_full' })).toBe(
       'Đã hết phiên chạy của công ty, việc chờ có chỗ trống.',
     );
+    expect(blockerSentence({ kind: 'disk_full', detail: 'Ổ V: còn 8,3 GB, cần 10 GB để tạo worktree.' })).toBe(
+      'Ổ V: còn 8,3 GB, cần 10 GB để tạo worktree.',
+    );
   });
 });
 
