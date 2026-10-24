@@ -709,14 +709,14 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
         >
           {voice.state === 'recording' ? `● ${voice.seconds}s` : voice.state === 'transcribing' ? '…' : '🎤'}
         </button>
-        {voice.mics.length > 1 && (
+        {voice.mics.length > 0 && (
           <select
             aria-label="Chọn mic"
-            title="Mic dùng để nói. Tên mic hiện sau lần đầu cho trình duyệt dùng micro."
+            title={`Mic đang dùng: ${voice.mics.find((mic) => mic.id === voice.micId)?.label ?? 'mic mặc định của trình duyệt'}. Bấm để đổi (tên mic hiện sau lần đầu cho trình duyệt dùng micro).`}
             value={voice.mics.some((mic) => mic.id === voice.micId) ? voice.micId : ''}
             onChange={(event) => voice.chooseMic(event.target.value)}
             data-testid="prompt-mic"
-            className="max-md:hidden w-5 shrink-0 cursor-pointer appearance-none rounded-[var(--company-radius-md)] bg-transparent py-2 text-center text-2xs text-text-muted hover:bg-hover hover:text-text"
+            className="touch-target w-6 shrink-0 cursor-pointer appearance-none rounded-[var(--company-radius-md)] bg-transparent py-2 text-center text-xs text-text-muted hover:bg-hover hover:text-text"
           >
             <option value="" className="bg-raised text-text">▾ Mic mặc định của trình duyệt</option>
             {voice.mics.map((mic) => (
