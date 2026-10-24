@@ -41,7 +41,8 @@ export async function startProjectSession(
   deps: ProjectModuleDeps<ProjectSessionServices>,
 ): Promise<ProjectSessionStartResultMessage> {
   if (request.taskName.trim() === '') throw new LibraryUserError('Hãy nhập tên việc.');
-  if (!request.initialPrompt.trim()) throw new LibraryUserError('Hãy nhập prompt đầu tiên.');
+  // omp opens a chat the user types into; Claude and agy run the prompt as their task.
+  if (request.engine !== 'omp' && !request.initialPrompt.trim()) throw new LibraryUserError('Claude và agy chạy theo việc giao: hãy ghi việc cần làm.');
   const tree = await deps.loadTree();
   const node = tree.nodes.find((candidate) => candidate.id === request.nodeId);
   if (node === undefined) throw new LibraryUserError('Không tìm thấy thư mục hoặc repo đã chọn.');

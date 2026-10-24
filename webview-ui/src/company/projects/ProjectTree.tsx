@@ -19,7 +19,8 @@ import {
 } from './projectTreeView.js';
 
 const COLLAPSED_KEY = 'company.projectTree.collapsed.v1';
-const AGENT_KINDS = ['omp', 'sub', 'claude', 'agy', 'herdr', 'board'] as const;
+// Tools a user filters by. "herdr" is the terminal host every session runs in, not a tool, so it is not offered.
+const AGENT_KINDS = ['omp', 'sub', 'claude', 'agy', 'board'] as const;
 const AGENT_KIND_CLASS: Readonly<Record<NonNullable<ProjectTreeNode['agentKind']>, string>> = {
   omp: 'text-accent',
   sub: 'text-warning',
@@ -254,10 +255,15 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                 <span className="flex min-w-0 items-baseline gap-1.5">
                   <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
                   <span className="max-w-[45%] shrink-0 truncate text-2xs text-text-muted">
-                    {node.agentKind !== undefined && <span className={AGENT_KIND_CLASS[node.agentKind]}>{node.agentKind}</span>}
-                    {!isRunningNode(node) && stateLabel !== undefined && ` · ${stateLabel}`}
-                    {children.length > 0 && ` · +${children.length}`}
-                    {branch.where !== undefined && !MAIN_BRANCHES.has(branch.where) && ` · ${branch.where}`}
+                    {/* Every session runs inside herdr, so "herdr" names no tool: show the tool only when it is known. */}
+                    {[
+                      node.agentKind !== undefined && node.agentKind !== 'herdr'
+                        ? <span key="kind" className={AGENT_KIND_CLASS[node.agentKind]}>{node.agentKind}</span>
+                        : null,
+                      !isRunningNode(node) && stateLabel !== undefined ? stateLabel : null,
+                      children.length > 0 ? `+${children.length}` : null,
+                      branch.where !== undefined && !MAIN_BRANCHES.has(branch.where) ? branch.where : null,
+                    ].filter((part) => part !== null).flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))}
                   </span>
                 </span>
                 {progress !== null && (
@@ -283,7 +289,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
               <span className={`min-w-0 flex-1 truncate ${node.kind === 'project' || node.kind === 'folder' ? 'font-semibold text-text' : 'font-medium'}`}>{node.name}</span>
               {counts !== null && counts.total > 0 && (
                 <span className="shrink-0 text-xs text-text-muted" title={`${counts.running} đang chạy / ${counts.total} phiên`}>
-                  {counts.running > 0 ? `${counts.running} chạy` : `${counts.total} phiên`}
+                  {counts.running > 0 ? counts.running : counts.total}
                 </span>
               )}
             </>

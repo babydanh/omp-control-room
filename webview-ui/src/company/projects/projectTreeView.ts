@@ -240,55 +240,6 @@ export function sessionActivityCounts(nodes: readonly ProjectTreeNode[]): Activi
   return counts;
 }
 
-/** A herdr pane no Project folder holds: listed below the tree so it stays reachable. */
-export interface OutsideHerdrRow {
-  paneId: string;
-  title: string;
-  /** The folder it works in, last segment; empty when herdr does not say. */
-  where: string;
-  status: string;
-  sleeping: boolean;
-}
-
-/** Herdr panes and hibernated sessions the Project tree does not show, live ones first. */
-export function herdrOutsideProjects(
-  nodes: readonly ProjectTreeNode[],
-  roster: {
-    readonly agents: readonly { paneId: string; status: string; title?: string; name?: string; cwd?: string }[];
-    readonly sleeping: readonly { paneId: string; title: string; cwd?: string }[];
-  },
-): OutsideHerdrRow[] {
-  const shown = new Set(
-    nodes.flatMap((node) => {
-      if (node.kind !== 'session') return [];
-      if (node.herdrPaneId !== undefined) return [node.herdrPaneId];
-      return node.agentKind === 'herdr' && node.sessionId !== undefined ? [node.sessionId] : [];
-    }),
-  );
-  const where = (cwd: string | undefined) => lastPathSegment(cwd) ?? cwd ?? '';
-  return [
-    ...roster.agents
-      .filter((agent) => !shown.has(agent.paneId))
-      .map((agent) => ({
-        paneId: agent.paneId,
-        title: agent.title || agent.name || agent.paneId,
-        where: where(agent.cwd),
-        status: agent.status,
-        sleeping: false,
-      })),
-    ...roster.sleeping
-      .filter((session) => !shown.has(session.paneId))
-      .map((session) => ({
-        paneId: session.paneId,
-        title: session.title || session.paneId,
-        where: where(session.cwd),
-        status: 'sleeping',
-        sleeping: true,
-      })),
-  ];
-}
-
-
 export function canMoveProjectNode(nodes: readonly ProjectTreeNode[], nodeId: string, targetId: string): boolean {
   if (nodeId === targetId) return false;
   const children = new Map<string, string[]>();

@@ -93,3 +93,29 @@
   cursor: not-allowed;
   opacity: 0.55;
 }
+
+.project-session-dialog__engines {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.project-session-dialog__engines button {
+  min-height: 48px;
+  font-weight: 600;
+}
+
+.project-session-dialog__engines button[aria-pressed='true'] {
+  border-color: var(--color-accent, var(--color-border));
+}
+
+.project-session-dialog details summary {
+  cursor: pointer;
+  color: var(--color-text-muted);
+}
+
+.project-session-dialog__more {
+  display: grid;
+  gap: 12px;
+  margin-top: 10px;
+}

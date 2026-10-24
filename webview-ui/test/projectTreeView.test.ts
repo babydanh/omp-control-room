@@ -13,7 +13,6 @@ import {
   canMoveProjectNode,
   countSessions,
   filterProjectTree,
-  herdrOutsideProjects,
   isSelectedSession,
   projectNodeMenuItems,
   selectedAncestorIds,
@@ -179,8 +178,6 @@ describe('projectTreeView', () => {
     expect(checkoutPathFor(all, root)).toBe('/work/repo');
     const folder = buildAgentTree(all)[0]?.children[0]?.children[0];
     expect(folder?.children.find((child) => child.node.id === 'root')).toMatchObject({ checkoutPath: '/work/repo' });
-    // The pane it runs in is not listed again below the tree.
-    expect(herdrOutsideProjects(all, { agents: [{ paneId: 'w1:p5', status: 'working' }], sleeping: [] })).toEqual([]);
   });
 
   it('opens the changes of the newest edited checkout that still has uncommitted lines', () => {
@@ -216,20 +213,5 @@ describe('projectTreeView', () => {
       node('g', 'session', 'folder', { sessionId: 's6', state: 'unknown' }),
     ];
     expect(sessionActivityCounts(shared)).toEqual({ total: 3, working: 1, needs: 1, idle: 1, error: 0 });
-  });
-
-  it('keeps herdr panes outside every Project reachable, live ones before hibernated', () => {
-    const inTree = node('pane', 'session', 'folder', { agentKind: 'herdr', sessionId: 'w1:p1' });
-    const rows = herdrOutsideProjects([...nodes, inTree], {
-      agents: [
-        { paneId: 'w1:p1', status: 'working', cwd: 'D:/repo' },
-        { paneId: 'w1:p3', status: 'idle', name: 'omp', cwd: 'D:\\other\\tool' },
-      ],
-      sleeping: [{ paneId: 'w1:p9', title: 'Ngủ', cwd: 'D:/away' }],
-    });
-    expect(rows).toEqual([
-      { paneId: 'w1:p3', title: 'omp', where: 'tool', status: 'idle', sleeping: false },
-      { paneId: 'w1:p9', title: 'Ngủ', where: 'away', status: 'sleeping', sleeping: true },
-    ]);
   });
 });

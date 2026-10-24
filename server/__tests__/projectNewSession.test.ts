@@ -214,6 +214,24 @@ describe('project session start', () => {
     }));
   });
 
+  it('opens an omp chat with no first prompt, while Claude and agy still need their task', async () => {
+    const coordinator: Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt'> = {
+      openNewChat: vi.fn(async () => 'board-session'),
+      submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
+    };
+    const runtime = createProjectSessionRuntime({
+      coordinatorFor: vi.fn(async () => coordinator),
+      workItemServiceFor: vi.fn(async () => ({ create: vi.fn(), get: vi.fn() })),
+      runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
+      effectiveSettings: async () => ({}),
+    });
+    const empty = (engine: ProjectSessionStartMessage['engine']) => ({ ...request(engine, 'shared'), initialPrompt: '  ' });
+    await expect(startProjectSession(empty('omp'), deps(runtime))).resolves.toMatchObject({ ok: true, sessionId: 'board-session' });
+    expect(coordinator.submitPrompt).not.toHaveBeenCalled();
+    await expect(startProjectSession(empty('claude'), deps(runtime))).rejects.toThrow('hãy ghi việc cần làm');
+    await expect(startProjectSession(empty('agy'), deps(runtime))).rejects.toThrow('hãy ghi việc cần làm');
+  });
+
   it('lets Claude work items create the separate checkout and reports it when available', async () => {
     const worktree = path.join(root, 'repo', '.worktrees', 'squad-12345678');
     const workItems: Pick<WorkItemService, 'create' | 'get'> = {

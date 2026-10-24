@@ -802,9 +802,6 @@ export function BoardShell({ client }: BoardShellProps) {
           {(sidebar === 'docked' || sidebar === 'overlay' || sidebar === 'sheet') && (
             <AgentSidebar
               width={prefs.width}
-              herdrRoster={state.herdrRoster}
-              onOpenHerdr={openHerdr}
-              onOpenSleeping={openSleeping}
               presentation={sidebar}
               onWidthChange={(width) =>
                 setPrefs((current) => ({ ...current, width: clampSidebarWidth(width) }))

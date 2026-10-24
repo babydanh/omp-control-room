@@ -68,6 +68,8 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
     async openChat({ folder, cwd, prompt }) {
       const coordinator = await options.coordinatorFor(folder);
       const sessionId = await coordinator.openNewChat({ cwd, role: 'chat' });
+      // No first prompt: the chat opens empty and the user types in its terminal.
+      if (prompt.trim() === '') return sessionId;
       const input: SubmitPromptInput = {
         requestId: randomUUID(),
         text: prompt,
