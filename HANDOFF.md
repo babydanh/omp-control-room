@@ -1,6 +1,6 @@
 # Handoff: Agent Board — đội nhiều vai, chế độ gọn, thống kê tool
 <!-- Đọc file này TRƯỚC khi làm tiếp nhánh. Cập nhật TRƯỚC khi báo xong, fast-handoff, hoặc hết phiên. -->
-Cập nhật: 2026-10-24 01:55 · bởi: omp · nhánh: feat/multi-role-company · OpenSpec: không có
+Cập nhật: 2026-10-24 19:30 · bởi: omp · nhánh: feat/multi-role-company · OpenSpec: không có
 
 ## Mục tiêu
 Board điều phối đội agent (trưởng đội chia việc, chế độ gọn mỗi repo một phiên trong tab herdr riêng), cây git có tab "Phối hợp" và "Thống kê tool". Lần này: tab "Thống kê tool" hiện % usage token Claude theo phiên chính/subagent/skill/plugin và nút chuyển skill Claude không dùng sang `name-only`.
@@ -20,7 +20,15 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
 - Test server cả bộ lần 1 có 7 test `companyTerminal.test.ts` đỏ (PTY helper exit 1 khi mở 28 PTY dưới tải), chạy riêng 9/9 và chạy lại cả bộ 164 file / 2675 pass: chập chờn do tải máy.
 - Xong (24/10): việc lỗi chỉ còn 2 nút "Giao người khác" và "Xoá" (`workItemNextStep.ts` failed; `WorkItemPanel.tsx` bỏ "Đánh dấu xong" và ô "Gửi tiếp" cho failed). Cột Lỗi và Xong có "Xoá hết" bấm 2 lần (`CompanyBoard.tsx` `clearLane`, chỉ xoá thẻ việc). Smoke: 2 việc giả #45/#46 → panel còn đúng 2 nút, "Xoá hết" xoá cả hai. Lưu ý: việc giao `auto` được gửi vào cả pane herdr của người dùng (lần này pane agy `wE:p5` nhận 2 việc giả, trả lời OK, không sửa file).
 - Trước đó: commit `a5311e2` (thống kê tool, usage token, nút name-only).
-- Đang dở: không. Chưa push nhánh (upstream đang là `mine/main`).
+- Xong (24/10 chiều), sửa lõi sau khi người dùng chạy thật thấy "hư lên hư xuống":
+  - `4433895`: việc tạo tay (không thuộc Đội) mở phiên **chat** dưới khoá `squad:<vai>:<cwd>` (`workItemService.ts` `chatItem`). Trước đó mở phiên vai worker, phiên này từ chối prompt vì không có hợp đồng, router đẩy sang Director, mở workstream mới (S23/S27/S28) kèm câu hỏi "verification profile", việc không bao giờ chạy. `tierOf` coi phiên chat của Đội như phiên đúng vai.
+  - `4433895`: phiên của việc (chat dưới khoá squad) chạy `--approval-mode yolo` (`ompRunner.ts` `unattended`, `companyRuntime.ts` `isWorkItemSession`). Trước đó vai read-only/scoped-write chạy `write` nên bash dừng ở hộp duyệt trong terminal không ai xem (S21 kẹt 23 phút, S24 kẹt ở `git branch && git status`). Máy người dùng `omp config get tools.approvalMode` = `yolo`, nên mức này bằng omp thường của họ. Vai `chat` bỏ qua cổng tool của board (`permissionPolicy.ts`), nên **không có giới hạn theo vai** cho các phiên này.
+  - `1a5fff7`, `adf361e`, `06dac1c`: việc chạy Claude Code có khối "Nhật ký Claude" trong ngăn việc. Server: `companySessionLogRequest` thiếu log board thì đọc `~/.claude/projects/*/<id>.jsonl` (`claudeTranscriptLog.ts`). Webview: `ClaudeRunLog.tsx` tải lại 5 giây khi đang chạy, `companyState.project` giữ log của `claudeRun.sessionId`. Smoke trên board thật: #72 hiện 138 bước.
+  - `c68fc19`: "Đánh dấu hỏng" → "Dừng việc". `f957c95`: việc lỗi có "Thử lại" (`retryAssignee`), trưởng đội dùng model vai chat, chia việc nặng Claude/omp. `b4dd124`: thẻ việc chỉ còn người làm, repo, thời gian.
+  - Cài đặt đội (WS): `claudeMaxTurns` 150, `claudeMaxBudgetUsd` 10 (40 lượt làm #57 chết giữa chừng).
+- Đang chạy trên board (19:20): #74 Backend `contactInfo.hidden` (S30), #73 Backend sửa lỗ hổng log theo audit #65 (S29), #72 Web Claude chờ bổ sung vì Backend chưa xong (gửi tiếp sau khi #74 xong). Lượt Đội `e3908a91` đã huỷ để trưởng đội thôi tự đẻ việc trùng.
+- Đã xoá phiên S1–S28 trên board, kèm file lịch sử omp của chúng (`deleteSession` xoá file). S1, S6, S7 có thể là chat của người dùng; chưa kiểm VSS (cần Admin).
+- Chưa push nhánh (upstream đang là `mine/main`).
 - Tiếp theo: hồ sơ vai của board (`state.settings.roleProfiles`) KHÔNG tự theo `omp config get modelRoles`; 23/10 đã đồng bộ tay qua `companySettingsUpdate`. Đổi vai trong omp sau này thì phải đồng bộ lại. Việc thử 24–44 trên bảng là của các lượt kiểm thử, tự vào Lưu trữ sau 7 ngày. Cột Xong xếp cũ trước nên việc mới nằm cuối cột.
 
 ## Đã thử
@@ -39,6 +47,8 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
 
 ## Ràng buộc thay đổi lần này
 - Đổi (24/10, người dùng chọn): việc sửa của đội gọn có worktree riêng cho từng việc để tránh nhiều việc cùng repo ghi đè; việc chỉ đọc vẫn chạy tại repo và dùng lại phiên theo vai.
+- Đổi (24/10 chiều): việc tạo tay chạy trên phiên chat, không qua hợp đồng. Phiên của việc không hỏi duyệt (yolo). Test cũ đổi theo: `workItemService.test.ts` 6 ca `openedWith` role `worker` → `chat`.
+- Rủi ro mở: phiên việc chạy yolo + vai chat không bị cổng board chặn. Muốn giới hạn theo vai thì `authorizeTool` phải lấy vai từ khoá squad, và cấp writeScopes cho việc (hiện chỉ hợp đồng mới có).
 - Đổi: phiên chat có khoá `squad:<vai>:<repo>` chạy model của vai đó, không phải model chat.
 - Bỏ: cổng `WorkItemRoster.wake`; `WorkItemHerdr` không còn `wake`.
 - Đổi (24/10): việc con đội gọn hiện trên bảng như việc thường (trước bị giấu trong thẻ đội); đội gọn xong vào Xong, không chờ bấm "Đóng". Test cũ đổi theo: `companySquadView.test.ts` "hides a working compact run…", `companyWorkItemView.test.ts` "shows compact-run children as cards…".
