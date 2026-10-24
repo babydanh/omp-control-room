@@ -388,4 +388,26 @@ describe('buildBoardLanes and work items', () => {
       failed: 1,
     });
   });
+
+  it('keeps an item in Đang làm while its own pane works its earlier turn, and in Sẵn sàng behind other work', () => {
+    const worktree = { path: 'D:/work/app.worktrees/squad-a', branch: 'squad-a' };
+    const agents = [
+      { paneId: 'p1', kind: 'omp', status: 'working', workspaceId: 'ws-1', cwd: 'D:\\work\\app.worktrees\\squad-a' },
+      { paneId: 'p2', kind: 'omp', status: 'working', workspaceId: 'ws-1', cwd: 'D:/work/app' },
+    ] as const;
+    const board = applyCompanyMessage(boardWithRoster('all'), {
+      type: 'herdrAgents',
+      available: true,
+      agents: agents.map((agent) => ({ ...agent })),
+      sleeping: [],
+    }).state;
+    const state = withWorkItems(board, ACTIVE, [
+      item({ id: 'own', sequence: 1, worktree, blocker: { kind: 'agent' } }),
+      item({ id: 'other', sequence: 2, worktree, assignee: { kind: 'herdr', paneId: 'p2' }, blocker: { kind: 'agent' } }),
+    ]);
+    const lanes = buildBoardLanes(state);
+
+    expect(lanes.find((lane) => lane.id === 'running')?.workItems).toMatchObject([{ id: 'own', blocker: null }]);
+    expect(lanes.find((lane) => lane.id === 'ready')?.workItems.map((card) => card.id)).toEqual(['other']);
+  });
 });

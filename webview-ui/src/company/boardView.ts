@@ -15,6 +15,7 @@ import type {
   Attempt,
   CompanyRole,
   CompanySessionSummary,
+  HerdrAgent,
   Task,
   VerificationEvidence,
 } from '../../../core/src/company.js';
@@ -34,6 +35,7 @@ import type { CompanyViewState } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
 import { COMPANY_LANE_LABELS, COMPANY_LANE_ORDER } from './constants.js';
 import type { FolderIdentity } from './folderIdentity.js';
+import { samePath } from './folderView.js';
 import { squadLaneFor, visibleSquadRuns } from './squadView.js';
 import { isParkedAssignee } from './workItemReviewView.js';
 import {
@@ -263,32 +265,49 @@ export function evidenceForTask(
   };
 }
 
+/**
+ * Whether an item queued for "agent busy" is in fact still at work: its herdr pane is working in the
+ * item's own worktree, so the run it waits behind is this item's earlier turn and the queued text is
+ * a follow-up the board sends when that turn ends. Such an item is in Đang làm, not Sẵn sàng.
+ */
+function busyWithOwnTurn(item: WorkItem, agents: readonly HerdrAgent[]): boolean {
+  if (item.status !== 'queued' || item.blocker?.kind !== 'agent') return false;
+  if (item.assignee.kind !== 'herdr' || item.worktree === undefined) return false;
+  const worktree = item.worktree.path;
+  const pane = agents.find((agent) => agent.paneId === item.assignee.paneId);
+  if (pane?.status !== 'working') return false;
+  return [pane.worktreeRoot, pane.cwd].some((path) => path !== undefined && samePath(path, worktree));
+}
+
 /** The work items the board shows, as cards: each one's lane, heading, holder, priority and hold. */
 function workItemCards(state: CompanyViewState): BoardWorkItem[] {
-  return visibleWorkItems(state).map(({ item, workspacePath, folder }) => ({
-    id: item.id,
-    workspacePath,
-    lane: laneForWorkItem(item.status),
-    status: item.status,
-    head: workItemCardHead(item.text),
-    assignee: assigneeLabel(item.assignee, state, workspacePath),
-    reason: item.reason?.trim() ? item.reason : null,
-    sequence: item.sequence,
-    priority: item.priority,
-    blocker: item.blocker ?? null,
-    repo: item.repo ?? null,
-    role: item.role ?? null,
-    agent: item.agent ?? null,
-    areas: item.areas ?? [],
-    updatedAt: item.updatedAt,
-    folder,
-    squadRunId: item.squadRunId ?? null,
-    judge: item.judge ?? null,
-    conflicts: item.conflicts ?? null,
-    parked: isParkedAssignee(item.assignee, workItemsOf(state, workspacePath).parkedSessionIds),
-    claudeRun: item.claudeRun ?? null,
-    agyRun: item.agyRun ?? null,
-  }));
+  return visibleWorkItems(state).map(({ item, workspacePath, folder }) => {
+    const ownTurn = busyWithOwnTurn(item, state.herdr.agents);
+    return {
+      id: item.id,
+      workspacePath,
+      lane: ownTurn ? 'running' : laneForWorkItem(item.status),
+      status: item.status,
+      head: workItemCardHead(item.text),
+      assignee: assigneeLabel(item.assignee, state, workspacePath),
+      reason: item.reason?.trim() ? item.reason : null,
+      sequence: item.sequence,
+      priority: item.priority,
+      blocker: ownTurn ? null : (item.blocker ?? null),
+      repo: item.repo ?? null,
+      role: item.role ?? null,
+      agent: item.agent ?? null,
+      areas: item.areas ?? [],
+      updatedAt: item.updatedAt,
+      folder,
+      squadRunId: item.squadRunId ?? null,
+      judge: item.judge ?? null,
+      conflicts: item.conflicts ?? null,
+      parked: isParkedAssignee(item.assignee, workItemsOf(state, workspacePath).parkedSessionIds),
+      claudeRun: item.claudeRun ?? null,
+      agyRun: item.agyRun ?? null,
+    };
+  });
 }
 
 /** The squad runs the board shows, as cards: each one's lane, heading and proposed rows. */
