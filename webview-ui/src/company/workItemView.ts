@@ -146,10 +146,14 @@ function firstNonBlank(...values: (string | undefined)[]): string | null {
   return null;
 }
 
+/** What a herdr assignee reads once its pane is gone (the agent exited and herdr closed it). */
+export const PANE_CLOSED_LABEL = 'Ô đã đóng';
+
 /**
  * The name an assignee carries on the board. A herdr pane takes its agent's name, then its
- * title, then its pane id; a sleeping pane takes its title. An omp session takes its own name,
- * then its code; a session the server no longer holds is named as such.
+ * title, then its pane id; a sleeping pane takes its title; a pane herdr no longer lists reads
+ * as closed, not as a bare id like "wA:p0". An omp session takes its own name, then its code;
+ * a session the server no longer holds is named as such.
  */
 export function assigneeLabel(
   assignee: WorkItemAssignee,
@@ -161,10 +165,12 @@ export function assigneeLabel(
       const paneId = assignee.paneId ?? '';
       const agent = state.herdrRoster.agents.find((entry) => entry.paneId === paneId);
       const sleeping = state.herdrRoster.sleeping.find((entry) => entry.paneId === paneId);
-      return (
-        firstNonBlank(agent?.name, agent?.title, sleeping?.title) ??
-        (paneId === '' ? 'Agent herdr' : paneId)
-      );
+      if (paneId === '') return 'Agent herdr';
+      // An empty roster is herdr not answered yet, not every pane closed.
+      if (agent === undefined && sleeping === undefined) {
+        return state.herdrRoster.agents.length === 0 ? 'Agent herdr' : PANE_CLOSED_LABEL;
+      }
+      return firstNonBlank(agent?.name, agent?.title, sleeping?.title) ?? paneId;
     }
     case 'session': {
       const sessionId = assignee.sessionId ?? '';

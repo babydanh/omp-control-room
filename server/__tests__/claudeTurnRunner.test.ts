@@ -239,4 +239,40 @@ describe('createEngineRunner', () => {
     expect(await runner.run('bốn', signal)).toBe('omp: bốn');
     expect(calls).toEqual({ omp: ['một', 'bốn'], claude: ['hai'], agy: ['ba'] });
   });
+
+  it('falls over to the next engine when the chosen one fails, and stops once the turn is aborted', async () => {
+    const calls: string[] = [];
+    const failing = (name: string): LeaderRunner => ({
+      run: () => {
+        calls.push(name);
+        return Promise.reject(new SquadLeaderError(`${name} hết hạn mức`));
+      },
+    });
+    const answering = (name: string): LeaderRunner => ({
+      run: (prompt) => {
+        calls.push(name);
+        return Promise.resolve(`${name}: ${prompt}`);
+      },
+    });
+    const signal = new AbortController().signal;
+    const runner = createEngineRunner({ engine: () => 'claude', omp: answering('omp'), claude: failing('claude'), agy: answering('agy') });
+    expect(await runner.run('một', signal)).toBe('omp: một');
+    expect(calls).toEqual(['claude', 'omp']);
+
+    const allDown = createEngineRunner({ engine: () => 'omp', omp: failing('omp'), claude: failing('claude'), agy: failing('agy') });
+    await expect(allDown.run('hai', signal)).rejects.toThrow('agy hết hạn mức');
+
+    calls.length = 0;
+    const controller = new AbortController();
+    const aborting: LeaderRunner = {
+      run: () => {
+        calls.push('omp');
+        controller.abort();
+        return Promise.reject(new SquadLeaderError('đã huỷ'));
+      },
+    };
+    const cancelled = createEngineRunner({ engine: () => 'omp', omp: aborting, claude: answering('claude'), agy: answering('agy') });
+    await expect(cancelled.run('ba', controller.signal)).rejects.toThrow('đã huỷ');
+    expect(calls).toEqual(['omp']);
+  });
 });

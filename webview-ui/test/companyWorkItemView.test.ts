@@ -18,6 +18,7 @@ import {
   assigneeLabel,
   laneForWorkItem,
   NEW_SESSION_LABEL,
+  PANE_CLOSED_LABEL,
   queuePosition,
   queueWaitText,
   roleDescriptionFor,
@@ -142,11 +143,12 @@ describe('statusWordVi', () => {
 });
 
 describe('assigneeLabel', () => {
-  it('names a herdr pane by its agent name, then its title, then its pane id', () => {
+  it('names a herdr pane by its agent name, then its title; a pane herdr no longer lists reads as closed', () => {
     const state = boardWithRoster('all');
     expect(assigneeLabel({ kind: 'herdr', paneId: 'p1' }, state, ACTIVE)).toBe('Dev A');
     expect(assigneeLabel({ kind: 'herdr', paneId: 'p2' }, state, ACTIVE)).toBe('Tiêu đề');
-    expect(assigneeLabel({ kind: 'herdr', paneId: 'p9' }, state, ACTIVE)).toBe('p9');
+    expect(assigneeLabel({ kind: 'herdr', paneId: 'p9' }, state, ACTIVE)).toBe(PANE_CLOSED_LABEL);
+    expect(assigneeLabel({ kind: 'herdr', paneId: 'p9' }, emptyCompanyState(), ACTIVE)).toBe('Agent herdr');
   });
 
   it('names an omp session by its name, then its code, then says it is gone', () => {

@@ -13,6 +13,7 @@ import { conflictText, judgeChipFor } from '../workItemReviewView.js';
 import {
   blockerChip,
   blockerSentence,
+  PANE_CLOSED_LABEL,
   repoShortName,
   statusWordVi,
   workItemInterruptedNote,
@@ -89,9 +90,12 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
         {card.head === '' ? 'Việc chưa có nội dung' : card.head}
       </span>
       <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-2xs text-text-muted">
-        <span className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5 text-text">
-          {card.assignee}
-        </span>
+        {/* A finished item's pane closing is expected: the chip would only say so on every done card. */}
+        {!(card.assignee === PANE_CLOSED_LABEL && (card.status === 'done' || card.status === 'failed')) && (
+          <span className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5 text-text">
+            {card.assignee}
+          </span>
+        )}
         {repoName !== '' && (
           <span
             data-testid="work-item-repo"

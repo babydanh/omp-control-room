@@ -60,7 +60,11 @@ export function createClaudeTurnRunner(options: ClaudeTurnRunnerOptions): Leader
   };
 }
 
-/** Routes each turn to the engine the settings name when the turn starts. */
+/**
+ * Routes each turn to the engine the settings name when the turn starts, then to the others when
+ * it fails: one account out of quota (Codex limit, Claude weekly cap) must not stop the leader or
+ * the judge while another CLI can answer. A turn the user aborted is not retried.
+ */
 export function createEngineRunner(options: {
   readonly engine: () => SquadEngine;
   readonly omp: LeaderRunner;
@@ -68,12 +72,24 @@ export function createEngineRunner(options: {
   readonly agy: LeaderRunner;
 }): LeaderRunner {
   return {
-    run(prompt, signal, onLive) {
-      // Only the omp runner streams; Claude and agy runs ignore onLive.
-      return options[options.engine()].run(prompt, signal, onLive);
+    async run(prompt, signal, onLive) {
+      const first = options.engine();
+      let lastError: unknown;
+      for (const engine of [first, ...ENGINE_ORDER.filter((other) => other !== first)]) {
+        try {
+          // Only the omp runner streams; Claude and agy runs ignore onLive.
+          return await options[engine].run(prompt, signal, onLive);
+        } catch (error) {
+          if (signal.aborted) throw error;
+          lastError = error;
+        }
+      }
+      throw lastError;
     },
   };
 }
+
+const ENGINE_ORDER: readonly SquadEngine[] = ['omp', 'claude', 'agy'];
 
 /** The answer of one finished turn, or the Vietnamese error the user reads. */
 function turnText(outcome: ClaudeTurnOutcome, label: string, aborted: boolean): string {
