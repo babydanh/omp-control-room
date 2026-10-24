@@ -81,17 +81,20 @@ export function registerVoiceRoutes(app: FastifyInstance, options: VoiceRoutesOp
   });
 }
 
-let cachedKey: string | undefined;
+/** A Groq key looks like `gsk_…`; a placeholder such as `<key>` counts as no key. */
+const GROQ_KEY_SHAPE = /^gsk_[A-Za-z0-9]+$/;
 
-/** The process env first; on Windows a key set as a User variable after the board started is read from the registry. */
+/**
+ * The process env first; on Windows a key set as a User variable after the board started is read
+ * from the registry on every call (one quick `reg query`), so a corrected key works without a restart.
+ */
 async function readGroqKey(): Promise<string | undefined> {
   const fromEnv = process.env[GROQ_KEY_NAME]?.trim();
-  if (fromEnv) return fromEnv;
-  if (cachedKey !== undefined || process.platform !== 'win32') return cachedKey;
+  if (fromEnv !== undefined && GROQ_KEY_SHAPE.test(fromEnv)) return fromEnv;
+  if (process.platform !== 'win32') return undefined;
   const output = await run('reg', ['query', 'HKCU\\Environment', '/v', GROQ_KEY_NAME], 5_000).catch(() => '');
-  const match = new RegExp(`${GROQ_KEY_NAME}\\s+REG_\\w+\\s+(\\S+)`).exec(output);
-  cachedKey = match?.[1];
-  return cachedKey;
+  const value = new RegExp(`${GROQ_KEY_NAME}\\s+REG_\\w+\\s+(\\S+)`).exec(output)?.[1];
+  return value !== undefined && GROQ_KEY_SHAPE.test(value) ? value : undefined;
 }
 
 async function transcribeWithGroq(audio: Buffer, contentType: string, key: string): Promise<string> {
