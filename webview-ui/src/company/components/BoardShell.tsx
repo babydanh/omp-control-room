@@ -18,10 +18,7 @@ import type { CompanyClient } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
 import { startNewChat } from '../composerRouting.js';
 import {
-  COMPANY_NAV_COLLAPSED_WIDTH_PX,
-  COMPANY_NAV_EXPANDED_WIDTH_PX,
   COMPANY_NAV_MOBILE_MAX_PX,
-  COMPANY_NAV_TRANSITION_MS,
   COMPANY_PAGE_TRANSITION_MS,
   COMPANY_RAIL_WIDTH_PX,
 } from '../constants.js';
@@ -109,24 +106,6 @@ function browserStorage(): Storage | null {
 
 type ShellPage = 'board' | 'ledger' | 'usage' | 'storage' | 'skills' | 'mcp' | 'accounts' | 'changes';
 
-const NAV_COLLAPSED_KEY = 'company.nav.collapsed.v1';
-
-function readNavCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(NAV_COLLAPSED_KEY) === 'true';
-  } catch {
-    return false;
-  }
-}
-
-function writeNavCollapsed(collapsed: boolean): void {
-  try {
-    window.localStorage.setItem(NAV_COLLAPSED_KEY, String(collapsed));
-  } catch {
-    // A refused store only means the navigation shape is not remembered.
-  }
-}
-
 /** Apple platforms show ⌘ in shortcut hints; elsewhere the key names stay. */
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
@@ -161,7 +140,6 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledger = useLedgerState(ledgerStore);
   const usageRouteOpen = useUsageRoute();
   const [activePage, setActivePage] = useState<ShellPage>(() => usageRouteOpen ? 'usage' : 'board');
-  const [navCollapsed, setNavCollapsed] = useState(readNavCollapsed);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(
     () => window.matchMedia(`(max-width: ${COMPANY_NAV_MOBILE_MAX_PX}px)`).matches,
@@ -213,10 +191,6 @@ export function BoardShell({ client }: BoardShellProps) {
     query.addEventListener('change', update);
     return () => query.removeEventListener('change', update);
   }, []);
-
-  useEffect(() => {
-    writeNavCollapsed(navCollapsed);
-  }, [navCollapsed]);
 
   useEffect(() => {
     if (usageRouteOpen) setActivePage('usage');
@@ -649,10 +623,11 @@ export function BoardShell({ client }: BoardShellProps) {
       : []),
   ];
 
-  function renderNavItems(collapsed: boolean) {
+  /** The phone menu: one page per row, under its group's heading. */
+  function renderNavItems() {
     let previousGroup = '';
     return navItems.map((item) => {
-      const showGroup = !collapsed && item.group !== previousGroup;
+      const showGroup = item.group !== previousGroup;
       previousGroup = item.group;
       return (
         <div key={item.page} className="flex flex-col">
@@ -663,13 +638,12 @@ export function BoardShell({ client }: BoardShellProps) {
           )}
           <button
             type="button"
-            title={collapsed ? item.label : undefined}
             aria-current={activePage === item.page ? 'page' : undefined}
             onClick={() => selectPage(item.page)}
-            className={`flex min-h-10 items-center gap-3 rounded-(--company-radius-sm) px-3 text-left text-sm transition-colors duration-150 hover:bg-hover motion-reduce:transition-none ${activePage === item.page ? 'bg-selected text-text' : 'text-text-secondary'} ${collapsed ? 'justify-center px-0' : ''}`}
+            className={`flex min-h-10 items-center gap-3 rounded-(--company-radius-sm) px-3 text-left text-sm transition-colors duration-150 hover:bg-hover motion-reduce:transition-none ${activePage === item.page ? 'bg-selected text-text' : 'text-text-secondary'}`}
           >
             <Icon name={item.icon} className="shrink-0" />
-            {!collapsed && <span className="truncate">{item.label}</span>}
+            <span className="truncate">{item.label}</span>
           </button>
         </div>
       );
@@ -680,11 +654,7 @@ export function BoardShell({ client }: BoardShellProps) {
     <div
       className="company-ui company-shell-root flex h-full w-full flex-col overflow-hidden bg-bg"
       data-testid="company-workspace"
-      style={{
-        paddingLeft: mobileViewport ? 0 : navCollapsed ? COMPANY_NAV_COLLAPSED_WIDTH_PX : COMPANY_NAV_EXPANDED_WIDTH_PX,
-        '--company-nav-transition': `${COMPANY_NAV_TRANSITION_MS}ms`,
-        '--company-page-transition': `${COMPANY_PAGE_TRANSITION_MS}ms`,
-      } as CSSProperties}
+      style={{ '--company-page-transition': `${COMPANY_PAGE_TRANSITION_MS}ms` } as CSSProperties}
     >
       <header className="company-nav-mobile items-center gap-3 border-b border-hairline bg-panel px-3 py-2">
         <button
@@ -701,27 +671,26 @@ export function BoardShell({ client }: BoardShellProps) {
           {navItems.find((item) => item.page === activePage)?.label ?? 'Bảng việc'}
         </span>
       </header>
-      <aside
-        className="company-nav-desktop company-nav-rail fixed inset-y-0 left-0 z-40 flex-col border-r border-hairline bg-panel p-2"
-        style={{ width: navCollapsed ? COMPANY_NAV_COLLAPSED_WIDTH_PX : COMPANY_NAV_EXPANDED_WIDTH_PX }}
+      <header
+        className="company-nav-desktop h-10 shrink-0 items-center gap-3 border-b border-hairline bg-panel px-3"
         aria-label="Điều hướng"
       >
-        <div className={`flex h-10 items-center ${navCollapsed ? 'justify-center' : 'justify-between px-2'}`}>
-          {!navCollapsed && <span className="font-semibold tracking-tight">Agent Board</span>}
-          <button
-            type="button"
-            aria-label={navCollapsed ? 'Mở rộng điều hướng' : 'Thu gọn điều hướng'}
-            aria-expanded={!navCollapsed}
-            onClick={() => setNavCollapsed((collapsed) => !collapsed)}
-            className="company-icon-btn touch-target shrink-0"
-          >
-            <Icon name={navCollapsed ? 'chevron-right' : 'chevron-left'} />
-          </button>
-        </div>
-        <nav className="mt-2 flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto" aria-label="Trang">
-          {renderNavItems(navCollapsed)}
+        <span className="shrink-0 font-semibold tracking-tight">Agent Board</span>
+        <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" aria-label="Trang">
+          {navItems.map((item) => (
+            <button
+              key={item.page}
+              type="button"
+              aria-current={activePage === item.page ? 'page' : undefined}
+              onClick={() => selectPage(item.page)}
+              className={`flex min-h-8 shrink-0 items-center gap-1.5 rounded-(--company-radius-sm) px-2.5 text-xs transition-colors duration-150 hover:bg-hover motion-reduce:transition-none ${activePage === item.page ? 'bg-selected text-text' : 'text-text-secondary'}`}
+            >
+              <Icon name={item.icon} className="shrink-0" />
+              <span className="whitespace-nowrap">{item.label}</span>
+            </button>
+          ))}
         </nav>
-      </aside>
+      </header>
       {mobileViewport && mobileNavOpen && (
         <>
           <button
@@ -734,7 +703,7 @@ export function BoardShell({ client }: BoardShellProps) {
             className="fixed inset-x-0 top-12 z-50 max-h-[calc(100dvh-3rem)] overflow-y-auto border-b border-hairline bg-panel p-3 shadow-lg"
             aria-label="Trang"
           >
-            {renderNavItems(false)}
+            {renderNavItems()}
           </nav>
         </>
       )}

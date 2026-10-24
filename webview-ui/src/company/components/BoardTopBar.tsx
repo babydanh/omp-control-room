@@ -205,7 +205,8 @@ export function BoardTopBar({
         phone ? 'flex items-center gap-1.5 px-2 py-1.5' : 'flex items-center gap-3 px-3 py-2'
       }
     >
-      <h1 className={phone ? 'sr-only' : 'shrink-0 text-base text-text'}>Agent Board</h1>
+      {/* The shell header already names the board; the heading stays for screen readers. */}
+      <h1 className="sr-only">Agent Board</h1>
       {!phone && <div className="min-w-0 flex-1" />}
       <ChatNewButton client={client} compact={phone} />
       <StatusPill client={client} state={state} />

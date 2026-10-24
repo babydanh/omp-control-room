@@ -238,21 +238,11 @@
     --company-radius-sm: 6px;
     --company-radius-md: 10px;
     --company-radius-lg: 14px;
-    --company-nav-transition: 180ms;
     --company-page-transition: 180ms;
-  }
-
-  .company-shell-root {
-    transition: padding var(--company-nav-transition) cubic-bezier(.33,1,.68,1);
   }
 
   .company-nav-mobile {
     display: none;
-  }
-
-  .company-nav-rail {
-    width: var(--company-nav-width, 224px);
-    transition: width var(--company-nav-transition) cubic-bezier(.33,1,.68,1);
   }
 
   .company-shell-page {
@@ -265,8 +255,6 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .company-shell-root,
-    .company-nav-rail,
     .company-shell-page {
       animation: none;
       transition: none;

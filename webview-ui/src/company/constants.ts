@@ -161,13 +161,10 @@ export const COMPANY_LANE_GAP_PX = 6;
 /** Viewport widths that pick the board's layout: a phone below 768px, a tablet below 1024px. */
 export const COMPANY_PHONE_MAX_PX = 767;
 export const COMPANY_TABLET_MAX_PX = 1023;
-/** Desktop library rail widths and the breakpoint where it becomes a top bar with drawer. */
-export const COMPANY_NAV_COLLAPSED_WIDTH_PX = 64;
-export const COMPANY_NAV_EXPANDED_WIDTH_PX = 224;
+/** The viewport width at and below which the page navigation becomes a menu button with a drawer. */
 export const COMPANY_NAV_MOBILE_MAX_PX = 768;
 
-/** Desktop shell navigation and page transition timing. */
-export const COMPANY_NAV_TRANSITION_MS = 180;
+/** Page transition timing. */
 export const COMPANY_PAGE_TRANSITION_MS = 180;
 
 /** The composer's text box idles at this many rows and grows with its text. */
