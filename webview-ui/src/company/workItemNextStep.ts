@@ -74,7 +74,7 @@ export function nextStepFor(item: StepItem, waitText: string | null, canClean: b
       }
       return { tone: 'act', title: 'Agent đang hỏi bạn', detail: short(item.reason), actions: ['answer', 'finish'] };
     case 'failed':
-      return { tone: 'error', title: 'Lỗi', detail: short(item.reason), actions: ['reassign', 'followUp', 'remove'] };
+      return { tone: 'error', title: 'Lỗi', detail: short(item.reason), actions: ['reassign', 'remove'] };
     case 'done':
       return { tone: 'done', title: 'Xong', actions: canClean ? ['cleanWorktree', 'remove'] : ['remove'] };
   }

@@ -28,4 +28,13 @@ describe('nextStepFor', () => {
     expect(nextStepFor({ status: 'review', judge: { status: 'interrupted', followUps: 0 } }, '', false).actions[0]).toBe('rejudge');
     expect(nextStepFor({ status: 'done' }, '', true).actions).toEqual(['cleanWorktree', 'remove']);
   });
+
+  it('offers a failed item only to hand it to someone else or remove it', () => {
+    expect(nextStepFor({ status: 'failed', reason: 'All 4 live runners are in use.' }, '', false)).toEqual({
+      tone: 'error',
+      title: 'Lỗi',
+      detail: 'All 4 live runners are in use.',
+      actions: ['reassign', 'remove'],
+    });
+  });
 });

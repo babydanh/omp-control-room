@@ -464,6 +464,14 @@ export function CompanyBoard({
   // The lane a phone shows, once the reader has picked one; until then the attention default.
   const [pickedLane, setPickedLane] = useState<CompanyLaneId | null>(null);
   const swipeStart = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  // The lane whose "Xoá hết" waits for a second click: one stray click must not empty a lane.
+  const [clearing, setClearing] = useState<CompanyLaneId | null>(null);
+
+  /** Removes every work item card in a finished lane; agent and task cards stay. */
+  function clearLane(lane: BoardLane): void {
+    for (const card of lane.workItems) void client.cancelWorkItem(card.workspacePath, card.id);
+    setClearing(null);
+  }
 
   const views: LaneView[] = lanes.map((lane) => {
     const drafts = lane.id === 'planned' ? planning : [];
@@ -534,7 +542,25 @@ export function CompanyBoard({
                 <Icon name={COMPANY_LANE_ICONS[lane.id]} className="text-[var(--lane-color)]" />{' '}
                 {lane.label}
               </span>
-              <span className="shrink-0 text-xs font-normal text-text-muted">{count}</span>
+              <span className="flex shrink-0 items-baseline gap-2 text-xs font-normal text-text-muted">
+                {(lane.id === 'failed' || lane.id === 'done') && lane.workItems.length > 0 && (
+                  clearing === lane.id ? (
+                    <>
+                      <button type="button" className="text-danger hover:underline" onClick={() => clearLane(lane)}>
+                        Xoá {lane.workItems.length} việc
+                      </button>
+                      <button type="button" className="hover:underline" onClick={() => setClearing(null)}>
+                        Thôi
+                      </button>
+                    </>
+                  ) : (
+                    <button type="button" className="hover:underline" onClick={() => setClearing(lane.id)}>
+                      Xoá hết
+                    </button>
+                  )
+                )}
+                {count}
+              </span>
             </h3>
             <p className="truncate text-xs text-status-active">{COMPANY_LANE_OWNERS[lane.id]}</p>
           </header>

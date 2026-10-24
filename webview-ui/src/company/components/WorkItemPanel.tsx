@@ -218,14 +218,15 @@ export function WorkItemPanel({
 
   // The actions a status allows. The server still decides; these only hide refused moves.
   // A queued item has not been sent: a big "done" button there reads as "send" and ends it unrun.
-  // The card menu still offers "Đánh dấu xong" for it.
-  const canFinish = status !== 'done' && status !== 'queued';
+  // A failed item offers only its banner: hand it to someone else, or remove it.
+  // The card menu still offers "Đánh dấu xong" for both.
+  const canFinish = status !== 'done' && status !== 'queued' && status !== 'failed';
   const canFail =
     status === 'queued' || status === 'running' || status === 'needs_input' || status === 'review';
   const canCancel = status === 'queued' || status === 'done' || status === 'failed';
   // A finished item is removed from the board, a queued one is cancelled before it is sent.
   const removes = status !== 'queued';
-  const canFollowUp = status === 'review' || status === 'failed' || status === 'needs_input';
+  const canFollowUp = status === 'review' || status === 'needs_input';
   const canReassign = status === 'queued' || status === 'review' || status === 'failed';
   const canAskLeader = status === 'review' && item.squadRunId === undefined;
   const hasActions =
