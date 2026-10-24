@@ -397,7 +397,7 @@ export function WorkItemPanel({
               disabled={busy}
               onClick={() => setConfirming('failed')}
             >
-              Đánh dấu hỏng
+              Dừng việc
             </CompanyButton>
           )}
           {canCancel && !inStep.has('remove') && (
@@ -449,7 +449,7 @@ export function WorkItemPanel({
                   ? 'Xoá việc này khỏi bảng? Không hoàn tác được.'
                   : 'Huỷ việc này? Việc đang chạy sẽ dừng.'
                 : confirming === 'failed'
-                  ? 'Đánh dấu việc này thất bại?'
+                  ? 'Dừng việc này? Agent sẽ ngừng và việc chuyển sang cột Lỗi; bấm Thử lại để chạy lại.'
                   : 'Dọn worktree của việc này?'
             }
             confirmLabel={
@@ -458,7 +458,7 @@ export function WorkItemPanel({
                   ? 'Xoá việc'
                   : 'Huỷ việc'
                 : confirming === 'failed'
-                  ? 'Đánh dấu thất bại'
+                  ? 'Dừng việc'
                   : 'Dọn worktree'
             }
             danger
