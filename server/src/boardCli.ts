@@ -99,6 +99,8 @@ export interface CliItem {
   readonly acceptance?: string;
   readonly repo?: string;
   readonly worktree?: { readonly path: string; readonly branch: string };
+  /** Where the branch stands and what is missing, as the board last read it from git. */
+  readonly delivery?: { readonly stage: string; readonly nextStep: string; readonly checkedAt: string };
   readonly history: readonly { readonly at: string; readonly message: string }[];
 }
 
@@ -107,6 +109,8 @@ export interface StatusAnswer {
   readonly you?: CliSession;
   readonly sessions: readonly CliSession[];
   readonly workItems: readonly CliItem[];
+  /** Finished items whose branch has not reached origin/main; empty from a board that does not tell. */
+  readonly undelivered: readonly CliItem[];
 }
 
 export interface TaskAnswer {
@@ -186,6 +190,7 @@ function readItem(value: unknown): CliItem {
     ...optional('acceptance', text(value, 'acceptance')),
     ...optional('repo', text(value, 'repo')),
     ...(path === undefined || branch === undefined || value['worktreeRemoved'] === true ? {} : { worktree: { path, branch } }),
+    ...readDelivery(value['delivery']),
     history: history.flatMap((event) => {
       if (!isRecord(event)) return [];
       const at = text(event, 'at');
@@ -193,6 +198,28 @@ function readItem(value: unknown): CliItem {
       return at === undefined || message === undefined ? [] : [{ at, message }];
     }),
   };
+}
+
+function readDelivery(value: unknown): Pick<CliItem, 'delivery'> {
+  if (!isRecord(value)) return {};
+  const stage = text(value, 'stage');
+  const nextStep = text(value, 'nextStep');
+  const checkedAt = text(value, 'checkedAt');
+  return stage === undefined || nextStep === undefined || checkedAt === undefined ? {} : { delivery: { stage, nextStep, checkedAt } };
+}
+
+const DELIVERY_LABEL: Record<string, string> = {
+  uncommitted: 'CHƯA COMMIT',
+  no_commits: 'chưa có commit',
+  branch: 'chỉ trên nhánh',
+  staging: 'đã lên staging, chưa main',
+  main: 'đã vào main',
+};
+
+function deliveryText(item: CliItem): string {
+  const delivery = item.delivery;
+  if (delivery === undefined) return '';
+  return `${DELIVERY_LABEL[delivery.stage] ?? delivery.stage} (kiểm ${delivery.checkedAt.slice(0, 16).replace('T', ' ')}) · Tiếp theo: ${delivery.nextStep}`;
 }
 
 function readList<T>(value: unknown, field: string, read: (entry: unknown) => T): T[] {
@@ -208,6 +235,7 @@ export function readStatusAnswer(value: unknown): StatusAnswer {
     ...(you === undefined ? {} : { you }),
     sessions: readList(value, 'sessions', readSession),
     workItems: readList(value, 'workItems', readItem),
+    undelivered: isRecord(value) && Array.isArray(value['undelivered']) ? value['undelivered'].map(readItem) : [],
   };
 }
 
@@ -248,6 +276,10 @@ export function formatStatus(answer: StatusAnswer): string {
   lines.push(...(answer.sessions.length === 0 ? ['  (không có)'] : answer.sessions.map(sessionLine)));
   lines.push('', `Việc chưa xong trên bảng (${answer.workItems.length}):`);
   lines.push(...(answer.workItems.length === 0 ? ['  (không có)'] : answer.workItems.map(itemLine)));
+  if (answer.undelivered.length > 0) {
+    lines.push('', `Việc xong nhưng chưa vào main (${answer.undelivered.length}):`);
+    lines.push(...answer.undelivered.map((item) => `${itemLine(item)}\n      ${deliveryText(item)}`));
+  }
   return lines.join('\n');
 }
 
@@ -258,6 +290,7 @@ export function formatTask(answer: TaskAnswer): string {
     if (item.acceptance) lines.push(`Xong khi: ${item.acceptance}`);
     if (item.repo) lines.push(`Repo: ${item.repo}`);
     if (item.worktree) lines.push(`Worktree: ${item.worktree.path} (nhánh ${item.worktree.branch})`);
+    if (item.delivery) lines.push(`Giao hàng: ${deliveryText(item)}`);
     if (item.reason) lines.push(`Lý do/chặn: ${item.reason}`);
     const recent = item.history.slice(-6);
     if (recent.length > 0) lines.push('Lịch sử gần đây:', ...recent.map((event) => `  ${event.at.slice(0, 16).replace('T', ' ')} ${clip(event.message, 200)}`));

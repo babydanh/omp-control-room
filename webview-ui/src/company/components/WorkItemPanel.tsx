@@ -28,6 +28,7 @@ import {
 import {
   assigneeLabel,
   blockerSentence,
+  deliveryChip,
   dependencyChoices,
   dependencyRefusal,
   dependencyRefusalText,
@@ -274,6 +275,25 @@ export function WorkItemPanel({
       className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto py-2"
     >
       <NextStepBanner step={step} busy={busy} onAction={runStep} />
+
+      {(() => {
+        const delivery = deliveryChip(item.delivery, now);
+        if (delivery === null || item.delivery === undefined) return null;
+        return (
+          <section aria-label="Giao hàng" data-testid="work-item-delivery-panel" className="px-2.5">
+            <h4 className="text-xs font-semibold text-text">Giao hàng</h4>
+            <p className="mt-1 text-xs text-text">
+              <span className="font-medium">{delivery.text}</span>
+              <span className="text-text-muted">
+                {' '}· nhánh {item.delivery.branch} · {item.delivery.commitsAhead} commit chưa có trên main
+                {item.delivery.inStaging === null ? ' · repo không có staging' : ''}
+              </span>
+            </p>
+            <p className="mt-1 break-words text-xs text-text-muted">Tiếp theo: {delivery.nextStep}</p>
+            {delivery.stale !== null && <p className="mt-1 text-2xs text-warning">Lưu ý: {delivery.stale}.</p>}
+          </section>
+        );
+      })()}
 
       {item.result !== undefined && item.result.trim() !== '' && (
         <section aria-label="Tóm tắt" className="px-2.5">

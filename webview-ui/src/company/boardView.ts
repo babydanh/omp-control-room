@@ -27,6 +27,7 @@ import type {
   WorkItemBlocker,
   WorkItemClaudeRun,
   WorkItemConflicts,
+  WorkItemDelivery,
   WorkItemJudge,
   WorkItemStatus,
 } from '../../../core/src/messages.js';
@@ -187,6 +188,8 @@ export interface BoardWorkItem {
   claudeRun: WorkItemClaudeRun | null;
   /** The agy run on the item, if any. */
   agyRun: WorkItemAgyRun | null;
+  /** Where the item's branch stands against origin/staging and origin/main, when the server has read it. */
+  delivery: WorkItemDelivery | null;
 }
 
 /** A squad run card: what the card shows, read from the run the server holds. */
@@ -308,6 +311,7 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
       parked: isParkedAssignee(item.assignee, workItemsOf(state, workspacePath).parkedSessionIds),
       claudeRun: item.claudeRun ?? null,
       agyRun: item.agyRun ?? null,
+      delivery: item.delivery ?? null,
     };
   });
 }

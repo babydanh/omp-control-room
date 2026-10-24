@@ -4037,6 +4037,8 @@ components:
         worktreeRemoved:
           type: boolean
           description: True once Dọn worktree removed this item's worktree. Absent otherwise.
+        delivery:
+          $ref: '#/components/schemas/WorkItemDelivery'
         blocker:
           $ref: '#/components/schemas/WorkItemBlocker'
         squadRunId:
@@ -4056,6 +4058,50 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WorkItemEvent'
+
+    WorkItemDeliveryStage:
+      type: string
+      enum: [uncommitted, no_commits, branch, staging, main]
+      description: >-
+        How far the item's branch has travelled. uncommitted = the worktree holds changes not committed;
+        no_commits = nothing committed beyond origin/main; branch = committed on the branch only;
+        staging = its content is in origin/staging; main = its content is in origin/main.
+
+    WorkItemDelivery:
+      type: object
+      additionalProperties: false
+      required: [checkedAt, branch, stage, dirtyFiles, commitsAhead, inStaging, inMain, nextStep]
+      description: >-
+        Where the item's branch stands against origin/main and origin/staging, checked from git (content
+        comparison, so a squash merge counts). nextStep names what is missing and the command that fixes it,
+        for the user and for CLI agents alike.
+      properties:
+        checkedAt:
+          type: string
+          format: date-time
+          description: When origin was last fetched successfully for this repo; the comparison used those refs. An old time means the fetch keeps failing.
+        branch:
+          type: string
+          minLength: 1
+          maxLength: 256
+        stage:
+          $ref: '#/components/schemas/WorkItemDeliveryStage'
+        dirtyFiles:
+          type: integer
+          minimum: 0
+          description: Files changed in the worktree and not committed; 0 when the worktree is gone.
+        commitsAhead:
+          type: integer
+          minimum: 0
+          description: Commits on the branch that origin/main does not hold by hash.
+        inStaging:
+          type: [boolean, 'null']
+          description: Whether the branch's content is in origin/staging; null when the repo has no staging branch.
+        inMain:
+          type: boolean
+        nextStep:
+          type: string
+          maxLength: 600
 
     WorkItemJudgeVerdict:
       type: string

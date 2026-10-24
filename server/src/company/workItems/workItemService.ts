@@ -71,6 +71,7 @@ import {
 } from './judgeModel.js';
 import { GIB, isSquadSettings, parseSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
 import type { SquadWorktree, WorktreeRemoval } from './squadWorktree.js';
+import { type DeliveryFacts, sameDelivery, toDelivery } from './workItemDelivery.js';
 import {
   type AgentObservation,
   assigneeKey,
@@ -128,6 +129,12 @@ import {
 
 /** How many recent request ids are remembered, so a resent command answers the same way. */
 const REQUEST_MEMORY_MAX = 256;
+/** How often each item's branch is checked against origin/main and origin/staging. */
+const DELIVERY_CHECK_MS = 2 * 60_000;
+/** The least time between two `git fetch origin` of one repo. */
+const DELIVERY_FETCH_MS = 5 * 60_000;
+/** The first check after the board starts: soon, but not while the start itself is busy. */
+const DELIVERY_FIRST_CHECK_MS = 15_000;
 
 /** How long a squad session may sit idle before the squad parks it to free its memory. */
 const SQUAD_PARK_IDLE_MS = 15 * 60_000;
@@ -269,6 +276,12 @@ export interface WorkItemPorts {
   /** Whether the approved proposal belongs to a compact squad run. */
   readonly isCompactSquadProposal?: (proposalId: string) => boolean;
   setLiveRunnerLimits?(live: number, retained: number): void;
+  /** Reads where an item's branch stands. Absent in tests that do not exercise it. */
+  readonly delivery?: {
+    /** Fetches origin for the repo; false when git failed. */
+    fetch(repo: string): Promise<boolean>;
+    probe(repo: string, worktree: SquadWorktree, worktreePresent: boolean): Promise<DeliveryFacts | undefined>;
+  };
 }
 
 /** A command the board sent. The request id makes a resent command harmless. */
@@ -424,6 +437,11 @@ export class WorkItemService {
   /** Whether the newest write failed. Nothing is sent to an agent until its state is on disk. */
   private lastWriteFailed = false;
   private disposed = false;
+  /** Cancels the next delivery check; null when none is scheduled. */
+  private deliveryTimer: (() => void) | null = null;
+  /** When each repo was last fetched successfully (ms, for the throttle; ISO, for `checkedAt`). */
+  private readonly lastFetch = new Map<string, number>();
+  private readonly fetchedAt = new Map<string, string>();
   private readonly changeListeners = new Set<() => void>();
   private readonly settledListeners = new Set<(item: WorkItem) => void>();
   /** Items held with the reason their attempted start is waiting: pool, worktree, or disk space. */
@@ -473,6 +491,57 @@ export class WorkItemService {
     if ([...this.items.values()].some((item) => item.status === 'running'))
       this.scheduleGraceCheck();
     this.ensureMaintenance();
+    this.scheduleDeliveryCheck(DELIVERY_FIRST_CHECK_MS);
+  }
+
+  /** Checks every item's branch again after `ms`, then keeps checking every few minutes. */
+  private scheduleDeliveryCheck(ms: number): void {
+    if (this.ports.delivery === undefined || this.disposed) return;
+    this.deliveryTimer?.();
+    this.deliveryTimer = this.ports.schedule(() => {
+      this.deliveryTimer = null;
+      void this.refreshDeliveries()
+        .catch(() => undefined)
+        .finally(() => this.scheduleDeliveryCheck(DELIVERY_CHECK_MS));
+    }, ms);
+  }
+
+  /**
+   * Reads where each item's branch stands (uncommitted in its worktree, on its branch, on
+   * origin/staging, in origin/main) and publishes what changed. Origin is fetched at most every few
+   * minutes per repo; `checkedAt` is the last successful fetch, so a failing fetch shows as an
+   * aging time rather than a fresh verdict. A repo never fetched in this run keeps its last delivery.
+   * A branch that no longer exists drops its delivery.
+   */
+  async refreshDeliveries(): Promise<void> {
+    const port = this.ports.delivery;
+    if (port === undefined) return;
+    const items = [...this.items.values()].filter((item) => item.worktree !== undefined);
+    for (const repo of new Set(items.map((item) => item.repo ?? this.workspacePath))) {
+      if (this.ports.now() - (this.lastFetch.get(repo) ?? 0) < DELIVERY_FETCH_MS) continue;
+      if (await port.fetch(repo)) {
+        this.lastFetch.set(repo, this.ports.now());
+        this.fetchedAt.set(repo, this.iso());
+      }
+    }
+    let changed = false;
+    for (const item of items) {
+      if (this.disposed) return;
+      const worktree = item.worktree;
+      const repo = item.repo ?? this.workspacePath;
+      const fetchedAt = this.fetchedAt.get(repo);
+      if (worktree === undefined || fetchedAt === undefined) continue;
+      const present = item.worktreeRemoved !== true && this.ports.worktrees.exists(worktree);
+      const facts = await port.probe(repo, worktree, present);
+      // The item may have been removed or replaced while git ran.
+      if (this.items.get(item.id) !== item) continue;
+      const next = facts === undefined ? undefined : toDelivery(facts, fetchedAt);
+      if (sameDelivery(item.delivery, next)) continue;
+      if (next === undefined) delete item.delivery;
+      else item.delivery = next;
+      changed = true;
+    }
+    if (changed) this.commit();
   }
 
   /** The folder's full state, as the board receives it. */
@@ -944,6 +1013,8 @@ export class WorkItemService {
   /** Cancels timers and stops further passes. Callers that already started a pass finish it. */
   dispose(): void {
     this.disposed = true;
+    this.deliveryTimer?.();
+    this.deliveryTimer = null;
     this.unsubscribeClaude?.();
     this.unsubscribeClaude = null;
     this.unsubscribeAgy?.();

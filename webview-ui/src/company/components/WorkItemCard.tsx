@@ -13,6 +13,7 @@ import { conflictText, judgeChipFor } from '../workItemReviewView.js';
 import {
   blockerChip,
   blockerSentence,
+  deliveryChip,
   PANE_CLOSED_LABEL,
   repoShortName,
   statusWordVi,
@@ -32,6 +33,13 @@ export interface WorkItemCardProps {
   onMenu: (request: AgentMenuRequest) => void;
 }
 
+const DELIVERY_TONE = {
+  warning: 'text-warning',
+  muted: 'text-text-muted',
+  caution: 'text-caution',
+  success: 'text-status-success',
+} as const;
+
 export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: WorkItemCardProps) {
   const triggers = useAgentMenuGestures<HTMLButtonElement>(
     { kind: 'workItem', id: card.id, workspacePath: card.workspacePath },
@@ -44,6 +52,8 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
   const needsAttention = card.status === 'needs_input' || card.status === 'failed';
   const progress = workItemProgressLine(card);
   const interrupted = workItemInterruptedNote(card);
+  // While an agent works, its branch is in flux: the chip only speaks once the item has stopped.
+  const delivery = card.status === 'running' || card.status === 'queued' ? null : deliveryChip(card.delivery, now);
   return (
     <button
       type="button"
@@ -107,6 +117,16 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
         )}
         {updated !== null && <span className="shrink-0">{updated}</span>}
       </span>
+      {delivery !== null && (
+        <span
+          data-testid="work-item-delivery"
+          title={delivery.stale === null ? delivery.nextStep : `${delivery.nextStep} (${delivery.stale})`}
+          className={`max-w-full truncate rounded-full bg-well px-1.5 text-2xs ${DELIVERY_TONE[delivery.tone]}`}
+        >
+          {delivery.text}
+          {delivery.stale !== null && ' · cũ'}
+        </span>
+      )}
       {progress !== null && (
         <span
           data-testid="work-item-progress"

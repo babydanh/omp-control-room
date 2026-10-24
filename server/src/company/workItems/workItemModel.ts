@@ -35,6 +35,7 @@ import { isRecord } from '../typeGuards.js';
 import { isValidAgentName } from './agentCatalog.js';
 import { composeDispatchPrompt } from './dispatchPrompt.js';
 import { parseSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
+import { parseDelivery } from './workItemDelivery.js';
 
 /** Longest prompt a work item may carry: the same bytes herdr accepts for one pane prompt. */
 export const WORK_ITEM_TEXT_MAX_BYTES = 32 * 1024;
@@ -478,6 +479,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
   const judge = parseJudge(value.judge);
   const claudeRun = parseClaudeRun(value.claudeRun);
   const agyRun = parseAgyRun(value.agyRun);
+  const delivery = parseDelivery(value.delivery);
   return {
     id: value.id,
     text: value.text,
@@ -507,6 +509,7 @@ export function parseStoredItem(value: unknown): StoredWorkItem | null {
     ...(judge === undefined ? {} : { judge }),
     judgeEvidenceAsked: value.judgeEvidenceAsked === true,
     ...(value.worktreeRemoved === true ? { worktreeRemoved: true } : {}),
+    ...(delivery === undefined ? {} : { delivery }),
     ...(value.inPlace === true ? { inPlace: true } : {}),
     ...(claudeRun === undefined ? {} : { claudeRun }),
     ...(agyRun === undefined ? {} : { agyRun }),

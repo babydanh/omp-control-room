@@ -19,6 +19,7 @@ import type {
   WorkItem,
   WorkItemAssignee,
   WorkItemBlocker,
+  WorkItemDelivery,
   WorkItemEventKind,
   WorkItemStatus,
 } from '../../../core/src/messages.js';
@@ -586,4 +587,37 @@ export function workItemCardTarget(state: CompanyViewState, item: WorkItem | und
       : { kind: 'workspaceSession', sessionId: assignee.sessionId };
   }
   return { kind: 'panel' };
+}
+
+/** How long a delivery may go without a successful origin fetch before the chip says it is old. */
+export const DELIVERY_STALE_MS = 15 * 60_000;
+
+/** The delivery chip: where the item's branch stands, in words, with the next step as its tooltip. */
+export interface DeliveryChip {
+  text: string;
+  tone: 'warning' | 'muted' | 'caution' | 'success';
+  nextStep: string;
+  /** Set when origin has not been fetched for a while: the stage may be out of date. */
+  stale: string | null;
+}
+
+export function deliveryChip(delivery: WorkItemDelivery | null | undefined, now: number): DeliveryChip | null {
+  if (delivery === null || delivery === undefined) return null;
+  const checked = Date.parse(delivery.checkedAt);
+  const stale = Number.isFinite(checked) && now - checked > DELIVERY_STALE_MS
+    ? `số liệu từ ${new Date(checked).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })}, fetch origin đang lỗi`
+    : null;
+  const base = { nextStep: delivery.nextStep, stale };
+  switch (delivery.stage) {
+    case 'uncommitted':
+      return { ...base, text: `Chưa commit · ${delivery.dirtyFiles} file`, tone: 'warning' };
+    case 'no_commits':
+      return { ...base, text: 'Chưa có commit', tone: 'muted' };
+    case 'branch':
+      return { ...base, text: delivery.inStaging === null ? 'Chưa vào main' : 'Chưa lên staging', tone: 'muted' };
+    case 'staging':
+      return { ...base, text: 'Đã lên staging · chưa main', tone: 'caution' };
+    case 'main':
+      return { ...base, text: 'Đã vào main', tone: 'success' };
+  }
 }

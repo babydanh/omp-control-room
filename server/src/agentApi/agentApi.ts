@@ -131,11 +131,14 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentApiDeps): v
     const sessions = await deps.sessions();
     const you = sessions.find((session) => session.paneId !== undefined && session.paneId === caller.paneId)
       ?? sessions.find((session) => caller.cwd !== undefined && pathKey(session.cwd) === pathKey(caller.cwd));
+    const items = allItems(deps.folders());
     return {
       caller,
       ...(you === undefined ? {} : { you }),
       sessions,
-      workItems: allItems(deps.folders()).filter((item) => OPEN.has(item.status)),
+      workItems: items.filter((item) => OPEN.has(item.status)),
+      // Finished work whose branch has not reached origin/main yet: what is still missing to ship.
+      undelivered: items.filter((item) => item.status === 'done' && item.delivery !== undefined && item.delivery.stage !== 'main'),
     };
   });
 

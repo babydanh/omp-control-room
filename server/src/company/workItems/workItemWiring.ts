@@ -27,6 +27,7 @@ import {
   removeSquadWorktree,
   runCommand,
 } from './squadWorktree.js';
+import { fetchOrigin, probeDelivery } from './workItemDelivery.js';
 import { squadWorkstreamKey } from './workItemScheduler.js';
 import {
   type WorkItemCatalog,
@@ -225,6 +226,10 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     claudeMcp: createClaudeMcpSource({ configPath: join(homedir(), '.claude.json') }),
     setLiveRunnerLimits: options.setLiveRunnerLimits,
     isCompactSquadProposal: options.isCompactSquadProposal,
+    delivery: {
+      fetch: (repo) => fetchOrigin(repo, runCommand),
+      probe: (repo, worktree, present) => probeDelivery(repo, worktree, present, runCommand),
+    },
   });
   await service.load();
   const unsubscribe = options.herdr?.onAgents(() => service.scheduleReconcile());
