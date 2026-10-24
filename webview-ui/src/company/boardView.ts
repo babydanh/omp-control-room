@@ -279,6 +279,8 @@ function busyWithOwnTurn(item: WorkItem, agents: readonly HerdrAgent[]): boolean
   return [pane.worktreeRoot, pane.cwd].some((path) => path !== undefined && samePath(path, worktree));
 }
 
+const OWN_TURN_REASON = 'Agent đang làm việc này; lời nhắn tiếp sẽ gửi khi lượt này xong.';
+
 /** The work items the board shows, as cards: each one's lane, heading, holder, priority and hold. */
 function workItemCards(state: CompanyViewState): BoardWorkItem[] {
   return visibleWorkItems(state).map(({ item, workspacePath, folder }) => {
@@ -290,7 +292,7 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
       status: item.status,
       head: workItemCardHead(item.text),
       assignee: assigneeLabel(item.assignee, state, workspacePath),
-      reason: item.reason?.trim() ? item.reason : null,
+      reason: ownTurn ? OWN_TURN_REASON : item.reason?.trim() ? item.reason : null,
       sequence: item.sequence,
       priority: item.priority,
       blocker: ownTurn ? null : (item.blocker ?? null),
