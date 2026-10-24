@@ -1224,7 +1224,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     expect(f.openedWith).toEqual([]);
   });
 
-  it('opens a new session in the item repo with the item role', async () => {
+  it('opens a chat session in the item repo, under the item role key so it takes the prompt directly', async () => {
     const f = await repoFixture();
     const id = await f.service.create({
       requestId: randomUUID(),
@@ -1233,7 +1233,8 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       repo: REPO,
       role: 'worker',
     });
-    expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'worker' }]);
+    expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'chat' }]);
+    expect(f.openedKeys).toEqual([squadWorkstreamKey('worker', worktreeOf(id))]);
     expect(itemOf(f, id)).toMatchObject({
       status: 'running',
       assignee: { kind: 'session', sessionId: 'chat-1' },
@@ -1250,7 +1251,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       repo: REPO,
       role: 'qa',
     });
-    expect(f.openedWith).toEqual([{ cwd: worktreeOf(first), role: 'qa' }]);
+    expect(f.openedWith).toEqual([{ cwd: worktreeOf(first), role: 'chat' }]);
     expect(itemOf(f, first)).toMatchObject({
       status: 'running',
       assignee: { kind: 'session', sessionId: 'chat-1' },
@@ -1415,7 +1416,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     expect(itemOf(readOnly, readOnlyId).status).toBe('running');
     expect(readOnly.diskChecks).toEqual([]);
     expect(readOnly.worktreesMade).toEqual([]);
-    expect(readOnly.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+    expect(readOnly.openedWith).toEqual([{ cwd: REPO, role: 'chat' }]);
   });
 
   it('starts worktree preparations concurrently while reserving the per-repo cap', async () => {
@@ -1457,7 +1458,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       role: 'worker',
     });
     expect(f.worktreesMade).toEqual([{ repo: REPO, shortId: id.slice(0, 8) }]);
-    expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'worker' }]);
+    expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'chat' }]);
     expect(itemOf(f, id)).toMatchObject({
       status: 'running',
       worktree: { path: worktreeOf(id), branch: `squad-${id.slice(0, 8)}` },
@@ -1540,7 +1541,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       agent: 'scout',
     });
     expect(f.worktreesMade).toEqual([]);
-    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'chat' }]);
     expect(itemOf(f, id)).toMatchObject({ status: 'running' });
     expect(itemOf(f, id).worktree).toBeUndefined();
   });
@@ -1583,7 +1584,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       repo: REPO,
       role: 'worker',
     });
-    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'worker' }]);
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'chat' }]);
     expect(itemOf(f, id)).toMatchObject({ status: 'running' });
     expect(itemOf(f, id).blocker).toBeUndefined();
   });

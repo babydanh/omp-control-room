@@ -9,7 +9,7 @@ import type {
   OmpBridgeOptions,
   OmpBridgeSendPrompt,
 } from '../src/company/ompBridge.js';
-import { createOmpRunner } from '../src/company/ompRunner.js';
+import { buildOmpRunnerArgs, createOmpRunner } from '../src/company/ompRunner.js';
 import type { PtyHostEvent, PtySpawnIdentity, PtySpawnSpec } from '../src/company/ptyHost.js';
 
 type Pty = {
@@ -123,6 +123,26 @@ function runnerInput(
     rpcHandler: () => undefined,
   };
 }
+
+describe('buildOmpRunnerArgs approval mode', () => {
+  const base = { commandArgs: [], extensionPath: 'C:/extension/omp-bridge.mjs' };
+  const approvalOf = (args: string[]): string | null => {
+    const index = args.indexOf('--approval-mode');
+    return index === -1 ? null : (args[index + 1] ?? null);
+  };
+
+  it('stops a role run on exec approval, but leaves the user chat on its own omp default', () => {
+    expect(approvalOf(buildOmpRunnerArgs({ ...base, roleProfile: profile }))).toBe('write');
+    expect(approvalOf(buildOmpRunnerArgs({ ...base, roleProfile: { ...profile, toolsPolicy: 'omp' } }))).toBeNull();
+  });
+
+  it('never stops an unattended run on an approval nobody can answer, whatever its role policy', () => {
+    expect(approvalOf(buildOmpRunnerArgs({ ...base, roleProfile: profile, unattended: true }))).toBe('yolo');
+    expect(
+      approvalOf(buildOmpRunnerArgs({ ...base, roleProfile: { ...profile, toolsPolicy: 'omp' }, unattended: true })),
+    ).toBe('yolo');
+  });
+});
 
 describe('managed OMP runner', () => {
   it('waits for authenticated readiness before delivery and keeps prompt text out of process arguments', async () => {

@@ -303,12 +303,15 @@ function servesRepo(member: SchedulerMember, repo: string): boolean {
   return member.squadRepo !== undefined && checkoutKey(member.squadRepo) === checkoutKey(repo);
 }
 
-/** Lower tier is preferred: a role note naming the role, then the squad's own session, then the rest. */
+/**
+ * Lower tier is preferred: a role note naming the role, then the squad's own session, then the rest.
+ * The squad opens its sessions as chat under a role key, so a chat session of its own counts too.
+ */
 function tierOf(member: SchedulerMember, item: SchedulerItem): number {
   if (item.role !== undefined && member.note?.toLowerCase().includes(item.role)) return 0;
   const ownSession =
     member.squadRepo !== undefined && checkoutKey(member.squadRepo) === checkoutKey(item.repo);
-  if (ownSession && (item.role === undefined || member.role === item.role)) return 1;
+  if (ownSession && (item.role === undefined || member.role === item.role || member.role === 'chat')) return 1;
   return 2;
 }
 

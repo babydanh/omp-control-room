@@ -1373,6 +1373,8 @@ class NativeCompanyRuntime implements CompanyRuntime {
           ? {}
           : { sessionDirectory: this.sessionDirectory(session.id) }),
         ...(resumeFile === undefined ? {} : { resumeFile }),
+        // A work item's session runs in a terminal nobody watches: it must not stop on an approval.
+        ...(isWorkItemSession(session) ? { unattended: true } : {}),
         ...(session.nativeSessionId === undefined
           ? {}
           : { nativeSessionId: session.nativeSessionId }),
@@ -3791,4 +3793,9 @@ export async function createCompanyRuntime(
  */
 function modelRoleOf(role: CompanyRole, workstreamId: string): CompanyRole {
   return role === 'chat' ? (squadWorkstreamRole(workstreamId) ?? role) : role;
+}
+
+/** A chat session the board opened for a work item, under a role key: no one watches its terminal. */
+function isWorkItemSession(session: CompanySession): boolean {
+  return session.role === 'chat' && squadWorkstreamRole(session.workstreamId) !== undefined;
 }

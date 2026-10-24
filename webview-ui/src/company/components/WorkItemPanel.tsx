@@ -380,7 +380,7 @@ export function WorkItemPanel({
       )}
 
       {item.claudeRun?.sessionId !== undefined && (
-        <details open={status === 'running'} className="px-2.5">
+        <details open className="px-2.5">
           <summary className="cursor-pointer text-xs text-text">Nhật ký Claude</summary>
           <ClaudeRunLog
             client={client}

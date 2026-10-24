@@ -50,6 +50,12 @@ export interface OmpRunnerStartInput {
   readonly nativeSessionId?: string;
   /** A session file to resume exactly (`omp --resume <file>`), used when the board reopens a session. */
   readonly resumeFile?: string;
+  /**
+   * True when no one watches the run's terminal (every board run but the user's own chat). omp then
+   * asks no approval, since an unanswered dialog stalls the run forever; the board's tool gate
+   * still decides every call by the role's policy.
+   */
+  readonly unattended?: boolean;
   /** Omitted when the run starts idle (capability discovery), so no turn is spent. */
   readonly initialPrompt?: OmpBridgeSendPrompt;
   readonly rpcHandler: OmpBridgeRpcHandler;
@@ -231,6 +237,7 @@ export class OmpRunner {
       ...(input.sessionDirectory === undefined ? {} : { sessionDirectory: input.sessionDirectory }),
       ...(input.nativeSessionId === undefined ? {} : { nativeSessionId: input.nativeSessionId }),
       ...(input.resumeFile === undefined ? {} : { resumeFile: input.resumeFile }),
+      ...(input.unattended === true ? { unattended: true } : {}),
     });
     const env = Object.fromEntries(
       Object.entries(this.options.environment ?? process.env).filter(
@@ -342,9 +349,16 @@ export function buildOmpRunnerArgs(input: {
   readonly sessionDirectory?: string;
   readonly nativeSessionId?: string;
   readonly resumeFile?: string;
+  readonly unattended?: boolean;
 }): string[] {
-  // A chat session is the user's own omp: it keeps omp's default approval mode.
-  const userDriven = input.roleProfile.toolsPolicy === 'omp';
+  // The user's own chat keeps omp's default approval mode. A run nobody watches asks for no
+  // approval: the board's tool gate decides its calls. Any other run stops exec on approval.
+  const approval =
+    input.unattended === true
+      ? ['--approval-mode', 'yolo']
+      : input.roleProfile.toolsPolicy === 'omp'
+        ? []
+        : ['--approval-mode', 'write'];
   const resume = input.resumeFile ?? input.nativeSessionId;
   return [
     ...input.commandArgs,
@@ -354,7 +368,7 @@ export function buildOmpRunnerArgs(input: {
     input.roleProfile.requestedModel,
     '--thinking',
     input.roleProfile.thinking,
-    ...(userDriven ? [] : ['--approval-mode', 'write']),
+    ...approval,
     ...(input.sessionDirectory === undefined ? [] : ['--session-dir', input.sessionDirectory]),
     ...(resume ? ['--resume', resume] : []),
   ];

@@ -1449,18 +1449,21 @@ export class WorkItemService {
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {
-      // Compact items use board chat sessions. Editing items open in their own worktree; read-only
-      // items stay in the repo and can reuse its role session. No herdr pane is taken: its model is unknown.
+      // Compact squad items and items the user filed themselves use board chat sessions: the item is
+      // the whole brief, so no contract stands behind the session (a role session refuses any prompt
+      // without one). Editing items open in their own worktree; read-only items stay in the repo and
+      // can reuse its role session. No herdr pane is taken: its model is unknown.
       const compactItem = item.assignee.kind === 'new-session' &&
         item.squadRunId !== undefined &&
         this.ports.isCompactSquadProposal?.(item.squadRunId) === true;
+      const chatItem = compactItem || item.squadRunId === undefined;
       const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
       if (cwd === undefined) return;
       let sessionId: string;
       try {
         sessionId = await this.ports.sessions.openChat({
           cwd,
-          role: compactItem ? 'chat' : decision.role,
+          role: chatItem ? 'chat' : decision.role,
           workstreamKey: squadWorkstreamKey(decision.role, cwd),
         });
       } catch (error) {
