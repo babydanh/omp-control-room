@@ -367,8 +367,8 @@ export const MONO_CHAR_EM = 0.6;
  * The smallest and largest font a fitted screen uses; below the floor it scrolls sideways. The floor
  * stays readable: a 200-column agent screen in a side drawer otherwise shrinks to unreadable dots.
  */
-const FIT_MIN_PX = 12;
-const FIT_MAX_PX = 14;
+const FIT_MIN_PX = 14;
+const FIT_MAX_PX = 16;
 /** A row drawn only with rules and spaces: a TUI divider stretched to the terminal's full width. */
 const RULE_ROW = /^[\s─━═│┃║┄┅┈┉╌╍-]*$/;
 

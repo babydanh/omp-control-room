@@ -407,16 +407,16 @@ describe('screenFitPx', () => {
   const row = (columns: number): ScreenLine => [{ text: 'x'.repeat(columns), style: {} }];
   const rule = (columns: number): ScreenLine => [{ text: '─'.repeat(columns), style: {} }];
 
-  it('shrinks the font so the widest row fits, within the readable 12-14 px bounds', () => {
-    // 80 columns at 0.6 em a glyph fit 600 px at 12.5 px.
-    expect(screenFitPx([row(40), row(80)], 600)).toBe(12.5);
-    expect(screenFitPx([row(20)], 600)).toBe(14);
-    expect(screenFitPx([row(300)], 600)).toBe(12);
+  it('shrinks the font so the widest row fits, within the readable 14-16 px bounds', () => {
+    // 40 columns at 0.6 em a glyph fit 360 px at 15 px.
+    expect(screenFitPx([row(20), row(40)], 360)).toBe(15);
+    expect(screenFitPx([row(20)], 600)).toBe(16);
+    expect(screenFitPx([row(300)], 600)).toBe(14);
   });
 
   it('sizes by the text, not by full-width divider rows or trailing spaces', () => {
-    expect(screenFitPx([rule(200), row(20)], 600)).toBe(14);
-    expect(screenFitPx([[{ text: `${'x'.repeat(20)}${' '.repeat(180)}`, style: {} }]], 600)).toBe(14);
+    expect(screenFitPx([rule(200), row(20)], 600)).toBe(16);
+    expect(screenFitPx([[{ text: `${'x'.repeat(20)}${' '.repeat(180)}`, style: {} }]], 600)).toBe(16);
   });
 
   it('has no size before the frame is measured or when the screen is empty', () => {
