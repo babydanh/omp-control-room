@@ -54,3 +54,9 @@ export const TERMINAL_INPUT_CHUNK_MAX_BYTES = 8 * 1024;
 // ── WebSocket reconnect ──────────────────────────────────────
 /** Reconnect backoff ladder for the /ws transport (transport/reconnectBackoff.ts). The last rung repeats. */
 export const WS_RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 4_000] as const;
+
+// ── Screen capture mark-up ───────────────────────────────────
+/** Marks drawn on a capture (ScreenAnnotateDialog): red reads on light and dark UIs alike. */
+export const ANNOTATE_MARK_COLOR = '#ff3b3b';
+export const ANNOTATE_LABEL_COLOR = '#ffffff';
+export const ANNOTATE_OUTLINE_COLOR = '#000000';

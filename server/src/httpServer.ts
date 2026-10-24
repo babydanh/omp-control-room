@@ -41,6 +41,7 @@ import { processAlive } from './projects/sessionStop.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
 import { registerTerminalRoutes } from './terminal/terminalRoutes.js';
 import type { AgentState } from './types.js';
+import { registerVoiceRoutes } from './voice/voiceRoutes.js';
 import {
   bearerTokenValid,
   isAllowedWebSocketOrigin,
@@ -158,6 +159,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     sessions: () => agentSessions(options),
     folders: () => agentFolders(options),
   });
+  registerVoiceRoutes(app, { token: options.token });
 
   // ── Listen ──────────────────────────────────────────────────
 

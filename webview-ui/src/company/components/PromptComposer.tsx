@@ -20,6 +20,9 @@
  *    picker over the omp sessions saved here. Neither reaches a terminal.
  *  - Images. Paste, drop or pick an image: the server saves it and its path joins the
  *    text (`promptImages.ts`), since a terminal carries text and agents open images by path.
+ *  - Voice. 🎤 or Ctrl+Shift+Space records, the server has Groq write it down; saying
+ *    "chụp màn" opens 📸 (whole screen after a countdown, then marked up in
+ *    ScreenAnnotateDialog), and a final "gửi đi" sends (`voiceCommands.ts`).
  */
 
 import {
@@ -66,10 +69,13 @@ import {
 import { canStartSquad, type SquadStartVerdict } from '../squadView.js';
 import { useCompanyState } from '../useCompanyState.js';
 import { usePromptImages } from '../usePromptImages.js';
+import { CAPTURE_DELAY_SECONDS, captureScreen, useVoiceInput } from '../useVoiceInput.js';
+import { readVoiceCommands } from '../voiceCommands.js';
 import { workItemsOf } from '../workItemView.js';
 import { composerFolderChoices, folderLabelFor } from '../workspaces.js';
 import { ComposerSendMenu } from './ComposerSendMenu.js';
 import { OmpSessionPicker } from './OmpSessionPicker.js';
+import { ScreenAnnotateDialog } from './ScreenAnnotateDialog.js';
 import { CreateWorkDialog } from './WorkDialogHost.js';
 
 /** Shown when a line is sent with no session selected. */
@@ -81,7 +87,7 @@ const TERMINAL_NOT_OPEN_NOTICE =
 
 /** The keys this box answers to, shown in the `?` tooltip beside the target line. */
 const COMPOSER_HINTS =
-  'Enter gõ vào phiên đang chọn · Shift+Enter xuống dòng · Ctrl+Shift+Enter để giao cho công ty · Ctrl+Alt+Enter để giao cho đội · /new mở phiên mới · /resume mở phiên đã lưu';
+  'Enter gõ vào phiên đang chọn · Shift+Enter xuống dòng · Ctrl+Shift+Enter để giao cho công ty · Ctrl+Alt+Enter để giao cho đội · Ctrl+Shift+Space nói (nói "chụp màn" để chụp, "gửi đi" để gửi) · /new mở phiên mới · /resume mở phiên đã lưu';
 
 /** Shown when Ctrl/Cmd+Shift+Enter is pressed while a herdr agent is the target. */
 const HERDR_COMPANY_NOTICE =
@@ -407,6 +413,61 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
     }
   };
 
+  // ── Voice and screen capture ──
+  /** Counting down before the screen is taken, or the capture being marked up. */
+  const [capture, setCapture] = useState<{ readonly left: number } | { readonly file: File } | null>(null);
+  /** Send once the dictated text (and a marked capture) is in the draft. */
+  const [sendAfterVoice, setSendAfterVoice] = useState<'now' | 'after-capture' | null>(null);
+  const startCapture = () => {
+    if (capture === null) setCapture({ left: CAPTURE_DELAY_SECONDS });
+  };
+  const voice = useVoiceInput(
+    (spoken) => {
+      const command = readVoiceCommands(spoken);
+      const current = draft.text.trimEnd();
+      if (command.text !== '') client.setDraftText(current === '' ? command.text : `${current} ${command.text}`);
+      if (command.capture) startCapture();
+      if (command.send) setSendAfterVoice(command.capture ? 'after-capture' : 'now');
+      inputRef.current?.focus();
+    },
+    setNotice,
+  );
+  useEffect(() => {
+    if (capture === null || !('left' in capture)) return undefined;
+    if (capture.left > 0) {
+      const timer = window.setTimeout(() => setCapture({ left: capture.left - 1 }), 1000);
+      return () => window.clearTimeout(timer);
+    }
+    let cancelled = false;
+    captureScreen()
+      .then((file) => { if (!cancelled) setCapture({ file }); })
+      .catch((reason: unknown) => {
+        if (cancelled) return;
+        setCapture(null);
+        setSendAfterVoice(null);
+        setNotice(reason instanceof Error ? reason.message : 'Không chụp được màn hình.');
+      });
+    return () => { cancelled = true; };
+  }, [capture]);
+  // The newest send handler, so the effect below runs only when its own inputs change.
+  const submitRef = useRef(onSubmitKey);
+  submitRef.current = onSubmitKey;
+  useEffect(() => {
+    if (sendAfterVoice !== 'now' || busy) return;
+    setSendAfterVoice(null);
+    if (blocker === null) submitRef.current();
+    else setNotice(blocker);
+  }, [sendAfterVoice, busy, blocker]);
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      if (event.code !== 'Space' || !event.ctrlKey || !event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      voice.toggle();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   const accept = (row: CompletionRow) => {
     setHighlight(0);
     setNotice(null);
@@ -635,6 +696,29 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
         >
           {images.saving > 0 ? '…' : '📎'}
         </button>
+        <button
+          type="button"
+          onClick={voice.toggle}
+          disabled={voice.state === 'transcribing'}
+          aria-pressed={voice.state === 'recording'}
+          aria-label={voice.state === 'recording' ? 'Dừng nghe' : 'Nói (Ctrl+Shift+Space)'}
+          title={voice.state === 'recording' ? 'Bấm lại để dừng và chép thành chữ' : 'Nói thay gõ (Ctrl+Shift+Space) · "chụp màn" để chụp · "gửi đi" để gửi'}
+          data-testid="prompt-voice"
+          className={`touch-target shrink-0 rounded-[var(--company-radius-md)] px-2 py-2 text-sm hover:bg-hover ${voice.state === 'recording' ? 'text-status-error' : 'text-text-muted hover:text-text'}`}
+        >
+          {voice.state === 'recording' ? `● ${voice.seconds}s` : voice.state === 'transcribing' ? '…' : '🎤'}
+        </button>
+        <button
+          type="button"
+          onClick={startCapture}
+          disabled={capture !== null}
+          aria-label="Chụp màn hình và đánh dấu"
+          title={`Chụp cả màn hình sau ${CAPTURE_DELAY_SECONDS} giây (chuyển sang cửa sổ cần chụp), rồi khoanh, đánh số, làm mờ trước khi gắn vào prompt`}
+          data-testid="prompt-capture"
+          className="touch-target shrink-0 rounded-[var(--company-radius-md)] px-2 py-2 text-sm text-text-muted hover:bg-hover hover:text-text"
+        >
+          {capture !== null && 'left' in capture ? capture.left : '📸'}
+        </button>
         <ComposerSendMenu
           sendLabel={images.saving > 0 ? 'Đang lưu ảnh...' : busy ? 'Đang gửi...' : 'Gửi'}
           sendDisabled={blocker !== null || busy || resumeRequest !== null || newSessionWaits}
@@ -712,6 +796,25 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
             client.setDraftText('');
           }}
           onClose={() => setAssignOpen(false)}
+        />
+      )}
+      {capture !== null && 'left' in capture && (
+        <p role="status" className="mt-1 text-2xs text-text-muted" data-testid="prompt-capture-countdown">
+          Chụp sau {capture.left} giây: chuyển sang cửa sổ cần chụp.
+        </p>
+      )}
+      {capture !== null && 'file' in capture && (
+        <ScreenAnnotateDialog
+          image={capture.file}
+          onCancel={() => {
+            setCapture(null);
+            setSendAfterVoice(null);
+          }}
+          onDone={(file) => {
+            images.attach([file]);
+            setCapture(null);
+            setSendAfterVoice((current) => (current === 'after-capture' ? 'now' : current));
+          }}
         />
       )}
     </section>
