@@ -31,6 +31,8 @@ import type {
   WorkItem,
   WorkItemAssignee,
   WorkItemBlocker,
+  WorkItemCloud,
+  WorkItemCloudIssue,
   WorkItemVerdict,
 } from '../../../../core/src/messages.js';
 import { withoutTerminalEscapes } from '../../../../core/src/terminalText.js';
@@ -70,7 +72,16 @@ import {
   passedMessage,
 } from './judgeModel.js';
 import { GIB, isSquadSettings, parseSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
-import type { SquadWorktree, WorktreeRemoval } from './squadWorktree.js';
+import type { CommandRunner, SquadWorktree, WorktreeRemoval } from './squadWorktree.js';
+import {
+  cloudTodoPending,
+  countUncommittedFiles,
+  missingCloudBranch,
+  parseFastHandoffResult,
+  parseOpenCloudIssues,
+  parseOrchestratorComments,
+  updateCloudHandoff,
+} from './workItemCloud.js';
 import { type DeliveryFacts, sameDelivery, toDelivery } from './workItemDelivery.js';
 import {
   type AgentObservation,
@@ -135,6 +146,12 @@ const DELIVERY_CHECK_MS = 2 * 60_000;
 const DELIVERY_FETCH_MS = 5 * 60_000;
 /** The first check after the board starts: soon, but not while the start itself is busy. */
 const DELIVERY_FIRST_CHECK_MS = 15_000;
+/** Cloud handoff and Git operations stay bounded so a dead CLI cannot stall the board. */
+const CLOUD_GIT_TIMEOUT_MS = 120_000;
+const CLOUD_GH_TIMEOUT_MS = 30_000;
+const FAST_HANDOFF_TIMEOUT_MS = 5 * 60_000;
+const CLOUD_ISSUE_CHECK_MS = 5 * 60_000;
+const CLOUD_REPOSITORY = 'babydanh/agent-orchestrator';
 
 /** How long a squad session may sit idle before the squad parks it to free its memory. */
 const SQUAD_PARK_IDLE_MS = 15 * 60_000;
@@ -241,6 +258,14 @@ export interface WorkItemWorktrees {
   exists(worktree: SquadWorktree): boolean;
 }
 
+/** Git, GitHub, handoff-file, and PowerShell operations used by cloud handoff. */
+export interface WorkItemCloudPort {
+  readonly run: CommandRunner;
+  readonly fastHandoffScript: string;
+  readHandoff(worktreePath: string): Promise<string | undefined>;
+  writeHandoff(worktreePath: string, content: string): Promise<void>;
+}
+
 /** Everything the service reaches outside itself. */
 export interface WorkItemPorts {
   readonly roster: WorkItemRoster;
@@ -276,6 +301,8 @@ export interface WorkItemPorts {
   /** Whether the approved proposal belongs to a compact squad run. */
   readonly isCompactSquadProposal?: (proposalId: string) => boolean;
   setLiveRunnerLimits?(live: number, retained: number): void;
+  /** Injectable git/GitHub/PowerShell and handoff-file operations. */
+  readonly cloud?: WorkItemCloudPort;
   /** Reads where an item's branch stands. Absent in tests that do not exercise it. */
   readonly delivery?: {
     /** Fetches origin for the repo; false when git failed. */
@@ -467,6 +494,8 @@ export class WorkItemService {
   /** Whether a progress pass is already scheduled for CLI output. */
   private claudeNotifyPending = false;
 
+  private cloudIssues: WorkItemCloudIssue[] = [];
+  private cloudIssueFetchedAt = Number.NEGATIVE_INFINITY;
   constructor(workspacePath: string, ports: WorkItemPorts) {
     this.workspacePath = workspacePath;
     this.ports = ports;
@@ -497,7 +526,7 @@ export class WorkItemService {
 
   /** Checks every item's branch again after `ms`, then keeps checking every few minutes. */
   private scheduleDeliveryCheck(ms: number): void {
-    if (this.ports.delivery === undefined || this.disposed) return;
+    if ((this.ports.delivery === undefined && this.ports.cloud === undefined) || this.disposed) return;
     this.deliveryTimer?.();
     this.deliveryTimer = this.ports.schedule(() => {
       this.deliveryTimer = null;
@@ -516,33 +545,125 @@ export class WorkItemService {
    */
   async refreshDeliveries(): Promise<void> {
     const port = this.ports.delivery;
-    if (port === undefined) return;
-    const items = [...this.items.values()].filter((item) => item.worktree !== undefined);
-    for (const repo of new Set(items.map((item) => item.repo ?? this.workspacePath))) {
-      if (this.ports.now() - (this.lastFetch.get(repo) ?? 0) < DELIVERY_FETCH_MS) continue;
-      if (await port.fetch(repo)) {
-        this.lastFetch.set(repo, this.ports.now());
-        this.fetchedAt.set(repo, this.iso());
+    if (port !== undefined) {
+      const items = [...this.items.values()].filter((item) => item.worktree !== undefined);
+      for (const repo of new Set(items.map((item) => item.repo ?? this.workspacePath))) {
+        if (this.ports.now() - (this.lastFetch.get(repo) ?? 0) < DELIVERY_FETCH_MS) continue;
+        if (await port.fetch(repo)) {
+          this.lastFetch.set(repo, this.ports.now());
+          this.fetchedAt.set(repo, this.iso());
+        }
       }
+      let changed = false;
+      for (const item of items) {
+        if (this.disposed) return;
+        const worktree = item.worktree;
+        const repo = item.repo ?? this.workspacePath;
+        const fetchedAt = this.fetchedAt.get(repo);
+        if (worktree === undefined || fetchedAt === undefined) continue;
+        const present = item.worktreeRemoved !== true && this.ports.worktrees.exists(worktree);
+        const facts = await port.probe(repo, worktree, present);
+        if (this.items.get(item.id) !== item || facts === null) continue;
+        const next = facts === undefined ? undefined : toDelivery(facts, fetchedAt);
+        if (sameDelivery(item.delivery, next)) continue;
+        if (next === undefined) delete item.delivery;
+        else item.delivery = next;
+        changed = true;
+      }
+      if (changed) this.commit();
     }
+    await this.refreshCloud();
+  }
+
+  private async refreshCloud(): Promise<void> {
+    const port = this.ports.cloud;
+    if (port === undefined || this.disposed) return;
+    const completed: StoredWorkItem[] = [];
     let changed = false;
-    for (const item of items) {
-      if (this.disposed) return;
-      const worktree = item.worktree;
-      const repo = item.repo ?? this.workspacePath;
-      const fetchedAt = this.fetchedAt.get(repo);
-      if (worktree === undefined || fetchedAt === undefined) continue;
-      const present = item.worktreeRemoved !== true && this.ports.worktrees.exists(worktree);
-      const facts = await port.probe(repo, worktree, present);
-      // The item may have been removed or replaced while git ran; an unreadable check changes nothing.
-      if (this.items.get(item.id) !== item || facts === null) continue;
-      const next = facts === undefined ? undefined : toDelivery(facts, fetchedAt);
-      if (sameDelivery(item.delivery, next)) continue;
-      if (next === undefined) delete item.delivery;
-      else item.delivery = next;
+    for (const item of this.items.values()) {
+      if (item.cloud?.state !== 'running') continue;
+      const status = await this.cloudIssueStatus(item.cloud.issue);
+      if (status === undefined || status.state === 'running' || this.items.get(item.id) !== item) continue;
+      item.cloud = {
+        ...item.cloud,
+        state: status.state,
+        ...(status.summary === undefined ? {} : { summary: status.summary }),
+        ...(status.logUrl === undefined ? {} : { logUrl: status.logUrl }),
+      };
+      if (status.state === 'finished') {
+        this.pushEvent(item, makeEvent(this.iso(), 'status', `Cloud hoàn tất Issue #${item.cloud.issue}.`));
+        completed.push(item);
+      } else {
+        this.pushEvent(item, makeEvent(this.iso(), 'status', `Issue cloud #${item.cloud.issue} đã đóng.`));
+      }
       changed = true;
     }
-    if (changed) this.commit();
+    if (changed) {
+      this.commit();
+      await this.flush();
+    }
+    for (const item of completed) await this.pullCloudItem(item, false);
+    if (this.ports.now() - this.cloudIssueFetchedAt < CLOUD_ISSUE_CHECK_MS) return;
+    const issues = await this.fetchOpenCloudIssues();
+    if (issues === undefined) return;
+    this.cloudIssueFetchedAt = this.ports.now();
+    if (JSON.stringify(issues) === JSON.stringify(this.cloudIssues)) return;
+    this.cloudIssues = issues;
+    this.commit();
+  }
+
+  private async cloudIssueStatus(issue: number): Promise<{
+    state: 'running' | 'finished' | 'closed';
+    summary?: string;
+    logUrl?: string;
+  } | undefined> {
+    const comment = await this.readOrchestratorComments(issue);
+    if (comment === undefined) return undefined;
+    if (comment !== null) return { state: 'finished', ...comment };
+    const result = await this.runCloud('gh', ['api', `repos/${CLOUD_REPOSITORY}/issues/${issue}`], this.workspacePath, CLOUD_GH_TIMEOUT_MS);
+    if (result.code !== 0) return undefined;
+    try {
+      const record = JSON.parse(result.stdout) as { state?: unknown };
+      if (record.state === 'closed') return { state: 'closed' };
+      return record.state === 'open' ? { state: 'running' } : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async readOrchestratorComments(issue: number): Promise<{
+    summary: string;
+    logUrl?: string;
+  } | null | undefined> {
+    const result = await this.runCloud(
+      'gh',
+      ['api', '--paginate', '--slurp', `repos/${CLOUD_REPOSITORY}/issues/${issue}/comments`],
+      this.workspacePath,
+      CLOUD_GH_TIMEOUT_MS,
+    );
+    return result.code === 0 ? parseOrchestratorComments(result.stdout) : undefined;
+  }
+
+  private async fetchOpenCloudIssues(): Promise<WorkItemCloudIssue[] | undefined> {
+    const result = await this.runCloud('gh', [
+      'issue', 'list', '-R', CLOUD_REPOSITORY, '--state', 'open', '--search', '[Handoff] in:title',
+      '--json', 'number,title,url,createdAt,body',
+    ], this.workspacePath, CLOUD_GH_TIMEOUT_MS);
+    if (result.code !== 0) return undefined;
+    const linked = new Set([...this.items.values()].flatMap((item) => item.cloud === undefined ? [] : [item.cloud.issue]));
+    const issues = parseOpenCloudIssues(result.stdout, linked);
+    if (issues === undefined) return undefined;
+    for (const issue of issues) {
+      const comment = await this.readOrchestratorComments(issue.issue);
+      if (comment !== null && comment !== undefined) issue.state = 'finished';
+    }
+    return issues;
+  }
+
+  private async runCloud(file: string, args: readonly string[], cwd: string, timeoutMs: number) {
+    const port = this.ports.cloud;
+    if (port === undefined) throw new CompanyError('cloud_unavailable', 'Tính năng cloud chưa được cấu hình.');
+    return port.run(file, args, cwd, timeoutMs);
   }
 
   /** The folder's full state, as the board receives it. */
@@ -565,6 +686,7 @@ export class WorkItemService {
       parkedSessionIds: this.squadSessionIds.filter((id) =>
         view.sessions.some((session) => session.id === id && session.status === 'parked'),
       ),
+      cloudIssues: this.cloudIssues.map((issue) => ({ ...issue })),
     };
   }
 
@@ -746,6 +868,69 @@ export class WorkItemService {
     await this.flush();
     // A verdict of done may free the items that waited for this one.
     if (command.verdict === 'done') await this.reconcileAfterSave();
+  }
+
+  /** Creates and commits only HANDOFF.md before asking fast-handoff to create its Issue. */
+  async pushToCloud(command: WorkItemCommand & { id: string }): Promise<void> {
+    if (this.replay(command.requestId) !== undefined) return;
+    const item = this.requireItem(command.id);
+    const port = this.ports.cloud;
+    if (port === undefined) throw new CompanyError('cloud_unavailable', 'Tính năng cloud chưa được cấu hình.');
+    if (item.cloud !== undefined) throw new CompanyError('cloud_already_linked', 'Việc này đã có Issue cloud.');
+    if (item.status === 'queued' || item.status === 'running')
+      throw new CompanyError('work_item_busy', 'Chỉ có thể đẩy việc chưa chạy hoặc đã dừng lên cloud.');
+    const worktree = item.worktree;
+    if (worktree === undefined || item.worktreeRemoved === true || !this.ports.worktrees.exists(worktree))
+      throw new CompanyError('cloud_worktree_missing', 'Không còn worktree của việc để bàn giao.');
+    const status = await this.runCloud('git', ['status', '--porcelain', '--untracked-files=all'], worktree.path, CLOUD_GIT_TIMEOUT_MS);
+    if (status.code !== 0) throw new CompanyError('cloud_status_failed', status.stderr || status.stdout || 'Không đọc được trạng thái worktree.');
+    const dirty = countUncommittedFiles(status.stdout);
+    if (dirty > 0) throw new CompanyError('cloud_worktree_dirty', `Worktree còn ${dirty} file chưa commit: commit hẹp đúng file của việc trước rồi mới đẩy lên cloud.`);
+    const at = this.iso();
+    const handoff = updateCloudHandoff(await port.readHandoff(worktree.path), this.wire(item, this.view()), at);
+    await port.writeHandoff(worktree.path, handoff);
+    const add = await this.runCloud('git', ['add', '--', 'HANDOFF.md'], worktree.path, CLOUD_GIT_TIMEOUT_MS);
+    if (add.code !== 0) throw new CompanyError('cloud_handoff_commit_failed', add.stderr || add.stdout || 'Không thêm được HANDOFF.md.');
+    const message = `docs(handoff): bàn giao #${item.sequence} lên cloud`;
+    const commit = await this.runCloud('git', ['commit', '--only', '-m', message, '--', 'HANDOFF.md'], worktree.path, CLOUD_GIT_TIMEOUT_MS);
+    if (commit.code !== 0) throw new CompanyError('cloud_handoff_commit_failed', commit.stderr || commit.stdout || 'Không commit được HANDOFF.md.');
+    const clean = await this.runCloud('git', ['status', '--porcelain', '--untracked-files=all'], worktree.path, CLOUD_GIT_TIMEOUT_MS);
+    if (clean.code !== 0) throw new CompanyError('cloud_status_failed', clean.stderr || clean.stdout || 'Không xác nhận được worktree sạch.');
+    const remaining = countUncommittedFiles(clean.stdout);
+    if (remaining > 0) throw new CompanyError('cloud_worktree_dirty', `Worktree còn ${remaining} file chưa commit: commit hẹp đúng file của việc trước rồi mới đẩy lên cloud.`);
+    const title = `#${item.sequence} ${item.text.replace(/\s+/g, ' ').trim().slice(0, 80)}`;
+    const result = await this.runCloud('powershell.exe', [
+      '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', port.fastHandoffScript,
+      '-TaskTitle', title, '-TodoPending', cloudTodoPending(this.wire(item, this.view())),
+    ], worktree.path, FAST_HANDOFF_TIMEOUT_MS);
+    let issue: { issue: number; url: string };
+    try {
+      issue = parseFastHandoffResult(result);
+    } catch (error) {
+      throw new CompanyError('cloud_handoff_failed', error instanceof Error ? error.message : String(error));
+    }
+    item.cloud = {
+      issue: issue.issue,
+      url: issue.url,
+      branch: worktree.branch,
+      repo: item.repo ?? this.workspacePath,
+      state: 'running',
+      startedAt: at,
+    };
+    this.pushEvent(item, makeEvent(at, 'status', `Đã đẩy lên cloud: Issue #${issue.issue}.`));
+    this.remember(command.requestId, '');
+    this.commit();
+    await this.flush();
+  }
+
+  /** Fetches a finished cloud branch, then performs only a safe fast-forward into the worktree. */
+  async pullCloud(command: WorkItemCommand & { id: string }): Promise<void> {
+    if (this.replay(command.requestId) !== undefined) return;
+    const item = this.requireItem(command.id);
+    if (!['finished', 'waiting_clean', 'diverged'].includes(item.cloud?.state ?? ''))
+      throw new CompanyError('cloud_pull_unavailable', 'Chỉ có thể kéo kết quả cloud đã hoàn tất.');
+    await this.pullCloudItem(item, true);
+    this.remember(command.requestId, '');
   }
 
   /**
@@ -1259,6 +1444,80 @@ export class WorkItemService {
 
   private refuseUnlessFollowable(item: StoredWorkItem): void {
     if (!canFollowUp(item.status)) this.refuseStatus(item);
+  }
+
+  private async pullCloudItem(item: StoredWorkItem, manual: boolean): Promise<void> {
+    const cloud = item.cloud;
+    if (cloud === undefined) throw new CompanyError('cloud_pull_unavailable', 'Việc này chưa có Issue cloud.');
+    const worktree = item.worktree;
+    if (worktree === undefined || item.worktreeRemoved === true || !this.ports.worktrees.exists(worktree)) {
+      if (manual) throw new CompanyError('cloud_worktree_missing', 'Không còn worktree của việc để kéo kết quả.');
+      return;
+    }
+    const branch = `omp/issue-${cloud.issue}`;
+    const fetch = await this.runCloud('git', ['fetch', 'origin', branch], worktree.path, CLOUD_GIT_TIMEOUT_MS);
+    const fetchOutput = `${fetch.stderr}\n${fetch.stdout}`;
+    if (fetch.code !== 0) {
+      if (missingCloudBranch(fetchOutput)) {
+        await this.updateCloudState(item, { ...cloud, state: 'no_changes', reason: `Không có nhánh cloud mới để kéo (${branch}).` });
+        return;
+      }
+      if (manual) throw new CompanyError('cloud_fetch_failed', fetch.stderr || fetch.stdout || 'Không fetch được nhánh cloud.');
+      return;
+    }
+    const status = await this.runCloud('git', ['status', '--porcelain', '--untracked-files=all'], worktree.path, CLOUD_GIT_TIMEOUT_MS);
+    if (status.code !== 0) {
+      if (manual) throw new CompanyError('cloud_status_failed', status.stderr || status.stdout || 'Không đọc được trạng thái worktree.');
+      return;
+    }
+    const dirty = countUncommittedFiles(status.stdout, true);
+    if (dirty > 0) {
+      await this.updateCloudState(item, {
+        ...cloud,
+        state: 'waiting_clean',
+        reason: 'Worktree còn file chưa commit: commit hoặc dọn rồi bấm Kéo về',
+      });
+      return;
+    }
+    const merge = await this.runCloud('git', ['-C', worktree.path, 'merge', '--ff-only', 'FETCH_HEAD'], worktree.path, CLOUD_GIT_TIMEOUT_MS);
+    if (merge.code !== 0) {
+      const output = `${merge.stderr}\n${merge.stdout}`;
+      if (/not possible to fast-forward|not a fast-forward|non-fast-forward/i.test(output)) {
+        await this.updateCloudState(item, {
+          ...cloud,
+          state: 'diverged',
+          reason: `Nhánh cloud và nhánh máy đã rẽ nhánh: gộp tay git -C ${worktree.path} merge origin/${branch}`,
+        });
+        return;
+      }
+      if (manual) throw new CompanyError('cloud_merge_failed', merge.stderr || merge.stdout || 'Không merge được nhánh cloud.');
+      return;
+    }
+    const pulled = { ...cloud, state: 'pulled' as const };
+    delete pulled.reason;
+    await this.updateCloudState(item, pulled);
+    this.lastFetch.delete(cloud.repo);
+    this.fetchedAt.delete(cloud.repo);
+    if (this.ports.delivery !== undefined) await this.refreshDeliveries();
+  }
+
+  private async updateCloudState(item: StoredWorkItem, cloud: WorkItemCloud): Promise<void> {
+    if (this.items.get(item.id) !== item) return;
+    if (cloud.reason === undefined) delete cloud.reason;
+    item.cloud = cloud;
+    this.pushEvent(item, makeEvent(this.iso(), 'status', this.cloudStateEvent(cloud)));
+    this.commit();
+    await this.flush();
+  }
+
+  private cloudStateEvent(cloud: WorkItemCloud): string {
+    switch (cloud.state) {
+      case 'no_changes': return `Không có thay đổi cloud mới cho Issue #${cloud.issue}.`;
+      case 'waiting_clean': return 'Worktree còn thay đổi; chưa kéo kết quả cloud.';
+      case 'diverged': return 'Nhánh cloud và nhánh máy đã rẽ nhánh; chưa kéo kết quả.';
+      case 'pulled': return `Đã kéo kết quả cloud về (omp/issue-${cloud.issue}).`;
+      default: return cloud.reason ?? `Trạng thái cloud: ${cloud.state}.`;
+    }
   }
 
   private iso(): string {

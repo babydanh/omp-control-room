@@ -249,6 +249,8 @@ components:
         - $ref: '#/components/schemas/CompanyWorkItemAssignMessage'
         - $ref: '#/components/schemas/CompanyWorkItemFollowUpMessage'
         - $ref: '#/components/schemas/CompanyWorkItemMarkMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemCloudPushMessage'
+        - $ref: '#/components/schemas/CompanyWorkItemCloudPullMessage'
         - $ref: '#/components/schemas/CompanyWorkItemCancelMessage'
         - $ref: '#/components/schemas/CompanyWorkItemDependenciesMessage'
         - $ref: '#/components/schemas/CompanyWorkItemJudgeMessage'
@@ -4039,6 +4041,8 @@ components:
           description: True once Dọn worktree removed this item's worktree. Absent otherwise.
         delivery:
           $ref: '#/components/schemas/WorkItemDelivery'
+        cloud:
+          $ref: '#/components/schemas/WorkItemCloud'
         blocker:
           $ref: '#/components/schemas/WorkItemBlocker'
         squadRunId:
@@ -4102,6 +4106,72 @@ components:
         nextStep:
           type: string
           maxLength: 600
+    WorkItemCloudState:
+      type: string
+      enum: [running, finished, waiting_clean, diverged, pulled, no_changes, closed]
+
+    WorkItemCloud:
+      type: object
+      additionalProperties: false
+      required: [issue, url, branch, repo, state, startedAt]
+      description: The cloud handoff Issue and its current tracked state.
+      properties:
+        issue:
+          type: integer
+          minimum: 1
+        url:
+          type: string
+          format: uri
+        branch:
+          type: string
+          minLength: 1
+          maxLength: 256
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        state:
+          $ref: '#/components/schemas/WorkItemCloudState'
+        startedAt:
+          type: string
+          format: date-time
+        summary:
+          type: string
+          maxLength: 300
+        logUrl:
+          type: string
+          format: uri
+        reason:
+          type: string
+          maxLength: 300
+
+    WorkItemCloudIssue:
+      type: object
+      additionalProperties: false
+      required: [issue, title, url, createdAt, state]
+      description: An open [Handoff] Issue not linked to a work item on this board.
+      properties:
+        issue:
+          type: integer
+          minimum: 1
+        title:
+          type: string
+          minLength: 1
+          maxLength: 256
+        url:
+          type: string
+          format: uri
+        createdAt:
+          type: string
+          format: date-time
+        state:
+          type: string
+          enum: [running, finished]
+        repo:
+          type: string
+          minLength: 1
+          maxLength: 256
+
 
     WorkItemJudgeVerdict:
       type: string
@@ -4383,6 +4453,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/WorkItem'
+        cloudIssues:
+          description: Open [Handoff] Issues on the orchestrator that no item on this board holds. Absent from boards that do not read them.
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/WorkItemCloudIssue'
         roles:
           type: array
           items:
@@ -4656,6 +4732,46 @@ components:
       properties:
         type:
           const: companyWorkItemCleanWorktree
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
+
+    CompanyWorkItemCloudPushMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id]
+      description: >-
+        Write/commit HANDOFF.md in a clean item worktree, then run fast-handoff. Refused if the worktree
+        contains any uncommitted file or the item is running/queued.
+      properties:
+        type:
+          const: companyWorkItemCloudPush
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        id:
+          type: string
+          format: uuid
+
+    CompanyWorkItemCloudPullMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, id]
+      description: Retry the safe fast-forward pull of a finished cloud Issue.
+      properties:
+        type:
+          const: companyWorkItemCloudPull
         requestId:
           type: string
           format: uuid

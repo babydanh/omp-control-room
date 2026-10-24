@@ -290,6 +290,8 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyWorkItemDependencies',
   'companyWorkItemJudge',
   'companyWorkItemCleanWorktree',
+  'companyWorkItemCloudPush',
+  'companyWorkItemCloudPull',
   'companySquadSettingsSet',
   'companySquadRequest',
   'companySquadApprove',
@@ -339,6 +341,8 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companyWorkItemDependencies: true,
   companyWorkItemJudge: true,
   companyWorkItemCleanWorktree: true,
+  companyWorkItemCloudPush: true,
+  companyWorkItemCloudPull: true,
   companySquadSettingsSet: true,
   companySquadRequest: true,
   companySquadApprove: true,
@@ -571,6 +575,8 @@ async function run(
       case 'companyWorkItemDependencies':
       case 'companyWorkItemJudge':
       case 'companyWorkItemCleanWorktree':
+      case 'companyWorkItemCloudPush':
+      case 'companyWorkItemCloudPull':
       case 'companySquadSettingsSet':
       case 'companySquadClaudeCheck':
       case 'companyAgentRoleSet':
@@ -1300,6 +1306,16 @@ async function workItemCommand(
   }
   if (msg.type === 'companyWorkItemCleanWorktree') {
     await work.cleanWorktree({ requestId, id });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemCloudPush') {
+    await work.pushToCloud({ requestId, id });
+    ok(send, requestId);
+    return;
+  }
+  if (msg.type === 'companyWorkItemCloudPull') {
+    await work.pullCloud({ requestId, id });
     ok(send, requestId);
     return;
   }

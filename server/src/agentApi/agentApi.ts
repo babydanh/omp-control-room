@@ -131,7 +131,8 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentApiDeps): v
     const sessions = await deps.sessions();
     const you = sessions.find((session) => session.paneId !== undefined && session.paneId === caller.paneId)
       ?? sessions.find((session) => caller.cwd !== undefined && pathKey(session.cwd) === pathKey(caller.cwd));
-    const items = allItems(deps.folders());
+    const snapshots = deps.folders().map((folder) => ({ folder, snapshot: folder.service.snapshot() }));
+    const items = snapshots.flatMap(({ folder, snapshot }) => snapshot.items.map((item) => ({ ...item, folder: folder.path })));
     return {
       caller,
       ...(you === undefined ? {} : { you }),
@@ -139,6 +140,9 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentApiDeps): v
       workItems: items.filter((item) => OPEN.has(item.status)),
       // Finished work whose branch has not reached origin/main yet: what is still missing to ship.
       undelivered: items.filter((item) => item.status === 'done' && item.delivery !== undefined && item.delivery.stage !== 'main'),
+      cloudIssues: snapshots.flatMap(({ folder, snapshot }) =>
+        (snapshot.cloudIssues ?? []).map((issue) => ({ ...issue, folder: folder.path })),
+      ),
     };
   });
 

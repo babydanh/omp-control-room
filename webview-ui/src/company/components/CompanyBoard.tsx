@@ -67,6 +67,7 @@ import { useFlightLayout } from '../useFlightLayout.js';
 import { useLayoutMode } from '../useLayoutMode.js';
 import { useNow } from '../useNow.js';
 import { queueOrder, workItemKey, type WorkItemRef } from '../workItemView.js';
+import { CloudIssueCard } from './CloudIssueCard.js';
 import { FolderTag } from './FolderTag.js';
 import { Icon } from './Icon.js';
 import { SquadRunCard } from './SquadRunCard.js';
@@ -417,6 +418,7 @@ const LANE_ATTENTION_ORDER: readonly CompanyLaneId[] = [
   'planned',
   'failed',
   'done',
+  'cloud',
 ];
 
 /** The lanes row's padding on each side (p-1.5), taken out of the width the lanes pack into. */
@@ -496,7 +498,8 @@ export function CompanyBoard({
       drafts.length +
       lane.workItems.length +
       lane.squads.length +
-      lane.agents.length;
+      lane.agents.length +
+      lane.cloudIssues.length;
     return { lane, drafts, count };
   });
   const shownLane =
@@ -629,11 +632,24 @@ export function CompanyBoard({
                 }
               />
             ))}
+            {lane.cloudIssues.map((card, index) => (
+              <CloudIssueCard
+                key={`${card.workspacePath}:${card.issue.issue}`}
+                card={card}
+                index={drafts.length + lane.cards.length + lane.workItems.length + index}
+              />
+            ))}
             {lane.squads.map((card, index) => (
               <SquadRunCard
                 key={squadRunKey(card)}
                 card={card}
-                index={drafts.length + lane.cards.length + lane.workItems.length + index}
+                index={
+                  drafts.length +
+                  lane.cards.length +
+                  lane.workItems.length +
+                  lane.cloudIssues.length +
+                  index
+                }
                 selected={
                   selectedSquad !== null &&
                   selectedSquad.runId === card.runId &&
@@ -652,6 +668,7 @@ export function CompanyBoard({
                   drafts.length +
                   lane.cards.length +
                   lane.workItems.length +
+                  lane.cloudIssues.length +
                   lane.squads.length +
                   index
                 }

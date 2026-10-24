@@ -17,6 +17,7 @@ import {
   PANE_CLOSED_LABEL,
   repoShortName,
   statusWordVi,
+  WORK_ITEM_CLOUD_LABELS,
   workItemInterruptedNote,
   workItemKey,
   workItemProgressLine,
@@ -55,6 +56,7 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
   // While an agent works, its branch is in flux: the chip only speaks once the item has stopped.
   const delivery = card.status === 'running' || card.status === 'queued' ? null : deliveryChip(card.delivery, now);
   return (
+    <>
     <button
       type="button"
       onClick={onOpen}
@@ -73,6 +75,11 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
           #{card.sequence}
         </span>
       </span>
+      {card.cloud != null && (
+        <span className="max-w-full truncate rounded-full bg-well px-1.5 text-2xs text-text-muted">
+          {WORK_ITEM_CLOUD_LABELS[card.cloud.state]}
+        </span>
+      )}
       {chip !== null && (
         <span className="flex min-w-0 flex-col items-start gap-0.5">
           <span
@@ -152,5 +159,17 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
         </span>
       )}
     </button>
+    {card.cloud != null && (
+      <a
+        href={card.cloud.url}
+        target="_blank"
+        rel="noreferrer"
+        data-testid="work-item-cloud-link"
+        className="mx-2 block truncate text-2xs text-text-muted hover:text-text hover:underline"
+      >
+        Issue #{card.cloud.issue} · {WORK_ITEM_CLOUD_LABELS[card.cloud.state]}
+      </a>
+    )}
+  </>
   );
 }

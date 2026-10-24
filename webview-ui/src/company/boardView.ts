@@ -26,6 +26,7 @@ import type {
   WorkItemAgyRun,
   WorkItemBlocker,
   WorkItemClaudeRun,
+  WorkItemCloudIssue,
   WorkItemConflicts,
   WorkItemDelivery,
   WorkItemJudge,
@@ -35,8 +36,8 @@ import { type AgentBoardCard, buildAgentCards } from './agentBoard.js';
 import type { CompanyViewState } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
 import { COMPANY_LANE_LABELS, COMPANY_LANE_ORDER } from './constants.js';
-import type { FolderIdentity } from './folderIdentity.js';
-import { samePath } from './folderView.js';
+import { type FolderIdentity,showsAllFolders } from './folderIdentity.js';
+import { foldersInView, samePath } from './folderView.js';
 import { squadLaneFor, visibleSquadRuns } from './squadView.js';
 import { isParkedAssignee } from './workItemReviewView.js';
 import {
@@ -44,6 +45,7 @@ import {
   laneForWorkItem,
   visibleWorkItems,
   workItemCardHead,
+  workItemFolderIdentity,
   workItemsOf,
 } from './workItemView.js';
 
@@ -190,6 +192,13 @@ export interface BoardWorkItem {
   agyRun: WorkItemAgyRun | null;
   /** Where the item's branch stands against origin/staging and origin/main, when the server has read it. */
   delivery: WorkItemDelivery | null;
+  cloud: WorkItem['cloud'] | null;
+}
+
+export interface BoardCloudIssue {
+  issue: WorkItemCloudIssue;
+  workspacePath: string;
+  folder: FolderIdentity | null;
 }
 
 /** A squad run card: what the card shows, read from the run the server holds. */
@@ -222,6 +231,8 @@ export interface BoardLane {
   cards: BoardCard[];
   /** Work item cards, in the order the folders and the server filed them. */
   workItems: BoardWorkItem[];
+  /** Unlinked open [Handoff] Issues to read or fetch manually; never merged by the board. */
+  cloudIssues: BoardCloudIssue[];
   /** Squad run cards, in the order the folders and the server filed them. */
   squads: BoardSquad[];
   /** Agents with no task card of their own, drawn after the task cards. */
@@ -291,7 +302,13 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
     return {
       id: item.id,
       workspacePath,
-      lane: ownTurn ? 'running' : laneForWorkItem(item.status),
+      lane:
+        item.cloud !== undefined &&
+        ['running', 'finished', 'waiting_clean', 'diverged'].includes(item.cloud.state)
+          ? 'cloud'
+          : ownTurn
+            ? 'running'
+            : laneForWorkItem(item.status),
       status: item.status,
       head: workItemCardHead(item.text),
       assignee: assigneeLabel(item.assignee, state, workspacePath),
@@ -312,7 +329,16 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
       claudeRun: item.claudeRun ?? null,
       agyRun: item.agyRun ?? null,
       delivery: item.delivery ?? null,
+      cloud: item.cloud ?? null,
     };
+  });
+}
+
+function cloudIssueCards(state: CompanyViewState): BoardCloudIssue[] {
+  const showAll = showsAllFolders(state);
+  return foldersInView(state, Object.keys(state.workItems)).flatMap((workspacePath) => {
+    const folder = showAll ? workItemFolderIdentity(state, workspacePath) : null;
+    return workItemsOf(state, workspacePath).cloudIssues.map((issue) => ({ issue, workspacePath, folder }));
   });
 }
 
@@ -407,6 +433,7 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
   }
   const agents = buildAgentCards(state, carded, finishedPanes);
   const squads = squadCards(state);
+  const cloudIssues = cloudIssueCards(state);
   return COMPANY_LANE_ORDER.map((id) => ({
     id,
     label: COMPANY_LANE_LABELS[id],
@@ -414,6 +441,7 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
     workItems: workItems.filter((card) => card.lane === id),
     squads: squads.filter((card) => card.lane === id),
     agents: agents.filter((agent) => agent.lane === id),
+    cloudIssues: id === 'cloud' ? cloudIssues : [],
   }));
 }
 

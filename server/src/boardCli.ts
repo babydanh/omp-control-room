@@ -16,7 +16,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
-import type { WorkItem } from '../../core/src/messages.js';
+import type { WorkItem, WorkItemCloudState } from '../../core/src/messages.js';
 import { isRecord } from './company/typeGuards.js';
 import { HANDOFF_MAX_BYTES, type HandoffFile, readHandoffFiles } from './ledger/handoffFiles.js';
 
@@ -102,6 +102,14 @@ export interface CliItem {
   /** Where the branch stands and what is missing, as the board last read it from git. */
   readonly delivery?: { readonly stage: string; readonly nextStep: string; readonly checkedAt: string };
   readonly history: readonly { readonly at: string; readonly message: string }[];
+  readonly cloud?: {
+    readonly issue: number;
+    readonly url: string;
+    readonly state: WorkItemCloudState;
+    readonly summary?: string;
+    readonly logUrl?: string;
+    readonly reason?: string;
+  };
 }
 
 export interface StatusAnswer {
@@ -111,6 +119,16 @@ export interface StatusAnswer {
   readonly workItems: readonly CliItem[];
   /** Finished items whose branch has not reached origin/main; empty from a board that does not tell. */
   readonly undelivered: readonly CliItem[];
+  readonly cloudIssues: readonly CliCloudIssue[];
+}
+export interface CliCloudIssue {
+  readonly issue: number;
+  readonly title: string;
+  readonly url: string;
+  readonly createdAt: string;
+  readonly state: 'running' | 'finished';
+  readonly repo?: string;
+  readonly folder: string;
 }
 
 export interface TaskAnswer {
@@ -167,8 +185,36 @@ function readAssignee(value: unknown): string {
   return kind;
 }
 
+const CLOUD_STATE_LABEL: Record<WorkItemCloudState, string> = {
+  running: 'đang chạy trên cloud',
+  finished: 'xong trên cloud',
+  waiting_clean: 'chờ worktree sạch',
+  diverged: 'nhánh bị rẽ',
+  pulled: 'đã kéo về',
+  no_changes: 'không có thay đổi',
+  closed: 'đã đóng',
+};
+
 function isStatus(value: unknown): value is WorkItem['status'] {
   return typeof value === 'string' && Object.hasOwn(STATUS_LABEL, value);
+}
+
+function readCloud(value: unknown): Pick<CliItem, 'cloud'> {
+  if (!isRecord(value)) return {};
+  const issue = value['issue'];
+  const url = text(value, 'url');
+  const state = text(value, 'state');
+  if (typeof issue !== 'number' || !Number.isInteger(issue) || issue < 1 || url === undefined || state === undefined || !Object.hasOwn(CLOUD_STATE_LABEL, state)) return {};
+  return {
+    cloud: {
+      issue,
+      url,
+      state: state as WorkItemCloudState,
+      ...optional('summary', text(value, 'summary')),
+      ...optional('logUrl', text(value, 'logUrl')),
+      ...optional('reason', text(value, 'reason')),
+    },
+  };
 }
 
 function readItem(value: unknown): CliItem {
@@ -191,6 +237,7 @@ function readItem(value: unknown): CliItem {
     ...optional('repo', text(value, 'repo')),
     ...(path === undefined || branch === undefined || value['worktreeRemoved'] === true ? {} : { worktree: { path, branch } }),
     ...readDelivery(value['delivery']),
+    ...readCloud(value['cloud']),
     history: history.flatMap((event) => {
       if (!isRecord(event)) return [];
       const at = text(event, 'at');
@@ -206,6 +253,22 @@ function readDelivery(value: unknown): Pick<CliItem, 'delivery'> {
   const nextStep = text(value, 'nextStep');
   const checkedAt = text(value, 'checkedAt');
   return stage === undefined || nextStep === undefined || checkedAt === undefined ? {} : { delivery: { stage, nextStep, checkedAt } };
+}
+
+function readCloudIssue(value: unknown): CliCloudIssue {
+  if (!isRecord(value)) throw new Error(OLD_BOARD);
+  const issue = value['issue'];
+  const state = text(value, 'state');
+  if (typeof issue !== 'number' || !Number.isInteger(issue) || issue < 1 || (state !== 'running' && state !== 'finished')) throw new Error(OLD_BOARD);
+  return {
+    issue,
+    title: need(value, 'title'),
+    url: need(value, 'url'),
+    createdAt: need(value, 'createdAt'),
+    state,
+    ...optional('repo', text(value, 'repo')),
+    folder: need(value, 'folder'),
+  };
 }
 
 const DELIVERY_LABEL: Record<string, string> = {
@@ -236,6 +299,7 @@ export function readStatusAnswer(value: unknown): StatusAnswer {
     sessions: readList(value, 'sessions', readSession),
     workItems: readList(value, 'workItems', readItem),
     undelivered: isRecord(value) && Array.isArray(value['undelivered']) ? value['undelivered'].map(readItem) : [],
+    cloudIssues: isRecord(value) && Array.isArray(value['cloudIssues']) ? value['cloudIssues'].map(readCloudIssue) : [],
   };
 }
 
@@ -263,7 +327,8 @@ function sessionLine(session: CliSession): string {
 }
 
 function itemLine(item: CliItem): string {
-  return `  #${item.sequence} [${STATUS_LABEL[item.status]}] ${clip(item.text, 100)} → ${item.assignee}${item.reason ? ` · ${clip(item.reason, 140)}` : ''}`;
+  const cloud = item.cloud === undefined ? '' : ` · cloud #${item.cloud.issue} [${CLOUD_STATE_LABEL[item.cloud.state]}]`;
+  return `  #${item.sequence} [${STATUS_LABEL[item.status]}] ${clip(item.text, 100)} → ${item.assignee}${cloud}${item.reason ? ` · ${clip(item.reason, 140)}` : ''}`;
 }
 
 function callerText(caller: CliCaller): string {
@@ -280,6 +345,12 @@ export function formatStatus(answer: StatusAnswer): string {
     lines.push('', `Việc xong nhưng chưa vào main (${answer.undelivered.length}):`);
     lines.push(...answer.undelivered.map((item) => `${itemLine(item)}\n      ${deliveryText(item)}`));
   }
+  if (answer.cloudIssues.length > 0) {
+    lines.push('', `Issue [Handoff] ngoài board (${answer.cloudIssues.length}):`);
+    lines.push(...answer.cloudIssues.map((issue) =>
+      `  #${issue.issue} [${CLOUD_STATE_LABEL[issue.state]}] ${clip(issue.title, 100)} · ${issue.folder}${issue.repo ? ` · ${issue.repo}` : ''}\n      ${issue.url}`,
+    ));
+  }
   return lines.join('\n');
 }
 
@@ -292,6 +363,12 @@ export function formatTask(answer: TaskAnswer): string {
     if (item.worktree) lines.push(`Worktree: ${item.worktree.path} (nhánh ${item.worktree.branch})`);
     if (item.delivery) lines.push(`Giao hàng: ${deliveryText(item)}`);
     if (item.reason) lines.push(`Lý do/chặn: ${item.reason}`);
+    if (item.cloud !== undefined) {
+      lines.push(`Cloud: Issue #${item.cloud.issue} [${CLOUD_STATE_LABEL[item.cloud.state]}] ${item.cloud.url}`);
+      if (item.cloud.summary) lines.push(`Cloud kết quả: ${item.cloud.summary}`);
+      if (item.cloud.logUrl) lines.push(`Cloud log: ${item.cloud.logUrl}`);
+      if (item.cloud.reason) lines.push(`Cloud chặn: ${item.cloud.reason}`);
+    }
     const recent = item.history.slice(-6);
     if (recent.length > 0) lines.push('Lịch sử gần đây:', ...recent.map((event) => `  ${event.at.slice(0, 16).replace('T', ' ')} ${clip(event.message, 200)}`));
     lines.push(`Báo tiến độ: board report #${item.sequence} "<nội dung>"`);

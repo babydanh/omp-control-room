@@ -39,6 +39,7 @@ import {
   type WaitingOn,
   waitingOn,
   waitingOnLabel,
+  WORK_ITEM_CLOUD_LABELS,
   workItemEventLabelVi,
   workItemFolderIdentity,
   workItemInterruptedNote,
@@ -61,7 +62,9 @@ type PanelAction =
   | 'dependencies'
   | 'squad'
   | 'judge'
-  | 'cleanWorktree';
+  | 'cleanWorktree'
+  | 'cloudPush'
+  | 'cloudPull';
 
 const FALLBACK_NOTICE: Readonly<Record<PanelAction, string>> = {
   verdict: 'Không đánh dấu được việc này.',
@@ -71,6 +74,8 @@ const FALLBACK_NOTICE: Readonly<Record<PanelAction, string>> = {
   dependencies: 'Không lưu được việc chờ.',
   squad: 'Không hỏi được đội trưởng.',
   judge: 'Không chấm lại được việc này.',
+  cloudPush: 'Không đẩy được việc này lên cloud.',
+  cloudPull: 'Không kéo được kết quả cloud về.',
   cleanWorktree: 'Không dọn được worktree của việc này.',
 };
 
@@ -109,7 +114,7 @@ export function WorkItemPanel({
   const [sent, setSent] = useState<SentCommand | null>(null);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
   const [reassigning, setReassigning] = useState(false);
-  const [confirming, setConfirming] = useState<'cancel' | 'failed' | 'cleanWorktree' | null>(null);
+  const [confirming, setConfirming] = useState<'cancel' | 'failed' | 'cleanWorktree' | 'cloudPush' | null>(null);
   const followUpRef = useRef<HTMLTextAreaElement>(null);
   const handledActionToken = useRef<number | null>(null);
 
@@ -194,6 +199,8 @@ export function WorkItemPanel({
       send('cancel', client.cancelWorkItem(workspacePath, id));
     } else if (action === 'cleanWorktree') {
       send('cleanWorktree', client.cleanWorkItemWorktree(workspacePath, id));
+    } else if (action === 'cloudPush') {
+      send('cloudPush', client.pushWorkItemToCloud(workspacePath, id));
     }
   }
 
@@ -231,6 +238,15 @@ export function WorkItemPanel({
   const canFollowUp = status === 'review' || status === 'needs_input';
   const canReassign = status === 'queued' || status === 'review' || status === 'failed';
   const canAskLeader = status === 'review' && item.squadRunId === undefined;
+  const canPushToCloud =
+    item.cloud === undefined &&
+    item.worktree !== undefined &&
+    item.worktreeRemoved !== true &&
+    status !== 'queued' &&
+    status !== 'running';
+  const canPullFromCloud =
+    item.cloud !== undefined &&
+    ['finished', 'waiting_clean', 'diverged'].includes(item.cloud.state);
   const hasActions =
     canFinish ||
     canFail ||
@@ -238,8 +254,9 @@ export function WorkItemPanel({
     canReassign ||
     canAskLeader ||
     canRejudge ||
-    canCleanWorktree;
-
+    canCleanWorktree ||
+    canPushToCloud ||
+    canPullFromCloud;
   const progress = workItemProgressLine(item);
   const interrupted = workItemInterruptedNote(item);
   const step = nextStepFor(item, waitText, canCleanWorktree);
@@ -298,6 +315,37 @@ export function WorkItemPanel({
           </section>
         );
       })()}
+      {item.cloud !== undefined && (
+        <section aria-label="Trên cloud" data-testid="work-item-cloud-panel" className="px-2.5">
+          <h4 className="text-xs font-semibold text-text">Trên cloud</h4>
+          <p className="mt-1 text-xs text-text">
+            <a href={item.cloud.url} target="_blank" rel="noreferrer" className="underline">
+              Issue #{item.cloud.issue}
+            </a>
+            {' '}· {WORK_ITEM_CLOUD_LABELS[item.cloud.state]}
+          </p>
+          {item.cloud.summary && (
+            <p className="mt-1 whitespace-pre-wrap break-words text-xs text-text-muted">
+              {item.cloud.summary}
+            </p>
+          )}
+          {item.cloud.reason && (
+            <p className="mt-1 whitespace-pre-wrap break-words text-2xs text-warning">
+              {item.cloud.reason}
+            </p>
+          )}
+          {item.cloud.logUrl && (
+            <a
+              href={item.cloud.logUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="mt-1 inline-block text-2xs text-text-muted underline hover:text-text"
+            >
+              Xem log cloud
+            </a>
+          )}
+        </section>
+      )}
 
       {item.result !== undefined && item.result.trim() !== '' && (
         <section aria-label="Tóm tắt" className="px-2.5">
@@ -472,6 +520,24 @@ export function WorkItemPanel({
               Dọn worktree
             </CompanyButton>
           )}
+          {canPushToCloud && (
+            <CompanyButton
+              size="sm"
+              disabled={busy}
+              onClick={() => setConfirming('cloudPush')}
+            >
+              Đẩy lên cloud
+            </CompanyButton>
+          )}
+          {canPullFromCloud && (
+            <CompanyButton
+              size="sm"
+              disabled={busy}
+              onClick={() => send('cloudPull', client.pullWorkItemFromCloud(workspacePath, id))}
+            >
+              Kéo về
+            </CompanyButton>
+          )}
         </div>
       )}
       {confirming !== null && (
@@ -484,7 +550,9 @@ export function WorkItemPanel({
                   : 'Huỷ việc này? Việc đang chạy sẽ dừng.'
                 : confirming === 'failed'
                   ? 'Dừng việc này? Agent sẽ ngừng và việc chuyển sang cột Lỗi; bấm Thử lại để chạy lại.'
-                  : 'Dọn worktree của việc này?'
+                  : confirming === 'cleanWorktree'
+                    ? 'Dọn worktree của việc này?'
+                    : 'Tạo bàn giao và đẩy việc này lên cloud?'
             }
             confirmLabel={
               confirming === 'cancel'
@@ -493,9 +561,11 @@ export function WorkItemPanel({
                   : 'Huỷ việc'
                 : confirming === 'failed'
                   ? 'Dừng việc'
-                  : 'Dọn worktree'
+                  : confirming === 'cleanWorktree'
+                    ? 'Dọn worktree'
+                    : 'Đẩy lên cloud'
             }
-            danger
+            danger={confirming !== 'cloudPush'}
             disabled={busy}
             onConfirm={confirmDestructive}
             onCancel={() => setConfirming(null)}

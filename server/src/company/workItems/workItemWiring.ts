@@ -5,7 +5,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { statfs } from 'node:fs/promises';
+import { readFile, statfs, writeFile } from 'node:fs/promises';
 import { freemem, homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -31,12 +31,12 @@ import { fetchOrigin, probeDelivery } from './workItemDelivery.js';
 import { squadWorkstreamKey } from './workItemScheduler.js';
 import {
   type WorkItemCatalog,
+  type WorkItemCloudPort,
   type WorkItemRoster,
   WorkItemService,
   type WorkItemSessions,
 } from './workItemService.js';
 import { WorkItemFileStore } from './workItemStore.js';
-
 /** The herdr calls work items make. The process-level link satisfies this. */
 export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read' | 'startAgent' | 'keys'>;
 
@@ -64,6 +64,7 @@ export interface WorkItemWiringOptions {
   readonly ledger: WorkItemLedger;
   readonly isCompactSquadProposal?: (proposalId: string) => boolean;
   readonly setLiveRunnerLimits?: (live: number, retained: number) => void;
+  readonly cloud?: WorkItemCloudPort;
 }
 
 /** A started service and the way to stop it. */
@@ -166,6 +167,15 @@ function sessionsFor(coordinator: WorkItemCoordinator): WorkItemSessions {
   };
 }
 
+async function readHandoff(worktreePath: string): Promise<string | undefined> {
+  try {
+    return await readFile(join(worktreePath, 'HANDOFF.md'), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+}
+
 /** The folder's repos and the omp agents it can use, read from disk. */
 async function catalogFor(workspacePath: string): Promise<WorkItemCatalog> {
   const repos = await listFolderRepos(workspacePath);
@@ -229,6 +239,12 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     delivery: {
       fetch: (repo) => fetchOrigin(repo, runCommand),
       probe: (repo, worktree, present) => probeDelivery(repo, worktree, present, runCommand),
+    },
+    cloud: options.cloud ?? {
+      run: runCommand,
+      fastHandoffScript: join(homedir(), '.omp', 'scripts', 'fast-handoff.ps1'),
+      readHandoff,
+      writeHandoff: (worktreePath, content) => writeFile(join(worktreePath, 'HANDOFF.md'), content, 'utf8'),
     },
   });
   await service.load();

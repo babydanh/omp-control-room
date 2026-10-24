@@ -551,6 +551,16 @@ export class CompanyClient {
     );
   }
 
+  /** Push a clean work item to cloud. The verdict is a companyCommandResult. */
+  pushWorkItemToCloud(workspacePath: string, id: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.workItemCloudPush(requestId, workspacePath, id));
+  }
+
+  /** Pull cloud output using only a safe fast-forward. The verdict is a companyCommandResult. */
+  pullWorkItemFromCloud(workspacePath: string, id: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.workItemCloudPull(requestId, workspacePath, id));
+  }
+
   /**
    * Replace the items a queued work item waits for; an empty list clears them. The verdict is a
    * companyCommandResult.

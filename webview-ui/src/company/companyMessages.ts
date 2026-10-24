@@ -425,6 +425,24 @@ export function workItemCleanWorktree(
   return { type: 'companyWorkItemCleanWorktree', requestId, workspacePath, id };
 }
 
+/** Push one clean worktree to cloud through a new handoff Issue. */
+export function workItemCloudPush(
+  requestId: string,
+  workspacePath: string,
+  id: string,
+): ClientMessage {
+  return { type: 'companyWorkItemCloudPush', requestId, workspacePath, id };
+}
+
+/** Pull an Issue result into its worktree only when a fast-forward is safe. */
+export function workItemCloudPull(
+  requestId: string,
+  workspacePath: string,
+  id: string,
+): ClientMessage {
+  return { type: 'companyWorkItemCloudPull', requestId, workspacePath, id };
+}
+
 /** Replace the items a queued work item waits for; an empty list clears them. The verdict is a companyCommandResult. */
 export function workItemDependencies(
   requestId: string,

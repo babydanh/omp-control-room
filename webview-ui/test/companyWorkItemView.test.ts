@@ -224,6 +224,7 @@ describe('workItemsOf and roleDescriptionFor', () => {
     expect(workItemsOf(state, ACTIVE)).toEqual({
       revision: 0,
       items: [],
+      cloudIssues: [],
       parkedSessionIds: [],
       claudeStatus: null,
       claudeMcpServers: [],
@@ -278,6 +279,46 @@ describe('companyWorkItems ingest', () => {
     );
     expect(workItemsOf(state, ACTIVE).items.map((entry) => entry.id)).toEqual(['a']);
     expect(workItemsOf(state, OTHER).items.map((entry) => entry.id)).toEqual(['b']);
+  });
+});
+
+describe('work-item cloud board lane', () => {
+  it('puts active cloud work in Trên cloud and returns pulled work to its status lane', () => {
+    const state = withWorkItems(emptyCompanyState(), ACTIVE, [
+      item({
+        id: 'cloud-running',
+        status: 'done',
+        cloud: {
+          issue: 12,
+          url: 'https://github.com/babydanh/agent-orchestrator/issues/12',
+          branch: 'omp/issue-12',
+          repo: 'owner/repo',
+          state: 'running',
+          startedAt: '2026-10-26T10:00:00.000Z',
+        },
+      }),
+      item({
+        id: 'cloud-pulled',
+        status: 'review',
+        sequence: 2,
+        cloud: {
+          issue: 13,
+          url: 'https://github.com/babydanh/agent-orchestrator/issues/13',
+          branch: 'omp/issue-13',
+          repo: 'owner/repo',
+          state: 'pulled',
+          startedAt: '2026-10-26T10:00:00.000Z',
+        },
+      }),
+    ]);
+
+    const lanes = buildBoardLanes(state);
+    expect(lanes.find((lane) => lane.id === 'cloud')?.workItems.map(({ id }) => id)).toEqual([
+      'cloud-running',
+    ]);
+    expect(lanes.find((lane) => lane.id === 'review')?.workItems.map(({ id }) => id)).toEqual([
+      'cloud-pulled',
+    ]);
   });
 });
 

@@ -1,9 +1,9 @@
 import Fastify from 'fastify';
 import { describe, expect, it } from 'vitest';
 
-import type { WorkItem } from '../../core/src/messages.js';
+import type { WorkItem, WorkItemCloudIssue } from '../../core/src/messages.js';
 import { type AgentFolder, registerAgentRoutes, sessionRows } from '../src/agentApi/agentApi.js';
-import { formatTask, parseBoardArgs, readStatusAnswer, readTaskAnswer } from '../src/boardCli.js';
+import { formatStatus, formatTask, parseBoardArgs, readStatusAnswer, readTaskAnswer } from '../src/boardCli.js';
 
 const TOKEN = 'secret';
 const AUTH = { authorization: `Bearer ${TOKEN}` };
@@ -22,11 +22,16 @@ function item(overrides: Partial<WorkItem> & Pick<WorkItem, 'id' | 'sequence'>):
   };
 }
 
-function folder(path: string, items: WorkItem[], notes: { id: string; text: string }[]): AgentFolder {
+function folder(
+  path: string,
+  items: WorkItem[],
+  notes: { id: string; text: string }[],
+  cloudIssues: WorkItemCloudIssue[] = [],
+): AgentFolder {
   return {
     path,
     service: {
-      snapshot: () => ({ type: 'companyWorkItems', items, settings: {} }) as never,
+      snapshot: () => ({ type: 'companyWorkItems', items, cloudIssues, settings: {} }) as never,
       note: async ({ id, text }) => {
         notes.push({ id, text });
       },
@@ -70,6 +75,20 @@ describe('agent API', () => {
     expect(answer.workItems.map((entry: WorkItem) => entry.sequence)).toEqual([3]);
   });
 
+  it('includes open handoff Issues outside the board in status', async () => {
+    const handoff = {
+      issue: 42,
+      title: '[Handoff] Sửa API',
+      url: 'https://github.com/babydanh/agent-orchestrator/issues/42',
+      createdAt: '2026-10-21T08:00:00Z',
+      state: 'finished',
+      repo: 'D:/p/api',
+    } satisfies WorkItemCloudIssue;
+    const server = await app([folder('D:/p', [], [], [handoff])]);
+    const answer = (await server.inject({ method: 'GET', url: '/api/agent/status', headers: AUTH })).json();
+    expect(answer.cloudIssues).toEqual([{ ...handoff, folder: 'D:/p' }]);
+  });
+
   it('writes a report onto #n, preferring the caller own item when two folders share the number', async () => {
     const notesA: { id: string; text: string }[] = [];
     const notesB: { id: string; text: string }[] = [];
@@ -110,14 +129,53 @@ describe('board CLI', () => {
   it('reads the done-when line, the worktree and how to report from the API answer', () => {
     const answer = readTaskAnswer({
       caller: { paneId: 'wA:p2' },
-      items: [{ ...item({ id: 'i1', sequence: 3, acceptance: 'test pass', worktree: { path: 'D:/w', branch: 'b' }, assignee: { kind: 'herdr', paneId: 'wA:p2' } }), folder: 'D:/p' }],
+      items: [{
+        ...item({
+          id: 'i1',
+          sequence: 3,
+          acceptance: 'test pass',
+          worktree: { path: 'D:/w', branch: 'b' },
+          assignee: { kind: 'herdr', paneId: 'wA:p2' },
+          cloud: {
+            issue: 42,
+            url: 'https://github.com/babydanh/agent-orchestrator/issues/42',
+            branch: 'b',
+            repo: 'D:/p',
+            state: 'waiting_clean',
+            startedAt: '2026-10-21T08:00:00.000Z',
+            reason: 'commit first',
+          },
+        }),
+        folder: 'D:/p',
+      }],
     });
     const text = formatTask(answer);
     expect(text).toContain('#3 · Đang làm · D:/p');
     expect(text).toContain('Xong khi: test pass');
     expect(text).toContain('Worktree: D:/w (nhánh b)');
     expect(text).toContain('board report #3');
+    expect(text).toContain('Cloud: Issue #42 [chờ worktree sạch]');
+    expect(text).toContain('Cloud chặn: commit first');
     expect(formatTask({ caller: { paneId: 'wA:p2' }, items: [] })).toContain('Không có việc nào');
+  });
+
+  it('prints cloud Issues outside the board in status', () => {
+    const answer = readStatusAnswer({
+      caller: {},
+      sessions: [],
+      workItems: [],
+      cloudIssues: [{
+        issue: 42,
+        title: '[Handoff] Sửa API',
+        url: 'https://github.com/babydanh/agent-orchestrator/issues/42',
+        createdAt: '2026-10-21T08:00:00Z',
+        state: 'finished',
+        repo: 'D:/p/api',
+        folder: 'D:/p',
+      }],
+    });
+    expect(formatStatus(answer)).toContain('Issue [Handoff] ngoài board (1)');
+    expect(formatStatus(answer)).toContain('https://github.com/babydanh/agent-orchestrator/issues/42');
   });
 
   it('refuses an answer that is not the agent API shape, such as an old board serving its web page', () => {

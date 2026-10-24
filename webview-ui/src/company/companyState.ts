@@ -849,6 +849,7 @@ function applyWorkItems(
         parkedSessionIds: [...(message.parkedSessionIds ?? [])],
         claudeStatus: message.claudeStatus ?? held?.claudeStatus ?? null,
         claudeMcpServers: [...(message.claudeMcpServers ?? [])],
+        cloudIssues: [...(message.cloudIssues ?? [])],
       },
     },
   };

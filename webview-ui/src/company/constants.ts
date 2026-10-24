@@ -19,6 +19,7 @@ export const COMPANY_LANE_ORDER = [
   'running',
   'needs_input',
   'review',
+  'cloud',
   'done',
   'failed',
 ] as const;
@@ -31,6 +32,7 @@ export const COMPANY_LANE_LABELS: Record<CompanyLaneId, string> = {
   running: 'Đang làm',
   needs_input: 'Chờ bạn',
   review: 'Kiểm',
+  cloud: 'Trên cloud',
   done: 'Xong',
   failed: 'Lỗi',
 };
@@ -42,6 +44,7 @@ export const COMPANY_LANE_OWNERS: Record<CompanyLaneId, string> = {
   running: 'Nhân viên',
   needs_input: 'bạn trả lời',
   review: 'QA → Trọng tài',
+  cloud: 'Agent Orchestrator',
   done: 'exit 0 · pass',
   failed: 'hết lượt thử',
 };
@@ -53,6 +56,7 @@ export const COMPANY_LANE_ICONS: Record<CompanyLaneId, IconName> = {
   running: 'play',
   needs_input: 'help',
   review: 'eye',
+  cloud: 'external',
   done: 'check',
   failed: 'x-circle',
 };

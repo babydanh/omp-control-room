@@ -19,6 +19,8 @@ import type {
   WorkItem,
   WorkItemAssignee,
   WorkItemBlocker,
+  WorkItemCloudIssue,
+  WorkItemCloudState,
   WorkItemDelivery,
   WorkItemEventKind,
   WorkItemStatus,
@@ -40,7 +42,7 @@ export interface FolderWorkItems {
   revision: number;
   items: WorkItem[];
   roles: AgentRole[];
-  /** The repos under the folder: git repos and worktrees, as canonical paths. */
+  cloudIssues: WorkItemCloudIssue[];
   repos: string[];
   /** The omp subagents the folder can run, as the server lists them. */
   agents: OmpAgentInfo[];
@@ -105,6 +107,16 @@ const STATUS_WORD_VI: Readonly<Record<string, string>> = {
   done: 'Xong',
   failed: 'Lỗi',
 };
+export const WORK_ITEM_CLOUD_LABELS: Readonly<Record<WorkItemCloudState, string>> = {
+  running: 'Đang chạy trên cloud',
+  finished: 'Cloud xong · đang kéo về',
+  waiting_clean: 'Chờ dọn worktree để kéo về',
+  diverged: 'Rẽ nhánh: gộp tay',
+  pulled: 'Đã kéo về',
+  no_changes: 'Không có thay đổi cloud',
+  closed: 'Issue đã đóng',
+};
+
 
 const EVENT_LABEL_VI: Readonly<Record<string, string>> = {
   created: 'Tạo việc',
@@ -500,6 +512,7 @@ export function workItemsOf(state: CompanyViewState, workspacePath: string): Fol
       parkedSessionIds: [],
       claudeStatus: null,
       claudeMcpServers: [],
+      cloudIssues: [],
     }
   );
 }
