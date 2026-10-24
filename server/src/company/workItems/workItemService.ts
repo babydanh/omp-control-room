@@ -67,7 +67,7 @@ import {
   parseJudgeReply,
   passedMessage,
 } from './judgeModel.js';
-import { GIB, isSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
+import { GIB, isSquadSettings, parseSquadSettings, SQUAD_SETTINGS_DEFAULT } from './squadSettings.js';
 import type { SquadWorktree, WorktreeRemoval } from './squadWorktree.js';
 import {
   type AgentObservation,
@@ -258,6 +258,7 @@ export interface WorkItemPorts {
   readonly claudeMcp: ClaudeMcpSource;
   /** Whether the approved proposal belongs to a compact squad run. */
   readonly isCompactSquadProposal?: (proposalId: string) => boolean;
+  setLiveRunnerLimits?(live: number, retained: number): void;
 }
 
 /** A command the board sent. The request id makes a resent command harmless. */
@@ -433,6 +434,7 @@ export class WorkItemService {
     this.nextSequence = parsed.file.nextSequence;
     this.roles = parsed.file.roles;
     this.settings = { ...parsed.file.settings };
+    this.applyRuntimeLimits();
     this.squadSessionIds = [...parsed.file.squadSessionIds];
     this.squadSessionRepos = new Map(Object.entries(parsed.file.squadSessionRepos));
     for (const item of parsed.file.items) this.items.set(item.id, item);
@@ -683,6 +685,7 @@ export class WorkItemService {
       .find((entry) => isInsideRepo(entry.cwd, path));
     if (pane !== undefined)
       throw new CompanyError('work_item_status', `Phiên herdr ${pane.paneId} còn mở (kể cả đang ngủ) trong worktree của việc này (${path}). Đóng phiên đó rồi bấm Xoá lại.`);
+    await this.parkIdleSquadSessionsIn(path);
     const key = checkoutKey(path);
     const live = this.ports.sessions.list().some(
       (session) => session.cwd !== undefined && checkoutKey(session.cwd) === key &&
@@ -692,6 +695,19 @@ export class WorkItemService {
     const outcome = await this.ports.worktrees.remove(item.repo ?? this.workspacePath, worktree);
     if (outcome === 'dirty') throw new CompanyError('work_item_status', `${MESSAGE.worktreeDirty} Gộp hoặc xoá tay ${path} rồi xoá việc.`);
     if (outcome === 'unmerged') throw new CompanyError('work_item_status', `${MESSAGE.worktreeUnmerged} Gộp hoặc xoá tay ${path} rồi xoá việc.`);
+  }
+
+  /**
+   * Parks the idle squad sessions working in a checkout, so a done item's worktree can go without
+   * waiting for the idle sweep. A busy or waiting session, or one the user opened, stays as it is.
+   */
+  private async parkIdleSquadSessionsIn(path: string): Promise<void> {
+    const key = checkoutKey(path);
+    for (const session of this.ports.sessions.list()) {
+      if (session.status !== 'idle' || session.cwd === undefined || checkoutKey(session.cwd) !== key) continue;
+      if (!this.squadSessionIds.includes(session.id)) continue;
+      await this.ports.sessions.park(session.id);
+    }
   }
 
   /**
@@ -752,6 +768,7 @@ export class WorkItemService {
     if (item.status !== 'done' || worktree === undefined || item.worktreeRemoved === true)
       throw new CompanyError('work_item_status', MESSAGE.noWorktree);
     const path = checkoutKey(worktree.path);
+    await this.parkIdleSquadSessionsIn(worktree.path);
     const sessions = this.ports.sessions
       .list()
       .filter((session) => session.cwd !== undefined && checkoutKey(session.cwd) === path);
@@ -844,11 +861,16 @@ export class WorkItemService {
     if (!isSquadSettings(command.settings)) {
       throw new CompanyError('settings_invalid', MESSAGE.settingsInvalid);
     }
-    this.settings = { ...command.settings };
+    this.settings = parseSquadSettings(command.settings);
     this.remember(command.requestId, '');
     this.commit();
     await this.flush();
+    this.applyRuntimeLimits();
     await this.reconcileAfterSave();
+  }
+  private applyRuntimeLimits(): void {
+    const live = Math.max(4, this.settings.maxSquadSessions + 4);
+    this.ports.setLiveRunnerLimits?.(live, Math.max(10, live + 6));
   }
 
   /** The folder's squad settings as they stand now. The role-specific engine selects each CLI. */
@@ -1361,15 +1383,12 @@ export class WorkItemService {
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {
-      // A compact squad item runs in the repo itself, never a worktree, on a board omp session the
-      // item's prompt reaches directly: a chat session (an execution role would need a contract and
-      // route through the Director) under the item role's key, which picks that role's model. The pool
-      // resumes the parked or idle session of that repo and role, opens one when none is free, and
-      // holds the item while the pool is full. No herdr pane is taken: its model is unknown.
+      // Compact items use board chat sessions. Editing items open in their own worktree; read-only
+      // items stay in the repo and can reuse its role session. No herdr pane is taken: its model is unknown.
       const compactItem = item.assignee.kind === 'new-session' &&
         item.squadRunId !== undefined &&
         this.ports.isCompactSquadProposal?.(item.squadRunId) === true;
-      const cwd = decision.isolate && !compactItem ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
+      const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
       if (cwd === undefined) return;
       let sessionId: string;
       try {
@@ -1390,7 +1409,7 @@ export class WorkItemService {
       this.recordSquadSession(sessionId, decision.cwd);
       item.assignee = { kind: 'session', sessionId };
       const message = compactItem
-        ? `Phiên omp vai ${decision.role} trong ${checkoutName(decision.cwd)} (dùng lại phiên rảnh hoặc đang đậu nếu có).`
+        ? `Phiên omp vai ${decision.role} trong ${checkoutName(cwd)} (dùng lại phiên rảnh hoặc đang đậu nếu có).`
         : auto
           ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
           : 'Mở phiên omp mới cho việc này.';
@@ -1537,6 +1556,7 @@ export class WorkItemService {
       members,
       holds,
       maxParallel: this.settings.maxParallel,
+      maxPerRepo: this.settings.maxPerRepo ?? 4,
       maxSquadSessions: this.settings.maxSquadSessions,
       squadSessionsOpen,
       freeBytes: this.ports.freeMemoryBytes(),

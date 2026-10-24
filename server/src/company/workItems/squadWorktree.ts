@@ -185,14 +185,14 @@ export interface RemoveWorktreeOptions {
 /**
  * Removes one squad worktree once nothing in it is lost: no uncommitted change, and its branch is
  * already in origin/main. Never forces. A dirty or unmerged worktree is refused and left as it is.
+ * Tracked files that differ only in line endings (a generator such as `flutter pub get` rewrote
+ * them) lose nothing, so they are put back first and do not count as dirty.
  */
 export async function removeSquadWorktree(
   options: RemoveWorktreeOptions,
 ): Promise<WorktreeRemoval> {
   const { repo, worktree, gitWt, run } = options;
-  const status = await run('git', ['status', '--porcelain'], worktree.path, LIST_TIMEOUT_MS);
-  requireOk(status, 'git status');
-  if (status.stdout.trim() !== '') return 'dirty';
+  if (!(await isCleanApartFromLineEndings(worktree.path, run))) return 'dirty';
   const merged = await run(
     'git',
     ['merge-base', '--is-ancestor', worktree.branch, 'origin/main'],
@@ -208,4 +208,24 @@ export async function removeSquadWorktree(
       : await run(gitWt, ['remove', worktree.branch, '-y'], repo, WORKTREE_TIMEOUT_MS);
   requireOk(removed, gitWt === undefined ? 'git worktree remove' : 'git-wt remove');
   return 'removed';
+}
+
+/**
+ * Whether a worktree holds nothing but line-ending rewrites of tracked files; those are restored so
+ * the worktree reads clean. Untracked or staged files, or any content change, keep it dirty.
+ */
+async function isCleanApartFromLineEndings(path: string, run: CommandRunner): Promise<boolean> {
+  const status = await run('git', ['status', '--porcelain'], path, LIST_TIMEOUT_MS);
+  requireOk(status, 'git status');
+  const entries = status.stdout.split('\n').filter((line) => line.trim() !== '');
+  if (entries.length === 0) return true;
+  // Only " M" (modified in the working tree, nothing staged) can be a line-ending rewrite.
+  if (!entries.every((line) => line.startsWith(' M '))) return false;
+  const content = await run('git', ['diff', '--ignore-cr-at-eol', '--quiet'], path, LIST_TIMEOUT_MS);
+  if (content.code !== 0) return false;
+  const files = entries.map((line) => line.slice(3));
+  requireOk(await run('git', ['checkout', '--', ...files], path, LIST_TIMEOUT_MS), 'git checkout');
+  const after = await run('git', ['status', '--porcelain'], path, LIST_TIMEOUT_MS);
+  requireOk(after, 'git status');
+  return after.stdout.trim() === '';
 }

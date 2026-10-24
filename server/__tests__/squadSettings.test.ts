@@ -7,8 +7,9 @@ import {
 } from '../src/company/workItems/squadSettings.js';
 
 const VALID = {
-  maxParallel: 4,
-  maxSquadSessions: 3,
+  maxParallel: 12,
+  maxSquadSessions: 12,
+  maxPerRepo: 4,
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
@@ -32,14 +33,15 @@ describe('parseSquadSettings', () => {
     expect(parseSquadSettings(undefined)).toEqual(SQUAD_SETTINGS_DEFAULT);
     expect(parseSquadSettings('bad')).toEqual(SQUAD_SETTINGS_DEFAULT);
   });
-  it('defaults compact mode on when an older settings file does not have the field', () => {
+  it('defaults new settings on when an older settings file does not have them', () => {
     expect(parseSquadSettings({ autoJudge: false }).compactSquad).toBe(true);
+    expect(parseSquadSettings({ maxParallel: 4, maxSquadSessions: 3 }).maxPerRepo).toBe(4);
   });
 
   it('keeps each valid field and defaults each invalid one', () => {
     expect(
       parseSquadSettings({
-        maxParallel: 9,
+        maxParallel: 25,
         maxSquadSessions: 2,
         minFreeRamGb: 1.5,
         autoJudge: 'yes',
@@ -51,6 +53,7 @@ describe('parseSquadSettings', () => {
       }),
     ).toEqual({
       maxParallel: SQUAD_SETTINGS_DEFAULT.maxParallel,
+      maxPerRepo: SQUAD_SETTINGS_DEFAULT.maxPerRepo,
       maxSquadSessions: 2,
       minFreeRamGb: 1.5,
       autoJudge: SQUAD_SETTINGS_DEFAULT.autoJudge,
@@ -147,15 +150,16 @@ describe('isSquadSettings', () => {
     expect(isSquadSettings(VALID)).toBe(true);
   });
 
-  it('accepts the bounds themselves', () => {
-    expect(isSquadSettings({ ...VALID, maxParallel: 8, maxSquadSessions: 0 })).toBe(true);
-    expect(isSquadSettings({ ...VALID, maxParallel: 1, minFreeRamGb: 0, maxAgyRuns: 4 })).toBe(true);
+  it('accepts bounds and an older settings object without maxPerRepo', () => {
+    expect(isSquadSettings({ ...VALID, maxParallel: 24, maxSquadSessions: 24, maxPerRepo: 8 })).toBe(true);
+    expect(isSquadSettings({ ...VALID, maxParallel: 1, maxSquadSessions: 0 })).toBe(true);
   });
 
-  it('refuses a value outside a bound, a fraction for a count, or a missing flag', () => {
+  it('refuses values outside bounds or a fraction for an integer setting', () => {
     expect(isSquadSettings({ ...VALID, maxParallel: 0 })).toBe(false);
     expect(isSquadSettings({ ...VALID, maxParallel: 2.5 })).toBe(false);
-    expect(isSquadSettings({ ...VALID, maxSquadSessions: 7 })).toBe(false);
+    expect(isSquadSettings({ ...VALID, maxSquadSessions: 25 })).toBe(false);
+    expect(isSquadSettings({ ...VALID, maxPerRepo: 9 })).toBe(false);
     expect(isSquadSettings({ ...VALID, minFreeRamGb: -1 })).toBe(false);
     expect(isSquadSettings({ ...VALID, autoJudge: undefined })).toBe(false);
     expect(isSquadSettings({ ...VALID, compactSquad: undefined })).toBe(false);

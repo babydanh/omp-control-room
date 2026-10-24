@@ -79,7 +79,7 @@ function settingsFile(): DurableJsonFile<ParsedProjectSettingsFile> {
 }
 const SETTING_FIELDS: readonly ProjectSettingField[] = [
   'engineLeader', 'engineJudge', 'engineWorker', 'claudeModelLeader', 'claudeModelJudge',
-  'maxParallel', 'maxClaudeRuns', 'maxAgyRuns', 'worktreePrepare',
+  'maxParallel', 'maxPerRepo', 'maxClaudeRuns', 'maxAgyRuns', 'worktreePrepare',
 ];
 const SQUAD_FIELDS: readonly Exclude<ProjectSettingField, 'worktreePrepare'>[] =
   SETTING_FIELDS.filter((field): field is Exclude<ProjectSettingField, 'worktreePrepare'> => field !== 'worktreePrepare');
@@ -115,6 +115,9 @@ function validSetting(field: ProjectSettingField, value: unknown): boolean {
     case 'maxParallel':
       return typeof value === 'number' && Number.isInteger(value) &&
         value >= SQUAD_SETTINGS_BOUNDS.maxParallel.min && value <= SQUAD_SETTINGS_BOUNDS.maxParallel.max;
+    case 'maxPerRepo':
+      return typeof value === 'number' && Number.isInteger(value) &&
+        value >= SQUAD_SETTINGS_BOUNDS.maxPerRepo.min && value <= SQUAD_SETTINGS_BOUNDS.maxPerRepo.max;
     case 'maxClaudeRuns':
       return typeof value === 'number' && Number.isInteger(value) &&
         value >= SQUAD_SETTINGS_BOUNDS.maxClaudeRuns.min && value <= SQUAD_SETTINGS_BOUNDS.maxClaudeRuns.max;

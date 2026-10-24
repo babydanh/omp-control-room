@@ -25,7 +25,7 @@ import { SerializeAddon } from '@xterm/addon-serialize';
 import { Terminal } from '@xterm/headless';
 import * as pty from 'node-pty';
 
-import { COMPANY_MAX_LIVE_RUNNERS, COMPANY_TERMINAL_NAME } from './constants.js';
+import { COMPANY_PTY_CEILING, COMPANY_TERMINAL_NAME } from './constants.js';
 
 export interface PtySpawnSpec {
   file: string;
@@ -113,10 +113,10 @@ export class PtyHost {
     if (this.sessions.has(sessionId)) {
       throw new HostError('pty_session_exists', `Session already exists: ${sessionId}`);
     }
-    if (this.sessions.size >= COMPANY_MAX_LIVE_RUNNERS) {
+    if (this.sessions.size >= COMPANY_PTY_CEILING) {
       throw new HostError(
         'pty_capacity_reached',
-        `Refusing to exceed ${COMPANY_MAX_LIVE_RUNNERS} live PTYs.`,
+        `Refusing to exceed ${COMPANY_PTY_CEILING} live PTYs.`,
       );
     }
 

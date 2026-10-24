@@ -4,6 +4,7 @@ process.env['ALLURE_LABEL_epic'] ??= 'server';
 
 export default defineConfig({
   test: {
+    maxWorkers: 4,
     globals: true,
     testTimeout: 10_000,
     include: ['__tests__/**/*.test.ts'],

@@ -73,6 +73,7 @@ function ctx(overrides: Partial<SchedulerContext> = {}): SchedulerContext {
     members: [],
     holds: [],
     maxParallel: 4,
+    maxPerRepo: 8,
     maxSquadSessions: 3,
     squadSessionsOpen: 0,
     freeBytes: 8 * GIB,
@@ -238,6 +239,31 @@ describe('decideStart: named herdr pane or session', () => {
     );
     expect(usedKey(decision)).toBe('herdr:A');
   });
+  it('blocks a fifth item in a repo but lets an item in another repo start', () => {
+    const holds = Array.from({ length: 4 }, (_, index) => hold(`session:${index}`));
+    const sameRepo = decideStart(item(), ctx({ holds, maxPerRepo: 4 }));
+    expect(blockerOf(sameRepo)).toEqual({
+      kind: 'repo_full',
+      running: 4,
+      limit: 4,
+      area: 'app',
+    });
+    expect(reasonOf(sameRepo)).toBe('Repo app đang chạy 4/4 việc, chờ có chỗ trống.');
+
+    const otherRepo = decideStart(
+      item({ repo: OTHER }),
+      ctx({
+        holds,
+        maxParallel: 12,
+        maxPerRepo: 4,
+        members: [
+          member('session:other', { kind: 'session', sessionId: 'other' }, { cwd: OTHER }),
+        ],
+      }),
+    );
+    expect(usedKey(otherRepo)).toBe('session:other');
+  });
+
 });
 
 describe('decideStart: auto', () => {

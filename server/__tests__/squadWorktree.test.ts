@@ -7,6 +7,7 @@ import {
   type CommandRunner,
   createSquadWorktree,
   findOnPath,
+  removeSquadWorktree,
   worktreeOnBranch,
 } from '../src/company/workItems/squadWorktree.js';
 
@@ -173,6 +174,52 @@ describe('createSquadWorktree', () => {
     await expect(
       createSquadWorktree({ repo: REPO, folderRoot: FOLDER, shortId: SHORT, gitWt: GIT_WT, run }),
     ).rejects.toThrow('git-wt chạy xong nhưng không thấy worktree của nhánh');
+  });
+});
+
+describe('removeSquadWorktree', () => {
+  const worktree = { path: `${FOLDER}/app.squad-${SHORT}`, branch: `squad-${SHORT}` };
+  const REGISTRANT = 'linux/flutter/generated_plugins.cmake';
+  const RESTORE = `git checkout -- ${REGISTRANT}`;
+
+  it('puts back files that differ only in line endings, then removes the worktree', async () => {
+    let restored = false;
+    const { run, calls } = recordingRunner((line) => {
+      if (line === 'git status --porcelain') {
+        return { code: 0, stdout: restored ? '' : ` M ${REGISTRANT}\n`, stderr: '' };
+      }
+      if (line === 'git diff --ignore-cr-at-eol --quiet') return OK;
+      if (line === RESTORE) {
+        restored = true;
+        return OK;
+      }
+      if (line.startsWith('git merge-base')) return OK;
+      if (line === `git worktree remove ${worktree.path}`) return OK;
+      return unexpected(line);
+    });
+
+    await expect(removeSquadWorktree({ repo: REPO, worktree, gitWt: undefined, run })).resolves.toBe('removed');
+    expect(calls.map((call) => call.line)).toContain(RESTORE);
+  });
+
+  it('keeps a worktree dirty when a change is more than line endings, touching nothing', async () => {
+    const { run, calls } = recordingRunner((line) => {
+      if (line === 'git status --porcelain') return { code: 0, stdout: ` M ${REGISTRANT}\n`, stderr: '' };
+      if (line === 'git diff --ignore-cr-at-eol --quiet') return { code: 1, stdout: '', stderr: '' };
+      return unexpected(line);
+    });
+
+    await expect(removeSquadWorktree({ repo: REPO, worktree, gitWt: undefined, run })).resolves.toBe('dirty');
+    expect(calls.some((call) => call.line === RESTORE)).toBe(false);
+  });
+
+  it('keeps a worktree with an untracked file dirty', async () => {
+    const { run } = recordingRunner((line) => {
+      if (line === 'git status --porcelain') return { code: 0, stdout: '?? notes.md\n', stderr: '' };
+      return unexpected(line);
+    });
+
+    await expect(removeSquadWorktree({ repo: REPO, worktree, gitWt: undefined, run })).resolves.toBe('dirty');
   });
 });
 

@@ -123,7 +123,13 @@ class Fixture {
           this.submits.push({ sessionId, text, mode });
         },
         wake: async () => undefined,
-        park: async () => true,
+        park: async (sessionId) => {
+          const index = this.sessions.findIndex((entry) => entry.id === sessionId);
+          const session = this.sessions[index];
+          if (session === undefined || session.status !== 'idle') return false;
+          this.sessions[index] = { ...session, status: 'parked' };
+          return true;
+        },
         lastReply: async () => this.sessionReply,
         openChat: async (input) => {
           if (this.poolFull) {
@@ -1130,8 +1136,8 @@ describe('WorkItemService: priority, waits, and acceptance', () => {
 describe('WorkItemService: squad fields, auto assignee, and settings', () => {
   const SETTINGS = {
     ...SQUAD_SETTINGS_DEFAULT,
-    maxParallel: 4,
-    maxSquadSessions: 3,
+    maxParallel: 12,
+    maxSquadSessions: 12,
     minFreeRamGb: 2,
     autoJudge: true,
     autoApproveNext: false,
@@ -1706,7 +1712,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     stop();
   });
 
-  it('runs compact items on board omp sessions per role in the repo itself, never a herdr pane or a worktree', async () => {
+  it('runs compact editing items on per-item board worktree sessions, never a herdr pane', async () => {
     const f = await repoFixture();
     // The user's own sessions in the repo, awake and asleep: their model is unknown, so none is taken.
     f.panes.push({ paneId: 'wA:p1', status: 'idle', cwd: REPO });
@@ -1723,21 +1729,18 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     );
     if (api === undefined || page === undefined || check === undefined) throw new Error('expected three work items');
 
-    // Chat sessions take the prompt directly (an execution role would need a contract and the Director);
-    // the role sits in the workstream key, one per repo and role, which picks the role's model and lets
-    // the pool resume that role's parked or idle session next time.
     expect(f.openedWith).toEqual([
-      { cwd: REPO, role: 'chat' },
-      { cwd: REPO, role: 'chat' },
-      { cwd: REPO, role: 'chat' },
+      { cwd: worktreeOf(api), role: 'chat' },
+      { cwd: worktreeOf(page), role: 'chat' },
+      { cwd: worktreeOf(check), role: 'chat' },
     ]);
     expect(f.openedKeys).toEqual([
-      squadWorkstreamKey('worker', REPO),
-      squadWorkstreamKey('worker', REPO),
-      squadWorkstreamKey('qa', REPO),
+      squadWorkstreamKey('worker', worktreeOf(api)),
+      squadWorkstreamKey('worker', worktreeOf(page)),
+      squadWorkstreamKey('qa', worktreeOf(check)),
     ]);
     expect(f.prompts).toHaveLength(0);
-    expect(f.worktreesMade).toHaveLength(0);
+    expect(f.worktreesMade).toEqual([api, page, check].map((id) => ({ repo: REPO, shortId: id.slice(0, 8) })));
     expect(itemOf(f, api)).toMatchObject({ status: 'running', assignee: { kind: 'session', sessionId: 'chat-1' } });
     expect(f.submits.map((entry) => [entry.sessionId, entry.mode])).toEqual([
       ['chat-1', 'chat'],
@@ -1746,7 +1749,48 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     ]);
   });
 
-  it('holds a compact item while the omp pool is full, then runs it in the repo without a worktree', async () => {
+  it('runs compact read-only items in the repo under the role key', async () => {
+    const f = await repoFixture();
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const [first, second] = await f.service.createWorkItems(
+      [
+        { text: 'Đọc cấu hình', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker', agent: 'scout' },
+        { text: 'Đọc tài liệu', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker', agent: 'scout' },
+      ],
+      { squadRunId },
+    );
+    if (first === undefined || second === undefined) throw new Error('expected two read-only work items');
+
+    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'chat' }, { cwd: REPO, role: 'chat' }]);
+    expect(f.openedKeys).toEqual([
+      squadWorkstreamKey('worker', REPO),
+      squadWorkstreamKey('worker', REPO),
+    ]);
+    expect(f.worktreesMade).toHaveLength(0);
+  });
+
+  it('gives two compact editing items in one repo separate worktree checkouts', async () => {
+    const f = await repoFixture();
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const [first, second] = await f.service.createWorkItems(
+      [
+        { text: 'Sửa API', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' },
+        { text: 'Sửa trang', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' },
+      ],
+      { squadRunId },
+    );
+    if (first === undefined || second === undefined) throw new Error('expected two editing work items');
+
+    expect(f.openedWith).toEqual([
+      { cwd: worktreeOf(first), role: 'chat' },
+      { cwd: worktreeOf(second), role: 'chat' },
+    ]);
+    expect(new Set(f.openedWith.map(({ cwd }) => cwd)).size).toBe(2);
+  });
+
+  it('holds a compact item while the omp pool is full, then runs it in a worktree', async () => {
     const f = await repoFixture();
     f.poolFull = true;
     const squadRunId = randomUUID();
@@ -1761,8 +1805,47 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     f.poolFull = false;
     await f.elapse(WORK_ITEM_HOLD_RETRY_MS);
     expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'session', sessionId: 'chat-1' } });
-    expect(f.openedWith).toEqual([{ cwd: REPO, role: 'chat' }]);
-    expect(f.worktreesMade).toHaveLength(0);
+    expect(f.openedWith).toEqual([{ cwd: worktreeOf(id), role: 'chat' }]);
+    expect(f.worktreesMade).toEqual([{ repo: REPO, shortId: id.slice(0, 8) }]);
+  });
+
+
+  it('cleans the worktree created by a compact editing item', async () => {
+    const f = await repoFixture();
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const [id] = await f.service.createWorkItems(
+      [{ text: 'Sửa API', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' }],
+      { squadRunId },
+    );
+    if (id === undefined) throw new Error('expected a work item');
+
+    f.sessions.length = 0;
+    await f.service.mark({ requestId: randomUUID(), id, verdict: 'done' });
+    await f.service.cleanWorktree({ requestId: randomUUID(), id });
+
+    expect(f.worktreesRemoved).toEqual([worktreeOf(id)]);
+    expect(itemOf(f, id)).toMatchObject({ status: 'done', worktreeRemoved: true });
+  });
+
+  it('parks the idle session of a done compact item so its worktree can be removed', async () => {
+    const f = await repoFixture();
+    const squadRunId = randomUUID();
+    f.compactSquadRunIds.add(squadRunId);
+    const [id] = await f.service.createWorkItems(
+      [{ text: 'Sửa API', assignee: { kind: 'new-session' }, repo: REPO, role: 'worker' }],
+      { squadRunId },
+    );
+    if (id === undefined) throw new Error('expected a work item');
+    await f.service.mark({ requestId: randomUUID(), id, verdict: 'done' });
+    // The session finished and sits idle in the worktree: removing the item parks it first.
+    expect(f.sessions[0]).toMatchObject({ id: 'chat-1', status: 'idle' });
+
+    await f.service.cancel({ requestId: randomUUID(), id });
+
+    expect(f.sessions[0]?.status).toBe('parked');
+    expect(f.worktreesRemoved).toEqual([worktreeOf(id)]);
+    expect(f.service.get(id)).toBeUndefined();
   });
 
   it('continues to judge ordinary work items', async () => {
@@ -1798,7 +1881,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     expect(f.service.snapshot().settings).toEqual(first);
 
     await expect(
-      f.service.setSettings({ requestId: randomUUID(), settings: { ...first, maxParallel: 9 } }),
+      f.service.setSettings({ requestId: randomUUID(), settings: { ...first, maxParallel: 25 } }),
     ).rejects.toMatchObject({ code: 'settings_invalid' });
     expect(f.service.snapshot().settings).toEqual(first);
   });

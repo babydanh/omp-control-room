@@ -182,7 +182,7 @@ export interface SessionPoolOptions {
 }
 
 export class SessionPool {
-  private readonly limits: PoolLimits;
+  private limits: PoolLimits;
   private readonly now: () => number;
   private readonly sessions = new Map<string, CompanySession>();
   private readonly pinned = new Set<string>();
@@ -192,6 +192,9 @@ export class SessionPool {
     this.now = options.now ?? Date.now;
   }
 
+  setLiveRunnerLimits(maxLiveRunners: number, maxRetainedSessions: number): void {
+    this.limits = { ...this.limits, maxLiveRunners, maxRetainedSessions };
+  }
   /** Insert or replace a session record from the durable state. */
   upsert(session: CompanySession): void {
     this.sessions.set(session.id, session);

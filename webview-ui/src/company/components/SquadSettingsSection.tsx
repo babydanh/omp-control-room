@@ -106,6 +106,7 @@ function SquadSettingsForm({
   const reading = squadSettingsFromDraft(draft);
   const parallel = SQUAD_COUNT_LIMITS.maxParallel;
   const sessions = SQUAD_COUNT_LIMITS.maxSquadSessions;
+  const perRepo = SQUAD_COUNT_LIMITS.maxPerRepo;
   const models = CLAUDE_SETTING_LIMITS.modelChars;
   const claudeRuns = CLI_SETTING_LIMITS.maxClaudeRuns;
   const agyRuns = CLI_SETTING_LIMITS.maxAgyRuns;
@@ -147,6 +148,17 @@ function SquadSettingsForm({
         step={1}
         disabled={command.pending}
         onChange={(value) => setDraft((current) => ({ ...current, maxSquadSessions: value }))}
+      />
+      <NumberSetting
+        id="squad-setting-max-per-repo"
+        label="Mỗi repo chạy cùng lúc"
+        hint="Số việc tối đa chạy cùng lúc trong một repo, từ 1 đến 8."
+        value={draft.maxPerRepo}
+        min={perRepo.min}
+        max={perRepo.max}
+        step={1}
+        disabled={command.pending}
+        onChange={(value) => setDraft((current) => ({ ...current, maxPerRepo: value }))}
       />
       <NumberSetting
         id="squad-setting-min-free-ram"

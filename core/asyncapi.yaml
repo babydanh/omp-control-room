@@ -3909,7 +3909,7 @@ components:
 
     WorkItemBlockerKind:
       type: string
-      enum: [agent, dependency, failed, capacity, area, no_member, busy_checkout, pool_full, worktree]
+      enum: [agent, dependency, failed, capacity, area, no_member, busy_checkout, pool_full, repo_full, worktree]
 
     WorkItemBlocker:
       type: object
@@ -3922,7 +3922,8 @@ components:
         item's #n and area names it. no_member: no free agent in the item's repo, and the squad cannot open one;
         the reason sentence says why. busy_checkout: an agent outside the work items is working in the checkout
         this item needs; area names the checkout. pool_full: the omp runner pool has no free slot; the item retries
-        on its own. worktree: the squad could not create the isolated worktree for this item; detail says why.
+        on its own. repo_full: the repo has reached its running-item limit; running and limit give the count and area
+        names the repo. worktree: the squad could not create the isolated worktree for this item; detail says why.
       properties:
         kind:
           $ref: '#/components/schemas/WorkItemBlockerKind'
@@ -4177,19 +4178,24 @@ components:
       required: [maxParallel, maxSquadSessions, minFreeRamGb, autoJudge, autoApproveNext, compactSquad, engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxClaudeRuns, maxAgyRuns, claudeMaxTurns, claudeMaxBudgetUsd, claudePermission, claudeAllowedTools, claudeWorkerMcp]
       description: >-
         Per-folder limits and CLI choices for the squad scheduler. maxParallel caps running work items in the folder.
-        maxSquadSessions caps the omp sessions the squad opens. minFreeRamGb is the free memory needed before
-        opening one. engineLeader, engineJudge, and engineWorker select a CLI independently for leader, judge, and
-        automatic worker runs. All three default to omp. autoJudge is read by the judge in a later phase.
-        autoApproveNext approves a leader's proposal by itself, the first one of a run included, when it has no completeness warning.
+        maxPerRepo caps running work items in one repo. maxSquadSessions caps the omp sessions the squad opens.
+        minFreeRamGb is the free memory needed before opening one. engineLeader, engineJudge, and engineWorker select
+        a CLI independently for leader, judge, and automatic worker runs. All three default to omp. autoJudge is read
+        by the judge in a later phase. autoApproveNext approves a leader's proposal by itself, the first one of a run
+        included, when it has no completeness warning.
       properties:
         maxParallel:
           type: integer
           minimum: 1
-          maximum: 8
+          maximum: 24
         maxSquadSessions:
           type: integer
           minimum: 0
-          maximum: 6
+          maximum: 24
+        maxPerRepo:
+          type: integer
+          minimum: 1
+          maximum: 8
         minFreeRamGb:
           type: number
           minimum: 0
@@ -8258,8 +8264,8 @@ components:
           minLength: 1
           maxLength: 256
         initialPrompt:
+          description: Empty for an omp chat the user types into; Claude and agy need it as their task.
           type: string
-          minLength: 1
           maxLength: 12000
 
     ProjectTreeSnapshotMessage:
@@ -8707,7 +8713,7 @@ components:
 
     ProjectSettingField:
       type: string
-      enum: [engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxParallel, maxClaudeRuns, maxAgyRuns, worktreePrepare]
+      enum: [engineLeader, engineJudge, engineWorker, claudeModelLeader, claudeModelJudge, maxParallel, maxPerRepo, maxClaudeRuns, maxAgyRuns, worktreePrepare]
 
     ProjectSettingValue:
       anyOf:
@@ -8715,6 +8721,9 @@ components:
         - type: string
           minLength: 1
           maxLength: 256
+        - type: integer
+          minimum: 1
+          maximum: 24
         - type: integer
           minimum: 1
           maximum: 8
@@ -8747,6 +8756,10 @@ components:
           minLength: 1
           maxLength: 256
         maxParallel:
+          type: integer
+          minimum: 1
+          maximum: 24
+        maxPerRepo:
           type: integer
           minimum: 1
           maximum: 8
@@ -8799,6 +8812,9 @@ components:
           type: string
           enum: [global, project, folder]
         maxParallel:
+          type: string
+          enum: [global, project, folder]
+        maxPerRepo:
           type: string
           enum: [global, project, folder]
         maxClaudeRuns:

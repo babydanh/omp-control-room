@@ -296,6 +296,7 @@ export interface CompanyRuntimeOptions {
 export interface CompanyRuntime {
   readonly effects: WorkspaceCompanyCoordinatorEffects;
   readonly terminal: CompanyTerminalGateway;
+  setLiveRunnerLimits(live: number, retained: number): void;
   modelCatalog(): Promise<CompanyModelCatalogEntry[]>;
   /**
    * What one managed session has loaded: working directory, model, thinking,
@@ -3565,6 +3566,10 @@ class NativeCompanyRuntime implements CompanyRuntime {
    * blocked the helper is left running and detached, and the blocked resource
    * stays visible to the operator instead of being quietly reaped.
    */
+  setLiveRunnerLimits(live: number, retained: number): void {
+    this.pool.setLiveRunnerLimits(live, retained);
+    this.scheduler.setLiveRunnerLimit(live);
+  }
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;

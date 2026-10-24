@@ -155,6 +155,18 @@ describe('archive pressure', () => {
     expect(decision.kind === 'queue' && decision.code).toBe('live_limit');
     expect(decision.kind === 'queue' && decision.blockedBy).toEqual([live.id]);
   });
+  it('allocates after the live-runner limit is raised', () => {
+    const instance = pool({ maxRetainedSessions: 8, maxLiveRunners: 1 });
+    instance.upsert(session({ status: 'busy' }));
+    const request = {
+      role: 'worker' as CompanyRole,
+      workstreamId: randomUUID(),
+      requestedModel: 'openai-codex/gpt-6-luna:xhigh',
+    };
+    expect(instance.plan(request)).toMatchObject({ kind: 'queue', code: 'live_limit' });
+    instance.setLiveRunnerLimits(2, 10);
+    expect(instance.plan(request)).toMatchObject({ kind: 'allocate' });
+  });
 
   it('refuses to evict a session that is live, running, or awaiting input', () => {
     const instance = pool({ maxRetainedSessions: 2, maxLiveRunners: 8 });

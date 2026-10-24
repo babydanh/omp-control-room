@@ -92,7 +92,7 @@ export interface ExternalCapacity {
  * slot to somebody else.
  */
 export class CapacityTable {
-  private readonly limits: SchedulerLimits;
+  private limits: SchedulerLimits;
   private readonly grants = new Map<string, CapacityGrant>();
   private external: { workers: number; modelCalls: number; liveRunners: number } = {
     workers: 0,
@@ -110,6 +110,9 @@ export class CapacityTable {
       modelCalls: external.modelCalls ?? 0,
       liveRunners: external.liveRunners ?? 0,
     };
+  }
+  setLiveRunnerLimit(maxLiveRunners: number): void {
+    this.limits = { ...this.limits, maxLiveRunners };
   }
 
   /** Replace capacity consumed outside this table (a Director turn, a native child). */
@@ -388,6 +391,10 @@ export class Scheduler {
 
   capacitySnapshot(): CapacitySnapshot {
     return this.capacity.snapshot();
+  }
+
+  setLiveRunnerLimit(maxLiveRunners: number): void {
+    this.capacity.setLiveRunnerLimit(maxLiveRunners);
   }
 
   /**

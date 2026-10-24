@@ -5,7 +5,7 @@ import * as path from 'node:path';
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { COMPANY_MAX_LIVE_RUNNERS } from '../src/company/constants.js';
+import { COMPANY_PTY_CEILING } from '../src/company/constants.js';
 import { ProcessSupervisor } from '../src/company/processSupervisor.js';
 import { PtyClient } from '../src/company/ptyClient.js';
 import type { PtySpawnSpec } from '../src/company/ptyHost.js';
@@ -123,7 +123,7 @@ describe('native PTY terminal', () => {
   it(
     'refuses to exceed the live PTY bound',
     async () => {
-      const ids = Array.from({ length: COMPANY_MAX_LIVE_RUNNERS }, () => randomUUID());
+      const ids = Array.from({ length: COMPANY_PTY_CEILING }, () => randomUUID());
       for (const id of ids) await client.spawnPty(id, spec());
 
       await expect(client.spawnPty(randomUUID(), spec())).rejects.toMatchObject({

@@ -61,6 +61,7 @@ export interface WorkItemWiringOptions {
   /** The ledger the conflict check reads overlaps from, and reports whether a board watches it. */
   readonly ledger: WorkItemLedger;
   readonly isCompactSquadProposal?: (proposalId: string) => boolean;
+  readonly setLiveRunnerLimits?: (live: number, retained: number) => void;
 }
 
 /** A started service and the way to stop it. */
@@ -213,6 +214,7 @@ export async function startWorkItems(options: WorkItemWiringOptions): Promise<Wo
     agy: createAgyRuns({ newRunId: () => randomUUID() }),
     claudeAuth: createClaudeAuthProbe(),
     claudeMcp: createClaudeMcpSource({ configPath: join(homedir(), '.claude.json') }),
+    setLiveRunnerLimits: options.setLiveRunnerLimits,
     isCompactSquadProposal: options.isCompactSquadProposal,
   });
   await service.load();

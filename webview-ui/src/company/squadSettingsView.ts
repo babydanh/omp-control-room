@@ -8,8 +8,9 @@ import type { SquadSettings } from '../../../core/src/messages.js';
 
 /** The whole-number bounds of the two counts. The server enforces the same bounds. */
 export const SQUAD_COUNT_LIMITS = {
-  maxParallel: { min: 1, max: 8 },
-  maxSquadSessions: { min: 0, max: 6 },
+  maxParallel: { min: 1, max: 24 },
+  maxSquadSessions: { min: 0, max: 24 },
+  maxPerRepo: { min: 1, max: 8 },
 } as const;
 
 /** The bounds of external CLI run counts. The server enforces the same bounds. */
@@ -40,6 +41,7 @@ export type SquadEngine = 'omp' | 'claude' | 'agy';
 export interface SquadSettingsDraft {
   maxParallel: string;
   maxSquadSessions: string;
+  maxPerRepo: string;
   minFreeRamGb: string;
   autoJudge: boolean;
   autoApproveNext: boolean;
@@ -79,6 +81,7 @@ export function squadSettingsDraftOf(settings: SquadSettings): SquadSettingsDraf
   return {
     maxParallel: String(settings.maxParallel),
     maxSquadSessions: String(settings.maxSquadSessions),
+    maxPerRepo: String(settings.maxPerRepo ?? 4),
     minFreeRamGb: String(settings.minFreeRamGb),
     autoJudge: settings.autoJudge,
     compactSquad: settings.compactSquad,
@@ -135,6 +138,7 @@ function isToolPattern(text: string, maxChars: number): boolean {
 export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettingsReading {
   const parallel = SQUAD_COUNT_LIMITS.maxParallel;
   const sessions = SQUAD_COUNT_LIMITS.maxSquadSessions;
+  const perRepo = SQUAD_COUNT_LIMITS.maxPerRepo;
   const maxParallel = wholeIn(draft.maxParallel, parallel.min, parallel.max);
   if (maxParallel === null) {
     return {
@@ -147,6 +151,13 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
     return {
       ok: false,
       reason: `Phiên đội tối đa là số nguyên từ ${sessions.min} đến ${sessions.max}.`,
+    };
+  }
+  const maxPerRepo = wholeIn(draft.maxPerRepo, perRepo.min, perRepo.max);
+  if (maxPerRepo === null) {
+    return {
+      ok: false,
+      reason: `Số việc mỗi repo chạy cùng lúc là số nguyên từ ${perRepo.min} đến ${perRepo.max}.`,
     };
   }
   const minFreeRamGb = numberOf(draft.minFreeRamGb);
@@ -233,6 +244,7 @@ export function squadSettingsFromDraft(draft: SquadSettingsDraft): SquadSettings
     settings: {
       maxParallel,
       maxSquadSessions,
+      maxPerRepo,
       minFreeRamGb,
       autoJudge: draft.autoJudge,
       compactSquad: draft.compactSquad,

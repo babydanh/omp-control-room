@@ -89,6 +89,7 @@ export interface SchedulerContext {
   readonly members: readonly SchedulerMember[];
   readonly holds: readonly SchedulerHold[];
   readonly maxParallel: number;
+  readonly maxPerRepo: number;
   readonly maxSquadSessions: number;
   /** Live sessions the squad opened. */
   readonly squadSessionsOpen: number;
@@ -169,6 +170,17 @@ export function checkoutName(checkout: string): string {
 
 /** Decides one ready item. Callers check dependencies first; this only looks at agents and limits. */
 export function decideStart(item: SchedulerItem, ctx: SchedulerContext): SchedulerDecision {
+  const runningInRepo = ctx.holds.filter(
+    (hold) => checkoutKey(hold.repo) === checkoutKey(item.repo),
+  ).length;
+  if (runningInRepo >= ctx.maxPerRepo) {
+    const area = checkoutName(item.repo);
+    return {
+      kind: 'wait',
+      blocker: { kind: 'repo_full', running: runningInRepo, limit: ctx.maxPerRepo, area },
+      reason: `Repo ${area} đang chạy ${runningInRepo}/${ctx.maxPerRepo} việc, chờ có chỗ trống.`,
+    };
+  }
   if (item.kind === 'herdr' || item.kind === 'session') return decideNamed(item, ctx);
   if (ctx.holds.length >= ctx.maxParallel) return capacityWait(ctx);
   if (item.kind === 'new-session') return decideOpen(item, ctx);

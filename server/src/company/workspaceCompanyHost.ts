@@ -1156,6 +1156,7 @@ async function openOwnerCompanyHost(
       }),
       ledger: options.ledger ?? NO_LEDGER,
       prepareWorktree: options.prepareWorktree,
+      setLiveRunnerLimits: (live, retained) => runtime?.setLiveRunnerLimits(live, retained),
       isCompactSquadProposal: (proposalId) =>
         squadWiring?.service.isCompactProposal(proposalId) ?? false,
     });

@@ -48,8 +48,9 @@ const CLAUDE_ALLOWED_TOOLS_DEFAULT: readonly string[] = [
 /** The settings a folder starts with, before the user changes any. */
 export const SQUAD_SETTINGS_DEFAULT: SquadSettings = {
   compactSquad: true,
-  maxParallel: 4,
-  maxSquadSessions: 3,
+  maxParallel: 12,
+  maxSquadSessions: 12,
+  maxPerRepo: 4,
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
@@ -69,8 +70,9 @@ export const SQUAD_SETTINGS_DEFAULT: SquadSettings = {
 
 /** Inclusive bounds the contract allows for each numeric setting. */
 export const SQUAD_SETTINGS_BOUNDS = {
-  maxParallel: { min: 1, max: 8 },
-  maxSquadSessions: { min: 0, max: 6 },
+  maxParallel: { min: 1, max: 24 },
+  maxSquadSessions: { min: 0, max: 24 },
+  maxPerRepo: { min: 1, max: 8 },
   minFreeRamGb: { min: 0, max: 256 },
   maxClaudeRuns: { min: 1, max: 4 },
   maxAgyRuns: { min: 1, max: 4 },
@@ -151,6 +153,7 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
   const {
     maxParallel,
     maxSquadSessions,
+    maxPerRepo,
     minFreeRamGb,
     maxClaudeRuns,
     maxAgyRuns,
@@ -160,6 +163,7 @@ export function isSquadSettings(value: unknown): value is SquadSettings {
   return (
     isIntegerIn(value.maxParallel, maxParallel.min, maxParallel.max) &&
     isIntegerIn(value.maxSquadSessions, maxSquadSessions.min, maxSquadSessions.max) &&
+    (value.maxPerRepo === undefined || isIntegerIn(value.maxPerRepo, maxPerRepo.min, maxPerRepo.max)) &&
     isNumberIn(value.minFreeRamGb, minFreeRamGb.min, minFreeRamGb.max) &&
     typeof value.autoJudge === 'boolean' &&
     typeof value.compactSquad === 'boolean' &&
@@ -192,6 +196,7 @@ export function parseSquadSettings(value: unknown): SquadSettings {
   const {
     maxParallel,
     maxSquadSessions,
+    maxPerRepo,
     minFreeRamGb,
     maxClaudeRuns,
     maxAgyRuns,
@@ -209,6 +214,9 @@ export function parseSquadSettings(value: unknown): SquadSettings {
     )
       ? value.maxSquadSessions
       : base.maxSquadSessions,
+    maxPerRepo: isIntegerIn(value.maxPerRepo, maxPerRepo.min, maxPerRepo.max)
+      ? value.maxPerRepo
+      : base.maxPerRepo,
     minFreeRamGb: isNumberIn(value.minFreeRamGb, minFreeRamGb.min, minFreeRamGb.max)
       ? value.minFreeRamGb
       : base.minFreeRamGb,

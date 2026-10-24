@@ -164,6 +164,7 @@ class FakeRuntime implements CompanyRuntime {
       },
     };
   }
+  setLiveRunnerLimits(): void {}
 
   /** Records which session was described; this fake holds no native session to read. */
   async sessionInfo(sessionId: string) {

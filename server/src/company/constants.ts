@@ -5,6 +5,7 @@ export const COMPANY_OMP_BRIDGE_FILENAME = 'company-omp-bridge.mjs';
 export const COMPANY_PTY_HOST_FILENAME = 'company-pty-host.js';
 export const COMPANY_MAX_RETAINED_SESSIONS = 10;
 export const COMPANY_MAX_LIVE_RUNNERS = 4;
+export const COMPANY_PTY_CEILING = 28;
 export const COMPANY_MAX_MODEL_CALLS = 4;
 export const COMPANY_MAX_WORKERS = 4;
 export const COMPANY_IDLE_PARK_SECONDS = 120;

@@ -38,6 +38,7 @@ const ACTIVE = 'D:/work/app';
 const SETTINGS: SquadSettings = {
   maxParallel: 4,
   maxSquadSessions: 3,
+  maxPerRepo: 4,
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,

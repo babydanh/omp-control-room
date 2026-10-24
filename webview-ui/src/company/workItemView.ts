@@ -281,6 +281,10 @@ export function blockerChip(item: {
       return { text: 'Repo đang bận', tone: 'muted' };
     case 'worktree':
       return { text: 'Chờ worktree', tone: 'muted' };
+    case 'repo_full':
+      return blocker.running === undefined || blocker.limit === undefined
+        ? { text: 'Repo đầy', tone: 'muted' }
+        : { text: `Repo đầy ${blocker.running}/${blocker.limit}`, tone: 'muted' };
     case 'pool_full':
       return { text: 'Hết phiên chạy', tone: 'muted' };
   }
@@ -323,6 +327,10 @@ export function blockerSentence(blocker: WorkItemBlocker | null | undefined): st
         : `Chưa tạo được worktree riêng cho việc này, việc vẫn đang chờ: ${blocker.detail}`;
     case 'pool_full':
       return 'Đã hết phiên chạy của công ty, việc chờ có chỗ trống.';
+    case 'repo_full':
+      return blocker.running === undefined || blocker.limit === undefined
+        ? `Repo ${blocker.area ?? ''} đang đầy, chờ có chỗ trống.`
+        : `Repo ${blocker.area ?? ''} đang chạy ${blocker.running}/${blocker.limit} việc, chờ có chỗ trống.`;
   }
 }
 

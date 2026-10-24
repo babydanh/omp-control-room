@@ -11,8 +11,9 @@ import {
 const ACTIVE = 'D:/work/app';
 
 const SETTINGS: SquadSettings = {
-  maxParallel: 4,
-  maxSquadSessions: 3,
+  maxParallel: 12,
+  maxSquadSessions: 12,
+  maxPerRepo: 4,
   minFreeRamGb: 2,
   autoJudge: true,
   autoApproveNext: false,
@@ -39,8 +40,9 @@ function draftWith(overrides: Partial<SquadSettingsDraft>): SquadSettingsDraft {
 describe('squadSettingsDraftOf', () => {
   it('holds each number as text and each switch as it is', () => {
     expect(squadSettingsDraftOf(SETTINGS)).toEqual({
-      maxParallel: '4',
-      maxSquadSessions: '3',
+      maxParallel: '12',
+      maxSquadSessions: '12',
+      maxPerRepo: '4',
       minFreeRamGb: '2',
       autoJudge: true,
       autoApproveNext: false,
@@ -76,14 +78,16 @@ describe('squadSettingsFromDraft', () => {
   });
 
   it('accepts the bounds of each count, and trims the text around a number', () => {
-    expect(squadSettingsFromDraft(draftWith({ maxParallel: ' 8 ', maxSquadSessions: '0' }))).toEqual(
-      {
-        ok: true,
-        settings: { ...SETTINGS, maxParallel: 8, maxSquadSessions: 0 },
-      },
-    );
+    expect(squadSettingsFromDraft(draftWith({
+      maxParallel: ' 24 ',
+      maxSquadSessions: '24',
+      maxPerRepo: '8',
+    }))).toEqual({
+      ok: true,
+      settings: { ...SETTINGS, maxParallel: 24, maxSquadSessions: 24, maxPerRepo: 8 },
+    });
     expect(squadSettingsFromDraft(draftWith({ maxParallel: '1' })).ok).toBe(true);
-    expect(squadSettingsFromDraft(draftWith({ maxSquadSessions: '6' })).ok).toBe(true);
+    expect(squadSettingsFromDraft(draftWith({ maxSquadSessions: '0' })).ok).toBe(true);
   });
 
   it('saves each selected engine and the agy concurrency limit', () => {
@@ -117,20 +121,28 @@ describe('squadSettingsFromDraft', () => {
     }
   });
 
-  it('refuses a parallel count outside 1 to 8, or one that is not a whole number', () => {
-    for (const maxParallel of ['0', '9', '2.5', '', 'abc']) {
+  it('refuses a parallel count outside 1 to 24, or one that is not a whole number', () => {
+    for (const maxParallel of ['0', '25', '2.5', '', 'abc']) {
       expect(squadSettingsFromDraft(draftWith({ maxParallel }))).toEqual({
         ok: false,
-        reason: 'Việc chạy song song là số nguyên từ 1 đến 8.',
+        reason: 'Việc chạy song song là số nguyên từ 1 đến 24.',
       });
     }
   });
 
-  it('refuses a session count outside 0 to 6, or one that is not a whole number', () => {
-    for (const maxSquadSessions of ['-1', '7', '1.5', '']) {
+  it('refuses a session count outside 0 to 24, or one that is not a whole number', () => {
+    for (const maxSquadSessions of ['-1', '25', '1.5', '']) {
       expect(squadSettingsFromDraft(draftWith({ maxSquadSessions }))).toEqual({
         ok: false,
-        reason: 'Phiên đội tối đa là số nguyên từ 0 đến 6.',
+        reason: 'Phiên đội tối đa là số nguyên từ 0 đến 24.',
+      });
+    }
+  });
+  it('refuses a per-repo count outside 1 to 8', () => {
+    for (const maxPerRepo of ['0', '9', '2.5', '']) {
+      expect(squadSettingsFromDraft(draftWith({ maxPerRepo }))).toEqual({
+        ok: false,
+        reason: 'Số việc mỗi repo chạy cùng lúc là số nguyên từ 1 đến 8.',
       });
     }
   });

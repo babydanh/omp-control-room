@@ -161,6 +161,9 @@ export function blockerReason(blocker: WorkItemBlocker): string {
     return `Chờ agent khác rảnh, đang làm trong ${blocker.area ?? ''}.`;
   }
   if (blocker.kind === 'pool_full') return 'Đã đủ phiên omp đang chạy, chờ chỗ trống rồi thử lại.';
+  if (blocker.kind === 'repo_full') {
+    return `Repo ${blocker.area ?? ''} đang chạy ${blocker.running ?? 0}/${blocker.limit ?? 0} việc, chờ có chỗ trống.`;
+  }
   if (blocker.kind === 'worktree') {
     return `Chưa tạo được worktree riêng cho việc này: ${blocker.detail ?? 'lỗi không rõ'}.`;
   }

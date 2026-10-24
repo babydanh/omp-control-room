@@ -466,11 +466,27 @@ export function CompanyBoard({
   const swipeStart = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   // The lane whose "Xoá hết" waits for a second click: one stray click must not empty a lane.
   const [clearing, setClearing] = useState<CompanyLaneId | null>(null);
+  // What a lane's last "Xoá hết" could not remove, and why: the server refuses to lose work.
+  const [clearNotice, setClearNotice] = useState<{ lane: CompanyLaneId; text: string } | null>(null);
 
-  /** Removes every work item card in a finished lane; agent and task cards stay. */
-  function clearLane(lane: BoardLane): void {
-    for (const card of lane.workItems) void client.cancelWorkItem(card.workspacePath, card.id);
+  /** Removes every work item card in a finished lane; agent and task cards stay. Refusals are named. */
+  async function clearLane(lane: BoardLane): Promise<void> {
     setClearing(null);
+    setClearNotice(null);
+    const verdicts = await Promise.all(
+      lane.workItems.map(async (card) => ({
+        card,
+        verdict: await client.waitForCommand(client.cancelWorkItem(card.workspacePath, card.id)),
+      })),
+    );
+    const refused = verdicts.filter(({ verdict }) => !verdict.ok);
+    if (refused.length === 0) return;
+    const first = refused[0];
+    const why = first?.verdict.message ?? 'Server từ chối.';
+    setClearNotice({
+      lane: lane.id,
+      text: `Chưa xoá được ${refused.length} việc (#${refused.map(({ card }) => card.sequence).join(', #')}): ${why}`,
+    });
   }
 
   const views: LaneView[] = lanes.map((lane) => {
@@ -546,7 +562,7 @@ export function CompanyBoard({
                 {(lane.id === 'failed' || lane.id === 'done') && lane.workItems.length > 0 && (
                   clearing === lane.id ? (
                     <>
-                      <button type="button" className="text-danger hover:underline" onClick={() => clearLane(lane)}>
+                      <button type="button" className="text-danger hover:underline" onClick={() => void clearLane(lane)}>
                         Xoá {lane.workItems.length} việc
                       </button>
                       <button type="button" className="hover:underline" onClick={() => setClearing(null)}>
@@ -563,6 +579,14 @@ export function CompanyBoard({
               </span>
             </h3>
             <p className="truncate text-xs text-status-active">{COMPANY_LANE_OWNERS[lane.id]}</p>
+            {clearNotice?.lane === lane.id && (
+              <p role="status" className="text-2xs text-warning">
+                {clearNotice.text}{' '}
+                <button type="button" className="text-text-muted hover:underline" onClick={() => setClearNotice(null)}>
+                  Đóng
+                </button>
+              </p>
+            )}
           </header>
           <div className="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto p-1">
             {count === 0 && (
