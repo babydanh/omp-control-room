@@ -298,8 +298,8 @@ interface FileChangeCount {
 
 /** Repos under a folder change rarely, and walking a large folder takes seconds. */
 const REPO_LIST_REUSE_MS = 60_000;
-/** Change counts are re-read at most this often per checkout. */
-const CHANGED_FILES_REUSE_MS = 10_000;
+/** Change counts (2 git calls per dirty checkout) are re-read at most this often, like repo scans. */
+const CHANGED_FILES_REUSE_MS = 20_000;
 /**
  * A repo's worktree states (6 git calls per worktree) are re-read at most this often. The tree
  * rebuilds on every session status change; without this, many open sessions keep git busy.
