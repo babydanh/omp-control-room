@@ -362,18 +362,25 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
 
   // Creation order is the server's order; Object.values keeps it, and sorting
   // by it would invent a sequence the company never declared.
-  // A session that already holds a task, plans a prompt, or runs a work item is shown by that card.
+  // A session or herdr pane that already holds a task, plans a prompt, or runs a work item is shown by that card.
+  // Pane ids ("wA:pY") and session ids (UUIDs) never collide, so one set holds both.
   const carded = new Set(tasks.flatMap((task) => (task.sessionId ? [task.sessionId] : [])));
   for (const prompt of planningPrompts(state)) {
     if (prompt.session !== null) carded.add(prompt.session.id);
   }
+  // A pane whose item is finished is still shown by that item while the pane itself reads "done".
+  const finishedPanes = new Set<string>();
   const workItems = workItemCards(state);
   for (const { item } of visibleWorkItems(state)) {
-    if (item.assignee.kind === 'session' && item.assignee.sessionId && laneForWorkItem(item.status) !== 'done') {
+    const finished = laneForWorkItem(item.status) === 'done';
+    if (item.assignee.kind === 'session' && item.assignee.sessionId && !finished) {
       carded.add(item.assignee.sessionId);
     }
+    if (item.assignee.kind === 'herdr' && item.assignee.paneId) {
+      (finished ? finishedPanes : carded).add(item.assignee.paneId);
+    }
   }
-  const agents = buildAgentCards(state, carded);
+  const agents = buildAgentCards(state, carded, finishedPanes);
   const squads = squadCards(state);
   return COMPANY_LANE_ORDER.map((id) => ({
     id,

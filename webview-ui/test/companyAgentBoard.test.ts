@@ -122,6 +122,22 @@ describe('herdr panes as agent cards', () => {
 
     expect(buildAgentCards(state, new Set())).toEqual([]);
   });
+
+  it('leaves out a pane a work item speaks for, and a done pane only while its item is finished', () => {
+    const state = withHerdr(stateFrom(), [
+      herdrAgent({ paneId: 'p-item', status: 'working' }),
+      herdrAgent({ paneId: 'p-finished', status: 'done' }),
+      herdrAgent({ paneId: 'p-new-work', status: 'working' }),
+      herdrAgent({ paneId: 'p-free', status: 'done' }),
+    ]);
+
+    // p-new-work finished an item earlier and now runs something no item holds: it stays a card.
+    const finished = new Set(['p-finished', 'p-new-work']);
+    expect(laneByKey(buildAgentCards(state, new Set(['p-item']), finished))).toEqual({
+      'herdr:p-new-work': 'running',
+      'herdr:p-free': 'done',
+    });
+  });
 });
 
 describe('company sessions as agent cards', () => {

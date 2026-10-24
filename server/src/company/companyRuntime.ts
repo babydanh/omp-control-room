@@ -578,6 +578,8 @@ class NativeCompanyRuntime implements CompanyRuntime {
       onSettingsUpdated: (profiles) => this.onSettingsUpdated(profiles),
       onStateChanged: (event) => this.onStateChanged(event),
       recover: (state) => this.recover(state),
+      // Without an event after a restart no dispatch pass ran, so a dead run stayed "busy" on the board.
+      onStarted: () => this.requestDispatch(),
       verifyControlOwnership: (session, action, runEpoch) =>
         this.verifyControlOwnership(session, action, runEpoch),
       dispose: () => this.dispose(),

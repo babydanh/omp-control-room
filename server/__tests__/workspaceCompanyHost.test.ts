@@ -124,6 +124,7 @@ class FakeRuntime implements CompanyRuntime {
       recover: async () => {
         this.launches += 1;
       },
+      onStarted: () => undefined,
       dispose: async () => {
         this.disposals += 1;
         this.sessions.clear();

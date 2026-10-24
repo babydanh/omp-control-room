@@ -135,6 +135,7 @@ function effects(overrides: Partial<Effects> = {}): Effects {
     onSettingsUpdated: async () => undefined,
     onStateChanged: () => undefined,
     recover: async () => undefined,
+    onStarted: () => undefined,
     dispose: async () => undefined,
     ...overrides,
   };

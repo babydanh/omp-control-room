@@ -8,8 +8,9 @@
  * a place to start work, not work in progress.
  *
  * Two kinds of agent never get a card of their own:
- *  - a session that already holds a task or is planning a prompt: the task card
- *    or the planning card speaks for it, and listing it twice would miscount;
+ *  - a session or herdr pane that already holds a task, plans a prompt or runs a
+ *    work item: that card speaks for it, and listing it twice would miscount; a
+ *    pane whose item is finished is left out only while it reads "done" too;
  *  - a crashed session: every board restart leaves its earlier runs crashed, and
  *    the sidebar folds them for that reason. Herdr has no error status at all,
  *    so no pane reaches Lỗi either.
@@ -166,26 +167,34 @@ function compareAgentCards(left: AgentBoardCard, right: AgentBoardCard): number 
   );
 }
 
-function herdrCards(herdr: HerdrView): AgentBoardCard[] {
+function herdrCards(
+  herdr: HerdrView,
+  carded: ReadonlySet<string>,
+  finishedPanes: ReadonlySet<string>,
+): AgentBoardCard[] {
   if (!herdr.loaded || !herdr.available) return [];
   const cards: AgentBoardCard[] = [];
   for (const agent of herdr.agents) {
+    if (carded.has(agent.paneId)) continue;
     const card = herdrCard(agent, herdr.screens[agent.paneId]);
-    if (card !== null) cards.push(card);
+    if (card === null || (card.lane === 'done' && finishedPanes.has(agent.paneId))) continue;
+    cards.push(card);
   }
   return cards;
 }
 
 /**
- * The agent cards for the board, sorted. `carded` holds the session ids a task
- * or a planning card already shows; those sessions are left out here.
+ * The agent cards for the board, sorted. `carded` holds the session ids and pane ids a task, a
+ * planning card or a live work item already shows; `finishedPanes` the panes of finished items,
+ * left out while they read "done". Both are left out here.
  */
 export function buildAgentCards(
   state: CompanyViewState,
   carded: ReadonlySet<string>,
+  finishedPanes: ReadonlySet<string> = new Set(),
 ): AgentBoardCard[] {
   const questioning = pendingQuestionSessionIds(state);
-  const cards = herdrCards(state.herdr);
+  const cards = herdrCards(state.herdr, carded, finishedPanes);
   for (const session of Object.values(state.sessions)) {
     if (carded.has(session.id)) continue;
     const card = sessionCard(session, questioning, state.sessionLogs[session.id]?.entries ?? []);

@@ -282,6 +282,11 @@ export interface WorkspaceCompanyCoordinatorEffects {
   readonly onStateChanged: (event: CompanyEvent) => void;
   /** Awaited with NO lock held (runs from start(), which is never serialized). */
   readonly recover: (state: CompanyState) => Promise<void>;
+  /**
+   * Fired once start() has finished, for the owner only. Recovery may not write, so this is the
+   * host's first chance to commit what it owes the journal (a dead run recorded as crashed).
+   */
+  readonly onStarted: () => void;
   readonly dispose: () => Promise<void>;
 }
 
@@ -445,6 +450,7 @@ export class WorkspaceCompanyCoordinator implements CompanyCoordinator {
     }
     this.assertNotDisposed();
     this.started = true;
+    if (this.options.isOwner()) this.options.effects.onStarted();
   }
 
   async submitPrompt(input: SubmitPromptInput): Promise<CompanyPrompt> {
