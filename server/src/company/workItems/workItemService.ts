@@ -1463,18 +1463,18 @@ export class WorkItemService {
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {
-      // Compact squad items and items the user filed themselves run like the user's own sessions: an
-      // omp agent in its own herdr tab, which the user watches there and which outlives a board
-      // restart. Without herdr they use board chat sessions: the item is the whole brief, so no
-      // contract stands behind the session (a role session refuses any prompt without one). Editing
-      // items open in their own worktree; read-only items stay in the repo.
+      // Every omp item runs like the user's own sessions: an omp agent in its own herdr tab, which the
+      // user watches there and which outlives a board restart. Without herdr, compact squad items and
+      // items the user filed use board chat sessions: the item is the whole brief, so no contract
+      // stands behind the session (a role session refuses any prompt without one). Editing items open
+      // in their own worktree; read-only items stay in the repo.
       const compactItem = item.assignee.kind === 'new-session' &&
         item.squadRunId !== undefined &&
         this.ports.isCompactSquadProposal?.(item.squadRunId) === true;
       const chatItem = compactItem || item.squadRunId === undefined;
       const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
       if (cwd === undefined) return;
-      const paneId = chatItem ? await this.openAgentPane(item, 'omp', cwd, false) : undefined;
+      const paneId = await this.openAgentPane(item, 'omp', cwd, false);
       if (paneId === null) return;
       if (paneId !== undefined) {
         item.assignee = { kind: 'herdr', paneId };
