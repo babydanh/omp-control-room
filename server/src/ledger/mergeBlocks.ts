@@ -15,17 +15,25 @@ interface CacheEntry {
 
 export class MergeBlockCache {
   private readonly cache = new Map<string, CacheEntry>();
+  /** A repo's common git dir never moves: asked once, not on every ledger tick. */
+  private readonly commonDirs = new Map<string, string | null>();
 
   async read(git: GitRunner, repo: string, nowMs: number): Promise<readonly LedgerMergeBlock[]> {
-    const commonDirResult = await git.run(
-      repo,
-      ['rev-parse', '--git-common-dir'],
-      { timeoutMs: LEDGER_GIT_TIMEOUT_MS, okCodes: [0], maxBytes: LEDGER_GIT_MAX_BYTES },
-    );
-    const commonDir =
-      commonDirResult.ok && commonDirResult.stdout.trim() !== ''
-        ? path.resolve(repo, commonDirResult.stdout.trim())
-        : fallbackCommonDir(repo);
+    const key = repo.toLowerCase();
+    let commonDir = this.commonDirs.get(key);
+    if (commonDir === undefined) {
+      const commonDirResult = await git.run(
+        repo,
+        ['rev-parse', '--git-common-dir'],
+        { timeoutMs: LEDGER_GIT_TIMEOUT_MS, okCodes: [0], maxBytes: LEDGER_GIT_MAX_BYTES },
+      );
+      commonDir =
+        commonDirResult.ok && commonDirResult.stdout.trim() !== ''
+          ? path.resolve(repo, commonDirResult.stdout.trim())
+          : fallbackCommonDir(repo);
+      // Only a git answer is kept; after a failed call the next tick asks again.
+      if (commonDirResult.ok) this.commonDirs.set(key, commonDir);
+    }
     if (commonDir === null) return [];
     const directory = path.join(commonDir, 'merge-lane');
     let mtimeMs: number | null = null;
@@ -34,7 +42,6 @@ export class MergeBlockCache {
     } catch {
       // No merge briefs have been written for this repository.
     }
-    const key = repo.toLowerCase();
     const cached = this.cache.get(key);
     if (cached !== undefined && cached.directory === directory && cached.mtimeMs === mtimeMs) {
       return cached.blocks.filter((block) => {

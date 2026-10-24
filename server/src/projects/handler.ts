@@ -27,6 +27,7 @@ import { startProjectSession } from './newSession.js';
 import { type ProjectNode, type ProjectState, ProjectStore } from './projectStore.js';
 import {
   buildProjectTreeSnapshot,
+  forgetGitScans,
   type HerdrProjectSession,
   type ProjectTreeOptions,
   type ProjectTreeSnapshot,
@@ -319,7 +320,10 @@ async function sendTreeSnapshot(
   fresh = true,
 ): Promise<void> {
   if (context.tree === undefined) return;
-  if (fresh) treeBuilds.delete(store);
+  if (fresh) {
+    treeBuilds.delete(store);
+    forgetGitScans();
+  }
   // Both builds read the agents: an iterator would be spent by the first.
   const shared: ProjectCommandContext = { ...context, ...(context.agents === undefined ? {} : { agents: [...context.agents] }) };
   const full = buildTree(store, shared);

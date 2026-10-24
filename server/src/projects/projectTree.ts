@@ -300,6 +300,11 @@ interface FileChangeCount {
 const REPO_LIST_REUSE_MS = 60_000;
 /** Change counts are re-read at most this often per checkout. */
 const CHANGED_FILES_REUSE_MS = 10_000;
+/**
+ * A repo's worktree states (6 git calls per worktree) are re-read at most this often. The tree
+ * rebuilds on every session status change; without this, many open sessions keep git busy.
+ */
+const REPO_SCAN_REUSE_MS = 20_000;
 
 interface Reused<T> {
   readonly at: number;
@@ -307,6 +312,13 @@ interface Reused<T> {
 }
 const repoLists = new Map<string, Reused<string[]>>();
 const changeCounts = new Map<string, Reused<FileChangeCount[]>>();
+const repoScans = new Map<string, Reused<GitRepoScan>>();
+
+/** After a change the user made (new worktree, moved folder), the next tree reads git afresh. */
+export function forgetGitScans(): void {
+  changeCounts.clear();
+  repoScans.clear();
+}
 
 /** `load` result for `key`, reused for `ttlMs`; a failed load is dropped so the next call retries. */
 function reuse<T>(cache: Map<string, Reused<T>>, key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
@@ -523,7 +535,8 @@ async function appendNodes(
       ? await reuse(repoLists, canonicalKey(node.path), REPO_LIST_REUSE_MS, () => listFolderRepos(node.path))
       : await options.listRepos(node.path);
     const repos = await mainRepos(listed);
-    const scanRepo = options.readRepo ?? ((repo: string) => readRepo(options.git, repo));
+    const scanRepo = options.readRepo
+      ?? ((repo: string) => reuse(repoScans, canonicalKey(repo), REPO_SCAN_REUSE_MS, () => readRepo(options.git, repo)));
     const scans = await mapLimit(repos, CHANGED_FILES_CONCURRENCY, scanRepo);
     // Sessions in the folder but in no checkout (a plain folder, a non-repo subfolder) belong to the folder.
     const checkoutPaths = scans.flatMap((scan) => (scan.kind === 'repo' ? scan.worktrees.map((worktree) => worktree.path) : []));
