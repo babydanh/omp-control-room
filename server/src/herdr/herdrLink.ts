@@ -239,10 +239,20 @@ export interface HerdrLink {
   wake(paneId: string, prompt?: string): Promise<void>;
   close(paneId: string): Promise<void>;
   /**
-   * Opens a new herdr tab in `cwd` and starts an interactive agent of `kind` in it, named `name`;
-   * types `prompt` once the agent is ready, when one is given. Resolves with the new pane's id.
+   * Opens a new herdr tab in `cwd` and starts an interactive agent of `kind` in it, named `name`,
+   * with `args` on its command line; types `prompt` once the agent is ready, when one is given.
+   * Resolves with the new pane's id once the roster lists it.
    */
-  startAgent(input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly prompt?: string }): Promise<string>;
+  startAgent(input: HerdrAgentStart): Promise<string>;
+}
+
+/** What a new interactive agent tab runs. */
+export interface HerdrAgentStart {
+  readonly cwd: string;
+  readonly kind: 'claude' | 'agy';
+  readonly name: string;
+  readonly args?: readonly string[];
+  readonly prompt?: string;
 }
 
 export { isHerdrPaneId };
@@ -596,7 +606,7 @@ class HerdrLinkImpl implements HerdrLink {
     if (this.running) this.scheduleRefresh();
   }
 
-  async startAgent(input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly prompt?: string }): Promise<string> {
+  async startAgent(input: HerdrAgentStart): Promise<string> {
     assertAgentName(input.name);
     if (input.prompt !== undefined) assertPrompt(input.prompt);
     const created = await this.call('tab.create', { cwd: input.cwd, label: input.name, focus: false });
@@ -604,11 +614,18 @@ class HerdrLinkImpl implements HerdrLink {
     if (paneId === undefined) throw new HerdrError('invalid_request', 'herdr không trả về pane của tab mới.');
     await this.call(
       'agent.start',
-      { name: input.name, kind: input.kind, pane_id: paneId, timeout_ms: AGENT_START_TIMEOUT_MS },
+      {
+        name: input.name,
+        kind: input.kind,
+        pane_id: paneId,
+        args: [...(input.args ?? [])],
+        timeout_ms: AGENT_START_TIMEOUT_MS,
+      },
       AGENT_START_TIMEOUT_MS + REQUEST_TIMEOUT_MS,
     );
+    // The roster lists the pane before this resolves, so a caller that assigns work to it sees it.
+    if (this.running) await this.refresh(this.generation);
     if (input.prompt !== undefined) await this.prompt(paneId, input.prompt);
-    if (this.running) this.scheduleRefresh();
     return paneId;
   }
 

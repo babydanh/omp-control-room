@@ -37,7 +37,7 @@ import {
 import { WorkItemFileStore } from './workItemStore.js';
 
 /** The herdr calls work items make. The process-level link satisfies this. */
-export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read'>;
+export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read' | 'startAgent'>;
 
 /** Screen lines read when a pane's result is taken; enough for the last non-empty lines. */
 const RESULT_SCREEN_LINES = 40;
@@ -116,6 +116,7 @@ function rosterFor(herdr: WorkItemHerdr | undefined): WorkItemRoster {
         paneId: session.paneId,
         ...(session.cwd === undefined ? {} : { cwd: session.cwd }),
       })),
+    ...(herdr === undefined ? {} : { startAgent: (input) => herdr.startAgent(input) }),
   };
 }
 

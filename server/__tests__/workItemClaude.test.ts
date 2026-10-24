@@ -10,7 +10,7 @@ import {
   WORK_ITEM_REASON,
   type WorkItemsFile,
 } from '../src/company/workItems/workItemModel.js';
-import { WorkItemService } from '../src/company/workItems/workItemService.js';
+import { type WorkItemRoster, WorkItemService } from '../src/company/workItems/workItemService.js';
 import { FakeAgyRuns } from './fakeAgy.js';
 import { FakeClaudeAuth, FakeClaudeMcp, FakeClaudeRuns } from './fakeClaude.js';
 
@@ -31,9 +31,9 @@ class Fixture {
   private timers: { run: () => void; cancelled: boolean }[] = [];
   readonly service: WorkItemService;
 
-  constructor(saved: WorkItemsFile | null = null) {
+  constructor(saved: WorkItemsFile | null = null, roster?: WorkItemRoster) {
     this.service = new WorkItemService('/work/folder', {
-      roster: {
+      roster: roster ?? {
         panes: () => ({ available: false, panes: [] }),
         prompt: async () => undefined,
         screenText: async () => '',
@@ -131,6 +131,55 @@ function createClaudeItem(f: Fixture, text = 'Sửa form'): Promise<string> {
     repo: REPO,
   });
 }
+
+/** A herdr that opens one interactive agent tab per call, and records what it was asked. */
+function herdrRoster(opens: 'ok' | 'fails' = 'ok') {
+  const panes: { paneId: string; status: 'idle'; cwd: string; kind: string }[] = [];
+  const starts: unknown[] = [];
+  const prompts: { paneId: string; text: string }[] = [];
+  const roster: WorkItemRoster = {
+    panes: () => ({ available: true, panes }),
+    prompt: async (paneId, text) => {
+      prompts.push({ paneId, text });
+    },
+    screenText: async () => '',
+    startAgent: async (input) => {
+      starts.push(input);
+      if (opens === 'fails') throw new Error('agent_start_timeout');
+      const paneId = `wA:p${panes.length + 1}`;
+      panes.push({ paneId, status: 'idle', cwd: input.cwd, kind: input.kind });
+      return paneId;
+    },
+  };
+  return { roster, starts, prompts };
+}
+
+describe('Claude Code in herdr', () => {
+  it('opens an editing item as an interactive Claude tab in its worktree, and sends the task there', async () => {
+    const herdr = herdrRoster();
+    const f = new Fixture(null, herdr.roster);
+    await f.service.load();
+    const id = await createClaudeItem(f);
+    await settle();
+    expect(herdr.starts).toEqual([
+      { cwd: worktreeOf(id), kind: 'claude', name: `claude-${id.slice(0, 8)}`, args: ['--permission-mode', 'auto'] },
+    ]);
+    expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'herdr', paneId: 'wA:p1' } });
+    expect(f.claude.starts).toHaveLength(0);
+    expect(herdr.prompts.map((prompt) => prompt.paneId)).toEqual(['wA:p1']);
+    expect(herdr.prompts[0]?.text).toContain('Sửa form');
+  });
+
+  it('fails the item with the reason when herdr cannot open the Claude tab, and runs nothing headless', async () => {
+    const herdr = herdrRoster('fails');
+    const f = new Fixture(null, herdr.roster);
+    await f.service.load();
+    const id = await createClaudeItem(f);
+    await settle();
+    expect(itemOf(f, id)).toMatchObject({ status: 'failed', reason: WORK_ITEM_REASON.agentPaneFailed });
+    expect(f.claude.starts).toHaveLength(0);
+  });
+});
 
 describe('Claude Code runs: start and end', () => {
   it('starts an editing run in the item worktree, with the squad limits', async () => {

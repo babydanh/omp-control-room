@@ -275,6 +275,19 @@ export function WorkItemPanel({
     >
       <NextStepBanner step={step} busy={busy} onAction={runStep} />
 
+      {item.result !== undefined && item.result.trim() !== '' && (
+        <section aria-label="Tóm tắt" className="px-2.5">
+          <h4 className="text-xs font-semibold text-text">Tóm tắt</h4>
+          <pre
+            data-testid="work-item-result"
+            className="company-work-result mt-1 max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-(--company-radius-sm) bg-well p-2 font-mono text-2xs text-text"
+          >
+            {/* Results saved before the board dropped colour codes still carry them. */}
+            {withoutTerminalEscapes(item.result)}
+          </pre>
+        </section>
+      )}
+
       {item.claudeRun?.sessionId !== undefined && (
         <details open className="px-2.5">
           <summary className="cursor-pointer text-xs text-text">Nhật ký Claude</summary>
@@ -373,22 +386,6 @@ export function WorkItemPanel({
             ))}
           </ul>
         </section>
-      )}
-
-      {item.result !== undefined && item.result.trim() !== '' && (
-        <details aria-label="Kết quả" className="px-2.5">
-          <summary className="cursor-pointer text-xs text-text">
-            <span className="text-text-muted">Agent báo: </span>
-            {summaryLine(withoutTerminalEscapes(item.result), 140) ?? 'Kết quả'}
-          </summary>
-          <pre
-            data-testid="work-item-result"
-            className="company-work-result mt-1 max-h-96 overflow-y-auto whitespace-pre-wrap break-words rounded-(--company-radius-sm) bg-well p-2 font-mono text-2xs text-text"
-          >
-            {/* Results saved before the board dropped colour codes still carry them. */}
-            {withoutTerminalEscapes(item.result)}
-          </pre>
-        </details>
       )}
 
       {hasActions && (

@@ -105,6 +105,7 @@ export const WORK_ITEM_REASON = {
   sessionGone: 'Phiên omp không còn trên bảng.',
   markedFailed: 'Bạn đánh dấu việc này hỏng.',
   openFailed: 'Không mở được phiên omp mới.',
+  agentPaneFailed: 'Không mở được Claude Code hay agy trong herdr.',
   saveFailed: 'Chưa lưu được việc nên chưa gửi. Board sẽ thử lại.',
   sendFailed: (detail: string): string => `Gửi việc thất bại: ${detail}`,
   claudeInterrupted:

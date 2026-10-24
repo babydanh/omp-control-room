@@ -170,6 +170,11 @@ export interface WorkItemRoster {
   lastReply?(paneId: string): Promise<string | undefined>;
   /** Hibernated sessions herdr keeps, each in its pane. Absent = none. */
   sleeping?(): readonly { readonly paneId: string; readonly cwd?: string }[];
+  /**
+   * Opens an interactive Claude Code or agy agent in a new herdr tab in `cwd` and resolves with its
+   * pane, once the roster lists it. Absent = herdr cannot open one, and the CLI runs headless.
+   */
+  startAgent?(input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly args: readonly string[] }): Promise<string>;
 }
 
 /** One omp session, as far as work items care. */
@@ -1442,9 +1447,17 @@ export class WorkItemService {
         ? decision.cwd
         : await this.isolatedCheckout(item, decision.cwd);
       if (cwd === undefined) return;
-      if (auto) {
+      if (auto) item.pendingPrompt = this.promptFor(item.text, item.acceptance, item.agent, { kind: decision.kind });
+      // With herdr linked the CLI runs as an interactive agent in its own tab: the user watches it
+      // there, and the item follows that pane like any herdr agent. Without herdr it runs headless.
+      const paneId = await this.openAgentPane(item, decision.kind, cwd, decision.readOnly);
+      if (paneId === null) return;
+      if (paneId !== undefined) {
+        item.assignee = { kind: 'herdr', paneId };
+        const cli = decision.kind === 'agy' ? 'Antigravity (agy)' : 'Claude Code';
+        this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Mở ${cli} trong tab herdr ${paneId}.`));
+      } else if (auto) {
         item.assignee = { kind: decision.kind };
-        item.pendingPrompt = this.promptFor(item.text, item.acceptance, item.agent, item.assignee);
         const cli = decision.kind === 'agy' ? 'Antigravity (agy)' : 'Claude Code (claude -p)';
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
@@ -1994,21 +2007,47 @@ export class WorkItemService {
     throw new Error('item has no agent to send to yet');
   }
 
-  /** Whether the item's Claude Code run is in flight: its items are running or waiting for the user. */
+  /** Claude Code runs in flight: headless runs, and items an interactive Claude pane in herdr holds. */
   private claudeRunsOpen(): number {
+    return this.cliRunsOpen('claude');
+  }
+
+  private agyRunsOpen(): number {
+    return this.cliRunsOpen('agy');
+  }
+
+  private cliRunsOpen(kind: 'claude' | 'agy'): number {
+    const paneKinds = new Map(this.ports.roster.panes().panes.map((pane) => [pane.paneId, pane.kind]));
     let open = 0;
     for (const item of this.items.values()) {
-      if (item.assignee.kind === 'claude' && occupiesAgent(item.status)) open += 1;
+      if (!occupiesAgent(item.status)) continue;
+      const assignee = item.assignee;
+      if (assignee.kind === kind) open += 1;
+      else if (assignee.kind === 'herdr' && paneKinds.get(assignee.paneId ?? '') === kind) open += 1;
     }
     return open;
   }
 
-  private agyRunsOpen(): number {
-    let open = 0;
-    for (const item of this.items.values()) {
-      if (item.assignee.kind === 'agy' && occupiesAgent(item.status)) open += 1;
+  /**
+   * Opens the item's Claude Code or agy agent in its own herdr tab: the pane id, undefined when herdr
+   * cannot open one (the CLI then runs headless), or null when the open failed and failed the item.
+   * A read-only item's Claude starts in plan mode; an editing one in the folder's Claude permission.
+   */
+  private async openAgentPane(
+    item: StoredWorkItem,
+    kind: 'claude' | 'agy',
+    cwd: string,
+    readOnly: boolean,
+  ): Promise<string | undefined | null> {
+    const roster = this.ports.roster;
+    if (roster.startAgent === undefined || !roster.panes().available) return undefined;
+    const args = kind === 'claude' ? ['--permission-mode', readOnly ? 'plan' : this.settings.claudePermission] : [];
+    try {
+      return await roster.startAgent({ cwd, kind, name: `${kind}-${item.id.slice(0, 8)}`, args });
+    } catch (error) {
+      this.fail(item, WORK_ITEM_REASON.agentPaneFailed, describe(error));
+      return null;
     }
-    return open;
   }
 
   /** Starts the Claude Code run that carries a dispatched item. A follow-up resumes the session the run opened. */
