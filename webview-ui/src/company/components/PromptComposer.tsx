@@ -707,7 +707,15 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
           data-testid="prompt-voice"
           className={`touch-target shrink-0 rounded-[var(--company-radius-md)] px-2 py-2 text-sm hover:bg-hover ${voice.state === 'recording' ? 'text-status-error' : 'text-text-muted hover:text-text'}`}
         >
-          {voice.state === 'recording' ? `● ${voice.seconds}s` : voice.state === 'transcribing' ? '…' : '🎤'}
+          {voice.state === 'recording' ? (
+            <span className="flex items-center gap-1.5">
+              ● {voice.seconds}s
+              {/* Moves while the mic hears you: a flat bar means the wrong mic or a muted one. */}
+              <span aria-hidden="true" className="h-2 w-8 overflow-hidden rounded-full bg-well">
+                <span className="block h-full rounded-full bg-status-success transition-[width] duration-100" style={{ width: `${Math.round(voice.level * 100)}%` }} />
+              </span>
+            </span>
+          ) : voice.state === 'transcribing' ? '…' : '🎤'}
         </button>
         {voice.mics.length > 0 && (
           <select

@@ -36,6 +36,8 @@ export interface VoiceMic {
 export function useVoiceInput(onText: (text: string) => void, onError: (message: string) => void): {
   readonly state: VoiceState;
   readonly seconds: number;
+  /** The microphone's loudness right now while recording, 0–1 scaled for display. */
+  readonly level: number;
   readonly toggle: () => void;
   /** The microphones the browser lists; names appear once the page has been allowed to use one. */
   readonly mics: readonly VoiceMic[];
@@ -45,6 +47,7 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
 } {
   const [state, setState] = useState<VoiceState>('idle');
   const [seconds, setSeconds] = useState(0);
+  const [liveLevel, setLiveLevel] = useState(0);
   const [mics, setMics] = useState<readonly VoiceMic[]>([]);
   const [micId, setMicId] = useState(() => window.localStorage.getItem(MIC_KEY) ?? '');
   const recorder = useRef<MediaRecorder | null>(null);
@@ -85,7 +88,7 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
       const opened = stream;
       const chunks: Blob[] = [];
       const next = new MediaRecorder(opened);
-      const level = listenLevel(opened);
+      const level = listenLevel(opened, setLiveLevel);
       next.addEventListener('dataavailable', (event) => chunks.push(event.data));
       next.addEventListener('stop', () => {
         const loudest = level.stop();
@@ -138,6 +141,7 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
   return {
     state,
     seconds,
+    level: state === 'recording' ? liveLevel : 0,
     mics,
     micId,
     chooseMic: (id) => {
@@ -169,7 +173,7 @@ const SPEECH_LEVEL = 0.02;
  * Follows the microphone's loudness while recording; `stop` returns the loudest RMS heard, or
  * Infinity when the audio graph never ran (a suspended context measures nothing, which is not silence).
  */
-function listenLevel(stream: MediaStream): { stop: () => number } {
+function listenLevel(stream: MediaStream, onLevel: (level: number) => void): { stop: () => number } {
   const context = new AudioContext();
   void context.resume();
   const analyser = context.createAnalyser();
@@ -184,7 +188,10 @@ function listenLevel(stream: MediaStream): { stop: () => number } {
     analyser.getFloatTimeDomainData(samples);
     let sum = 0;
     for (const sample of samples) sum += sample * sample;
-    loudest = Math.max(loudest, Math.sqrt(sum / samples.length));
+    const rms = Math.sqrt(sum / samples.length);
+    loudest = Math.max(loudest, rms);
+    // Speech sits around 0.02–0.2 RMS: ×5 makes a normal voice fill most of the meter.
+    onLevel(Math.min(1, rms * 5));
   }, 100);
   return {
     stop: () => {

@@ -142,8 +142,8 @@ const SILENCE_OUTROS: readonly RegExp[] = [
   /^.{0,20}(để )?(không|đừng) bỏ lỡ những video.{0,30}$/iu,
   /^cảm ơn các bạn đã (theo dõi|xem|lắng nghe).{0,30}$/iu,
   /^(subtitles by|phụ đề bởi).{0,40}$/iu,
-  // Over silence Whisper echoes the start of the vocabulary prompt (measured: " Lập trình").
-  /^lập trình[\s:.,]*([a-z ,.-]{0,120})$/iu,
+  // Over silence Whisper echoes the start of the vocabulary prompt (measured: " Lập trình"); only that exact echo.
+  /^lập trình[\s:.]*$/iu,
 ];
 
 /**
