@@ -334,12 +334,16 @@ function workItemCards(state: CompanyViewState): BoardWorkItem[] {
   });
 }
 
+/** Open handoff Issues no item holds: finished ones first (they wait for a pull), then the newest. */
 function cloudIssueCards(state: CompanyViewState): BoardCloudIssue[] {
   const showAll = showsAllFolders(state);
-  return foldersInView(state, Object.keys(state.workItems)).flatMap((workspacePath) => {
+  const cards = foldersInView(state, Object.keys(state.workItems)).flatMap((workspacePath) => {
     const folder = showAll ? workItemFolderIdentity(state, workspacePath) : null;
     return workItemsOf(state, workspacePath).cloudIssues.map((issue) => ({ issue, workspacePath, folder }));
   });
+  return cards.sort((left, right) =>
+    Number(right.issue.state === 'finished') - Number(left.issue.state === 'finished') ||
+    right.issue.createdAt.localeCompare(left.issue.createdAt));
 }
 
 /** The squad runs the board shows, as cards: each one's lane, heading and proposed rows. */
