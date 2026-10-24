@@ -18,7 +18,7 @@ import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { HERDR_CHOICE_KEYS, HERDR_DRAWER_TAB_LABELS, type HerdrDrawerTab } from '../herdrView.js';
 import { formatLogTime } from '../sessionLogView.js';
-import { screenFitPx,type ScreenLine } from '../terminalScreen.js';
+import { MONO_CHAR_EM, screenFitPx,type ScreenLine } from '../terminalScreen.js';
 import { useCoalescedFrame } from '../useCoalescedFrame.js';
 import { useHerdrScreenWatch } from '../useHerdrScreenWatch.js';
 import { useParsedScreen } from '../useParsedScreen.js';
@@ -164,14 +164,25 @@ function HerdrScreenView({
   const onScroll = useStickToBottom(scrollRef);
   const fit = useContext(WrapLinesContext);
   const [widthPx, setWidthPx] = useState(0);
+  const [charEm, setCharEm] = useState(MONO_CHAR_EM);
   useEffect(() => {
     const frame = scrollRef.current;
     if (frame === null) return undefined;
-    // The frame's inner width: its padding (p-1.5, 6px a side) is not room for text.
-    const observer = new ResizeObserver(([entry]) => setWidthPx(Math.max(0, (entry?.contentRect.width ?? 0))));
+    // contentRect leaves out the frame's padding: only the room the text has.
+    const observer = new ResizeObserver(([entry]) => setWidthPx(entry?.contentRect.width ?? 0));
     observer.observe(frame);
     return () => observer.disconnect();
   }, []);
+  // The real glyph width of the screen's font, so the widest row fills the frame edge to edge.
+  useEffect(() => {
+    const pre = preRef.current;
+    const context = pre === null ? null : document.createElement('canvas').getContext('2d');
+    if (pre === null || context === null) return;
+    context.font = `100px ${getComputedStyle(pre).fontFamily}`;
+    const measured = context.measureText('0'.repeat(10)).width / 1000;
+    if (measured > 0) setCharEm(measured);
+  }, [preRef]);
+  const fitPx = fit ? screenFitPx(lines, widthPx, charEm) : undefined;
   return (
     <div
       ref={scrollRef}
@@ -180,9 +191,10 @@ function HerdrScreenView({
     >
       <ScreenView
         testId="herdr-screen"
+        className="min-h-full min-w-full"
         lines={lines}
         preRef={preRef}
-        {...(fit && screenFitPx(lines, widthPx) !== undefined ? { fitPx: screenFitPx(lines, widthPx) } : {})}
+        {...(fitPx === undefined ? {} : { fitPx })}
       />
     </div>
   );

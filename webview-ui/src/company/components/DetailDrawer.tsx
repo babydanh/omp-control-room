@@ -261,7 +261,7 @@ export function DetailDrawer({
             title="Giữ nguyên chiều rộng dòng và cuộn ngang khi dòng dài"
             onClick={() => onPrefsChange((current) => ({ ...current, wrapLines: !current.wrapLines }))}
             onDoubleClick={(event) => event.stopPropagation()}
-            className="company-toggle shrink-0"
+            className="company-toggle touch-target shrink-0"
           >
             Không ngắt dòng
           </button>
