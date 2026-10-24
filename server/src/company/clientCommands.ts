@@ -48,6 +48,7 @@ import {
   isHerdrKey,
 } from '../herdr/herdrLink.js';
 import type { BrowserReaperControl } from './browserReaper.js';
+import { readClaudeTranscriptLog } from './claudeCode/claudeTranscriptLog.js';
 import type {
   CompanyCoordinator,
   CompanySessionAction,
@@ -1559,11 +1560,14 @@ async function sessionLogPage(
     );
     return;
   }
-  const entries = await readSessionLog(
+  const boardEntries = await readSessionLog(
     sessionLogDirectory(services.store.namespaceDir),
     sessionId,
     limit,
   );
+  // A Claude Code run has no board log of its own: its transcript is the log.
+  const entries =
+    boardEntries.length > 0 ? boardEntries : await readClaudeTranscriptLog(sessionId, limit);
   send({
     type: 'companySessionLog',
     requestId: requestId ?? FALLBACK_REQUEST_ID,

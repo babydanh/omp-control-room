@@ -45,6 +45,7 @@ import {
   workItemsOf,
 } from '../workItemView.js';
 import { AssignWorkDialog } from './AssignWorkDialog.js';
+import { ClaudeRunLog } from './ClaudeRunLog.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
 import { FolderTag } from './FolderTag.js';
@@ -375,6 +376,18 @@ export function WorkItemPanel({
             {/* Results saved before the board dropped colour codes still carry them. */}
             {withoutTerminalEscapes(item.result)}
           </pre>
+        </details>
+      )}
+
+      {item.claudeRun?.sessionId !== undefined && (
+        <details open={status === 'running'} className="px-2.5">
+          <summary className="cursor-pointer text-xs text-text">Nhật ký Claude</summary>
+          <ClaudeRunLog
+            client={client}
+            state={state}
+            sessionId={item.claudeRun.sessionId}
+            running={status === 'running'}
+          />
         </details>
       )}
 
