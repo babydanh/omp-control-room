@@ -54,6 +54,9 @@ describe('requestFromTranscriptLine', () => {
     expect(requestFromTranscriptLine(claude('thêm popup'))).toBe('thêm popup');
     expect(requestFromTranscriptLine(claude([{ type: 'tool_result', content: 'ok' }]))).toBeUndefined();
     expect(requestFromTranscriptLine(claude('<command-name>/clear</command-name>'))).toBeUndefined();
+    expect(requestFromTranscriptLine(claude('<system-reminder>nhắc</system-reminder>'))).toBeUndefined();
+    // A prompt that opens with markup is still what the user asked.
+    expect(requestFromTranscriptLine(claude('<div> này lệch, sửa giúp'))).toBe('<div> này lệch, sửa giúp');
     expect(requestFromTranscriptLine(claude('việc của subagent', { isSidechain: true }))).toBeUndefined();
     expect(requestFromTranscriptLine(claude('x'.repeat(400)))?.length).toBe(300);
   });

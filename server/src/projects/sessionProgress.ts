@@ -26,6 +26,8 @@ const EMPTY = Buffer.alloc(0);
 const MAX_CURRENT = 400;
 const MAX_BLOCKED = 800;
 const MAX_REQUEST = 300;
+/** Claude Code's own blocks written as user turns: slash commands, their output, hooks, reminders. */
+const CLAUDE_WRAPPER = /^<(command-|local-command-|system-reminder|user-prompt-submit-hook|bash-)/;
 /** The first request is looked for this far into a transcript read from its tail. */
 const HEAD_BYTES = 256 * 1024;
 
@@ -93,7 +95,7 @@ export function requestFromTranscriptLine(line: string): string | undefined {
     ? content.flatMap((part) => (isRecord(part) && part['type'] === 'text' && typeof part['text'] === 'string' ? [part['text']] : []))
     : [];
   const text = parts.join(' ').replace(/\s+/g, ' ').trim();
-  if (text === '' || text.startsWith('<')) return undefined;
+  if (text === '' || CLAUDE_WRAPPER.test(text)) return undefined;
   return clip(text, MAX_REQUEST);
 }
 
