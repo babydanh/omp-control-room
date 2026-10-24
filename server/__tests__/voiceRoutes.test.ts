@@ -1,7 +1,7 @@
 import Fastify from 'fastify';
 import { describe, expect, it, vi } from 'vitest';
 
-import { registerVoiceRoutes, VOICE_CAPTURE_ROUTE, VOICE_NO_KEY_REASON, VOICE_TRANSCRIBE_ROUTE } from '../src/voice/voiceRoutes.js';
+import { registerVoiceRoutes, spokenText, VOICE_CAPTURE_ROUTE, VOICE_NO_KEY_REASON, VOICE_TRANSCRIBE_ROUTE } from '../src/voice/voiceRoutes.js';
 
 const TOKEN = 'board-token';
 
@@ -53,5 +53,18 @@ describe('voice routes', () => {
     const failed = await broken.inject({ method: 'POST', url: VOICE_CAPTURE_ROUTE, headers: { authorization: `Bearer ${TOKEN}` } });
     expect(failed.statusCode).toBe(502);
     expect(failed.json()).toEqual({ error: 'cua-driver không chạy' });
+  });
+});
+
+describe('spokenText', () => {
+  it('drops what Whisper invents over silence and keeps what was said', () => {
+    // The reply Groq gave for one second of silence, no_speech_prob 0 included.
+    expect(spokenText({ segments: [{ text: ' Hãy subscribe cho kênh Ghiền Mì Gõ Để không bỏ lỡ những video hấp dẫn', no_speech_prob: 0 }] })).toBe('');
+    expect(spokenText({ segments: [
+      { text: ' sửa nút đăng nhập', no_speech_prob: 0.01 },
+      { text: ' tiếng ồn', no_speech_prob: 0.9 },
+      { text: ' rồi gửi đi', no_speech_prob: 0.02 },
+    ] })).toBe('sửa nút đăng nhập rồi gửi đi');
+    expect(spokenText({ text: ' chỉ có chữ ' })).toBe('chỉ có chữ');
   });
 });

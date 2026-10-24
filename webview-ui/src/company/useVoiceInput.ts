@@ -57,10 +57,18 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
       const opened = stream;
       const chunks: Blob[] = [];
       const next = new MediaRecorder(opened);
+      const level = listenLevel(opened);
       next.addEventListener('dataavailable', (event) => chunks.push(event.data));
       next.addEventListener('stop', () => {
+        const loudest = level.stop();
         opened.getTracks().forEach((track) => track.stop());
         recorder.current = null;
+        // Whisper invents a sentence over silence: a recording nobody spoke into is not sent.
+        if (loudest < SPEECH_LEVEL) {
+          setState('idle');
+          handlers.current.onError('Không nghe thấy tiếng nói: kiểm tra mic rồi nói lại.');
+          return;
+        }
         void transcribe(new Blob(chunks, { type: next.mimeType || 'audio/webm' }));
       });
       next.start();
@@ -113,4 +121,30 @@ export async function captureScreen(): Promise<File> {
   const response = await fetch(CAPTURE_ROUTE, { method: 'POST', headers: authHeaders() });
   if (!response.ok) throw new Error(await errorOf(response, 'Không chụp được màn hình.'));
   return new File([await response.blob()], `man-hinh-${Date.now()}.png`, { type: 'image/png' });
+}
+
+/** RMS level (0–1) that counts as someone speaking; room noise stays well below it. */
+const SPEECH_LEVEL = 0.02;
+
+/** Follows the microphone's loudness while recording; `stop` returns the loudest RMS heard. */
+function listenLevel(stream: MediaStream): { stop: () => number } {
+  const context = new AudioContext();
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 2048;
+  context.createMediaStreamSource(stream).connect(analyser);
+  const samples = new Float32Array(analyser.fftSize);
+  let loudest = 0;
+  const timer = window.setInterval(() => {
+    analyser.getFloatTimeDomainData(samples);
+    let sum = 0;
+    for (const sample of samples) sum += sample * sample;
+    loudest = Math.max(loudest, Math.sqrt(sum / samples.length));
+  }, 100);
+  return {
+    stop: () => {
+      window.clearInterval(timer);
+      void context.close();
+      return loudest;
+    },
+  };
 }

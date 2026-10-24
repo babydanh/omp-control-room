@@ -103,7 +103,8 @@ async function transcribeWithGroq(audio: Buffer, contentType: string, key: strin
   form.append('file', new Blob([new Uint8Array(audio)], { type: contentType }), `prompt.${extension}`);
   form.append('model', GROQ_MODEL);
   form.append('language', 'vi');
-  form.append('response_format', 'json');
+  // Segments carry no_speech_prob: Whisper writes a stock phrase ("Hãy subscribe cho kênh…") over silence.
+  form.append('response_format', 'verbose_json');
   form.append('temperature', '0');
   const response = await fetch(GROQ_TRANSCRIBE_URL, {
     method: 'POST',
@@ -116,8 +117,30 @@ async function transcribeWithGroq(audio: Buffer, contentType: string, key: strin
     const detail = (await response.text()).slice(0, 300);
     throw new Error(`Groq trả lỗi ${response.status}: ${detail}`);
   }
-  const body = (await response.json()) as { text?: unknown };
-  return typeof body.text === 'string' ? body.text.trim() : '';
+  return spokenText(await response.json());
+}
+
+/** Above this, Whisper itself judges a segment to hold no speech: its text is a guess, not what was said. */
+const NO_SPEECH_LIMIT = 0.5;
+/**
+ * Sentences Whisper writes over silence or noise in Vietnamese (YouTube outros it was trained on).
+ * Groq reports no_speech_prob 0 for them, so they are dropped by their wording.
+ */
+const SILENCE_PHRASES = /subscribe cho kênh|ghiền mì gõ|đăng ký kênh|không bỏ lỡ những video|cảm ơn các bạn đã (theo dõi|xem)|amara\.org|subtitles by/iu;
+
+/** The text of the segments that hold speech; a reply without segments keeps its whole text. */
+export function spokenText(body: unknown): string {
+  const record = typeof body === 'object' && body !== null ? (body as { text?: unknown; segments?: unknown }) : {};
+  const heard = (text: string) => (SILENCE_PHRASES.test(text) ? '' : text.trim());
+  if (!Array.isArray(record.segments)) return typeof record.text === 'string' ? heard(record.text) : '';
+  return record.segments
+    .flatMap((segment: unknown) => {
+      const { text, no_speech_prob: noSpeech } = (segment ?? {}) as { text?: unknown; no_speech_prob?: unknown };
+      if (typeof text !== 'string') return [];
+      return typeof noSpeech === 'number' && noSpeech > NO_SPEECH_LIMIT ? [] : [heard(text)];
+    })
+    .filter((text) => text !== '')
+    .join(' ');
 }
 
 async function captureWithCuaDriver(): Promise<Buffer> {
