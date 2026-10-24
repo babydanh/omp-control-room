@@ -11,10 +11,11 @@ import type { LedgerSelection } from './ledgerSelection.js';
 import type { LedgerState } from './ledgerStore.js';
 
 const STATUS_GROUPS = [
-  { status: 'collide', label: 'Sẽ đụng' },
-  { status: 'rebase', label: 'Cần rebase' },
+  { status: 'trunk', label: 'Chính' },
+  { status: 'collide', label: '⚔ Xung đột' },
+  { status: 'rebase', label: '↻ Cần rebase' },
   { status: 'working', label: 'Đang làm' },
-  { status: 'ready', label: 'Sẵn sàng gộp' },
+  { status: 'ready', label: '✓ Gộp được' },
   { status: 'merged', label: 'Đã gộp' },
 ] as const;
 
@@ -78,16 +79,11 @@ export function LedgerOverviewTab({ view, ledger, boardSessions, onSelect, onCom
 
   return (
     <div ref={rootRef} className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2 rounded-(--company-radius-md) bg-panel p-2">
-        <label className="flex min-w-48 flex-1 items-center gap-2 text-xs text-text-muted">
-          Tìm <input aria-label="Tìm nhánh hoặc file" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nhánh, file…" className="min-w-0 flex-1 rounded bg-well px-2 py-1 text-sm text-text" />
-        </label>
-        <label className="flex items-center gap-2 text-xs text-text-muted">Công cụ
-          <select aria-label="Lọc theo công cụ" value={tool} onChange={(event) => setTool(event.target.value)} className="rounded bg-well px-2 py-1 text-sm text-text">
-            <option value="all">Tất cả</option><option value="omp">omp</option><option value="claude">claude</option><option value="agy">agy</option>
-          </select>
-        </label>
-        <span className="text-xs text-text-muted">Dùng j/k rồi Enter để mở nhánh</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <input aria-label="Tìm nhánh hoặc file" title="j/k rồi Enter để mở nhánh" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="🔍 Nhánh, file…" className="min-w-40 flex-1 rounded bg-well px-2 py-1 text-sm text-text" />
+        <select aria-label="Lọc theo công cụ" value={tool} onChange={(event) => setTool(event.target.value)} className="rounded bg-well px-2 py-1 text-sm text-text">
+          <option value="all">Mọi tool</option><option value="omp">omp</option><option value="claude">claude</option><option value="agy">agy</option>
+        </select>
       </div>
       {insights.map((insight) => <RepoOverview key={insight.repo} insight={insight} view={view} ledger={ledger} boardSessions={boardSessions} onSelect={onSelect} onCompare={onCompare} query={query} tool={tool} filter={filters.get(insight.repo) ?? null} onFilter={(kind) => toggleFilter(insight.repo, kind)} expandedTodos={expandedTodos} onToggleTodo={(id) => setExpandedTodos((current) => toggleSet(current, id))} mergedCollapsed={collapsedMerged.has(insight.repo)} onToggleMerged={() => setCollapsedMerged((current) => toggleSet(current, insight.repo))} />)}
     </div>
@@ -128,10 +124,16 @@ function RepoOverview({ insight, view, ledger, boardSessions, onSelect, onCompar
       })}
       {rows.length === 0 && <p className="text-sm text-text-muted">Không có nhánh khớp bộ lọc.</p>}
     </section>
-    {insight.mergeOrder.length > 0 && <section aria-label="Gợi ý thứ tự gộp"><h3 className="mb-1 text-sm font-semibold text-text">Gợi ý thứ tự gộp</h3><ol className="list-inside list-decimal text-sm text-text-secondary">{insight.mergeOrder.map((step) => <li key={step.path}><span className="font-medium text-text">{step.label}</span> — {step.reason}</li>)}</ol></section>}
-    {insight.liveEdits.length > 0 && <section aria-label="Đang sửa cùng file"><h3 className="mb-1 text-sm font-semibold text-text">Đang sửa cùng file</h3><ul className="flex flex-col gap-1 text-sm text-text-secondary">{insight.liveEdits.map((item) => <li key={item.file}><span className="font-mono text-text">{item.file}</span> · {item.checkouts.map((checkout) => checkout.label).join(' · ')}</li>)}</ul></section>}
     {insight.mergeBlocks.length > 0 && <section aria-label="Merge-lane bị chặn" className="rounded border border-hairline bg-raised p-2"><h3 className="text-sm font-semibold text-status-error">Merge-lane bị chặn</h3>{insight.mergeBlocks.map((block) => <p key={`${block.branch}-${block.at}`} className="text-sm text-text-secondary">{block.branch} · {block.files.join(', ')} <span className="text-xs text-text-muted">{block.briefPath}</span></p>)}</section>}
-    <LedgerCollisionPanel insight={insight} view={view} ledger={ledger} />
+    {/* Merge order, files edited in two places and the collision grid: there when asked for. */}
+    <details className="text-sm">
+      <summary className="cursor-pointer text-xs text-text-muted">Chi tiết{insight.matrix.rows.length > 0 ? ` · ${insight.matrix.rows.length} file chạm nhau` : ''}</summary>
+      <div className="mt-2 flex flex-col gap-3">
+        {insight.mergeOrder.length > 0 && <section aria-label="Gợi ý thứ tự gộp"><h3 className="mb-1 text-sm font-semibold text-text">Thứ tự gộp</h3><ol className="list-inside list-decimal text-sm text-text-secondary">{insight.mergeOrder.map((step) => <li key={step.path}><span className="font-medium text-text">{step.label}</span> — {step.reason}</li>)}</ol></section>}
+        {insight.liveEdits.length > 0 && <section aria-label="Đang sửa cùng file"><h3 className="mb-1 text-sm font-semibold text-text">Đang sửa cùng file</h3><ul className="flex flex-col gap-1 text-sm text-text-secondary">{insight.liveEdits.map((item) => <li key={item.file}><span className="font-mono text-text">{item.file}</span> · {item.checkouts.map((checkout) => checkout.label).join(' · ')}</li>)}</ul></section>}
+        <LedgerCollisionPanel insight={insight} view={view} ledger={ledger} />
+      </div>
+    </details>
   </section>;
 }
 

@@ -16,7 +16,7 @@ import { databaseLabel, formatClock, parseLedgerTimestamp } from './ledgerFormat
 import { type PaneInput } from './ledgerManagers.js';
 import type { BoardSessionIndex } from './ledgerMapping.js';
 import { LedgerOverviewTab } from './LedgerOverviewTab.js';
-import { scopeLedgerView } from './ledgerScope.js';
+import { type LedgerFolder, scopeLedgerToFolders, scopeLedgerView } from './ledgerScope.js';
 import { type LedgerSelection, resolveSelection } from './ledgerSelection.js';
 import { LedgerSidePanels } from './LedgerSidePanels.js';
 import { type LedgerState, useLedgerState } from './ledgerStore.js';
@@ -35,6 +35,18 @@ const TAB_LABELS: Record<LedgerTab, string> = {
   toolUsage: 'Thống kê tool',
 };
 
+/** Which folders the view shows: every Project folder, the whole machine, or one folder's path. */
+type FolderScope = 'project' | 'all' | (string & {});
+const SCOPE_KEY = 'company.ledger.scope.v1';
+
+function readScope(): FolderScope {
+  try {
+    return window.localStorage.getItem(SCOPE_KEY) ?? 'project';
+  } catch {
+    return 'project';
+  }
+}
+
 export interface LedgerViewProps {
   /** The board's sessions, to link a ledger session to its drawer, with their labels. */
   boardSessions: BoardSessionIndex;
@@ -47,11 +59,14 @@ export interface LedgerViewProps {
   onCompare: (repo: string, branch: string) => void;
   /** The folder rules' input: the Cây git view shows only the repos and folders in view. */
   focus: FolderFocusInput;
+  /** The Project tree's folders: the chips above the tabs narrow the view to them. */
+  folders: readonly LedgerFolder[];
 }
 
 export function LedgerView({
   boardSessions,
   focus,
+  folders,
   onOpenBoardSession,
   panes,
   onOpenHerdr,
@@ -64,10 +79,26 @@ export function LedgerView({
   const [tab, setTab] = useState<LedgerTab>('overview');
   const [selection, setSelection] = useState<LedgerSelection | null>(null);
   const [infoOpen, setInfoOpen] = useState(false);
-  const view = useMemo(
-    () => (ledger.view === null ? null : scopeLedgerView(ledger.view, focus)),
-    [ledger.view, focus],
+  const [scope, setScope] = useState<FolderScope>(readScope);
+  // A remembered folder that left the Project falls back to every Project folder.
+  const activeScope = scope === 'project' || scope === 'all' || folders.some((folder) => folder.path === scope) ? scope : 'project';
+  const roots = useMemo(
+    () => (activeScope === 'all' || folders.length === 0 ? null : activeScope === 'project' ? folders.map((folder) => folder.path) : [activeScope]),
+    [activeScope, folders],
   );
+  // "Cả máy" means every repo: the board's folder mode does not narrow it either.
+  const view = useMemo(
+    () => (ledger.view === null ? null : activeScope === 'all' ? ledger.view : scopeLedgerToFolders(scopeLedgerView(ledger.view, focus), roots)),
+    [ledger.view, focus, roots, activeScope],
+  );
+  function chooseScope(next: FolderScope): void {
+    setScope(next);
+    try {
+      window.localStorage.setItem(SCOPE_KEY, next);
+    } catch {
+      // Storage is optional in embedded and restricted browser contexts.
+    }
+  }
   const resolved = view === null || selection === null ? null : resolveSelection(view, selection);
   const sheetOpen = phone && (resolved !== null || infoOpen);
   const generatedMs = view === null ? null : parseLedgerTimestamp(view.generatedAt);
@@ -150,6 +181,15 @@ export function LedgerView({
       ) : (
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            {folders.length > 0 && (
+              <div role="group" aria-label="Thư mục" className="flex flex-wrap gap-1 px-3 pb-2">
+                <ScopeChip label="Trong Project" title="Mọi thư mục trong cây Project" active={activeScope === 'project'} onClick={() => chooseScope('project')} />
+                {folders.map((folder) => (
+                  <ScopeChip key={folder.path} label={folder.name} title={folder.path} active={activeScope === folder.path} onClick={() => chooseScope(folder.path)} />
+                ))}
+                <ScopeChip label="Cả máy" title="Mọi repo trên máy, kể cả repo ngoài Project" active={activeScope === 'all'} onClick={() => chooseScope('all')} />
+              </div>
+            )}
             <div
               role="tablist"
               aria-label="Chế độ xem"
@@ -269,5 +309,19 @@ function LedgerSheet({
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3 pb-3">{children}</div>
     </div>
+  );
+}
+
+function ScopeChip({ label, title, active, onClick }: { label: string; title: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={title}
+      onClick={onClick}
+      className={`touch-target rounded-full px-2.5 py-0.5 text-xs ${active ? 'bg-selected text-text' : 'bg-well text-text-secondary hover:bg-hover'}`}
+    >
+      {label}
+    </button>
   );
 }

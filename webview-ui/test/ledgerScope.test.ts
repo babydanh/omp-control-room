@@ -8,7 +8,7 @@ import type {
 } from '../../core/src/messages.js';
 import type { FolderFocusInput } from '../src/company/folderView.js';
 import { ledgerFixtureView } from '../src/company/ledger/ledgerFixture.js';
-import { scopeLedgerView } from '../src/company/ledger/ledgerScope.js';
+import { scopeLedgerToFolders, scopeLedgerView } from '../src/company/ledger/ledgerScope.js';
 
 const ACTIVE = 'D:\\Duancanhan\\Project_QuanLyGiaiDau';
 const OTHER = 'V:\\Duancanhan\\AICheckVAR';
@@ -93,5 +93,26 @@ describe('scopeLedgerView', () => {
 
     expect(scoped.repos.map((item) => item.repo)).toEqual(['shop']);
     expect(scoped.repos[0]?.worktrees.map((item) => item.path)).toEqual(['/shop-feat']);
+  });
+});
+
+describe('scopeLedgerToFolders', () => {
+  it('keeps only repos and pending checkouts under the chosen folders, not a same-prefix sibling', () => {
+    const inside = repo('V:/Duancanhan/AICheckVAR', undefined, [worktree('V:/Duancanhan/AICheckVAR', undefined)]);
+    const sibling = repo('V:/Duancanhan/AICheckVAR2', undefined, [worktree('V:/Duancanhan/AICheckVAR2', undefined)]);
+    const base = viewWith([inside, sibling], []);
+    const view: LedgerView = {
+      ...base,
+      pending: [
+        { checkout: 'V:/Duancanhan/AICheckVAR', sessionId: null, branch: 'danh', dirty: 1, unpushed: 0, notInMain: 0, hasRemote: true, ts: '' },
+        { checkout: 'V:/openviking-src', sessionId: null, branch: 'main', dirty: 0, unpushed: 1, notInMain: 0, hasRemote: true, ts: '' },
+      ],
+    };
+
+    const scoped = scopeLedgerToFolders(view, [OTHER]);
+
+    expect(scoped.repos.map((item) => item.repo)).toEqual(['V:/Duancanhan/AICheckVAR']);
+    expect(scoped.pending.map((item) => item.checkout)).toEqual(['V:/Duancanhan/AICheckVAR']);
+    expect(scopeLedgerToFolders(view, null)).toBe(view);
   });
 });

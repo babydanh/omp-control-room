@@ -291,6 +291,11 @@ export function BoardShell({ client }: BoardShellProps) {
     () => ({ viewMode: state.viewMode, focusPath: state.focusPath, workspaces: state.workspaces }),
     [state.viewMode, state.focusPath, state.workspaces],
   );
+  // The Project tree's folders: Cây git narrows to one of them, or to all of them.
+  const ledgerFolders = useMemo(
+    () => projects.nodes.flatMap((node) => (node.kind === 'folder' && node.path !== undefined ? [{ name: node.name, path: node.path }] : [])),
+    [projects.nodes],
+  );
   const pendingQuestions = useMemo(
     () => Object.values(state.questions).filter((question) => question.status === 'pending'),
     [state.questions],
@@ -844,6 +849,7 @@ export function BoardShell({ client }: BoardShellProps) {
             <LedgerView
               boardSessions={ledgerBoardSessions}
               focus={ledgerFocus}
+              folders={ledgerFolders}
               onOpenBoardSession={selectSession}
               panes={ledgerPanes}
               onOpenHerdr={openHerdr}
