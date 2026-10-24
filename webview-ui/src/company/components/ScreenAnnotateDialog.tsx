@@ -1,7 +1,8 @@
 /**
  * ScreenAnnotateDialog: mark up a screen capture before it goes into the prompt. Boxes, arrows,
- * numbered dots, short text and blur (pixelate) are drawn onto the capture itself, so the agent
- * sees exactly what was pointed at, and what was blurred never leaves the machine.
+ * numbered dots, short text and solid cover are drawn onto the capture itself, so the agent sees
+ * exactly what was pointed at. A cover is an opaque fill, not a blur: pixelated text can be read
+ * back, a filled box cannot.
  * Enter or "Xong" attaches the marked image; Esc cancels; Ctrl+Z undoes the last mark.
  */
 
@@ -10,10 +11,10 @@ import { createPortal } from 'react-dom';
 
 import { ANNOTATE_LABEL_COLOR, ANNOTATE_MARK_COLOR, ANNOTATE_OUTLINE_COLOR } from '../../constants.js';
 
-type Tool = 'rect' | 'arrow' | 'number' | 'text' | 'blur';
+type Tool = 'rect' | 'arrow' | 'number' | 'text' | 'cover';
 
 type Mark =
-  | { readonly kind: 'rect' | 'arrow' | 'blur'; readonly x1: number; readonly y1: number; readonly x2: number; readonly y2: number }
+  | { readonly kind: 'rect' | 'arrow' | 'cover'; readonly x1: number; readonly y1: number; readonly x2: number; readonly y2: number }
   | { readonly kind: 'number'; readonly x: number; readonly y: number; readonly n: number }
   | { readonly kind: 'text'; readonly x: number; readonly y: number; readonly text: string };
 
@@ -22,9 +23,8 @@ const TOOLS: readonly { readonly id: Tool; readonly label: string; readonly hint
   { id: 'arrow', label: '➜', hint: 'Mũi tên' },
   { id: 'number', label: '①', hint: 'Đánh số' },
   { id: 'text', label: 'T', hint: 'Ghi chữ' },
-  { id: 'blur', label: '▒', hint: 'Làm mờ chỗ riêng tư' },
+  { id: 'cover', label: '■', hint: 'Che kín chỗ riêng tư' },
 ];
-const BLUR_BLOCK = 14;
 
 export interface ScreenAnnotateDialogProps {
   readonly image: File;
@@ -160,8 +160,9 @@ function paint(canvas: HTMLCanvasElement, picture: HTMLImageElement, marks: read
       context.strokeRect(Math.min(mark.x1, mark.x2), Math.min(mark.y1, mark.y2), Math.abs(mark.x2 - mark.x1), Math.abs(mark.y2 - mark.y1));
     } else if (mark.kind === 'arrow') {
       drawArrow(context, mark.x1, mark.y1, mark.x2, mark.y2, width * 5);
-    } else if (mark.kind === 'blur') {
-      pixelate(context, picture, mark.x1, mark.y1, mark.x2, mark.y2);
+    } else if (mark.kind === 'cover') {
+      context.fillStyle = ANNOTATE_OUTLINE_COLOR;
+      context.fillRect(Math.min(mark.x1, mark.x2), Math.min(mark.y1, mark.y2), Math.abs(mark.x2 - mark.x1), Math.abs(mark.y2 - mark.y1));
     } else if (mark.kind === 'number') {
       const radius = width * 5;
       context.beginPath();
@@ -197,20 +198,4 @@ function drawArrow(context: CanvasRenderingContext2D, x1: number, y1: number, x2
   context.lineTo(x2 - head * Math.cos(angle + Math.PI / 6), y2 - head * Math.sin(angle + Math.PI / 6));
   context.closePath();
   context.fill();
-}
-
-/** Redraws the area from the original picture in coarse blocks, so no detail stays readable. */
-function pixelate(context: CanvasRenderingContext2D, picture: HTMLImageElement, x1: number, y1: number, x2: number, y2: number): void {
-  const x = Math.round(Math.min(x1, x2));
-  const y = Math.round(Math.min(y1, y2));
-  const width = Math.round(Math.abs(x2 - x1));
-  const height = Math.round(Math.abs(y2 - y1));
-  if (width < 2 || height < 2) return;
-  const small = document.createElement('canvas');
-  small.width = Math.max(1, Math.ceil(width / BLUR_BLOCK));
-  small.height = Math.max(1, Math.ceil(height / BLUR_BLOCK));
-  small.getContext('2d')?.drawImage(picture, x, y, width, height, 0, 0, small.width, small.height);
-  context.imageSmoothingEnabled = false;
-  context.drawImage(small, 0, 0, small.width, small.height, x, y, width, height);
-  context.imageSmoothingEnabled = true;
 }

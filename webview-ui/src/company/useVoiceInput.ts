@@ -34,6 +34,8 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
   const [state, setState] = useState<VoiceState>('idle');
   const [seconds, setSeconds] = useState(0);
   const recorder = useRef<MediaRecorder | null>(null);
+  /** Set from the press until recording starts: a second press meanwhile opens no second microphone. */
+  const starting = useRef(false);
   const handlers = useRef({ onText, onError });
   handlers.current = { onText, onError };
 
@@ -47,25 +49,30 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
   useEffect(() => () => recorder.current?.stream.getTracks().forEach((track) => track.stop()), []);
 
   async function start(): Promise<void> {
-    let stream: MediaStream;
+    if (starting.current || recorder.current !== null) return;
+    starting.current = true;
+    let stream: MediaStream | null = null;
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const opened = stream;
+      const chunks: Blob[] = [];
+      const next = new MediaRecorder(opened);
+      next.addEventListener('dataavailable', (event) => chunks.push(event.data));
+      next.addEventListener('stop', () => {
+        opened.getTracks().forEach((track) => track.stop());
+        recorder.current = null;
+        void transcribe(new Blob(chunks, { type: next.mimeType || 'audio/webm' }));
+      });
+      next.start();
+      recorder.current = next;
+      setSeconds(0);
+      setState('recording');
     } catch {
+      stream?.getTracks().forEach((track) => track.stop());
       handlers.current.onError('Không mở được mic: cho phép trình duyệt dùng micro rồi thử lại.');
-      return;
+    } finally {
+      starting.current = false;
     }
-    const chunks: Blob[] = [];
-    const next = new MediaRecorder(stream);
-    next.addEventListener('dataavailable', (event) => chunks.push(event.data));
-    next.addEventListener('stop', () => {
-      stream.getTracks().forEach((track) => track.stop());
-      recorder.current = null;
-      void transcribe(new Blob(chunks, { type: next.mimeType || 'audio/webm' }));
-    });
-    recorder.current = next;
-    next.start();
-    setSeconds(0);
-    setState('recording');
   }
 
   async function transcribe(audio: Blob): Promise<void> {

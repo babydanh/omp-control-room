@@ -462,7 +462,8 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
     const onKey = (event: globalThis.KeyboardEvent) => {
       if (event.code !== 'Space' || !event.ctrlKey || !event.shiftKey || event.altKey) return;
       event.preventDefault();
-      voice.toggle();
+      // Holding the chord repeats the key: only the first press toggles.
+      if (!event.repeat) voice.toggle();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
