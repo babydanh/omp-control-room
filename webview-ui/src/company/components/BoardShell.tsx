@@ -823,6 +823,8 @@ export function BoardShell({ client }: BoardShellProps) {
               onDismiss={dismissSheet}
             />
           )}
+          {/* The composer sits under the board column only, so the agent list and the drawer run the full height. */}
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {ledgerShown ? (
             <LedgerView
               boardSessions={ledgerBoardSessions}
@@ -868,6 +870,8 @@ export function BoardShell({ client }: BoardShellProps) {
               identityOf={(id) => folderIdentityOf(state, id)}
             />
           )}
+          {!composerHidden && <PromptComposer client={client} projectFolders={ledgerFolders} />}
+          </div>
           <DetailDrawer
             client={client}
             state={state}
@@ -903,7 +907,6 @@ export function BoardShell({ client }: BoardShellProps) {
           />
         </div>
       </TerminalPreviewProvider>
-      {!composerHidden && <PromptComposer client={client} projectFolders={ledgerFolders} />}
       </div>
       </>
       ) : activePage === 'changes' ? (

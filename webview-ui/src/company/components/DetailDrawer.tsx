@@ -146,11 +146,12 @@ export function DetailDrawer({
       : retained.kind === 'task'
         ? (rest.state.tasks[retained.taskId]?.sessionId ?? null)
         : null;
-  const liveChat =
-    liveSessionId !== null &&
-    terminalPolicy(rest.state.sessions[liveSessionId]?.status ?? '').attach;
+  // A live terminal, a board chat or a herdr agent's screen, is where the work shows: it opens wide.
+  const liveScreen =
+    retained.kind === 'herdr' ||
+    (liveSessionId !== null && terminalPolicy(rest.state.sessions[liveSessionId]?.status ?? '').attach);
   const width = effectiveDrawerWidth(
-    rememberedOrChatWidth(prefs.width, liveChat, boardWidth),
+    rememberedOrChatWidth(prefs.width, liveScreen, boardWidth),
     boardWidth,
   );
   const limit = drawerWidthLimit(boardWidth);

@@ -168,7 +168,7 @@ export const COMPANY_NAV_MOBILE_MAX_PX = 768;
 export const COMPANY_PAGE_TRANSITION_MS = 180;
 
 /** The composer's text box idles at this many rows and grows with its text. */
-export const COMPOSER_MIN_ROWS = 4;
+export const COMPOSER_MIN_ROWS = 2;
 
 /** The most rows the composer's text box grows to before it scrolls. */
 export const COMPOSER_MAX_ROWS = 12;

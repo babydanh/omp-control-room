@@ -2,17 +2,17 @@ import { describe, expect, it } from 'vitest';
 
 import { composerInputHeight } from '../src/company/composerHeight.js';
 
-// A 20px line with 10px of padding and border: four rows are 90px, twelve rows 250px.
+// A 20px line with 10px of padding and border: two rows are 50px, twelve rows 250px.
 const ROW = 20;
 const CHROME = 10;
 
 describe('composerInputHeight', () => {
-  it('idles at four rows when the box was never dragged', () => {
-    expect(composerInputHeight(0, ROW, CHROME, null)).toBe(90);
-    expect(composerInputHeight(30, ROW, CHROME, null)).toBe(90);
+  it('idles at two rows when the box was never dragged', () => {
+    expect(composerInputHeight(0, ROW, CHROME, null)).toBe(50);
+    expect(composerInputHeight(30, ROW, CHROME, null)).toBe(50);
   });
 
-  it('grows past four rows as the text needs more', () => {
+  it('grows past two rows as the text needs more', () => {
     expect(composerInputHeight(7 * ROW + CHROME, ROW, CHROME, null)).toBe(150);
   });
 
@@ -35,12 +35,12 @@ describe('composerInputHeight', () => {
   });
 
   it('clamps a dragged height to the rows the box allows', () => {
-    expect(composerInputHeight(30, ROW, CHROME, 40)).toBe(90);
+    expect(composerInputHeight(30, ROW, CHROME, 40)).toBe(50);
     expect(composerInputHeight(30, ROW, CHROME, 900)).toBe(250);
   });
 
   it('treats a dragged height that is not a number as the idle height', () => {
-    expect(composerInputHeight(30, ROW, CHROME, Number.NaN)).toBe(90);
+    expect(composerInputHeight(30, ROW, CHROME, Number.NaN)).toBe(50);
   });
 
   it('rounds a fractional fit up to a whole pixel', () => {

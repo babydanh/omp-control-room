@@ -648,7 +648,8 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
           ))}
         </ul>
       )}
-      <div className="flex flex-wrap items-end gap-1.5">
+      {/* The tools and Send sit inside the box's bottom-right corner; the box keeps room for them below its text. */}
+      <div className="relative">
         <textarea
           ref={inputRef}
           value={draft.text}
@@ -673,8 +674,9 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
           placeholder="Nhập tin nhắn · / để gõ lệnh · dán hoặc kéo ảnh vào đây"
           aria-label="Tin nhắn"
           data-testid="prompt-input"
-          className="min-w-0 flex-1 max-md:basis-full resize-none rounded-[var(--company-radius-md)] border border-border bg-raised px-3 py-2 text-sm leading-5 text-text"
+          className="block w-full resize-none rounded-[var(--company-radius-md)] border border-border bg-raised px-3 pt-2 pb-10 text-sm leading-5 text-text"
         />
+        <div className="absolute right-1.5 bottom-1.5 flex items-center gap-0.5">
         <input
           ref={fileRef}
           type="file"
@@ -693,7 +695,7 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
           aria-label="Đính kèm ảnh"
           title="Đính kèm ảnh (hoặc dán Ctrl+V, kéo thả vào ô)"
           data-testid="prompt-attach-image"
-          className="touch-target shrink-0 rounded-[var(--company-radius-md)] px-2 py-2 text-sm text-text-muted hover:bg-hover hover:text-text"
+          className="shrink-0 rounded-[var(--company-radius-sm)] px-1.5 py-1 text-sm text-text-muted hover:bg-hover hover:text-text"
         >
           {images.saving > 0 ? '…' : '📎'}
         </button>
@@ -705,7 +707,7 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
           aria-label={voice.state === 'recording' ? 'Dừng nghe' : 'Nói (Ctrl+Shift+Space)'}
           title={voice.state === 'recording' ? 'Bấm lại để dừng và chép thành chữ' : 'Nói thay gõ (Ctrl+Shift+Space) · "chụp màn" để chụp · "gửi đi" để gửi'}
           data-testid="prompt-voice"
-          className={`touch-target shrink-0 rounded-[var(--company-radius-md)] px-2 py-2 text-sm hover:bg-hover ${voice.state === 'recording' ? 'text-status-error' : 'text-text-muted hover:text-text'}`}
+          className={`shrink-0 rounded-[var(--company-radius-sm)] px-1.5 py-1 text-sm hover:bg-hover ${voice.state === 'recording' ? 'text-status-error' : 'text-text-muted hover:text-text'}`}
         >
           {voice.state === 'recording' ? (
             <span className="flex items-center gap-1.5">
@@ -724,7 +726,7 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
             value={voice.mics.some((mic) => mic.id === voice.micId) ? voice.micId : ''}
             onChange={(event) => voice.chooseMic(event.target.value)}
             data-testid="prompt-mic"
-            className="touch-target w-6 shrink-0 cursor-pointer appearance-none rounded-[var(--company-radius-md)] bg-transparent py-2 text-center text-xs text-text-muted hover:bg-hover hover:text-text"
+            className="w-5 shrink-0 cursor-pointer appearance-none rounded-[var(--company-radius-sm)] bg-transparent py-1 text-center text-xs text-text-muted hover:bg-hover hover:text-text"
           >
             <option value="" className="bg-raised text-text">▾ Mic mặc định của trình duyệt</option>
             {voice.mics.map((mic) => (
@@ -739,7 +741,7 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
           aria-label="Chụp màn hình và đánh dấu"
           title={`Chụp cả màn hình sau ${CAPTURE_DELAY_SECONDS} giây (chuyển sang cửa sổ cần chụp), rồi khoanh, đánh số, che kín chỗ riêng tư trước khi gắn vào prompt`}
           data-testid="prompt-capture"
-          className="touch-target shrink-0 rounded-[var(--company-radius-md)] px-2 py-2 text-sm text-text-muted hover:bg-hover hover:text-text"
+          className="shrink-0 rounded-[var(--company-radius-sm)] px-1.5 py-1 text-sm text-text-muted hover:bg-hover hover:text-text"
         >
           {capture !== null && 'left' in capture ? capture.left : '📸'}
         </button>
@@ -750,8 +752,9 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
           entries={sendMenu}
           onRun={runSendEntry}
         />
+        </div>
       </div>
-      <p className="mt-1 flex min-w-0 items-center gap-2 text-2xs text-text-muted">
+      <p className="mt-0.5 flex min-w-0 items-center gap-2 text-2xs text-text-muted">
         <span className="min-w-0 truncate" data-testid="prompt-target">
           {sendTargetLabel(selectedSession, herdrTarget)}
         </span>
