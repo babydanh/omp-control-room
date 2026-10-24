@@ -37,7 +37,7 @@ import {
 import { WorkItemFileStore } from './workItemStore.js';
 
 /** The herdr calls work items make. The process-level link satisfies this. */
-export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read' | 'startAgent'>;
+export type WorkItemHerdr = Pick<HerdrLink, 'snapshot' | 'onAgents' | 'prompt' | 'read' | 'startAgent' | 'keys'>;
 
 /** Screen lines read when a pane's result is taken; enough for the last non-empty lines. */
 const RESULT_SCREEN_LINES = 40;
@@ -102,6 +102,9 @@ function rosterFor(herdr: WorkItemHerdr | undefined): WorkItemRoster {
     prompt: async (paneId, text) => {
       if (herdr === undefined) throw new Error('herdr is not linked');
       await herdr.prompt(paneId, text);
+      // Claude Code folds a long paste into "[Pasted text]" and waits for one more Enter to send it.
+      const agent = herdr.snapshot().agents.find((entry) => entry.paneId === paneId);
+      if (agent?.kind === 'claude') await herdr.keys(paneId, ['enter']);
     },
     screenText: async (paneId) => {
       if (herdr === undefined) throw new Error('herdr is not linked');

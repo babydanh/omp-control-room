@@ -60,6 +60,8 @@ export const WORK_ITEM_GRACE_MS = 10_000;
  * item was sent, before the item finishes on what the pane shows.
  */
 export const WORK_ITEM_STALE_REPLY_MS = 5 * 60_000;
+/** How long a herdr agent may sit idle after a send before the item counts as done, when it was never seen busy. */
+export const WORK_ITEM_HERDR_START_MS = 3 * 60_000;
 /**
  * How long a queued item waits before the board tries it again when the omp runner pool was full or
  * its isolated worktree could not be created.

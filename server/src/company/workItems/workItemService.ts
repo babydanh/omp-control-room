@@ -102,6 +102,7 @@ import {
   WORK_ITEM_BLOCKER_DETAIL_MAX_CHARS,
   WORK_ITEM_FINISHED_KEEP,
   WORK_ITEM_GRACE_MS,
+  WORK_ITEM_HERDR_START_MS,
   WORK_ITEM_HISTORY_MAX,
   WORK_ITEM_HOLD_RETRY_MS,
   WORK_ITEM_REASON,
@@ -1822,7 +1823,13 @@ export class WorkItemService {
     if (this.sending.has(item.id)) return;
     const dispatchedMs = item.dispatchedAt === undefined ? 0 : Date.parse(item.dispatchedAt);
     const elapsed = this.ports.now() - dispatchedMs;
-    if (!this.observedBusy.has(item.id) && elapsed < WORK_ITEM_GRACE_MS) return;
+    // An agent herdr just opened takes a while to read a long brief before herdr shows it busy: an
+    // idle pane is not taken for a finished one until it was seen at work, or the start window ends.
+    const window = item.assignee.kind === 'herdr' ? WORK_ITEM_HERDR_START_MS : WORK_ITEM_GRACE_MS;
+    if (!this.observedBusy.has(item.id) && elapsed < window) {
+      if (elapsed >= WORK_ITEM_GRACE_MS) this.scheduleGraceCheck();
+      return;
+    }
     if (await this.replyUnchanged(item, elapsed)) {
       // An idle pane sends no event when its transcript grows: look again after a while.
       this.scheduleGraceCheck();

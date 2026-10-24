@@ -17,6 +17,7 @@ import {
   parseWorkItemsFile,
   WORK_ITEM_FINISHED_KEEP,
   WORK_ITEM_GRACE_MS,
+  WORK_ITEM_HERDR_START_MS,
   WORK_ITEM_HOLD_RETRY_MS,
   WORK_ITEM_REASON,
   WORK_ITEM_STALE_REPLY_MS,
@@ -339,7 +340,7 @@ describe('WorkItemService: dispatch and status', () => {
     expect(itemOf(f, id).reason).toBeUndefined();
   });
 
-  it('reviews a dispatched item after the grace window when the agent never looked busy', async () => {
+  it('reviews a herdr item that never looked busy only after the start window, not after the short grace', async () => {
     const f = await openFixture();
     f.panes.push({ paneId: PANE_A, status: 'idle' });
     const id = await f.service.create({
@@ -351,7 +352,11 @@ describe('WorkItemService: dispatch and status', () => {
     await f.service.reconcileNow();
     expect(itemOf(f, id).status).toBe('running');
 
+    // A herdr agent can sit idle reading a long brief past the short grace: it is still at work.
     await f.elapse(WORK_ITEM_GRACE_MS);
+    expect(itemOf(f, id).status).toBe('running');
+
+    await f.elapse(WORK_ITEM_HERDR_START_MS);
     expect(itemOf(f, id).status).toBe('review');
   });
 
@@ -370,7 +375,7 @@ describe('WorkItemService: dispatch and status', () => {
     expect(changes).toBeGreaterThan(0);
 
     await f.service.reconcileNow();
-    await f.elapse(WORK_ITEM_GRACE_MS);
+    await f.elapse(WORK_ITEM_HERDR_START_MS);
     expect(reviewed).toEqual([id]);
 
     stopChanges();
@@ -1300,7 +1305,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       blocker: { kind: 'capacity', running: 1, limit: 1 },
     });
 
-    await f.elapse(WORK_ITEM_GRACE_MS);
+    await f.elapse(WORK_ITEM_HERDR_START_MS);
     expect(itemOf(f, first).status).toBe('review');
     expect(itemOf(f, second).status).toBe('running');
   });
@@ -1329,7 +1334,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       area: 'web/ui',
     });
 
-    await f.elapse(WORK_ITEM_GRACE_MS);
+    await f.elapse(WORK_ITEM_HERDR_START_MS);
     expect(itemOf(f, first).status).toBe('review');
     expect(itemOf(f, second).status).toBe('running');
   });
@@ -1671,7 +1676,7 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
       text: 'Xem lại',
       assignee: herdr(PANE_A),
     });
-    await f.elapse(WORK_ITEM_GRACE_MS);
+    await f.elapse(WORK_ITEM_HERDR_START_MS);
     expect(settled).toEqual([`review:${reviewed}`]);
 
     const failed = await f.service.create({
@@ -1700,8 +1705,8 @@ describe('WorkItemService: squad fields, auto assignee, and settings', () => {
     const [id] = await f.service.createWorkItems([{ text: 'Tính 2 + 2', assignee: herdr(PANE_A) }], { squadRunId });
     if (id === undefined) throw new Error('expected a work item');
 
-    // herdr shows the woken pane idle and never busy: past the grace window, the old reply is not the answer.
-    await f.elapse(WORK_ITEM_GRACE_MS);
+    // herdr shows the woken pane idle and never busy: past the start window, the old reply is not the answer.
+    await f.elapse(WORK_ITEM_HERDR_START_MS);
     await f.service.reconcileNow();
     expect(itemOf(f, id).status).toBe('running');
 
