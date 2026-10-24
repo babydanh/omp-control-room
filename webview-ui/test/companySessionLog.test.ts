@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
 import type { CompanySessionLogEntry } from '../../core/src/company.js';
-import type { ServerMessage } from '../../core/src/messages.js';
+import type { ServerMessage, SquadSettings } from '../../core/src/messages.js';
 import {
   applyCompanyMessage,
   mergeSessionLog,
@@ -34,6 +34,29 @@ function entry(overrides: Partial<CompanySessionLogEntry> = {}): CompanySessionL
     ...overrides,
   };
 }
+
+const SQUAD_SETTINGS: SquadSettings = {
+  maxParallel: 4,
+  maxSquadSessions: 3,
+  maxPerRepo: 4,
+  minFreeRamGb: 2,
+  minFreeDiskGb: 10,
+  autoJudge: true,
+  autoApproveNext: false,
+  compactSquad: false,
+  engineLeader: 'omp',
+  engineJudge: 'omp',
+  engineWorker: 'omp',
+  claudeModelLeader: 'opus',
+  claudeModelJudge: 'sonnet',
+  maxClaudeRuns: 2,
+  maxAgyRuns: 2,
+  claudeMaxTurns: 40,
+  claudeMaxBudgetUsd: 3,
+  claudePermission: 'auto',
+  claudeAllowedTools: [],
+  claudeWorkerMcp: [],
+};
 
 function logMessage(
   sessionId: string,
@@ -158,7 +181,7 @@ describe('companySessionLog reducer', () => {
       roles: [],
       repos: [],
       agents: [],
-      settings: null,
+      settings: SQUAD_SETTINGS,
       claudeMcpServers: [],
     }).state;
 
