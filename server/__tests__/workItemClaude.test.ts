@@ -191,7 +191,7 @@ describe('Claude Code in herdr', () => {
       repo: REPO,
     });
     await settle();
-    expect(herdr.starts).toEqual([{ cwd: worktreeOf(id), kind: 'omp', name: `omp-${id.slice(0, 8)}`, args: [] }]);
+    expect(herdr.starts).toEqual([{ cwd: worktreeOf(id), kind: 'omp', name: `omp-${id.slice(0, 8)}`, args: ['--no-lsp'] }]);
     expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'herdr', paneId: 'wA:p1' } });
     expect(herdr.prompts[0]?.text).toContain('Sửa API');
   });
