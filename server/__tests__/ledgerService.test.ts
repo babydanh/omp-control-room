@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { LedgerSnapshotMessage } from '../../core/src/messages.js';
 import {
   LEDGER_ACTIVITY_WINDOW_MS,
+  LEDGER_GIT_IDLE_REFRESH_MS,
   LEDGER_GIT_REFRESH_MS,
   LEDGER_OVERLAP_BASE,
   LEDGER_OVERLAP_BUDGET_SECONDS,
@@ -145,6 +146,25 @@ describe('LedgerService: git cache', () => {
     expect(topLevelReads(h)).toBe(1);
 
     h.advance(1);
+    h.schedule.fire();
+    await flushAsync();
+    expect(topLevelReads(h)).toBe(2);
+  });
+
+  it('reads a quiet repo (no agent event in the last minutes) again only after the idle interval', async () => {
+    const quiet = eventRow('s1', { repo: REPO, checkout: REPO, ts: minutesAgo(30) });
+    const h = makeService({ data: { events: [quiet] } });
+    h.service.subscribe(() => {});
+    await h.service.getView();
+    await flushAsync();
+    expect(topLevelReads(h)).toBe(1);
+
+    h.advance(LEDGER_GIT_REFRESH_MS);
+    h.schedule.fire();
+    await flushAsync();
+    expect(topLevelReads(h)).toBe(1);
+
+    h.advance(LEDGER_GIT_IDLE_REFRESH_MS - LEDGER_GIT_REFRESH_MS);
     h.schedule.fire();
     await flushAsync();
     expect(topLevelReads(h)).toBe(2);

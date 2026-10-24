@@ -43,7 +43,11 @@ export const LEDGER_CALLS_LONG_MS = 30 * 60_000;
 
 // ── Git ──
 
+/** A repo an agent touched within LEDGER_GIT_BUSY_WINDOW_MS is re-read this often. */
 export const LEDGER_GIT_REFRESH_MS = 60_000;
+/** A quiet repo (no agent event in the window) is re-read this often: each read is ~6 git calls per worktree. */
+export const LEDGER_GIT_IDLE_REFRESH_MS = 5 * 60_000;
+export const LEDGER_GIT_BUSY_WINDOW_MS = 10 * 60_000;
 export const LEDGER_GIT_TIMEOUT_MS = 15_000;
 export const LEDGER_GIT_MAX_BYTES = 4 * 1024 * 1024;
 export const LEDGER_REPO_CAP = 24;

@@ -21,6 +21,8 @@ import * as commands from './commands.js';
 import {
   LEDGER_ACTIVITY_WINDOW_MS,
   LEDGER_DAY_MS,
+  LEDGER_GIT_BUSY_WINDOW_MS,
+  LEDGER_GIT_IDLE_REFRESH_MS,
   LEDGER_GIT_REFRESH_MS,
   LEDGER_POLL_INTERVAL_MS,
   LEDGER_REPO_CAP,
@@ -86,6 +88,7 @@ interface GitEntry {
 export class LedgerService {
   private readonly listeners = new Set<LedgerSnapshotListener>();
   private readonly gitEntries = new Map<string, GitEntry>();
+  private busyRepos: { readonly at: number; readonly keys: ReadonlySet<string> } | null = null;
   private readonly mergeBlocks = new MergeBlockCache();
   private readonly overlap: OverlapScanner;
   private lastHash: string | null = null;
@@ -409,8 +412,8 @@ export class LedgerService {
       if (force) entry.rerun = true;
       return entry.inFlight;
     }
-    const fresh =
-      entry.readAt !== null && this.options.now() - entry.readAt < LEDGER_GIT_REFRESH_MS;
+    const ttl = this.busyRepoKeys().has(ledgerPathKey(entry.repo)) ? LEDGER_GIT_REFRESH_MS : LEDGER_GIT_IDLE_REFRESH_MS;
+    const fresh = entry.readAt !== null && this.options.now() - entry.readAt < ttl;
     if (!force && fresh) return Promise.resolve();
     entry.inFlight = this.readGitEntry(entry).finally(() => {
       entry.inFlight = null;
@@ -419,6 +422,22 @@ export class LedgerService {
       if (this.isActive()) this.refreshInBackground();
     });
     return entry.inFlight;
+  }
+
+  /** Repos an agent touched lately, re-read once per poll at most: one ledger query, no git. */
+  private busyRepoKeys(): ReadonlySet<string> {
+    const nowMs = this.options.now();
+    if (this.busyRepos !== null && nowMs - this.busyRepos.at < LEDGER_POLL_INTERVAL_MS) return this.busyRepos.keys;
+    const keys = new Set<string>();
+    try {
+      for (const event of this.options.source.eventRows(formatLedgerTime(nowMs - LEDGER_GIT_BUSY_WINDOW_MS))) {
+        if (event.repo !== null && event.repo !== '') keys.add(ledgerPathKey(event.repo));
+      }
+    } catch {
+      // An unreadable ledger has no activity to show: every repo counts as quiet.
+    }
+    this.busyRepos = { at: nowMs, keys };
+    return keys;
   }
 
   private async readGitEntry(entry: GitEntry): Promise<void> {
