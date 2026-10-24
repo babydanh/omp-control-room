@@ -480,15 +480,24 @@ export function BoardShell({ client }: BoardShellProps) {
   /**
    * A work item card opens onto the agent that holds it, as a session row does: its live terminal
    * and log are what the user wants to see, whatever the item's status. The composer below talks
-   * to that agent. Only an item no omp session or herdr pane holds (queued, or run by Claude Code)
-   * opens the item's panel, which leads with the Claude log.
+   * to that agent. An item no live agent holds (queued, run by Claude Code, or its herdr tab since
+   * closed) opens the item's panel, which shows its result and history.
    */
   function openWorkItemCard(ref: { id: string; workspacePath: string }): void {
     const item = workItemsOf(state, ref.workspacePath).items.find((entry) => entry.id === ref.id);
     const assignee = item?.assignee;
     if (assignee?.kind === 'herdr' && assignee.paneId) {
-      if (state.herdrRoster.sleeping.some((entry) => entry.paneId === assignee.paneId)) openSleeping(assignee.paneId);
-      else openHerdr(assignee.paneId);
+      const paneId = assignee.paneId;
+      if (state.herdrRoster.sleeping.some((entry) => entry.paneId === paneId)) {
+        openSleeping(paneId);
+        return;
+      }
+      if (state.herdr.agents.some((agent) => agent.paneId === paneId)) {
+        openHerdr(paneId);
+        return;
+      }
+      // The tab was closed: an empty "no longer in herdr" screen shows nothing, the item's panel does.
+      setOpened({ kind: 'workItem', ...ref });
       return;
     }
     if (assignee?.kind === 'session' && assignee.sessionId) {
