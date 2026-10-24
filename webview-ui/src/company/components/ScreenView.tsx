@@ -29,14 +29,14 @@ export interface ScreenViewProps {
   /** Receives the `<pre>`, so a selection inside the screen can be watched and copied. */
   preRef?: RefObject<HTMLPreElement | null>;
   /**
-   * A font size, in pixels, that fits the screen's widest row to its frame. Set, the rows keep
-   * their columns (no wrap) at that size, the way the terminal draws them.
+   * A font size, in pixels, that fits the screen's widest row to its frame. Rows that still do not
+   * fit at the smallest readable size wrap instead of running off the frame's right edge.
    */
   fitPx?: number;
 }
 
 export function ScreenView({ lines, className = '', testId, preRef, fitPx }: ScreenViewProps) {
-  const wrap = useContext(WrapLinesContext) && fitPx === undefined;
+  const wrap = useContext(WrapLinesContext);
   // Wrapped lines keep the screen whole at the drawer's width; unwrapped lines keep
   // their columns and scroll sideways inside the screen's own frame.
   const wrapClass = wrap ? 'whitespace-pre-wrap [overflow-wrap:anywhere]' : 'whitespace-pre';

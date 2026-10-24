@@ -392,6 +392,26 @@ export function screenFitPx(
   return Math.min(FIT_MAX_PX, Math.max(FIT_MIN_PX, fit));
 }
 
+/**
+ * The rows with each divider row cut to `columns` characters. A TUI divider spans the terminal's full
+ * width; in a narrower frame that wraps it would fold into several rows of rules.
+ */
+export function clipRuleRows(lines: readonly ScreenLine[], columns: number): readonly ScreenLine[] {
+  if (columns <= 0) return lines;
+  return lines.map((line) => {
+    const text = line.map((segment) => segment.text).join('');
+    if (text.length <= columns || !RULE_ROW.test(text)) return line;
+    const clipped: ScreenSegment[] = [];
+    let room = columns;
+    for (const segment of line) {
+      if (room <= 0) break;
+      clipped.push(segment.text.length <= room ? segment : { ...segment, text: segment.text.slice(0, room) });
+      room -= segment.text.length;
+    }
+    return clipped;
+  });
+}
+
 /** The last `count` lines after dropping trailing lines that hold no visible character. */
 export function tailScreen(lines: readonly ScreenLine[], count: number): ScreenLine[] {
   if (count <= 0) return [];

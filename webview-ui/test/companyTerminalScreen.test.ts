@@ -6,6 +6,7 @@ import {
   type BufferCellLike,
   type BufferLineLike,
   bufferLineSegments,
+  clipRuleRows,
   paletteColor,
   parseAnsiScreen,
   plainScreen,
@@ -422,5 +423,17 @@ describe('screenFitPx', () => {
   it('has no size before the frame is measured or when the screen is empty', () => {
     expect(screenFitPx([row(80)], 0)).toBeUndefined();
     expect(screenFitPx([], 600)).toBeUndefined();
+  });
+});
+
+describe('clipRuleRows', () => {
+  it('cuts a full-width divider to the frame and leaves rows with text whole', () => {
+    const rule: ScreenLine = [{ text: '─'.repeat(50), style: { fg: '#888' } }, { text: '─'.repeat(150), style: {} }];
+    const text: ScreenLine = [{ text: 'x'.repeat(120), style: {} }];
+
+    const [clippedRule, keptText] = clipRuleRows([rule, text], 60);
+
+    expect(clippedRule).toEqual([{ text: '─'.repeat(50), style: { fg: '#888' } }, { text: '─'.repeat(10), style: {} }]);
+    expect(keptText).toBe(text);
   });
 });

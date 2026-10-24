@@ -18,7 +18,7 @@ import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { HERDR_CHOICE_KEYS, HERDR_DRAWER_TAB_LABELS, type HerdrDrawerTab } from '../herdrView.js';
 import { formatLogTime } from '../sessionLogView.js';
-import { MONO_CHAR_EM, screenFitPx,type ScreenLine } from '../terminalScreen.js';
+import { clipRuleRows, MONO_CHAR_EM, screenFitPx, type ScreenLine } from '../terminalScreen.js';
 import { useCoalescedFrame } from '../useCoalescedFrame.js';
 import { useHerdrScreenWatch } from '../useHerdrScreenWatch.js';
 import { useParsedScreen } from '../useParsedScreen.js';
@@ -183,6 +183,8 @@ function HerdrScreenView({
     if (measured > 0) setCharEm(measured);
   }, [preRef]);
   const fitPx = fit ? screenFitPx(lines, widthPx, charEm) : undefined;
+  // Rows wrap at the fitted size, so a full-width divider is cut to the frame instead of folding.
+  const shown = fitPx === undefined ? lines : clipRuleRows(lines, Math.floor(widthPx / (fitPx * charEm)));
   return (
     <div
       ref={scrollRef}
@@ -192,7 +194,7 @@ function HerdrScreenView({
       <ScreenView
         testId="herdr-screen"
         className="min-h-full min-w-full"
-        lines={lines}
+        lines={shown}
         preRef={preRef}
         {...(fitPx === undefined ? {} : { fitPx })}
       />
