@@ -133,6 +133,46 @@ describe('companySessionLog reducer', () => {
     expect(resynced.sessionLogs[kept.id]).toBeDefined();
     expect(resynced.sessionLogs[gone.id]).toBeUndefined();
   });
+
+  it("keeps the log of a work item's Claude Code run through a resync, which drops a stranger's", () => {
+    const workspacePath = 'D:/work/app';
+    const withItem = applyCompanyMessage(stateFrom({ revision: 4, sessions: [] }), {
+      type: 'companyWorkItems',
+      workspacePath,
+      revision: 1,
+      items: [
+        {
+          id: 'item-1',
+          text: 'Sửa trang',
+          assignee: { kind: 'claude' },
+          status: 'running',
+          sequence: 1,
+          priority: 1,
+          dependsOn: [],
+          createdAt: '2026-10-24T11:30:00.000Z',
+          updatedAt: '2026-10-24T11:30:00.000Z',
+          history: [],
+          claudeRun: { mode: 'edit', startedAt: '2026-10-24T11:30:00.000Z', sessionId: 'claude-run-1' },
+        },
+      ],
+      roles: [],
+      repos: [],
+      agents: [],
+      settings: null,
+      claudeMcpServers: [],
+    }).state;
+
+    const logged = applyCompanyMessage(withItem, logMessage('claude-run-1', [entry()], true)).state;
+    const stranger = applyCompanyMessage(logged, logMessage('nobody', [entry()], true)).state;
+    const resynced = applyCompanyMessage(stranger, {
+      type: 'companySnapshot',
+      requestId: randomUUID(),
+      snapshot: snapshot({ revision: 9, sessions: [] }),
+    }).state;
+
+    expect(logEntriesFor(resynced, 'claude-run-1', null)).toHaveLength(1);
+    expect(resynced.sessionLogs['nobody']).toBeUndefined();
+  });
 });
 
 describe('sessionLogView', () => {

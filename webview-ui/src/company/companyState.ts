@@ -904,6 +904,12 @@ function project(state: CompanyViewState): CompanyViewState {
     inView.map((path) => ({ path, scope: state.folders[path] ?? emptyFolderScope() })),
     focus,
   );
+  // A Claude Code run is no board session, but its work item shows its log: keep that log too.
+  const claudeRuns = new Set(
+    Object.values(state.workItems).flatMap((folder) =>
+      folder.items.flatMap((item) => (item.claudeRun?.sessionId === undefined ? [] : [item.claudeRun.sessionId])),
+    ),
+  );
   return {
     ...state,
     ...scope,
@@ -911,7 +917,7 @@ function project(state: CompanyViewState): CompanyViewState {
     herdr: herdrInView(state.herdr, state.herdrRoster, input),
     sessionLogs: keepLive(
       state.sessionLogs,
-      (sessionId) => scope.sessions[sessionId] !== undefined,
+      (sessionId) => scope.sessions[sessionId] !== undefined || claudeRuns.has(sessionId),
     ),
     sessionInfos: keepLive(
       state.sessionInfos,
