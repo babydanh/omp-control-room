@@ -614,10 +614,10 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
       ? '- Bạn không tự chạy công cụ hay làm việc; mỗi assignment là một yêu cầu để người được giao thực hiện.'
       : '- You run no tools and do no work yourself. Each assignment is a prompt its assignee will run.',
     input.compact
-      ? '- "assignee" là "new-session" để mở phiên omp mới; không dùng phiên đang có hay "auto".'
+      ? '- "assignee" chỉ là "new-session" (mở phiên omp mới) hoặc "claude" (một lượt Claude Code); không dùng phiên đang có hay "auto".'
       : '- "assignee" is an id listed under "Team", "auto" (the scheduler picks a free agent in the row repo), or "new-session" (a fresh omp chat in the folder). Never invent an id. Omitted means "auto".',
     input.compact
-      ? '- "claude" là lượt chạy Claude Code.'
+      ? '- Việc NẶNG (sửa nhiều file hoặc nhiều tầng, tính năng mới, refactor, lỗi khó tìm nguyên nhân, phải build/test lặp lại) chia đôi: cứ 2 việc nặng thì 1 giao "claude", 1 giao "new-session"; chỉ có 1 việc nặng thì giao "claude". Việc nhẹ (đọc, tra cứu, sửa nhỏ 1-2 file, kiểm thử, tóm tắt) luôn giao "new-session".'
       : '- "claude" as an "assignee" is a Claude Code run.',
     input.compact
       ? '- "repo" phải là một đường dẫn trong danh sách repo; bỏ trống nghĩa là thư mục gốc.'
@@ -644,7 +644,7 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
     ...(input.compact
       ? [
           'Chế độ gọn:',
-          '- Chia việc theo repo; mỗi repo tối đa MỘT việc trong mỗi lượt. Giao bằng assignee "new-session" và agent "task".',
+          '- Chia việc theo repo. Một repo có thể nhận nhiều việc trong một lượt khi các việc đụng vùng code khác nhau (areas không trùng); board chạy song song có giới hạn theo repo. Assignee theo quy tắc ở trên ("new-session" hoặc "claude"), agent "task".',
           '- Mỗi việc phải tự trọn gói: tự khảo sát repo, thực hiện, chạy test phù hợp, tự review thay đổi, rồi báo bằng chứng file:dòng, lệnh đã chạy và mã thoát.',
           '- Dùng dependsOn khi một repo cần repo khác hoàn tất trước (ví dụ Backend trước Web).',
           '- Khi có kết quả: nếu thiếu, lỗi hoặc agent dừng hỏi thì giao MỘT việc bổ sung cho đúng repo; tự trả lời câu hỏi nếu suy ra được từ yêu cầu, nếu không thì đưa vào câu hỏi cuối.',
@@ -671,7 +671,7 @@ export function buildLeaderPrompt(input: LeaderPromptInput): string {
       ? 'Chỉ trả lời đúng một đối tượng JSON, không thêm lời dẫn hay khung mã.'
       : 'Reply with ONLY one JSON object: no text before or after it, no code fence.',
     input.compact
-      ? '{"assignments":[{"assignee":"new-session","agent":"task","repo":"<đường dẫn repo>","role":"worker","areas":["web:src/app"],"text":"<yêu cầu>","reason":"<lý do>","acceptance":"<điều kiện xong>","priority":2,"dependsOn":[]}],"note":"<tóm tắt hoặc câu hỏi>","done":false}'
+      ? '{"assignments":[{"assignee":"<new-session hoặc claude>","agent":"task","repo":"<đường dẫn repo>","role":"worker","areas":["web:src/app"],"text":"<yêu cầu>","reason":"<lý do>","acceptance":"<điều kiện xong>","priority":2,"dependsOn":[]}],"note":"<tóm tắt hoặc câu hỏi>","done":false}'
       : '{"assignments":[{"assignee":"auto","agent":"task","repo":"<repo path>","role":"worker","areas":["web:src/app"],"text":"<prompt>","reason":"<one short sentence>","acceptance":"<done when>","priority":2,"dependsOn":[]}],"note":"<one short sentence for the user>","done":false}',
     input.compact
       ? 'Chỉ đặt "done" thành true khi mọi việc đã hoàn thành. Note cuối phải có tóm tắt theo repo, nhánh/worktree, test và mã thoát, phần còn lại, mục "Cần bạn quyết:". Còn việc đang chạy và chưa cần giao thêm: "assignments": [], "done": false (board chờ các việc đó xong rồi hỏi lại bạn).'

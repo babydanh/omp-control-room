@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { followUpDraftFor, nextStepFor, summaryLine } from '../src/company/workItemNextStep.js';
+import { followUpDraftFor, nextStepFor, retryAssignee, summaryLine } from '../src/company/workItemNextStep.js';
 
 describe('nextStepFor', () => {
   it('offers to ask for what the judge found missing, or to accept, when the judge sent the item back', () => {
@@ -29,12 +29,24 @@ describe('nextStepFor', () => {
     expect(nextStepFor({ status: 'done' }, '', true).actions).toEqual(['cleanWorktree', 'remove']);
   });
 
-  it('offers a failed item only to hand it to someone else or remove it', () => {
+  it('offers a failed item one button that tries it again, or removing it', () => {
     expect(nextStepFor({ status: 'failed', reason: 'All 4 live runners are in use.' }, '', false)).toEqual({
       tone: 'error',
       title: 'Lỗi',
       detail: 'All 4 live runners are in use.',
-      actions: ['reassign', 'remove'],
+      actions: ['retry', 'remove'],
     });
+  });
+});
+
+describe('retryAssignee', () => {
+  it('runs a Claude Code or agy item the same way again', () => {
+    expect(retryAssignee({ assignee: { kind: 'claude' }, squadRunId: 'p1' })).toEqual({ kind: 'claude' });
+    expect(retryAssignee({ assignee: { kind: 'agy' } })).toEqual({ kind: 'agy' });
+  });
+
+  it('opens a fresh omp session for a squad item, and lets any free agent take another item', () => {
+    expect(retryAssignee({ assignee: { kind: 'session', sessionId: 'dead' }, squadRunId: 'p1' })).toEqual({ kind: 'new-session' });
+    expect(retryAssignee({ assignee: { kind: 'herdr', paneId: 'w1:p1' } })).toEqual({ kind: 'auto' });
   });
 });

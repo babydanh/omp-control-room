@@ -1161,7 +1161,10 @@ async function openOwnerCompanyHost(
         squadWiring?.service.isCompactProposal(proposalId) ?? false,
     });
     unregisterWorkItems = registerWorkItemService(store.namespaceDir, workItemsWiring.service);
-    const director = modelRoles.assignments.director;
+    // The leader only splits work, and must answer inside its turn limit: it runs the chat role's
+    // model (omp `default`), not the director's. Measured 24/10: glm-5.3 high took 78 s on a short
+    // split and over 4 min on a real one; gpt-6-luna high took 21 s.
+    const leaderModel = modelRoles.assignments.chat;
     squadWiring = await startSquad({
       workspacePath: store.workspacePath,
       namespaceDir: store.namespaceDir,
@@ -1173,8 +1176,8 @@ async function openOwnerCompanyHost(
         omp: createOmpLeaderRunner({
           command: hostModelRolesCommand(options),
           cwd: store.workspacePath,
-          model: director.model,
-          thinking: capSquadLeaderThinking(director.thinking),
+          model: leaderModel.model,
+          thinking: capSquadLeaderThinking(leaderModel.thinking),
         }),
         claude: createClaudeTurnRunner({
           cwd: store.workspacePath,

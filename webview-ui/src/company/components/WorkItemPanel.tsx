@@ -18,7 +18,7 @@ import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { useNow } from '../useNow.js';
-import { followUpDraftFor, NEXT_STEP_LABEL, type NextStep, type NextStepAction, nextStepFor, summaryLine } from '../workItemNextStep.js';
+import { followUpDraftFor, NEXT_STEP_LABEL, type NextStep, type NextStepAction, nextStepFor, retryAssignee, summaryLine } from '../workItemNextStep.js';
 import {
   conflictText,
   isParkedAssignee,
@@ -253,6 +253,15 @@ export function WorkItemPanel({
       followUpRef.current?.focus();
     }
     else if (action === 'reassign') openReassign();
+    else if (action === 'retry') {
+      // Tried again as it was filed: same repo, role, areas and agent; the board picks who runs it.
+      send('assign', client.assignWorkItem(workspacePath, id, retryAssignee(item), {
+        ...(item.repo === undefined ? {} : { repo: item.repo }),
+        ...(item.role === undefined ? {} : { role: item.role }),
+        ...(item.areas === undefined ? {} : { areas: item.areas }),
+        ...(item.agent === undefined ? {} : { agent: item.agent }),
+      }));
+    }
     else if (action === 'cleanWorktree') setConfirming('cleanWorktree');
     else setConfirming('cancel');
   };

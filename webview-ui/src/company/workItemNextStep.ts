@@ -5,9 +5,9 @@
  * what it asks. Everything else (the item's text, its history) folds away below.
  */
 
-import type { WorkItem } from '../../../core/src/messages.js';
+import type { WorkItem, WorkItemAssignee } from '../../../core/src/messages.js';
 
-export type NextStepAction = 'rejudge' | 'finish' | 'followUp' | 'answer' | 'reassign' | 'cleanWorktree' | 'remove';
+export type NextStepAction = 'rejudge' | 'finish' | 'followUp' | 'answer' | 'reassign' | 'retry' | 'cleanWorktree' | 'remove';
 
 export interface NextStep {
   /** wait: someone else acts; act: you act; done / error: finished. */
@@ -25,6 +25,7 @@ export const NEXT_STEP_LABEL: Record<NextStepAction, string> = {
   followUp: 'Yêu cầu bổ sung',
   answer: 'Trả lời agent',
   reassign: 'Giao người khác',
+  retry: 'Thử lại',
   cleanWorktree: 'Dọn worktree',
   remove: 'Xoá',
 };
@@ -74,8 +75,18 @@ export function nextStepFor(item: StepItem, waitText: string | null, canClean: b
       }
       return { tone: 'act', title: 'Agent đang hỏi bạn', detail: short(item.reason), actions: ['answer', 'finish'] };
     case 'failed':
-      return { tone: 'error', title: 'Lỗi', detail: short(item.reason), actions: ['reassign', 'remove'] };
+      return { tone: 'error', title: 'Lỗi', detail: short(item.reason), actions: ['retry', 'remove'] };
     case 'done':
       return { tone: 'done', title: 'Xong', actions: canClean ? ['cleanWorktree', 'remove'] : ['remove'] };
   }
+}
+
+/**
+ * Who a failed item goes to when it is tried again, with nothing to choose: a Claude Code or agy run
+ * runs again the same way; a squad item opens a fresh omp session in its repo, as the squad does; any
+ * other item goes to whichever agent is free.
+ */
+export function retryAssignee(item: Pick<WorkItem, 'assignee' | 'squadRunId'>): WorkItemAssignee {
+  if (item.assignee.kind === 'claude' || item.assignee.kind === 'agy') return { kind: item.assignee.kind };
+  return item.squadRunId === undefined ? { kind: 'auto' } : { kind: 'new-session' };
 }
