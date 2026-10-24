@@ -210,7 +210,7 @@ function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandC
       isAlive: processAlive,
       readRepo: (repo) => ledger.repoScan(repo),
       overlapScans: () => ledger.currentOverlapScans(),
-      sessionProgress: transcriptProgress,
+      sessionFacts: transcriptProgress,
     },
   };
 }

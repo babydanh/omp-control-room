@@ -1,10 +1,11 @@
 /**
- * sessionProgress: how far an agent says it is, read from its own transcript.
+ * sessionProgress: how far an agent says it is, and what it was last asked, read from its own
+ * transcript.
  *
  * omp records every `todo` call's result with the whole list in `details.phases`; Claude Code
  * records each TodoWrite call with the whole list in `input.todos`. The newest one is the agent's
- * current list. A transcript only grows, so each file is read once and then from where the last
- * read stopped.
+ * current list. The newest message the user typed is the request it works on. A transcript only
+ * grows, so each file is read once and then from where the last read stopped.
  */
 
 import { open, stat } from 'node:fs/promises';
@@ -24,6 +25,19 @@ const MAX_FILES = 200;
 const EMPTY = Buffer.alloc(0);
 const MAX_CURRENT = 400;
 const MAX_BLOCKED = 800;
+const MAX_REQUEST = 300;
+/** The first request is looked for this far into a transcript read from its tail. */
+const HEAD_BYTES = 256 * 1024;
+
+/**
+ * What a transcript says about its session: the todo progress, the first thing the user asked
+ * (the session's task), and the newest thing the user typed when it differs.
+ */
+export interface TranscriptFacts {
+  readonly progress?: SessionProgress;
+  readonly request?: string;
+  readonly lastRequest?: string;
+}
 
 function clip(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
@@ -56,6 +70,33 @@ export function todoFromTranscriptLine(line: string): CompanySessionTodo | undef
   return readTodo({ phases: [{ name: 'Todo', tasks: input['todos'] }] });
 }
 
+/**
+ * The text the user typed on this line, or undefined for anything else: agent turns, tool results,
+ * subagent (sidechain) turns, and Claude Code's `<command-…>` / `<system-reminder>` wrappers.
+ */
+export function requestFromTranscriptLine(line: string): string | undefined {
+  if (!line.includes('"role":"user"')) return undefined;
+  let entry: unknown;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (!isRecord(entry) || entry['isSidechain'] === true) return undefined;
+  const message = entry['message'];
+  if (!isRecord(message) || message['role'] !== 'user') return undefined;
+  // omp tags what the user typed; its injected notices carry another attribution.
+  if (entry['type'] === 'message' && message['attribution'] !== 'user') return undefined;
+  if (entry['type'] !== 'message' && entry['type'] !== 'user') return undefined;
+  const content = message['content'];
+  const parts = typeof content === 'string' ? [content] : Array.isArray(content)
+    ? content.flatMap((part) => (isRecord(part) && part['type'] === 'text' && typeof part['text'] === 'string' ? [part['text']] : []))
+    : [];
+  const text = parts.join(' ').replace(/\s+/g, ' ').trim();
+  if (text === '' || text.startsWith('<')) return undefined;
+  return clip(text, MAX_REQUEST);
+}
+
 /** Done of total (abandoned tasks left out), the task in hand, and the first blocked task. */
 export function progressOfTodo(todo: CompanySessionTodo): SessionProgress | undefined {
   const tasks = todo.phases.flatMap((phase) => phase.tasks).filter((task) => task.status !== 'abandoned');
@@ -79,6 +120,9 @@ interface FileState {
   /** Dropping bytes up to the next newline: the read began mid-line, or the line is too long. */
   skipping: boolean;
   todo: CompanySessionTodo | undefined;
+  /** The first user message: found while reading from the start, or read once from the head. */
+  request: string | undefined;
+  lastRequest: string | undefined;
 }
 
 export interface TranscriptLimits {
@@ -89,7 +133,7 @@ export interface TranscriptLimits {
 /** A reader that remembers how far it read each transcript. */
 export function createTranscriptProgress(
   limits: TranscriptLimits = { tailBytes: TAIL_BYTES, maxLineBytes: MAX_LINE_BYTES },
-): (file: string) => Promise<SessionProgress | undefined> {
+): (file: string) => Promise<TranscriptFacts> {
   const files = new Map<string, FileState>();
 
   function readLines(state: FileState, chunk: Buffer): void {
@@ -113,6 +157,10 @@ export function createTranscriptProgress(
     for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
       const todo = todoFromTranscriptLine(line);
       if (todo !== undefined) state.todo = todo;
+      const request = requestFromTranscriptLine(line);
+      if (request === undefined) continue;
+      state.lastRequest = request;
+      state.request ??= request;
     }
   }
 
@@ -132,23 +180,47 @@ export function createTranscriptProgress(
     }
   }
 
+  /** The first user message within the head of a transcript whose tail was read. */
+  async function readFirstRequest(file: string, size: number): Promise<string | undefined> {
+    const handle = await open(file, 'r');
+    try {
+      const chunk = Buffer.alloc(Math.min(HEAD_BYTES, size));
+      const { bytesRead } = await handle.read(chunk, 0, chunk.length, 0);
+      const text = chunk.subarray(0, bytesRead).toString('utf8');
+      // The last line of the chunk may be cut: only whole lines count.
+      for (const line of text.slice(0, text.lastIndexOf('\n') + 1).split('\n')) {
+        const request = requestFromTranscriptLine(line);
+        if (request !== undefined) return request;
+      }
+      return undefined;
+    } finally {
+      await handle.close();
+    }
+  }
+
   return async (file) => {
     let size: number;
     try {
       size = (await stat(file)).size;
     } catch {
       files.delete(file);
-      return undefined;
+      return {};
     }
     let state = files.get(file);
     // A new file is read from its tail; a shorter file was rewritten and is read again.
     if (state === undefined || size < state.offset) {
       const offset = Math.max(0, size - limits.tailBytes);
-      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined };
+      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined, request: undefined, lastRequest: undefined };
       if (files.size >= MAX_FILES) files.delete(files.keys().next().value ?? '');
       files.set(file, state);
+      if (offset > 0) state.request = await readFirstRequest(file, size).catch(() => undefined);
     }
     if (size > state.offset) await readNew(file, state, size);
-    return state.todo === undefined ? undefined : progressOfTodo(state.todo);
+    const progress = state.todo === undefined ? undefined : progressOfTodo(state.todo);
+    return {
+      ...(progress === undefined ? {} : { progress }),
+      ...(state.request === undefined ? {} : { request: state.request }),
+      ...(state.lastRequest === undefined || state.lastRequest === state.request ? {} : { lastRequest: state.lastRequest }),
+    };
   };
 }

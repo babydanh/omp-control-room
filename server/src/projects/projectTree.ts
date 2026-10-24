@@ -14,7 +14,7 @@ import { normalizeLedgerPath } from '../ledger/ledgerPath.js';
 import { formatLedgerTime } from '../ledger/ledgerTime.js';
 import type { AgentState } from '../types.js';
 import { type Project, type ProjectNode, ProjectStore } from './projectStore.js';
-import type { SessionProgress } from './sessionProgress.js';
+import type { SessionProgress, TranscriptFacts } from './sessionProgress.js';
 
 export interface ProjectSessionSnapshot {
   readonly engine: NonNullable<ProjectTreeNode['engine']>;
@@ -33,6 +33,10 @@ export interface ProjectSessionSnapshot {
   readonly editCheckouts?: readonly string[];
   /** The agent's own todo list, as its transcript last wrote it. */
   readonly progress?: SessionProgress;
+  /** The user's first message in the transcript: what the session was asked to do. */
+  readonly request?: string;
+  /** The user's newest message, when it is not the first one. */
+  readonly lastRequest?: string;
 }
 
 export interface HerdrProjectSession {
@@ -65,8 +69,8 @@ export interface ProjectTreeOptions {
   readonly sessionsOnly?: boolean;
   /** The board session an open folder runs for an omp (native) session id, if any. */
   readonly boardSessionFor?: (nativeSessionId: string) => string | undefined;
-  /** The todo progress a transcript last wrote. Unset leaves rows without progress. */
-  readonly sessionProgress?: (sessionFile: string) => Promise<SessionProgress | undefined>;
+  /** The todo progress and user requests a transcript last wrote. Unset leaves rows without them. */
+  readonly sessionFacts?: (sessionFile: string) => Promise<TranscriptFacts>;
 }
 /** How far back a session's latest intent is looked up for its title. */
 const SESSION_INTENT_WINDOW_MS = 6 * 60 * 60 * 1000;
@@ -110,6 +114,8 @@ type TitledSessionRow = SessionRow & {
   readonly herdrPaneId?: string;
   readonly editCheckouts?: readonly string[];
   readonly progress?: SessionProgress;
+  readonly request?: string;
+  readonly lastRequest?: string;
 };
 
 /**
@@ -255,6 +261,8 @@ function sessionsForCheckout(
       ...(row.herdrPaneId === undefined ? {} : { herdrPaneId: row.herdrPaneId }),
       ...(row.editCheckouts === undefined ? {} : { editCheckouts: row.editCheckouts }),
       ...(row.progress === undefined ? {} : { progress: row.progress }),
+      ...(row.request === undefined ? {} : { request: row.request }),
+      ...(row.lastRequest === undefined ? {} : { lastRequest: row.lastRequest }),
     });
   }
   for (const agent of agents) {
@@ -623,6 +631,8 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
       ...(session.herdrPaneId === undefined ? {} : { herdrPaneId: session.herdrPaneId }),
       ...(session.editCheckouts === undefined ? {} : { editCheckouts: [...session.editCheckouts] }),
       ...(session.progress === undefined ? {} : { progress: session.progress }),
+      ...(session.request === undefined ? {} : { request: session.request }),
+      ...(session.lastRequest === undefined ? {} : { lastRequest: session.lastRequest }),
     });
   }
 }
@@ -636,16 +646,22 @@ function withoutDeadProcesses(rows: readonly SessionRow[], isAlive: ((pid: numbe
   return rows.filter((row) => row.endedAt !== null || row.pid === null || isAlive(row.pid));
 }
 
-/** Live rows with the todo progress their transcript last wrote; an unreadable transcript gives none. */
+/** Live rows with the todo progress and request their transcript last wrote; an unreadable transcript gives none. */
 async function withProgress(
   rows: readonly TitledSessionRow[],
-  read: ProjectTreeOptions['sessionProgress'],
+  read: ProjectTreeOptions['sessionFacts'],
 ): Promise<readonly TitledSessionRow[]> {
   if (read === undefined) return rows;
   return Promise.all(rows.map(async (row) => {
     if (row.endedAt !== null || !row.sessionFile) return row;
-    const progress = await read(row.sessionFile).catch(() => undefined);
-    return progress === undefined ? row : { ...row, progress };
+    const facts = await read(row.sessionFile).catch((): TranscriptFacts => ({}));
+    if (facts.progress === undefined && facts.request === undefined && facts.lastRequest === undefined) return row;
+    return {
+      ...row,
+      ...(facts.progress === undefined ? {} : { progress: facts.progress }),
+      ...(facts.request === undefined ? {} : { request: facts.request }),
+      ...(facts.lastRequest === undefined ? {} : { lastRequest: facts.lastRequest }),
+    };
   }));
 }
 
@@ -658,7 +674,7 @@ export async function buildProjectTreeSnapshot(
     annotateLedgerRows(withoutDeadProcesses(options.ledger.sessionRows(), options.isAlive), options.ledger, options.boardSessionFor),
     options.herdrSessions?.() ?? [],
   );
-  const ledgerRows = await withProgress(linked.rows, options.sessionProgress);
+  const ledgerRows = await withProgress(linked.rows, options.sessionFacts);
   const pendingCheckouts = new Set(options.ledger.pendingRows().map((row) => canonicalKey(row.checkout)));
   const overlapScans = options.sessionsOnly === true ? [] : await (options.overlapScans?.() ?? Promise.resolve([]));
   const agents = [...(options.agents ?? [])];

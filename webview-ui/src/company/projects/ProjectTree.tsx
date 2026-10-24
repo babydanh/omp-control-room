@@ -17,6 +17,8 @@ import {
   sessionProgressView,
   type TreeSelection,
 } from './projectTreeView.js';
+import { useSessionHover } from './sessionHover.js';
+import { SessionHoverCard } from './SessionHoverCard.js';
 
 const COLLAPSED_KEY = 'company.projectTree.collapsed.v1';
 // Tools a user filters by. "herdr" is the terminal host every session runs in, not a tool, so it is not offered.
@@ -210,6 +212,8 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   const receivesDrop = DROP_KINDS.has(node.kind);
   const counts = isSession ? null : countSessions(branch);
   const progress = isSession ? sessionProgressView(node.progress) : null;
+  const hover = useSessionHover(isSession);
+  const hoverCheckout = hover.anchor === null ? undefined : props.nodes.find((candidate) => candidate.id === node.parentId && candidate.kind === 'checkout');
   const onDragOver = (event: DragEvent<HTMLDivElement>) => {
     if (!receivesDrop) return;
     event.preventDefault();
@@ -238,13 +242,14 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           aria-current={selected ? 'true' : undefined}
           type="button"
           aria-label={`${node.kind}: ${node.name}`}
-          title={isSession ? [node.title, stateLabel, branch.where].filter(Boolean).join(' · ') : node.path ?? node.name}
+          title={isSession ? undefined : node.path ?? node.name}
           onClick={() => {
             if (node.kind === 'project') props.onSelectProject(node.id);
             else if (isSession) props.onOpenSession(node, branch);
             else onToggleCollapse(node.id);
           }}
           {...menu}
+          {...hover.bind}
           className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} py-0.5`}
         >
           {isSession ? (
@@ -310,6 +315,16 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
       {!isCollapsed && children.map((child) => (
         <ProjectTreeRow key={child.node.id} branch={child} depth={depth + 1} collapsed={collapsed} onToggleCollapse={onToggleCollapse} onMove={onMove} {...props} />
       ))}
+      {hover.anchor !== null && (
+        <SessionHoverCard
+          node={node}
+          anchor={hover.anchor}
+          {...(branch.where === undefined || MAIN_BRANCHES.has(branch.where) ? {} : { where: branch.where })}
+          {...(hoverCheckout === undefined ? {} : { checkout: hoverCheckout })}
+          {...(stateLabel === undefined ? {} : { stateLabel })}
+          running={isRunningNode(node)}
+        />
+      )}
     </div>
   );
 }

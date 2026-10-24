@@ -8464,6 +8464,17 @@ components:
               type: string
               maxLength: 800
               description: The first blocked task and its reason, joined by a colon.
+        request:
+          type: string
+          maxLength: 300
+          description: >-
+            Session rows: the first message the user typed in the session's transcript (omp,
+            Claude Code), whitespace collapsed and clipped. What the session was asked to do.
+        lastRequest:
+          type: string
+          maxLength: 300
+          description: >-
+            Session rows: the newest message the user typed, when it is not the first one.
         state:
           type: string
         title:
