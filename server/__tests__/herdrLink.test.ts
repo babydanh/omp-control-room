@@ -1207,6 +1207,16 @@ describe('HerdrLink against a herdr socket', () => {
     ]);
   });
 
+  it('closes a pane through herdr, targeting its pane id', async () => {
+    fake.reply('pane.close', () => ({ type: 'ok' }));
+
+    await link.close('wA:p2');
+
+    expect(fake.requestsTo('pane.close')).toEqual([
+      { method: 'pane.close', params: { pane_id: 'wA:p2' } },
+    ]);
+  });
+
   it('refuses names herdr would reject before sending anything', async () => {
     for (const name of ['', 'Reviewer', '2agent', 'my agent', 'a'.repeat(33), 'bạn']) {
       expect((await herdrFailure(link.rename('wA:p2', name))).code).toBe('invalid_request');

@@ -44,6 +44,7 @@ function stubLink(overrides: Partial<HerdrLink> = {}): HerdrLink {
     keys: vi.fn(async (): Promise<void> => undefined),
     focus: vi.fn(async (): Promise<void> => undefined),
     rename: vi.fn(async (): Promise<void> => undefined),
+    close: vi.fn(async (): Promise<void> => undefined),
     info: vi.fn(async (): Promise<AgentInfo> => INFO),
     wake: vi.fn(async (): Promise<void> => undefined),
     watch: vi.fn((): void => undefined),
@@ -109,6 +110,7 @@ describe('herdr board commands', () => {
       'herdrKeys',
       'herdrFocus',
       'herdrRename',
+      'herdrClose',
       'herdrInfoRequest',
       'herdrWake',
       'herdrWatch',
@@ -180,6 +182,21 @@ describe('herdr board commands', () => {
     expect(herdr.focus).not.toHaveBeenCalled();
     expect(herdr.wake).not.toHaveBeenCalled();
   });
+
+  it('closes a herdr pane and answers ok', async () => {
+    const herdr = stubLink();
+    const rec = recorder();
+
+    handleCompanyCommand(
+      { type: 'herdrClose', requestId: 'c-1', paneId: 'wA:p2' },
+      rec.send,
+      context({ herdr }),
+    );
+
+    expect(await rec.next()).toEqual({ type: 'companyCommandResult', requestId: 'c-1', ok: true });
+    expect(herdr.close).toHaveBeenCalledWith('wA:p2');
+  });
+
 
   it('wakes a sleeping session with the typed prompt and answers ok', async () => {
     const herdr = stubLink();

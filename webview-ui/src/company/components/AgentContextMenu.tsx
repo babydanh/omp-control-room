@@ -102,7 +102,8 @@ type ConfirmKind =
   | 'squad-remove'
   | 'project-delete'
   | 'project-remove-folder'
-  | 'project-stop';
+  | 'project-stop'
+  | 'close-herdr';
 
 type MenuMode = 'menu' | 'rename' | 'folder-rename' | 'project-rename' | 'project-move' | 'project-create-group' | 'project-add-folder' | ConfirmKind;
 
@@ -629,6 +630,10 @@ export function AgentContextMenu({
       setMode('project-stop');
       return;
     }
+    if (action === 'closeHerdr') {
+      setMode('close-herdr');
+      return;
+    }
     if (action === 'removeFolder') {
       setMode('project-remove-folder');
       return;
@@ -750,6 +755,22 @@ export function AgentContextMenu({
             onClose();
           },
         };
+      case 'close-herdr': {
+        const sleepingPane = subject.kind === 'sleeping' ||
+          (subject.kind === 'projectNode' && subject.node.state === 'sleeping');
+        const message = sleepingPane
+          ? 'Xoá phiên này? Pane herdr sẽ bị đóng. Lịch sử omp vẫn còn trong file phiên.'
+          : 'Xoá phiên này? Pane herdr sẽ bị đóng; phiên đang chạy sẽ dừng. Lịch sử omp vẫn còn trong file phiên.';
+        return {
+          message,
+          label: 'Xoá phiên',
+          run: () => {
+            if (subject.kind === 'projectNode') onProjectNodeAction?.(subject.node, 'closeHerdr');
+            else if (paneId !== null) track(client.herdrClose(paneId));
+            onClose();
+          },
+        };
+      }
     }
   }
 
@@ -828,6 +849,10 @@ export function AgentContextMenu({
         return;
       case 'wake':
         if (paneId !== null) track(client.herdrWake(paneId));
+        return;
+      case 'closeHerdr':
+        setNotice(null);
+        setMode('close-herdr');
         return;
       case 'cloudHandoff':
         sendHandoff(paneId);

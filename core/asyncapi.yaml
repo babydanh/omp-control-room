@@ -305,6 +305,7 @@ components:
         - $ref: '#/components/schemas/HerdrFocusMessage'
         - $ref: '#/components/schemas/HerdrRenameMessage'
         - $ref: '#/components/schemas/HerdrInfoRequestMessage'
+        - $ref: '#/components/schemas/HerdrCloseMessage'
         - $ref: '#/components/schemas/HerdrWakeMessage'
         - $ref: '#/components/schemas/HerdrWatchMessage'
         - $ref: '#/components/schemas/BrowserReaperReapNow'
@@ -5560,6 +5561,20 @@ components:
       properties:
         type:
           const: herdrInfoRequest
+        requestId:
+          type: string
+          format: uuid
+        paneId:
+          type: string
+          maxLength: 64
+
+    HerdrCloseMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, paneId]
+      properties:
+        type:
+          const: herdrClose
         requestId:
           type: string
           format: uuid

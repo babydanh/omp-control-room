@@ -45,7 +45,8 @@ export type ProjectNodeAction =
   | 'copySessionId'
   | 'wake'
   | 'cloudHandoff'
-  | 'stop';
+  | 'stop'
+  | 'closeHerdr';
 
 /** What a project-tree menu needs beyond the node: whether git rows sit under it, and its folders. */
 export interface ProjectNodeMenuContext {
@@ -122,6 +123,7 @@ export type AgentMenuAction =
   | { kind: 'squadAction'; action: SquadRunMenuAction }
   | { kind: 'wake' }
   | { kind: 'cloudHandoff' }
+  | { kind: 'closeHerdr' }
   | { kind: 'projectNodeAction'; action: ProjectNodeAction };
 
 export interface AgentMenuItem {
@@ -710,6 +712,13 @@ export function herdrMenuItems(
         action: { kind: 'copy', what: 'paneId' },
       }),
       ...maximizeItems(drawer),
+      item({
+        id: 'close-herdr',
+        label: 'Xoá phiên…',
+        icon: 'trash',
+        action: { kind: 'closeHerdr' },
+        danger: true,
+      }),
     ]),
   ];
 }
@@ -719,6 +728,13 @@ export function sleepingMenuItems(drawer: DrawerView | null): AgentMenuItem[] {
   return [
     item({ id: 'wake', label: 'Đánh thức', icon: 'sun', action: { kind: 'wake' } }),
     ...withGroupStart(maximizeItems(drawer)),
+    item({
+      id: 'close-herdr',
+      label: 'Xoá phiên…',
+      icon: 'trash',
+      action: { kind: 'closeHerdr' },
+      danger: true,
+    }),
   ];
 }
 
@@ -869,6 +885,9 @@ export function projectNodeMenuItems(
         // A ledger session's process can be stopped; a subagent shares its parent's.
         ...(node.agentKind === 'omp' || node.agentKind === 'claude' || node.agentKind === 'agy'
           ? [add('stop', 'Tắt phiên…', 'stop', 'stop', true)]
+          : []),
+        ...(node.agentKind === 'herdr'
+          ? [add('close-herdr', 'Xoá phiên…', 'trash', 'closeHerdr', true, true)]
           : []),
       ];
     case 'file-agg':

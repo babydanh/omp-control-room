@@ -871,6 +871,11 @@ export class CompanyClient {
     return this.command((requestId) => commands.herdrRename(requestId, paneId, name));
   }
 
+  /** Close a herdr pane; herdr's subsequent roster refresh removes it from the board. */
+  herdrClose(paneId: string): CompanyCommandHandle {
+    return this.command((requestId) => commands.herdrClose(requestId, paneId));
+  }
+
   /**
    * Wake a hibernated session. The answer is the standard command result under the
    * handle's requestId: ok, or a refusal the server words for the user.

@@ -214,6 +214,7 @@ const HERDR_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'herdrKeys',
   'herdrFocus',
   'herdrRename',
+  'herdrClose',
   'herdrInfoRequest',
   'herdrWake',
   'herdrWatch',
@@ -657,6 +658,10 @@ async function herdrCommand(
       }
       case 'herdrFocus':
         await herdr.focus(paneId);
+        ok(send, requestId);
+        return;
+      case 'herdrClose':
+        await herdr.close(paneId);
         ok(send, requestId);
         return;
       case 'herdrWake': {

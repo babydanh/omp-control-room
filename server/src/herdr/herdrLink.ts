@@ -235,6 +235,7 @@ export interface HerdrLink {
    * given. Refuses unless herdr and the sleep registry still show the pane holding that session.
    */
   wake(paneId: string, prompt?: string): Promise<void>;
+  close(paneId: string): Promise<void>;
 }
 
 export { isHerdrPaneId };
@@ -580,6 +581,12 @@ class HerdrLinkImpl implements HerdrLink {
       read,
       collectedAt: new Date().toISOString(),
     });
+  }
+
+  async close(paneId: string): Promise<void> {
+    assertPaneId(paneId);
+    await this.call('pane.close', { pane_id: paneId });
+    if (this.running) this.scheduleRefresh();
   }
 
   async wake(paneId: string, prompt?: string): Promise<void> {

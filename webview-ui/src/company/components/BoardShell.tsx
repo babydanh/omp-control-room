@@ -458,8 +458,14 @@ export function BoardShell({ client }: BoardShellProps) {
       openProjectSettings(node.id);
       return;
     }
+    if (action === 'closeHerdr') {
+      const paneId = node.herdrPaneId ?? (node.agentKind === 'herdr' ? node.sessionId : undefined);
+      if (paneId !== undefined) client.herdrClose(paneId);
+      return;
+    }
     if (action === 'wake') {
-      if (node.sessionId !== undefined) client.herdrWake(node.sessionId);
+      const paneId = node.herdrPaneId ?? node.sessionId;
+      if (paneId !== undefined) client.herdrWake(paneId);
       return;
     }
     if (action === 'openSession') {

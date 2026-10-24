@@ -209,6 +209,7 @@ export type ClientMessage =
   | HerdrFocusMessage
   | HerdrRenameMessage
   | HerdrInfoRequestMessage
+  | HerdrCloseMessage
   | HerdrWakeMessage
   | HerdrWatchMessage
   | BrowserReaperReapNow
@@ -3474,6 +3475,12 @@ export interface HerdrInfoRequestMessage {
   paneId: string;
 }
 
+export interface HerdrCloseMessage {
+  type: 'herdrClose';
+  requestId: string;
+  paneId: string;
+}
+
 export interface HerdrWakeMessage {
   type: 'herdrWake';
   requestId: string;
@@ -3501,11 +3508,11 @@ export interface UsageLimitsRequestMessage {
 export interface UsageHistoryRequestMessage {
   type: 'usageHistoryRequest';
   requestId: string;
-  days: AnonymousSchema_1915;
+  days: AnonymousSchema_1918;
   force?: boolean;
 }
 
-export type AnonymousSchema_1915 = 1 | 7 | 30;
+export type AnonymousSchema_1918 = 1 | 7 | 30;
 
 export interface UsageStatsRequestMessage {
   type: 'usageStatsRequest';

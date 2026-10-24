@@ -349,7 +349,13 @@ function DrawerContent(props: ContentProps) {
       );
     case 'sleeping':
       return (
-        <SleepingPanel key={subject.paneId} client={client} state={state} paneId={subject.paneId} />
+        <SleepingPanel
+          key={subject.paneId}
+          client={client}
+          state={state}
+          paneId={subject.paneId}
+          onClose={props.onClose}
+        />
       );
     case 'contract':
       return <ContractSubject client={client} state={state} contractId={subject.contractId} />;

@@ -556,6 +556,11 @@ export function herdrWatch(requestId: string, paneId: string, watching: boolean)
   return { type: 'herdrWatch', requestId, paneId, watching };
 }
 
+/** Close a pane from herdr. */
+export function herdrClose(requestId: string, paneId: string): ClientMessage {
+  return { type: 'herdrClose', requestId, paneId };
+}
+
 /** Wakes a hibernated session. The prompt goes only when the user typed something; a blank one is left out. */
 export function herdrWake(requestId: string, paneId: string, prompt?: string): ClientMessage {
   const text = prompt?.trim() ?? '';

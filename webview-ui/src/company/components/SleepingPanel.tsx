@@ -16,6 +16,7 @@ import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
 import { useNow } from '../useNow.js';
 import { CompanyButton } from './CompanyButton.js';
+import { ConfirmAction } from './ConfirmAction.js';
 import { Icon } from './Icon.js';
 
 /** The server's limit on a wake prompt, in characters. */
@@ -25,13 +26,16 @@ export interface SleepingPanelProps {
   client: CompanyClient;
   state: CompanyViewState;
   paneId: string;
+  onClose: () => void;
 }
 
-export function SleepingPanel({ client, state, paneId }: SleepingPanelProps) {
+export function SleepingPanel({ client, state, paneId, onClose }: SleepingPanelProps) {
   const now = useNow();
   const session = state.herdr.sleeping.find((entry) => entry.paneId === paneId);
   const [draft, setDraft] = useState('');
   const [wakeRequest, setWakeRequest] = useState<string | null>(null);
+  const [closeRequest, setCloseRequest] = useState<string | null>(null);
+  const [confirmingClose, setConfirmingClose] = useState(false);
   const [localNotice, setLocalNotice] = useState<string | null>(null);
 
   // The draft is cleared only when the server confirms the wake, so a refused wake keeps
@@ -42,9 +46,20 @@ export function SleepingPanel({ client, state, paneId }: SleepingPanelProps) {
     setDraft('');
     setWakeRequest(null);
   }, [wakeOutcome]);
+  const closeOutcome = closeRequest === null ? undefined : state.commandResults[closeRequest];
+
+  useEffect(() => {
+    if (closeOutcome?.ok !== true) return;
+    setCloseRequest(null);
+    onClose();
+  }, [closeOutcome, onClose]);
 
   const waking = wakeRequest !== null && wakeOutcome === undefined;
-  const notice = localNotice ?? failureNotice(wakeOutcome, 'Máy chủ từ chối lệnh này.');
+  const closing = closeRequest !== null && closeOutcome === undefined;
+  const notice =
+    localNotice ??
+    failureNotice(closeOutcome, 'Không xoá được.') ??
+    failureNotice(wakeOutcome, 'Máy chủ từ chối lệnh này.');
 
   if (session === undefined) {
     return (
@@ -63,6 +78,12 @@ export function SleepingPanel({ client, state, paneId }: SleepingPanelProps) {
     setWakeRequest(handle.ok ? handle.requestId : null);
   }
 
+  function close(): void {
+    const handle = client.herdrClose(paneId);
+    setConfirmingClose(false);
+    setLocalNotice(failureNotice(handle, 'Không xoá được.'));
+    setCloseRequest(handle.ok ? handle.requestId : null);
+  }
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 p-2" data-testid="sleeping-panel">
       <div className="flex flex-col gap-1 text-2xs text-text-muted">
@@ -114,6 +135,26 @@ export function SleepingPanel({ client, state, paneId }: SleepingPanelProps) {
           {waking ? 'Đang đánh thức…' : 'Đánh thức'}
         </CompanyButton>
       </form>
+      {confirmingClose ? (
+        <ConfirmAction
+          message="Xoá phiên này? Pane herdr sẽ bị đóng. Lịch sử omp vẫn còn trong file phiên."
+          confirmLabel="Xoá phiên"
+          danger
+          disabled={closing}
+          onConfirm={close}
+          onCancel={() => setConfirmingClose(false)}
+        />
+      ) : (
+        <CompanyButton
+          type="button"
+          size="sm"
+          className="text-danger"
+          disabled={closing}
+          onClick={() => setConfirmingClose(true)}
+        >
+          Xoá phiên
+        </CompanyButton>
+      )}
     </div>
   );
 }

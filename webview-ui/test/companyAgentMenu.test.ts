@@ -2,6 +2,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { isReplayableClientMessage } from '../../core/src/messageDelivery.js';
+import type { ProjectTreeNode } from '../../core/src/messages.js';
 import {
   type AgentMenuItem,
   type AgentMenuSubject,
@@ -13,6 +14,7 @@ import {
   placeMenu,
   planningMenuItems,
   projectMenuItems,
+  projectNodeMenuItems,
   type SessionMenuFacts,
   sessionMenuItems,
   sessionNameProblem,
@@ -23,6 +25,7 @@ import {
 } from '../src/company/agentMenu.js';
 import { copyText } from '../src/company/clipboard.js';
 import {
+  herdrClose,
   herdrInfoRequest,
   herdrRename,
   isCompanyServerMessage,
@@ -155,6 +158,29 @@ describe('sessionMenuItems', () => {
 
     expect(items.some((item) => item.label === 'Sao chép thư mục làm việc')).toBe(false);
     expect(items.find((item) => item.id === 'copy-code')).toMatchObject({ disabled: false });
+  });
+});
+
+describe('herdr project session menu', () => {
+  const node = (agentKind: ProjectTreeNode['agentKind'], state: string): ProjectTreeNode => ({
+    id: 'pane',
+    kind: 'session',
+    name: 'pane',
+    sessionId: 'w1:p2',
+    agentKind,
+    state,
+  });
+
+  it('offers pane deletion for sleeping and awake herdr sessions only', () => {
+    for (const state of ['sleeping', 'idle']) {
+      const items = projectNodeMenuItems(node('herdr', state));
+      expect(items.find((item) => item.label === 'Xoá phiên…')).toMatchObject({
+        danger: true,
+        action: { kind: 'projectNodeAction', action: 'closeHerdr' },
+      });
+    }
+
+    expect(projectNodeMenuItems(node('omp', 'idle')).some((item) => item.label === 'Xoá phiên…')).toBe(false);
   });
 });
 
@@ -326,6 +352,7 @@ describe('herdrMenuItems', () => {
       'Sao chép màn hình',
       'Sao chép thư mục',
       'Sao chép pane id',
+      'Xoá phiên…',
     ]);
   });
 
@@ -425,6 +452,7 @@ describe('work item actions in the agent menu', () => {
       'Sao chép màn hình',
       'Sao chép thư mục',
       'Sao chép pane id',
+      'Xoá phiên…',
     ]);
   });
 
@@ -713,6 +741,11 @@ describe('company request builders and replay rules', () => {
       type: 'companySessionInfoRequest',
       requestId: 'r2',
       sessionId: 's1',
+    });
+    expect(herdrClose('r5', 'p1')).toEqual({
+      type: 'herdrClose',
+      requestId: 'r5',
+      paneId: 'p1',
     });
     expect(herdrRename('r3', 'p1', 'builder')).toEqual({
       type: 'herdrRename',
