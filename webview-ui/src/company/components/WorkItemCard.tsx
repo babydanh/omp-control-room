@@ -13,7 +13,6 @@ import { conflictText, judgeChipFor } from '../workItemReviewView.js';
 import {
   blockerChip,
   blockerSentence,
-  priorityBadge,
   repoShortName,
   statusWordVi,
   workItemInterruptedNote,
@@ -38,7 +37,6 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
     onMenu,
   );
   const updated = relativeTimeVi(card.updatedAt, now);
-  const badge = priorityBadge(card.priority);
   const chip = blockerChip(card);
   const sentence = blockerSentence(card.blocker);
   const repoName = card.repo === null ? '' : repoShortName(card.repo);
@@ -63,14 +61,6 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
         <span className="shrink-0 tabular-nums" data-testid="work-item-sequence">
           #{card.sequence}
         </span>
-        {badge !== null && (
-          <span
-            data-testid="work-item-priority"
-            className={`shrink-0 rounded-full bg-well px-1.5 font-medium ${badge === 'P0' ? 'text-danger' : 'text-warning'}`}
-          >
-            {badge}
-          </span>
-        )}
       </span>
       {chip !== null && (
         <span className="flex min-w-0 flex-col items-start gap-0.5">

@@ -236,13 +236,6 @@ export function isOpenWorkItem(status: WorkItemStatus): boolean {
   return OPEN_STATUSES.includes(status);
 }
 
-/** The badge a card shows for a priority: P0 and P1 only. P2 and P3 are left plain. */
-export function priorityBadge(priority: number): 'P0' | 'P1' | null {
-  if (priority === 0) return 'P0';
-  if (priority === 1) return 'P1';
-  return null;
-}
-
 /** A chip a card shows: its words and how loud they are. */
 export interface WorkItemChip {
   text: string;

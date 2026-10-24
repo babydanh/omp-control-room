@@ -13,7 +13,6 @@ import {
   dependencyRefusal,
   dependencyRefusalText,
   isOpenWorkItem,
-  priorityBadge,
   queueOrder,
   statusWordVi,
   waitingOn,
@@ -36,15 +35,6 @@ function item(overrides: Pick<WorkItem, 'id'> & Partial<WorkItem>): WorkItem {
     ...overrides,
   };
 }
-
-describe('priorityBadge', () => {
-  it('badges only P0 and P1; P2 and P3 stay plain', () => {
-    expect(priorityBadge(0)).toBe('P0');
-    expect(priorityBadge(1)).toBe('P1');
-    expect(priorityBadge(2)).toBeNull();
-    expect(priorityBadge(3)).toBeNull();
-  });
-});
 
 describe('blockerChip', () => {
   it('returns no chip when nothing holds the item', () => {

@@ -171,10 +171,10 @@ export interface WorkItemRoster {
   /** Hibernated sessions herdr keeps, each in its pane. Absent = none. */
   sleeping?(): readonly { readonly paneId: string; readonly cwd?: string }[];
   /**
-   * Opens an interactive Claude Code or agy agent in a new herdr tab in `cwd` and resolves with its
-   * pane, once the roster lists it. Absent = herdr cannot open one, and the CLI runs headless.
+   * Opens an interactive agent (omp, Claude Code, agy) in a new herdr tab in `cwd` and resolves with
+   * its pane, once the roster lists it. Absent = herdr cannot open one, and the board runs it instead.
    */
-  startAgent?(input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly args: readonly string[] }): Promise<string>;
+  startAgent?(input: { readonly cwd: string; readonly kind: 'omp' | 'claude' | 'agy'; readonly name: string; readonly args: readonly string[] }): Promise<string>;
 }
 
 /** One omp session, as far as work items care. */
@@ -1462,40 +1462,48 @@ export class WorkItemService {
         this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Tự chọn: ${cli}.`));
       }
     } else if (decision.kind === 'open') {
-      // Compact squad items and items the user filed themselves use board chat sessions: the item is
-      // the whole brief, so no contract stands behind the session (a role session refuses any prompt
-      // without one). Editing items open in their own worktree; read-only items stay in the repo and
-      // can reuse its role session. No herdr pane is taken: its model is unknown.
+      // Compact squad items and items the user filed themselves run like the user's own sessions: an
+      // omp agent in its own herdr tab, which the user watches there and which outlives a board
+      // restart. Without herdr they use board chat sessions: the item is the whole brief, so no
+      // contract stands behind the session (a role session refuses any prompt without one). Editing
+      // items open in their own worktree; read-only items stay in the repo.
       const compactItem = item.assignee.kind === 'new-session' &&
         item.squadRunId !== undefined &&
         this.ports.isCompactSquadProposal?.(item.squadRunId) === true;
       const chatItem = compactItem || item.squadRunId === undefined;
       const cwd = decision.isolate ? await this.isolatedCheckout(item, decision.cwd) : decision.cwd;
       if (cwd === undefined) return;
-      let sessionId: string;
-      try {
-        sessionId = await this.ports.sessions.openChat({
-          cwd,
-          role: chatItem ? 'chat' : decision.role,
-          workstreamKey: squadWorkstreamKey(decision.role, cwd),
-        });
-      } catch (error) {
-        // A full omp runner pool is temporary: the item waits and the next pass tries it again.
-        if (error instanceof CompanyError && error.code === 'company_pool_full') {
-          this.hold(item, { kind: 'pool_full' });
+      const paneId = chatItem ? await this.openAgentPane(item, 'omp', cwd, false) : undefined;
+      if (paneId === null) return;
+      if (paneId !== undefined) {
+        item.assignee = { kind: 'herdr', paneId };
+        this.pushEvent(item, makeEvent(this.iso(), 'assigned', `Mở omp trong tab herdr ${paneId} (${checkoutName(cwd)}).`));
+      } else {
+        let sessionId: string;
+        try {
+          sessionId = await this.ports.sessions.openChat({
+            cwd,
+            role: chatItem ? 'chat' : decision.role,
+            workstreamKey: squadWorkstreamKey(decision.role, cwd),
+          });
+        } catch (error) {
+          // A full omp runner pool is temporary: the item waits and the next pass tries it again.
+          if (error instanceof CompanyError && error.code === 'company_pool_full') {
+            this.hold(item, { kind: 'pool_full' });
+            return;
+          }
+          this.fail(item, WORK_ITEM_REASON.openFailed, describe(error));
           return;
         }
-        this.fail(item, WORK_ITEM_REASON.openFailed, describe(error));
-        return;
+        this.recordSquadSession(sessionId, decision.cwd);
+        item.assignee = { kind: 'session', sessionId };
+        const message = compactItem
+          ? `Phiên omp vai ${decision.role} trong ${checkoutName(cwd)} (dùng lại phiên rảnh hoặc đang đậu nếu có).`
+          : auto
+            ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
+            : 'Mở phiên omp mới cho việc này.';
+        this.pushEvent(item, makeEvent(this.iso(), 'assigned', message));
       }
-      this.recordSquadSession(sessionId, decision.cwd);
-      item.assignee = { kind: 'session', sessionId };
-      const message = compactItem
-        ? `Phiên omp vai ${decision.role} trong ${checkoutName(cwd)} (dùng lại phiên rảnh hoặc đang đậu nếu có).`
-        : auto
-          ? `Tự chọn: mở phiên omp mới trong ${checkoutName(decision.cwd)}.`
-          : 'Mở phiên omp mới cho việc này.';
-      this.pushEvent(item, makeEvent(this.iso(), 'assigned', message));
     } else if (auto) {
       item.assignee = normalizeAssignee(decision.member.assignee);
       this.pushEvent(
@@ -2029,13 +2037,13 @@ export class WorkItemService {
   }
 
   /**
-   * Opens the item's Claude Code or agy agent in its own herdr tab: the pane id, undefined when herdr
-   * cannot open one (the CLI then runs headless), or null when the open failed and failed the item.
+   * Opens the item's agent (omp, Claude Code or agy) in its own herdr tab: the pane id, undefined when
+   * herdr cannot open one (the board then runs it), or null when the open failed and failed the item.
    * A read-only item's Claude starts in plan mode; an editing one in the folder's Claude permission.
    */
   private async openAgentPane(
     item: StoredWorkItem,
-    kind: 'claude' | 'agy',
+    kind: 'omp' | 'claude' | 'agy',
     cwd: string,
     readOnly: boolean,
   ): Promise<string | undefined | null> {

@@ -179,6 +179,22 @@ describe('Claude Code in herdr', () => {
     expect(itemOf(f, id)).toMatchObject({ status: 'failed', reason: WORK_ITEM_REASON.agentPaneFailed });
     expect(f.claude.starts).toHaveLength(0);
   });
+
+  it('opens a new-session item as an omp tab in herdr in its worktree, like the user\'s own sessions', async () => {
+    const herdr = herdrRoster();
+    const f = new Fixture(null, herdr.roster);
+    await f.service.load();
+    const id = await f.service.create({
+      requestId: randomUUID(),
+      text: 'Sửa API',
+      assignee: { kind: 'new-session' },
+      repo: REPO,
+    });
+    await settle();
+    expect(herdr.starts).toEqual([{ cwd: worktreeOf(id), kind: 'omp', name: `omp-${id.slice(0, 8)}`, args: [] }]);
+    expect(itemOf(f, id)).toMatchObject({ status: 'running', assignee: { kind: 'herdr', paneId: 'wA:p1' } });
+    expect(herdr.prompts[0]?.text).toContain('Sửa API');
+  });
 });
 
 describe('Claude Code runs: start and end', () => {

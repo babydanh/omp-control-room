@@ -249,7 +249,7 @@ export interface HerdrLink {
 /** What a new interactive agent tab runs. */
 export interface HerdrAgentStart {
   readonly cwd: string;
-  readonly kind: 'claude' | 'agy';
+  readonly kind: 'omp' | 'claude' | 'agy';
   readonly name: string;
   readonly args?: readonly string[];
   readonly prompt?: string;
@@ -612,17 +612,23 @@ class HerdrLinkImpl implements HerdrLink {
     const created = await this.call('tab.create', { cwd: input.cwd, label: input.name, focus: false });
     const paneId = nonEmptyString(jsonField(jsonField(created, 'root_pane'), 'pane_id'));
     if (paneId === undefined) throw new HerdrError('invalid_request', 'herdr không trả về pane của tab mới.');
-    await this.call(
-      'agent.start',
-      {
-        name: input.name,
-        kind: input.kind,
-        pane_id: paneId,
-        args: [...(input.args ?? [])],
-        timeout_ms: AGENT_START_TIMEOUT_MS,
-      },
-      AGENT_START_TIMEOUT_MS + REQUEST_TIMEOUT_MS,
-    );
+    try {
+      await this.call(
+        'agent.start',
+        {
+          name: input.name,
+          kind: input.kind,
+          pane_id: paneId,
+          args: [...(input.args ?? [])],
+          timeout_ms: AGENT_START_TIMEOUT_MS,
+        },
+        AGENT_START_TIMEOUT_MS + REQUEST_TIMEOUT_MS,
+      );
+    } catch (error) {
+      // An agent that never came up leaves no empty shell tab behind.
+      await this.call('pane.close', { pane_id: paneId }).catch(() => undefined);
+      throw error;
+    }
     // The roster lists the pane before this resolves, so a caller that assigns work to it sees it.
     if (this.running) await this.refresh(this.generation);
     if (input.prompt !== undefined) await this.prompt(paneId, input.prompt);
