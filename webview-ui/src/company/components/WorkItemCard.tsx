@@ -1,17 +1,16 @@
 /**
  * WorkItemCard: one work item on the board. The card reads what the server holds for the item:
- * its heading, who holds it, why it waits, and where a queued item stands. A click opens the
- * drawer on the item, which carries the actions.
+ * its heading, who holds it and in which repo, why it waits, and where a queued item stands. Its
+ * folder, role, areas and squad stay in the drawer, so a card is a few words, not a row of tags.
+ * A click opens the drawer on the item, which carries the actions.
  */
 
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { relativeTimeVi } from '../agentSidebarView.js';
 import type { BoardWorkItem } from '../boardView.js';
-import { companyRoleLabel } from '../roleProfiles.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { conflictText, judgeChipFor } from '../workItemReviewView.js';
 import {
-  areaChipsOf,
   blockerChip,
   blockerSentence,
   priorityBadge,
@@ -21,7 +20,6 @@ import {
   workItemKey,
   workItemProgressLine,
 } from '../workItemView.js';
-import { FolderTag } from './FolderTag.js';
 import { WorkItemReviewChips } from './WorkItemReviewChips.js';
 
 export interface WorkItemCardProps {
@@ -44,7 +42,6 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
   const chip = blockerChip(card);
   const sentence = blockerSentence(card.blocker);
   const repoName = card.repo === null ? '' : repoShortName(card.repo);
-  const areas = areaChipsOf(card.areas);
   const needsAttention = card.status === 'needs_input' || card.status === 'failed';
   const progress = workItemProgressLine(card);
   const interrupted = workItemInterruptedNote(card);
@@ -101,7 +98,6 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
       <span className="line-clamp-2 break-normal text-sm font-medium leading-[1.3] text-text">
         {card.head === '' ? 'Việc chưa có nội dung' : card.head}
       </span>
-      {card.folder !== null && <FolderTag identity={card.folder} />}
       <span className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-2xs text-text-muted">
         <span className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5 text-text">
           {card.assignee}
@@ -114,32 +110,6 @@ export function WorkItemCard({ card, index, now, selected, onOpen, onMenu }: Wor
           >
             {repoName}
           </span>
-        )}
-        {card.role !== null && (
-          <span data-testid="work-item-role" className="shrink-0 rounded-full bg-well px-1.5">
-            {companyRoleLabel(card.role)}
-          </span>
-        )}
-        {card.agent !== null && card.agent !== '' && (
-          <span
-            data-testid="work-item-agent"
-            className="min-w-0 max-w-full truncate rounded-full bg-well px-1.5"
-          >
-            {card.agent}
-          </span>
-        )}
-        {areas.shown.length > 0 && (
-          <span data-testid="work-item-areas" className="flex min-w-0 max-w-full items-center gap-1">
-            {areas.shown.map((area) => (
-              <span key={area} className="min-w-0 truncate rounded-full bg-well px-1.5">
-                {area}
-              </span>
-            ))}
-            {areas.more > 0 && <span className="shrink-0">+{areas.more}</span>}
-          </span>
-        )}
-        {card.squadRunId !== null && (
-          <span className="shrink-0 rounded-full bg-well px-1.5 text-text">Đội</span>
         )}
         {updated !== null && <span className="shrink-0">{updated}</span>}
       </span>

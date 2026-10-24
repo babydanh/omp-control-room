@@ -5,7 +5,6 @@ import { assigneeKeyOf,AUTO_ASSIGNEE } from '../src/company/assigneeOptions.js';
 import { workItemAssign, workItemCreate } from '../src/company/companyMessages.js';
 import { applyCompanyMessage, emptyCompanyState } from '../src/company/companyState.js';
 import {
-  areaChipsOf,
   assigneeLabel,
   AUTO_ASSIGNEE_LABEL,
   blockerSentence,
@@ -79,20 +78,6 @@ describe('normalizeAreas', () => {
     expect(kept).toHaveLength(WORK_ITEM_AREAS_MAX);
     expect(kept[0]).toBe('area0');
     expect(kept.at(-1)).toBe(`area${WORK_ITEM_AREAS_MAX - 1}`);
-  });
-});
-
-describe('areaChipsOf', () => {
-  it('shows the first two areas and counts the rest', () => {
-    expect(areaChipsOf(['auth', 'billing', 'ui'])).toEqual({
-      shown: ['auth', 'billing'],
-      more: 1,
-    });
-  });
-
-  it('counts nothing more when two or fewer areas are given', () => {
-    expect(areaChipsOf(['auth'])).toEqual({ shown: ['auth'], more: 0 });
-    expect(areaChipsOf([])).toEqual({ shown: [], more: 0 });
   });
 });
 

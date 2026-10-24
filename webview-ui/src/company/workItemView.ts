@@ -87,9 +87,6 @@ export const WORK_ITEM_ROLES: readonly CompanyRole[] = ['chat', 'worker', 'qa', 
 /** Longest list of code areas one work item carries. */
 export const WORK_ITEM_AREAS_MAX = 8;
 
-/** How many area chips a card shows before it counts the rest as `+n`. */
-export const WORK_ITEM_AREA_CHIPS = 2;
-
 const LANE_BY_STATUS: Readonly<Record<WorkItemStatus, CompanyLaneId>> = {
   queued: 'ready',
   running: 'running',
@@ -357,14 +354,6 @@ export function normalizeAreas(values: readonly string[]): string[] {
     if (areas.length === WORK_ITEM_AREAS_MAX) break;
   }
   return areas;
-}
-
-/** The area chips a card shows: the first few, and how many more follow them. */
-export function areaChipsOf(areas: readonly string[]): { shown: string[]; more: number } {
-  return {
-    shown: areas.slice(0, WORK_ITEM_AREA_CHIPS),
-    more: Math.max(0, areas.length - WORK_ITEM_AREA_CHIPS),
-  };
 }
 
 /**
