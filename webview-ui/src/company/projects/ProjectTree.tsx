@@ -234,9 +234,6 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
         className="group flex min-w-0 items-center gap-1 rounded-(--company-radius-sm) hover:bg-hover"
         style={{ paddingLeft: `${depth * 12}px` }}
       >
-        {children.length > 0 ? (
-          <button type="button" aria-label={isCollapsed ? 'Mở rộng' : 'Thu gọn'} aria-expanded={!isCollapsed} onClick={() => onToggleCollapse(node.id)} className="touch-target size-6 shrink-0 text-base text-text-muted">{isCollapsed ? '›' : '⌄'}</button>
-        ) : <span className="w-6 shrink-0" />}
         <button
           ref={rowRef}
           aria-current={selected ? 'true' : undefined}
@@ -244,10 +241,18 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           aria-label={`${node.kind}: ${node.name}`}
           title={isSession ? undefined : node.path ?? node.name}
           onClick={() => {
-            if (node.kind === 'project') props.onSelectProject(node.id);
-            else if (isSession) props.onOpenSession(node, branch);
+            // No chevron column (it took a fixed 24px per row): the row name toggles. A project selects on the
+            // first click and collapses when clicked again while selected.
+            if (node.kind === 'project') {
+              if (props.selectedProjectId === node.id && children.length > 0) onToggleCollapse(node.id);
+              else {
+                props.onSelectProject(node.id);
+                if (isCollapsed) onToggleCollapse(node.id);
+              }
+            } else if (isSession) props.onOpenSession(node, branch);
             else onToggleCollapse(node.id);
           }}
+          aria-expanded={children.length > 0 && !isSession ? !isCollapsed : undefined}
           {...menu}
           {...hover.bind}
           className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} py-0.5`}
@@ -312,7 +317,8 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           </button>
         )}
       </div>
-      {!isCollapsed && children.map((child) => (
+      {/* A session's sub-agents always show: its row opens the session, so it has no collapse gesture left. */}
+      {(!isCollapsed || isSession) && children.map((child) => (
         <ProjectTreeRow key={child.node.id} branch={child} depth={depth + 1} collapsed={collapsed} onToggleCollapse={onToggleCollapse} onMove={onMove} {...props} />
       ))}
       {hover.anchor !== null && (
