@@ -127,6 +127,7 @@ export function useVoiceInput(onText: (text: string) => void, onError: (message:
       const body = (await response.json()) as { text?: unknown };
       const text = typeof body.text === 'string' ? body.text.trim() : '';
       if (text !== '') handlers.current.onText(text);
+      else handlers.current.onError('Không nghe ra chữ nào: bấm ▾ cạnh 🎤 xem đúng mic chưa, nói gần mic rồi thử lại.');
     } catch (error) {
       handlers.current.onError(error instanceof Error ? error.message : 'Không chép được giọng nói.');
     } finally {

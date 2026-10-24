@@ -68,5 +68,8 @@ describe('spokenText', () => {
       { text: ' rồi gửi đi', no_speech_prob: 0.02 },
     ] })).toBe('thêm nút đăng ký kênh ở trang chủ rồi gửi đi');
     expect(spokenText({ text: ' chỉ có chữ ' })).toBe('chỉ có chữ');
+    // Silence with the vocabulary prompt: Groq returned the prompt's first words.
+    expect(spokenText({ segments: [{ text: ' Lập trình', no_speech_prob: 0 }] })).toBe('');
+    expect(spokenText({ segments: [{ text: ' Lập trình lại màn đăng nhập', no_speech_prob: 0 }] })).toBe('Lập trình lại màn đăng nhập');
   });
 });

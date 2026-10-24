@@ -62,9 +62,13 @@ export function registerVoiceRoutes(app: FastifyInstance, options: VoiceRoutesOp
       if (key === undefined) return reply.code(503).send({ error: VOICE_NO_KEY_REASON });
       try {
         const text = await transcribe(audio, request.headers['content-type'] ?? 'audio/webm', key);
+        // Only sizes are logged: the words are the user's.
+        request.log.info({ audioBytes: audio.length, textChars: text.length }, 'voice transcribed');
         return reply.send({ text });
       } catch (error) {
-        return reply.code(502).send({ error: error instanceof Error ? error.message : 'Không chép được giọng nói.' });
+        const reason = error instanceof Error ? error.message : 'Không chép được giọng nói.';
+        request.log.warn({ audioBytes: audio.length, reason }, 'voice transcribe failed');
+        return reply.code(502).send({ error: reason });
       }
     });
 
@@ -106,6 +110,9 @@ async function transcribeWithGroq(audio: Buffer, contentType: string, key: strin
   // Segments carry no_speech_prob: Whisper writes a stock phrase ("Hãy subscribe cho kênh…") over silence.
   form.append('response_format', 'verbose_json');
   form.append('temperature', '0');
+  // Whisper writes English dev words said in a Vietnamese sentence by sound ("commit" → "cầm mít");
+  // a prompt naming them steers it to the spelling a developer means.
+  form.append('prompt', WHISPER_VOCABULARY);
   const response = await fetch(GROQ_TRANSCRIBE_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key}` },
@@ -120,6 +127,9 @@ async function transcribeWithGroq(audio: Buffer, contentType: string, key: strin
   return spokenText(await response.json());
 }
 
+const WHISPER_VOCABULARY =
+  'Lập trình: commit, push, merge, rebase, branch, worktree, pull request, deploy, staging, production, repo, Board, agent, omp, Claude, API, backend, frontend, component, test, build, bug, fix, refactor.';
+
 /** Above this, Whisper itself judges a segment to hold no speech. */
 const NO_SPEECH_LIMIT = 0.5;
 /**
@@ -132,6 +142,8 @@ const SILENCE_OUTROS: readonly RegExp[] = [
   /^.{0,20}(để )?(không|đừng) bỏ lỡ những video.{0,30}$/iu,
   /^cảm ơn các bạn đã (theo dõi|xem|lắng nghe).{0,30}$/iu,
   /^(subtitles by|phụ đề bởi).{0,40}$/iu,
+  // Over silence Whisper echoes the start of the vocabulary prompt (measured: " Lập trình").
+  /^lập trình[\s:.,]*([a-z ,.-]{0,120})$/iu,
 ];
 
 /**
