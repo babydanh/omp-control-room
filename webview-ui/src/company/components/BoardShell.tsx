@@ -925,7 +925,7 @@ export function BoardShell({ client }: BoardShellProps) {
           />
         </div>
       </TerminalPreviewProvider>
-      {!composerHidden && <PromptComposer client={client} />}
+      {!composerHidden && <PromptComposer client={client} projectFolders={ledgerFolders} />}
       </div>
       </>
       ) : activePage === 'changes' ? (

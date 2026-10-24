@@ -67,7 +67,7 @@ import { canStartSquad, type SquadStartVerdict } from '../squadView.js';
 import { useCompanyState } from '../useCompanyState.js';
 import { usePromptImages } from '../usePromptImages.js';
 import { workItemsOf } from '../workItemView.js';
-import { folderLabel, folderLabelFor } from '../workspaces.js';
+import { composerFolderChoices, folderLabelFor } from '../workspaces.js';
 import { ComposerSendMenu } from './ComposerSendMenu.js';
 import { OmpSessionPicker } from './OmpSessionPicker.js';
 import { CreateWorkDialog } from './WorkDialogHost.js';
@@ -100,6 +100,8 @@ interface CompletionRow {
 
 export interface PromptComposerProps {
   client: CompanyClient;
+  /** The Project tree's folders: new work can go to any of them, opened or not yet. */
+  projectFolders: readonly { path: string; name?: string }[];
 }
 
 /** One line's height, the padding and border around it, and the height the text needs. */
@@ -139,7 +141,7 @@ function fitTextarea(el: HTMLTextAreaElement | null, savedPx: number | null): vo
   el.style.height = `${composerInputHeight(fitPx, rowPx, chromePx, savedPx)}px`;
 }
 
-export function PromptComposer({ client }: PromptComposerProps) {
+export function PromptComposer({ client, projectFolders }: PromptComposerProps) {
   const state = useCompanyState(client);
   const draft = state.prompt;
   const [notice, setNotice] = useState<string | null>(null);
@@ -167,11 +169,19 @@ export function PromptComposer({ client }: PromptComposerProps) {
   // An image still saving has no path in the draft yet: sending now would leave it out.
   const busy = draft.pendingSubmit !== null || herdrRequest !== null || images.saving > 0;
   const blocker = promptBlockReason(draft);
-  // The folder a new session or company prompt goes to. In all mode the composer names it.
+  // The folder a new session, squad or company prompt goes to. Any Project folder can be picked.
   const focus = focusFolder(state);
-  const pickerFolders = showsAllFolders(state)
-    ? (state.workspaces ?? []).filter((entry) => entry.open)
-    : [];
+  const pickerFolders = composerFolderChoices(state.workspaces, projectFolders);
+  // A folder the board has not opened yet is opened first; the view mode the user had stays.
+  const pickFolder = (path: string): void => {
+    if (pickerFolders.find((entry) => entry.path === path)?.open !== false) {
+      client.setFocusFolder(path);
+      return;
+    }
+    const wasAll = showsAllFolders(state);
+    client.openWorkspace(path);
+    if (wasAll) client.setViewMode('all');
+  };
   // Until the server's folder list arrives, a message with no session has no folder to go to.
   const folderLoading = folderListLoading(state);
 
@@ -642,13 +652,13 @@ export function PromptComposer({ client }: PromptComposerProps) {
             aria-label="Thư mục nhận việc mới"
             title={`Thư mục nhận việc mới: ${folderLabelFor(state.workspaces, focus)}`}
             value={focus}
-            onChange={(event) => client.setFocusFolder(event.target.value)}
+            onChange={(event) => pickFolder(event.target.value)}
             data-testid="prompt-folder"
             className="min-w-0 max-w-[160px] shrink cursor-pointer truncate rounded-(--company-radius-sm) bg-transparent px-1 text-2xs text-text-muted hover:bg-hover"
           >
             {pickerFolders.map((entry) => (
               <option key={entry.path} value={entry.path} className="bg-raised text-text">
-                {folderLabel(entry)}
+                {entry.label}
               </option>
             ))}
           </select>

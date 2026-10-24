@@ -11,7 +11,7 @@ import {
   EMPTY_SELECTION,
   type TerminalView,
 } from '../src/company/companyState.js';
-import { activeWorkspace, folderLabel, workspaceActivity } from '../src/company/workspaces.js';
+import { activeWorkspace, composerFolderChoices, folderLabel, workspaceActivity } from '../src/company/workspaces.js';
 import type { MessageTransport } from '../src/transport/types.js';
 import { session, snapshot, stateFrom } from './companyFixtures.js';
 
@@ -320,5 +320,21 @@ describe('choosing a session in another folder through the client', () => {
     expect(handle.ok).toBe(false);
     expect(state.pendingWorkspaceSelection).toBeNull();
     expect(state.workspaceSelectionNotice).not.toBeNull();
+  });
+});
+
+describe('composerFolderChoices', () => {
+  it('offers the open folders, then every Project folder not open yet, each once', () => {
+    const closed = { ...folder(KHAC, false), open: false };
+    const choices = composerFolderChoices([folder(DU_AN, true), closed], [
+      { path: 'd:/du-an/', name: 'Đồ án' },
+      { path: 'V:\\pixel-agents', name: 'Board' },
+      { path: KHAC },
+    ]);
+    expect(choices).toEqual([
+      { path: DU_AN, label: 'du-an', open: true },
+      { path: 'V:\\pixel-agents', label: 'Board', open: false },
+      { path: KHAC, label: 'khac', open: false },
+    ]);
   });
 });

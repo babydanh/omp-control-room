@@ -40,3 +40,34 @@ export function workspaceActivity(entry: CompanyWorkspaceEntry): string {
   if (entry.waiting > 0) parts.push(`chờ ${entry.waiting}`);
   return parts.length === 0 ? 'rảnh' : parts.join(' · ');
 }
+
+/** One folder the composer can send new work to; `open` says the board already has it open. */
+export interface ComposerFolderChoice {
+  path: string;
+  label: string;
+  open: boolean;
+}
+
+/**
+ * The folders new work can go to: every folder the board has open, then every Project folder
+ * it has not opened yet, each once (paths compared without case or trailing slash).
+ */
+export function composerFolderChoices(
+  workspaces: readonly CompanyWorkspaceEntry[] | null,
+  projectFolders: readonly { path: string; name?: string }[],
+): ComposerFolderChoice[] {
+  const key = (path: string): string => path.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+  const choices: ComposerFolderChoice[] = [];
+  const seen = new Set<string>();
+  for (const entry of workspaces ?? []) {
+    if (!entry.open || seen.has(key(entry.path))) continue;
+    seen.add(key(entry.path));
+    choices.push({ path: entry.path, label: folderLabel(entry), open: true });
+  }
+  for (const folder of projectFolders) {
+    if (seen.has(key(folder.path))) continue;
+    seen.add(key(folder.path));
+    choices.push({ path: folder.path, label: folderLabel(folder), open: false });
+  }
+  return choices;
+}
