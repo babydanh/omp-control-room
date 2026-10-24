@@ -3,19 +3,19 @@ import { randomUUID } from 'node:crypto';
 import type { SubmitPromptInput } from '../../../core/src/company.js';
 import type { ProjectPrepareScript, ProjectSettingsValues } from '../../../core/src/messages.js';
 import type { CompanyCoordinator } from '../company/companyCoordinator.js';
-import type { WorkItemService } from '../company/workItems/workItemService.js';
+import type { HerdrLink } from '../herdr/herdrLink.js';
 import type { ProcessRunner } from '../ledger/processRunner.js';
-import type { ProjectSessionLaunch, ProjectSessionServices } from './newSession.js';
+import type { ProjectSessionServices } from './newSession.js';
 
 type SessionCoordinator = Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt'>;
-type SessionWorkItemService = Pick<WorkItemService, 'create' | 'get'>;
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 
 export interface ProjectSessionRuntimeOptions {
   readonly coordinatorFor: (folder: string) => Promise<SessionCoordinator>;
-  readonly workItemServiceFor: (folder: string) => Promise<SessionWorkItemService>;
+  /** Opens Claude and agy as interactive agents in herdr, where the user watches and types. */
+  readonly herdr: Pick<HerdrLink, 'startAgent'>;
   readonly runProcess: ProcessRunner;
   readonly effectiveSettings: (nodeId: string) => Promise<ProjectSettingsValues>;
 }
@@ -80,35 +80,9 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
       await coordinator.submitPrompt(input);
       return sessionId;
     },
-    async startClaudeRun({ folder, cwd, prompt, inPlace }) {
-      return startWorkItem(await options.workItemServiceFor(folder), cwd, prompt, 'claude', inPlace);
+    async startAgent({ cwd, kind, name, prompt }) {
+      const text = prompt.trim();
+      return options.herdr.startAgent({ cwd, kind, name, ...(text === '' ? {} : { prompt: text }) });
     },
-    async startAgyRun({ folder, cwd, prompt, inPlace }) {
-      return startWorkItem(await options.workItemServiceFor(folder), cwd, prompt, 'agy', inPlace);
-    },
- 
-  };
-}
-
-async function startWorkItem(
-  service: SessionWorkItemService,
-  cwd: string,
-  prompt: string,
-  engine: 'claude' | 'agy',
-  inPlace: boolean,
-): Promise<ProjectSessionLaunch> {
-  const id = await service.create({
-    requestId: randomUUID(),
-    text: prompt,
-    assignee: { kind: engine },
-    repo: cwd,
-    role: 'worker',
-    inPlace,
-  });
-  const item = service.get(id);
-  if (item?.status === 'failed') throw new Error(item.reason ?? 'Không chạy được work item.');
-  return {
-    sessionId: engine === 'claude' ? item?.claudeRun?.sessionId ?? id : id,
-    ...(inPlace ? { checkout: cwd } : item?.worktree === undefined ? {} : { checkout: item.worktree.path }),
   };
 }

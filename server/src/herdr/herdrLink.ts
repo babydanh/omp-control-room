@@ -59,6 +59,8 @@ const OMP_PROCESS_PATTERN = /^omp(\.exe)?$/i;
 const REQUEST_TIMEOUT_MS = 5_000;
 const READ_TIMEOUT_MS = 15_000;
 const PROMPT_TIMEOUT_MS = 10_000;
+/** How long herdr may take to bring a new interactive agent (Claude, agy) to its prompt. */
+const AGENT_START_TIMEOUT_MS = 60_000;
 /** How long a prompt waits for an agent herdr just started or woke to accept it. */
 const PROMPT_READY_WAIT_MS = 90_000;
 const PROMPT_READY_RETRY_MS = 2_000;
@@ -236,6 +238,11 @@ export interface HerdrLink {
    */
   wake(paneId: string, prompt?: string): Promise<void>;
   close(paneId: string): Promise<void>;
+  /**
+   * Opens a new herdr tab in `cwd` and starts an interactive agent of `kind` in it, named `name`;
+   * types `prompt` once the agent is ready, when one is given. Resolves with the new pane's id.
+   */
+  startAgent(input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly prompt?: string }): Promise<string>;
 }
 
 export { isHerdrPaneId };
@@ -587,6 +594,22 @@ class HerdrLinkImpl implements HerdrLink {
     assertPaneId(paneId);
     await this.call('pane.close', { pane_id: paneId });
     if (this.running) this.scheduleRefresh();
+  }
+
+  async startAgent(input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly prompt?: string }): Promise<string> {
+    assertAgentName(input.name);
+    if (input.prompt !== undefined) assertPrompt(input.prompt);
+    const created = await this.call('tab.create', { cwd: input.cwd, label: input.name, focus: false });
+    const paneId = nonEmptyString(jsonField(jsonField(created, 'root_pane'), 'pane_id'));
+    if (paneId === undefined) throw new HerdrError('invalid_request', 'herdr không trả về pane của tab mới.');
+    await this.call(
+      'agent.start',
+      { name: input.name, kind: input.kind, pane_id: paneId, timeout_ms: AGENT_START_TIMEOUT_MS },
+      AGENT_START_TIMEOUT_MS + REQUEST_TIMEOUT_MS,
+    );
+    if (input.prompt !== undefined) await this.prompt(paneId, input.prompt);
+    if (this.running) this.scheduleRefresh();
+    return paneId;
   }
 
   async wake(paneId: string, prompt?: string): Promise<void> {

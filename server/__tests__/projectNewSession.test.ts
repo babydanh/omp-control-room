@@ -6,9 +6,8 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SubmitPromptInput } from '../../core/src/company.js';
-import type { ProjectSessionStartMessage, ProjectTreeNode, WorkItem } from '../../core/src/messages.js';
+import type { ProjectSessionStartMessage, ProjectTreeNode } from '../../core/src/messages.js';
 import type { CompanyCoordinator } from '../src/company/companyCoordinator.js';
-import type { WorkItemService } from '../src/company/workItems/workItemService.js';
 import { type ProjectSessionServices, startProjectSession } from '../src/projects/newSession.js';
 import { createProjectSessionRuntime } from '../src/projects/newSessionRuntime.js';
 import { createProjectSessionWorktree, taskSlug } from '../src/projects/projectSessionWorktree.js';
@@ -50,8 +49,7 @@ function createServices(overrides: Partial<ProjectSessionServices> = {}) {
       }
     },
     openChat: vi.fn(async () => 'omp-id'),
-    startClaudeRun: vi.fn(async () => ({ sessionId: 'claude-id', checkout: repo })),
-    startAgyRun: vi.fn(async () => ({ sessionId: 'agy-id', checkout: repo })),
+    startAgent: vi.fn(async ({ kind }: { kind: 'claude' | 'agy' }) => `${kind}-pane`),
     runSetupScript: vi.fn(async () => ({ code: 0, stderr: '' })),
     ...overrides,
   } satisfies ProjectSessionServices;
@@ -134,8 +132,8 @@ describe('project session start', () => {
 
   it.each([
     ['omp', 'omp-id', 'openChat'],
-    ['claude', 'claude-id', 'startClaudeRun'],
-    ['agy', 'agy-id', 'startAgyRun'],
+    ['claude', 'claude-pane', 'startAgent'],
+    ['agy', 'agy-pane', 'startAgent'],
   ] as const)('starts %s with the selected checkout cwd', async (engine, sessionId, runnerName) => {
     const services = createServices();
     const result = await startProjectSession(request(engine, 'shared'), deps(services));
@@ -144,12 +142,10 @@ describe('project session start', () => {
   });
   it('uses the exact checkout node selected in the tree', async () => {
     const checkout = path.join(root, 'repo.worktrees', 'branch');
-    const services = createServices({
-      startClaudeRun: vi.fn(async ({ cwd }) => ({ sessionId: 'claude-id', checkout: cwd })),
-    });
+    const services = createServices();
     const result = await startProjectSession(request('claude', 'shared', 'worktree'), deps(services));
-    expect(result).toMatchObject({ sessionId: 'claude-id', checkout });
-    expect(services.startClaudeRun).toHaveBeenCalledWith(expect.objectContaining({ cwd: checkout }));
+    expect(result).toMatchObject({ sessionId: 'claude-pane', checkout });
+    expect(services.startAgent).toHaveBeenCalledWith(expect.objectContaining({ cwd: checkout, kind: 'claude' }));
   });
 
   it('refuses a shared checkout at the protected main repository root', async () => {
@@ -177,18 +173,15 @@ describe('project session start', () => {
     await expect(startProjectSession(request('claude', 'shared', 'folder'), plainDeps)).rejects.toThrow('cần repo');
   });
 
-  it('adapts the coordinator and work-item service using their runtime contracts', async () => {
+  it('adapts the coordinator and herdr using their runtime contracts', async () => {
     const coordinator: Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt'> = {
       openNewChat: vi.fn(async () => 'board-session'),
       submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
     };
-    const workItems: Pick<WorkItemService, 'create' | 'get'> = {
-      create: vi.fn(async () => 'work-item-id'),
-      get: vi.fn(() => ({ id: 'work-item-id', claudeRun: { sessionId: 'claude-session' } }) as WorkItem),
-    };
+    const herdr = { startAgent: vi.fn(async () => 'wA:p9') };
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => coordinator),
-      workItemServiceFor: vi.fn(async () => workItems),
+      herdr,
       runProcess: vi.fn(async () => ({
         ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false,
       })),
@@ -204,58 +197,41 @@ describe('project session start', () => {
     }));
 
     const claude = await startProjectSession(request('claude', 'shared'), deps(runtime));
-    expect(claude.sessionId).toBe('claude-session');
-    expect(claude.checkout).toBe(repo);
-    expect(workItems.create).toHaveBeenCalledWith(expect.objectContaining({
-      repo,
-      assignee: { kind: 'claude' },
-      text: 'Hãy sửa lỗi đăng nhập.',
-      inPlace: true,
-    }));
+    expect(claude).toMatchObject({ sessionId: 'wA:p9', checkout: repo });
+    expect(herdr.startAgent).toHaveBeenCalledWith({
+      cwd: repo,
+      kind: 'claude',
+      name: 'claude-sua-loi-dang-nhap',
+      prompt: 'Hãy sửa lỗi đăng nhập.',
+    });
   });
 
-  it('opens an omp chat with no first prompt, while Claude and agy still need their task', async () => {
+  it('opens every engine with no first prompt: the user types into the session', async () => {
     const coordinator: Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt'> = {
       openNewChat: vi.fn(async () => 'board-session'),
       submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
     };
+    const herdr = { startAgent: vi.fn(async () => 'wA:p9') };
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => coordinator),
-      workItemServiceFor: vi.fn(async () => ({ create: vi.fn(), get: vi.fn() })),
+      herdr,
       runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
       effectiveSettings: async () => ({}),
     });
     const empty = (engine: ProjectSessionStartMessage['engine']) => ({ ...request(engine, 'shared'), initialPrompt: '  ' });
     await expect(startProjectSession(empty('omp'), deps(runtime))).resolves.toMatchObject({ ok: true, sessionId: 'board-session' });
     expect(coordinator.submitPrompt).not.toHaveBeenCalled();
-    await expect(startProjectSession(empty('claude'), deps(runtime))).rejects.toThrow('hãy ghi việc cần làm');
-    await expect(startProjectSession(empty('agy'), deps(runtime))).rejects.toThrow('hãy ghi việc cần làm');
+    await expect(startProjectSession(empty('claude'), deps(runtime))).resolves.toMatchObject({ ok: true, sessionId: 'wA:p9' });
+    await expect(startProjectSession(empty('agy'), deps(runtime))).resolves.toMatchObject({ ok: true, sessionId: 'wA:p9' });
+    expect(herdr.startAgent).toHaveBeenCalledWith({ cwd: repo, kind: 'agy', name: 'agy-sua-loi-dang-nhap' });
   });
 
-  it('lets Claude work items create the separate checkout and reports it when available', async () => {
-    const worktree = path.join(root, 'repo', '.worktrees', 'squad-12345678');
-    const workItems: Pick<WorkItemService, 'create' | 'get'> = {
-      create: vi.fn(async () => 'work-item-id'),
-      get: vi.fn(() => ({
-        id: 'work-item-id',
-        claudeRun: { sessionId: 'claude-session' },
-        worktree: { path: worktree, branch: 'squad-12345678' },
-      }) as WorkItem),
-    };
-    const runtime = createProjectSessionRuntime({
-      coordinatorFor: vi.fn(async () => ({
-        openNewChat: vi.fn(async () => ''),
-        submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
-      })),
-      workItemServiceFor: vi.fn(async () => workItems),
-      runProcess: vi.fn(async () => ({
-        ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false,
-      })),
-      effectiveSettings: async () => ({}),
-    });
-    const result = await startProjectSession(request('claude', 'separate'), deps(runtime));
-    expect(result).toMatchObject({ sessionId: 'claude-session', checkout: worktree });
-    expect(workItems.create).toHaveBeenCalledWith(expect.objectContaining({ repo, inPlace: false }));
+  it('makes a separate worktree for Claude as for omp, and starts the agent in it', async () => {
+    const services = createServices();
+    const result = await startProjectSession(request('claude', 'separate'), deps(services));
+    const worktree = path.join(root, 'repo.worktrees', 'sua-loi-dang-nhap');
+    expect(result).toMatchObject({ sessionId: 'claude-pane', checkout: worktree });
+    expect(services.startAgent).toHaveBeenCalledWith(expect.objectContaining({ cwd: worktree }));
   });
 
   it('uses the prepare script for the OMP worktree before opening the chat', async () => {

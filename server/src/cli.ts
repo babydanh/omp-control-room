@@ -360,6 +360,7 @@ async function main(): Promise<void> {
     company,
     ledger,
     runProcess,
+    herdr,
   });
   // Terminals for agents this server launches. Construction is cheap -- the
   // native module is resolved (and probed) lazily on first use, so a user who

@@ -32,8 +32,8 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
   const target = folderChoices.length > 0 ? folderChoices.find((folder) => folder.id === folderId) : requested;
   const candidateRepos = useMemo(() => getCandidateRepos(target, state.nodes), [target, state.nodes]);
   const [repoId, setRepoId] = useState(candidateRepos.length === 1 ? candidateRepos[0]?.id ?? '' : '');
-  // Claude and agy run as an assigned task: picking one asks for it before starting.
-  const [chosenEngine, setEngine] = useState<SessionEngine | null>(initialEngine === undefined || initialEngine === 'omp' ? null : initialEngine);
+  // The engine the menu asked for opens as soon as the folder's repos are known; Enter opens it too.
+  const chosenEngine: SessionEngine = initialEngine ?? 'omp';
   const [worktree, setWorktree] = useState<'separate' | 'shared'>('separate');
   const [taskName, setTaskName] = useState('');
   const [initialPrompt, setInitialPrompt] = useState('');
@@ -49,15 +49,9 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
   const reposKnown = state.treeComplete;
   const plainFolder = target?.kind === 'folder' && reposKnown && candidateRepos.length === 0;
   const workdir = plainFolder ? 'shared' : worktree;
-  // A folder with no repo runs only omp, even when the menu asked for Claude or agy.
-  const engine = plainFolder ? null : chosenEngine;
   const selectedRepo = candidateRepos.find((repo) => repo.id === repoId);
-  const shownTaskName = taskName.trim() || autoTaskName(engine ?? 'omp', initialPrompt);
-  const worktreePath = selectedRepo?.path === undefined
-    ? ''
-    : engine === null || engine === 'omp'
-      ? `${selectedRepo.path}.worktrees/${taskSlug(shownTaskName)}`
-      : `${selectedRepo.path}/.worktrees/squad-<mã việc>`;
+  const shownTaskName = taskName.trim() || autoTaskName(chosenEngine, initialPrompt);
+  const worktreePath = selectedRepo?.path === undefined ? '' : `${selectedRepo.path}.worktrees/${taskSlug(shownTaskName)}`;
   const result = requestId === null ? undefined : state.results[requestId];
   const pending = requestId !== null && state.pending[requestId] !== undefined;
   const reason = result?.type === 'projectSessionStartResult' && !result.ok
@@ -79,10 +73,6 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
   function start(choice: SessionEngine) {
     if (blocked || target === undefined) return;
     const text = initialPrompt.trim();
-    if (choice !== 'omp' && text === '') {
-      setEngine(choice);
-      return;
-    }
     setStartedEngine(choice);
     setRequestId(store.startSession({
       nodeId: target.kind === 'checkout' || selectedRepo === undefined ? target.id : selectedRepo.id,
@@ -93,17 +83,18 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
     }));
   }
 
-  // "Phiên mới · omp" from the menu: open it as soon as the folder's repos are known, once.
+  // "Phiên mới · omp/Claude/agy" from the menu: open it as soon as the folder's repos are known, once.
   const autoStarted = useRef(false);
   useEffect(() => {
-    if (initialEngine !== 'omp' || autoStarted.current || blocked) return;
+    if (initialEngine === undefined || autoStarted.current || blocked) return;
+    if (initialEngine !== 'omp' && plainFolder) return;
     autoStarted.current = true;
-    start('omp');
+    start(initialEngine);
   });
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    start(engine ?? 'omp');
+    start(chosenEngine);
   }
 
   return (
@@ -139,7 +130,7 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
               <button
                 key={choice.id}
                 type="button"
-                aria-pressed={engine === choice.id}
+                aria-pressed={chosenEngine === choice.id}
                 disabled={blocked || needsRepo}
                 title={needsRepo ? 'Thư mục này không phải repo git: Claude và agy cần repo.' : choice.hint}
                 onClick={() => start(choice.id)}
@@ -149,12 +140,6 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
             );
           })}
         </div>
-        {engine !== null && (
-          <label>
-            Việc giao cho {engine === 'claude' ? 'Claude' : 'agy'}
-            <textarea autoFocus value={initialPrompt} onChange={(event) => setInitialPrompt(event.target.value)} required rows={4} />
-          </label>
-        )}
         <details>
           <summary>Tuỳ chọn thêm</summary>
           <div className="project-session-dialog__more">
@@ -170,26 +155,16 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
               <input value={taskName} placeholder={shownTaskName} onChange={(event) => setTaskName(event.target.value)} maxLength={120} />
             </label>
             {workdir === 'separate' && <p className="project-session-dialog__path">Worktree sẽ tạo: <code>{worktreePath}</code></p>}
-            {engine === null && (
-              <label>
-                Prompt đầu cho omp (không bắt buộc)
-                <textarea value={initialPrompt} onChange={(event) => setInitialPrompt(event.target.value)} rows={3} />
-              </label>
-            )}
+            <label>
+              Prompt đầu (không bắt buộc)
+              <textarea value={initialPrompt} onChange={(event) => setInitialPrompt(event.target.value)} rows={3} />
+            </label>
           </div>
         </details>
         {plainFolder && <p className="project-session-dialog__path">Thư mục này không phải repo git: phiên omp chạy ngay trong <code>{target?.path}</code>.</p>}
         {reason && <p role="alert" className="project-session-dialog__error">{reason}</p>}
         {pending && <p role="status">Đang mở…</p>}
         {opened !== undefined && <p role="status">Đã mở phiên tại <code>{opened.checkout}</code></p>}
-        {engine !== null && (
-          <footer>
-            <button type="button" onClick={() => setEngine(null)}>Thôi</button>
-            <button type="submit" disabled={blocked || initialPrompt.trim() === ''}>
-              {pending ? 'Đang mở…' : `Giao cho ${engine === 'claude' ? 'Claude' : 'agy'}`}
-            </button>
-          </footer>
-        )}
       </form>
     </div>
   );
@@ -197,8 +172,8 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
 
 const ENGINES: readonly { readonly id: SessionEngine; readonly label: string; readonly hint: string }[] = [
   { id: 'omp', label: 'π omp', hint: 'Mở phiên omp ngay, gõ việc trong terminal' },
-  { id: 'claude', label: '✳ Claude', hint: 'Giao một việc cho Claude Code chạy' },
-  { id: 'agy', label: 'agy', hint: 'Giao một việc cho Antigravity chạy' },
+  { id: 'claude', label: '✳ Claude', hint: 'Mở Claude Code ngay trong một tab herdr, gõ việc trong đó' },
+  { id: 'agy', label: 'agy', hint: 'Mở Antigravity ngay trong một tab herdr, gõ việc trong đó' },
 ];
 
 /** Names the worktree when the user gives no name: the task's first words, else the tool and the time. */

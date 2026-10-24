@@ -48,6 +48,7 @@ function stubLink(overrides: Partial<HerdrLink> = {}): HerdrLink {
     info: vi.fn(async (): Promise<AgentInfo> => INFO),
     wake: vi.fn(async (): Promise<void> => undefined),
     watch: vi.fn((): void => undefined),
+    startAgent: vi.fn(async (): Promise<string> => 'wA:p9'),
     ...overrides,
   };
 }

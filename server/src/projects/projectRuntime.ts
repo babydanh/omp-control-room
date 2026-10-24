@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { ProjectPrepareScript } from '../../../core/src/messages.js';
 import type { CompanyWorkspaceRegistry } from '../company/workspaceRegistry.js';
+import type { HerdrLink } from '../herdr/herdrLink.js';
 import { ledgerPathKey } from '../ledger/ledgerPath.js';
 import type { LedgerService } from '../ledger/ledgerService.js';
 import type { ProcessRunner } from '../ledger/processRunner.js';
@@ -28,6 +29,8 @@ export interface ProjectRuntimeInput {
   readonly company: ProjectFolders;
   readonly ledger: LedgerService;
   readonly runProcess: ProcessRunner;
+  /** Opens Claude and agy sessions as interactive herdr agents. */
+  readonly herdr: Pick<HerdrLink, 'startAgent'>;
 }
 
 export interface ProjectRuntime {
@@ -45,7 +48,7 @@ export interface ProjectRuntime {
 
 /** Composition root of the Project tree: one store, one tree loader, every service wired to the real runtime. */
 export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime {
-  const { company, ledger, runProcess } = input;
+  const { company, ledger, runProcess, herdr } = input;
   const store = new ProjectStore();
   // Settings and worktree setup only need Project/group/folder nodes: skip the git scan.
   const loadTree = (): Promise<ProjectTreeSnapshot> =>
@@ -110,13 +113,7 @@ export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime
       }),
       session: createProjectSessionRuntime({
         coordinatorFor: async (folder) => (await company.ensure(folder)).coordinator,
-        workItemServiceFor: async (folder) => {
-          const workItems = (await company.ensure(folder)).workItems;
-          if (workItems === undefined) {
-            throw new LibraryUserError('Thư mục này đang do một board khác điều khiển; mở phiên từ board đó.');
-          }
-          return workItems;
-        },
+        herdr,
         runProcess,
         effectiveSettings: (nodeId) => resolveProjectSettings(nodeId, settingsDeps),
       }),

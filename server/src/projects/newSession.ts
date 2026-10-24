@@ -11,11 +11,6 @@ import { createProjectSessionWorktree } from './projectSessionWorktree.js';
 import type { ProjectTreeSnapshot } from './projectTree.js';
 import type { ProjectModuleDeps } from './services.js';
 
-export interface ProjectSessionLaunch {
-  readonly sessionId: string;
-  readonly checkout?: string;
-}
-
 export interface ProjectSessionServices {
   readonly effectiveSettings: (nodeId: string) => Promise<ProjectSettingsValues>;
   readonly runGit: (
@@ -25,8 +20,8 @@ export interface ProjectSessionServices {
     timeoutMs: number,
   ) => Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }>;
   readonly openChat: (input: { readonly folder: string; readonly cwd: string; readonly prompt: string }) => Promise<string>;
-  readonly startClaudeRun: (input: { readonly folder: string; readonly cwd: string; readonly prompt: string; readonly inPlace: boolean }) => Promise<ProjectSessionLaunch>;
-  readonly startAgyRun: (input: { readonly folder: string; readonly cwd: string; readonly prompt: string; readonly inPlace: boolean }) => Promise<ProjectSessionLaunch>;
+  /** Opens an interactive Claude or agy agent in a new herdr tab in `cwd`; resolves with its pane id. */
+  readonly startAgent: (input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly prompt: string }) => Promise<string>;
   readonly runSetupScript: (
     argv: readonly string[],
     cwd: string,
@@ -41,8 +36,7 @@ export async function startProjectSession(
   deps: ProjectModuleDeps<ProjectSessionServices>,
 ): Promise<ProjectSessionStartResultMessage> {
   if (request.taskName.trim() === '') throw new LibraryUserError('Hãy nhập tên việc.');
-  // omp opens a chat the user types into; Claude and agy run the prompt as their task.
-  if (request.engine !== 'omp' && !request.initialPrompt.trim()) throw new LibraryUserError('Claude và agy chạy theo việc giao: hãy ghi việc cần làm.');
+  // Every engine opens an interactive session the user types into; a first prompt is optional.
   const tree = await deps.loadTree();
   const node = tree.nodes.find((candidate) => candidate.id === request.nodeId);
   if (node === undefined) throw new LibraryUserError('Không tìm thấy thư mục hoặc repo đã chọn.');
@@ -63,21 +57,18 @@ export async function startProjectSession(
   const repoPath = selectedRepo === undefined ? folderPath : selectedRepo.path;
   if (repoPath === undefined) throw new LibraryUserError('Đường dẫn repo không hợp lệ.');
   const sharedCheckout = node.kind === 'checkout' ? node.path : repoPath;
-  const schedulerCreatesWorktree = request.engine !== 'omp' && request.worktree === 'separate';
-  const checkout = schedulerCreatesWorktree
-    ? repoPath
-    : request.worktree === 'shared'
-      ? sharedCheckout
-      : (await createProjectSessionWorktree({
-        repo: repoPath,
-        taskName: request.taskName,
-        run: deps.services.runGit,
-      })).path;
+  const checkout = request.worktree === 'shared'
+    ? sharedCheckout
+    : (await createProjectSessionWorktree({
+      repo: repoPath,
+      taskName: request.taskName,
+      run: deps.services.runGit,
+    })).path;
   if (checkout === undefined) throw new LibraryUserError('Đường dẫn checkout không hợp lệ.');
   if (request.worktree === 'shared' && isProtectedMainRepo(checkout)) {
     throw new LibraryUserError('Không thể dùng chung thư mục chính của Project_QuanLyGiaiDau. Hãy tạo worktree riêng.');
   }
-  if (request.worktree === 'separate' && request.engine === 'omp') {
+  if (request.worktree === 'separate') {
     const settings = await deps.services.effectiveSettings(folder.id);
     const script = settings.worktreePrepare;
     if (script !== undefined) {
@@ -89,21 +80,15 @@ export async function startProjectSession(
   }
 
   let sessionId: string;
-  let launchedCheckout: string | undefined;
   try {
-    if (request.engine === 'omp') {
-      sessionId = await deps.services.openChat({ folder: folderPath, cwd: checkout, prompt: request.initialPrompt });
-      launchedCheckout = checkout;
-    } else {
-      const launch = await (request.engine === 'claude' ? deps.services.startClaudeRun : deps.services.startAgyRun)({
-        folder: folderPath,
+    sessionId = request.engine === 'omp'
+      ? await deps.services.openChat({ folder: folderPath, cwd: checkout, prompt: request.initialPrompt })
+      : await deps.services.startAgent({
         cwd: checkout,
+        kind: request.engine,
+        name: agentName(request.engine, request.taskName),
         prompt: request.initialPrompt,
-        inPlace: request.worktree === 'shared',
       });
-      sessionId = launch.sessionId;
-      launchedCheckout = launch.checkout;
-    }
   } catch (error) {
     throw new LibraryUserError(error instanceof Error ? error.message : 'Không mở được phiên mới.');
   }
@@ -112,8 +97,15 @@ export async function startProjectSession(
     requestId: request.requestId,
     ok: true,
     sessionId,
-    ...(launchedCheckout === undefined ? {} : { checkout: launchedCheckout }),
+    checkout,
   };
+}
+
+/** A herdr agent name for the session: the engine and the task's first words, as herdr allows. */
+function agentName(engine: 'claude' | 'agy', taskName: string): string {
+  const slug = taskName.normalize('NFKD').replace(/[đĐ]/g, 'd').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return `${engine}-${slug}`.slice(0, 32).replace(/-+$/g, '');
 }
 
 function findFolder(node: ProjectTreeNode, tree: ProjectTreeSnapshot): ProjectTreeNode {
