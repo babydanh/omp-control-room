@@ -50,8 +50,11 @@ import {
   planComposerCommand,
   resumeListView,
   sendTargetLabel,
+  sleepingSendTarget,
+  sleepingTargetLabel,
   startNewChat,
   terminalLine,
+  wakeWithLine,
 } from '../composerRouting.js';
 import { sendMenuEntries, type SendMenuEntryId } from '../composerSendMenu.js';
 import { showsAllFolders } from '../folderIdentity.js';
@@ -173,9 +176,7 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
   const selectedModel = selectedSession?.requestedModel ?? state.selectedModel;
   const herdrTarget = herdrAgentFor(state.selection.herdrPaneId, state.herdr.agents);
   // A sleeping session picked on the board: its pane is closed, so a send wakes it with the line.
-  const sleepingTarget = herdrTarget === null
-    ? (state.herdrRoster.sleeping.find((session) => session.paneId === state.selection.herdrPaneId) ?? null)
-    : null;
+  const sleepingTarget = sleepingSendTarget(state.selection.herdrPaneId, herdrTarget, state.herdrRoster.sleeping);
   // An image still saving has no path in the draft yet: sending now would leave it out.
   const busy = draft.pendingSubmit !== null || herdrRequest !== null || images.saving > 0;
   const blocker = promptBlockReason(draft);
@@ -298,9 +299,8 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
   /** Wake a sleeping session with the draft as its first prompt; the draft clears once the server accepts. */
   const wakeWithPrompt = (session: { readonly paneId: string }) => {
     if (herdrRequest !== null) return;
-    const text = draft.text.trim();
-    if (text === '') return;
-    const handle = client.herdrWake(session.paneId, text);
+    const handle = wakeWithLine(client, session.paneId, draft.text);
+    if (handle === null) return;
     if (!handle.ok) {
       setNotice(failureNotice(handle, 'Chưa đánh thức được.'));
       return;
@@ -785,9 +785,7 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
       </div>
       <p className="mt-0.5 flex min-w-0 items-center gap-2 text-2xs text-text-muted">
         <span className="min-w-0 truncate" data-testid="prompt-target">
-          {sleepingTarget === null
-            ? sendTargetLabel(selectedSession, herdrTarget)
-            : `Gửi tới: ${sleepingTarget.title} (đang ngủ — gửi là đánh thức kèm lời nhắn)`}
+          {sleepingTarget === null ? sendTargetLabel(selectedSession, herdrTarget) : sleepingTargetLabel(sleepingTarget)}
         </span>
         {pickerFolders.length > 0 && focus !== null && (
           <select

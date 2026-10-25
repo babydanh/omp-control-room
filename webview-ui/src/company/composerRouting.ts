@@ -17,7 +17,7 @@
  */
 
 import type { CompanySessionSummary, HerdrAgent } from '../../../core/src/company.js';
-import type { OmpSessionEntry } from '../../../core/src/messages.js';
+import type { HerdrSleepingSession, OmpSessionEntry } from '../../../core/src/messages.js';
 import { type CommandResultView, failureNotice } from './commandResults.js';
 import type { CompanyClient } from './companyClient.js';
 import type { OmpSessionsView } from './companyState.js';
@@ -61,6 +61,34 @@ export function sendTargetLabel(
   // Nothing is sent with no session selected (PromptComposer shows why), so name no target.
   if (session === null) return 'Chưa chọn nơi gửi: chọn một agent, hoặc bấm Phiên mới';
   return `Gửi tới: ${session.code} · ${session.name} · ${companyRoleLabel(session.role)}`;
+}
+
+/**
+ * The sleeping session the composer sends to: the one picked on the board when no live herdr
+ * agent holds that pane. Its pane is closed, so what is sent there wakes it.
+ */
+export function sleepingSendTarget(
+  paneId: string | null,
+  liveAgent: HerdrAgent | null,
+  sleeping: readonly HerdrSleepingSession[],
+): HerdrSleepingSession | null {
+  if (paneId === null || liveAgent !== null) return null;
+  return sleeping.find((session) => session.paneId === paneId) ?? null;
+}
+
+/** The line above the box while a sleeping session is the target. */
+export function sleepingTargetLabel(session: Pick<HerdrSleepingSession, 'title'>): string {
+  return `Gửi tới: ${session.title} (đang ngủ — gửi là đánh thức kèm lời nhắn)`;
+}
+
+/** Wakes a sleeping session with the typed line as its first prompt. Blank text wakes nothing. */
+export function wakeWithLine(
+  client: Pick<CompanyClient, 'herdrWake'>,
+  paneId: string,
+  text: string,
+): ReturnType<CompanyClient['herdrWake']> | null {
+  const line = text.trim();
+  return line === '' ? null : client.herdrWake(paneId, line);
 }
 
 /**

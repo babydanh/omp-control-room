@@ -9,7 +9,10 @@ import {
   resumeListView,
   resumeRowTitle,
   sendTargetLabel,
+  sleepingSendTarget,
+  sleepingTargetLabel,
   terminalLine,
+  wakeWithLine,
 } from '../src/company/composerRouting.js';
 import { session } from './companyFixtures.js';
 
@@ -227,5 +230,36 @@ describe('a saved session row', () => {
     const updatedAt = '2026-10-02T10:00:00.000Z';
     expect(formatUpdatedAt(updatedAt)).toBe(new Date(updatedAt).toLocaleString('vi-VN'));
     expect(formatUpdatedAt('không phải ngày')).toBe('không phải ngày');
+  });
+});
+
+describe('TC-FEAT-01: a sleeping session picked on the board takes the composer line as its wake prompt', () => {
+  const sleeping = [{
+    paneId: 'zz:13ad3c46fac4c0e4',
+    title: 'df490920-498d-4f6f-a082-92307c3ffac5',
+    sessionFile: 'C:/sessions/df490920.jsonl',
+    sleptAt: '2026-10-25T08:12:18.000Z',
+  }];
+
+  it('targets the picked sleeping session, never one a live agent still holds', () => {
+    expect(sleepingSendTarget('zz:13ad3c46fac4c0e4', null, sleeping)).toBe(sleeping[0]);
+    expect(sleepingSendTarget('wA:p14', null, sleeping)).toBeNull();
+    expect(sleepingSendTarget(null, null, sleeping)).toBeNull();
+    const live = { paneId: 'zz:13ad3c46fac4c0e4', kind: 'claude' } as unknown as Parameters<typeof sleepingSendTarget>[1];
+    expect(sleepingSendTarget('zz:13ad3c46fac4c0e4', live, sleeping)).toBeNull();
+    expect(sleepingTargetLabel(sleeping[0]!)).toContain('đang ngủ — gửi là đánh thức');
+  });
+
+  it('wakes it with the trimmed line, and wakes nothing for a blank one', () => {
+    const calls: [string, string | undefined][] = [];
+    const client = {
+      herdrWake: (paneId: string, prompt?: string) => {
+        calls.push([paneId, prompt]);
+        return { ok: true as const, requestId: 'r1' };
+      },
+    };
+    expect(wakeWithLine(client, 'zz:13ad3c46fac4c0e4', '  sửa tiếp bug login \n')).toEqual({ ok: true, requestId: 'r1' });
+    expect(wakeWithLine(client, 'zz:13ad3c46fac4c0e4', '   ')).toBeNull();
+    expect(calls).toEqual([['zz:13ad3c46fac4c0e4', 'sửa tiếp bug login']]);
   });
 });
