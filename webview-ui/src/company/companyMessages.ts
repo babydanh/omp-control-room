@@ -402,13 +402,14 @@ export function workItemMark(
   return { type: 'companyWorkItemMark', requestId, workspacePath, id, verdict };
 }
 
-/** Withdraw a work item that is still queued. The verdict is a companyCommandResult. */
+/** Remove a work item. `keepWorktree` drops only the card. The verdict is a companyCommandResult. */
 export function workItemCancel(
   requestId: string,
   workspacePath: string,
   id: string,
+  keepWorktree = false,
 ): ClientMessage {
-  return { type: 'companyWorkItemCancel', requestId, workspacePath, id };
+  return { type: 'companyWorkItemCancel', requestId, workspacePath, id, ...(keepWorktree ? { keepWorktree: true } : {}) };
 }
 
 /** Judge a review item again, after the judge did not finish. The verdict is a companyCommandResult. */
@@ -441,6 +442,11 @@ export function workItemCloudPull(
   id: string,
 ): ClientMessage {
   return { type: 'companyWorkItemCloudPull', requestId, workspacePath, id };
+}
+
+/** Close a handoff Issue no work item holds; its branch stays. The verdict is a companyCommandResult. */
+export function cloudIssueClose(requestId: string, workspacePath: string, issue: number): ClientMessage {
+  return { type: 'companyCloudIssueClose', requestId, workspacePath, issue };
 }
 
 /** Replace the items a queued work item waits for; an empty list clears them. The verdict is a companyCommandResult. */

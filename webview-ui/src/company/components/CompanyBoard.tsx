@@ -637,6 +637,7 @@ export function CompanyBoard({
                 key={`${card.workspacePath}:${card.issue.issue}`}
                 card={card}
                 index={drafts.length + lane.cards.length + lane.workItems.length + index}
+                client={client}
               />
             ))}
             {lane.squads.map((card, index) => (

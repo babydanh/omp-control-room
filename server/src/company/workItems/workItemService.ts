@@ -934,11 +934,31 @@ export class WorkItemService {
   }
 
   /**
+   * Closes an open handoff Issue no item holds, so it leaves the "Trên cloud" lane. Only the Issue
+   * is closed: its `omp/issue-N` branch stays on origin, so a finished run can still be fetched.
+   */
+  async closeCloudIssue(command: WorkItemCommand & { issue: number }): Promise<void> {
+    if (this.replay(command.requestId) !== undefined) return;
+    if (!this.cloudIssues.some((issue) => issue.issue === command.issue))
+      throw new CompanyError('cloud_issue_unknown', `Issue #${command.issue} không nằm trong cột Trên cloud.`);
+    const result = await this.runCloud('gh', [
+      'issue', 'close', String(command.issue), '-R', CLOUD_REPOSITORY,
+      '--comment', `Đóng từ Agent Board. Nhánh omp/issue-${command.issue} vẫn giữ.`,
+    ], this.workspacePath, CLOUD_GH_TIMEOUT_MS);
+    if (result.code !== 0)
+      throw new CompanyError('cloud_issue_close_failed', `Không đóng được Issue #${command.issue}: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
+    this.cloudIssues = this.cloudIssues.filter((issue) => issue.issue !== command.issue);
+    this.remember(command.requestId, '');
+    this.commit();
+  }
+
+  /**
    * Removes an item nobody works on: a queued one never sent, or a finished one (done, failed).
    * Its worktree goes with it when nothing in it is lost (clean, branch merged, no session in it);
-   * otherwise the delete is refused with what is in the way, so the worktree is never orphaned.
+   * otherwise the delete is refused with what is in the way, so the worktree is never orphaned
+   * silently. `keepWorktree` drops only the card and leaves the worktree and branch untouched.
    */
-  async cancel(command: WorkItemCommand & { id: string }): Promise<void> {
+  async cancel(command: WorkItemCommand & { id: string; keepWorktree?: boolean }): Promise<void> {
     if (this.replay(command.requestId) !== undefined) return;
     const item = this.requireItem(command.id);
     if (!canCancel(item.status)) this.refuseStatus(item);
@@ -948,7 +968,8 @@ export class WorkItemService {
         'work_item_awaited',
         awaitedMessage(waiters.map((waiter) => waiter.sequence)),
       );
-    if (item.worktree !== undefined && item.worktreeRemoved !== true && this.ports.worktrees.exists(item.worktree))
+    const removable = item.worktree !== undefined && item.worktreeRemoved !== true && this.ports.worktrees.exists(item.worktree);
+    if (removable && command.keepWorktree !== true && item.worktree !== undefined)
       await this.removeWorktreeOf(item, item.worktree);
     // The item may have been removed by another command while its worktree was removed.
     if (this.items.get(item.id) !== item) return;

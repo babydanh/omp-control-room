@@ -598,13 +598,24 @@ export function WorkItemPanel({
       )}
 
       {notice !== null && !reassigning && (
-        <p
+        <div
           role="alert"
           data-testid="work-item-notice"
-          className="mx-2.5 rounded-(--company-radius-sm) bg-warning/12 px-2 py-1 text-2xs text-warning"
+          className="mx-2.5 flex flex-col items-start gap-1.5 rounded-(--company-radius-sm) bg-warning/12 px-2 py-1 text-2xs text-warning"
         >
-          {notice}
-        </p>
+          <span>{notice}</span>
+          {/* A delete refused because of the worktree can still drop the card: the code stays on disk. */}
+          {sent?.action === 'cancel' && /worktree/i.test(notice) && (
+            <CompanyButton
+              size="sm"
+              data-testid="work-item-remove-keep-worktree"
+              disabled={busy}
+              onClick={() => send('cancel', client.cancelWorkItem(workspacePath, id, true))}
+            >
+              Gỡ khỏi bảng, giữ worktree
+            </CompanyButton>
+          )}
+        </div>
       )}
 
       <details className="px-2.5">

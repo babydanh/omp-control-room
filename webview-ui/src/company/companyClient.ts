@@ -534,9 +534,9 @@ export class CompanyClient {
     );
   }
 
-  /** Withdraw a work item that is still queued. The verdict is a companyCommandResult. */
-  cancelWorkItem(workspacePath: string, id: string): CompanyCommandHandle {
-    return this.command((requestId) => commands.workItemCancel(requestId, workspacePath, id));
+  /** Remove a work item; `keepWorktree` drops only the card. The verdict is a companyCommandResult. */
+  cancelWorkItem(workspacePath: string, id: string, keepWorktree = false): CompanyCommandHandle {
+    return this.command((requestId) => commands.workItemCancel(requestId, workspacePath, id, keepWorktree));
   }
 
   /** Judge a review item again. The verdict is a companyCommandResult. */
@@ -559,6 +559,11 @@ export class CompanyClient {
   /** Pull cloud output using only a safe fast-forward. The verdict is a companyCommandResult. */
   pullWorkItemFromCloud(workspacePath: string, id: string): CompanyCommandHandle {
     return this.command((requestId) => commands.workItemCloudPull(requestId, workspacePath, id));
+  }
+
+  /** Close a handoff Issue no work item holds; its branch stays. The verdict is a companyCommandResult. */
+  closeCloudIssue(workspacePath: string, issue: number): CompanyCommandHandle {
+    return this.command((requestId) => commands.cloudIssueClose(requestId, workspacePath, issue));
   }
 
   /**

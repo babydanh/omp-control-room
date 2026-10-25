@@ -34,7 +34,7 @@ interface CloudFixture {
   handoff: string | undefined;
 }
 
-function fixture(): CloudFixture {
+function fixture(status = 'review'): CloudFixture {
   const workspace = join(process.cwd(), 'cloud-workspace');
   const repo = join(workspace, 'repo');
   const worktree = join(repo, '.worktrees', 'squad-42');
@@ -44,7 +44,7 @@ function fixture(): CloudFixture {
     id: itemId,
     text: 'Sửa endpoint đăng nhập',
     assignee: { kind: 'new-session' },
-    status: 'review',
+    status,
     sequence: 1,
     priority: 2,
     dependsOn: [],
@@ -71,7 +71,14 @@ function fixture(): CloudFixture {
       openChat: async () => 'session',
     },
     persistence: { load: async () => parseWorkItemsFile(saved), save: async () => undefined },
-    worktrees: { create: async () => ({ path: worktree, branch: 'squad-42' }), remove: async () => 'removed', exists: () => true },
+    worktrees: {
+      create: async () => ({ path: worktree, branch: 'squad-42' }),
+      remove: async () => {
+        calls.push({ file: 'worktrees.remove', argv: [], cwd: worktree, timeoutMs: 0 });
+        return 'removed';
+      },
+      exists: () => true,
+    },
     publish: () => undefined,
     now: () => Date.parse(at),
     newId: () => randomUUID(),
@@ -263,5 +270,52 @@ describe('WorkItemService cloud tracking and pull', () => {
     if (state === 'pulled') {
       expect(f.service.get(f.itemId)?.history.some((event) => event.message?.includes('Đã kéo kết quả cloud về'))).toBe(true);
     }
+  });
+});
+
+describe('WorkItemService removing board clutter', () => {
+  it('drops only the card with keepWorktree, and removes the worktree without it', async () => {
+    const kept = fixture('failed');
+    await kept.service.load();
+    await kept.service.cancel({ requestId: randomUUID(), id: kept.itemId, keepWorktree: true });
+    expect(kept.service.get(kept.itemId)).toBeUndefined();
+    expect(kept.calls.some((call) => call.file === 'worktrees.remove')).toBe(false);
+
+    const removed = fixture('failed');
+    await removed.service.load();
+    await removed.service.cancel({ requestId: randomUUID(), id: removed.itemId });
+    expect(removed.calls.some((call) => call.file === 'worktrees.remove')).toBe(true);
+  });
+
+  it('closes a listed handoff Issue on GitHub, keeps it when gh fails, refuses an unlisted one', async () => {
+    const f = fixture();
+    await f.service.load();
+    const listed = JSON.stringify([{
+      number: 7,
+      title: '[Handoff] việc cũ',
+      url: 'https://github.com/babydanh/agent-orchestrator/issues/7',
+      createdAt: '2026-04-01T08:00:00Z',
+      body: '',
+    }]);
+    const close: { result: CommandResult } = { result: { code: 1, stdout: '', stderr: 'HTTP 502' } };
+    f.setHandler(async (_file, argv) => {
+      if (argv[0] === 'issue' && argv[1] === 'list') return { code: 0, stdout: listed, stderr: '' };
+      if (argv[0] === 'issue' && argv[1] === 'close') return close.result;
+      if (argv[0] === 'api') return { code: 0, stdout: '[[]]', stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    });
+    await f.service.refreshDeliveries();
+    expect(f.service.snapshot().cloudIssues?.map((issue) => issue.issue)).toEqual([7]);
+
+    await expect(f.service.closeCloudIssue({ requestId: randomUUID(), issue: 7 })).rejects.toThrow('HTTP 502');
+    expect(f.service.snapshot().cloudIssues?.map((issue) => issue.issue)).toEqual([7]);
+
+    close.result = { code: 0, stdout: '', stderr: '' };
+    await f.service.closeCloudIssue({ requestId: randomUUID(), issue: 7 });
+    expect(f.service.snapshot().cloudIssues).toEqual([]);
+    const closeCall = f.calls.filter((call) => call.argv[1] === 'close').at(-1);
+    expect(closeCall?.argv).toEqual(expect.arrayContaining(['7', '-R', 'babydanh/agent-orchestrator']));
+
+    await expect(f.service.closeCloudIssue({ requestId: randomUUID(), issue: 99 })).rejects.toThrow('không nằm trong cột');
   });
 });

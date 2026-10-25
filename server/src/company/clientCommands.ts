@@ -292,6 +292,7 @@ const COMPANY_COMMAND_TYPES: ReadonlySet<string> = new Set([
   'companyWorkItemCleanWorktree',
   'companyWorkItemCloudPush',
   'companyWorkItemCloudPull',
+  'companyCloudIssueClose',
   'companySquadSettingsSet',
   'companySquadRequest',
   'companySquadApprove',
@@ -343,6 +344,7 @@ const CREATION_COMMAND_TYPES: Readonly<Record<string, true>> = {
   companyWorkItemCleanWorktree: true,
   companyWorkItemCloudPush: true,
   companyWorkItemCloudPull: true,
+  companyCloudIssueClose: true,
   companySquadSettingsSet: true,
   companySquadRequest: true,
   companySquadApprove: true,
@@ -577,6 +579,7 @@ async function run(
       case 'companyWorkItemCleanWorktree':
       case 'companyWorkItemCloudPush':
       case 'companyWorkItemCloudPull':
+      case 'companyCloudIssueClose':
       case 'companySquadSettingsSet':
       case 'companySquadClaudeCheck':
       case 'companyAgentRoleSet':
@@ -1319,8 +1322,17 @@ async function workItemCommand(
     ok(send, requestId);
     return;
   }
+  if (msg.type === 'companyCloudIssueClose') {
+    if (typeof msg.issue !== 'number' || !Number.isSafeInteger(msg.issue) || msg.issue < 1) {
+      fail(send, requestId, 'invalid_request', 'Số Issue không hợp lệ.');
+      return;
+    }
+    await work.closeCloudIssue({ requestId, issue: msg.issue });
+    ok(send, requestId);
+    return;
+  }
   if (msg.type === 'companyWorkItemCancel') {
-    await work.cancel({ requestId, id });
+    await work.cancel({ requestId, id, keepWorktree: msg.keepWorktree === true });
     ok(send, requestId);
     return;
   }

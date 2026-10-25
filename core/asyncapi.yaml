@@ -251,6 +251,7 @@ components:
         - $ref: '#/components/schemas/CompanyWorkItemMarkMessage'
         - $ref: '#/components/schemas/CompanyWorkItemCloudPushMessage'
         - $ref: '#/components/schemas/CompanyWorkItemCloudPullMessage'
+        - $ref: '#/components/schemas/CompanyCloudIssueCloseMessage'
         - $ref: '#/components/schemas/CompanyWorkItemCancelMessage'
         - $ref: '#/components/schemas/CompanyWorkItemDependenciesMessage'
         - $ref: '#/components/schemas/CompanyWorkItemJudgeMessage'
@@ -4673,6 +4674,11 @@ components:
         id:
           type: string
           format: uuid
+        keepWorktree:
+          type: boolean
+          description: >-
+            Remove the card only: the item's worktree and branch stay on disk untouched. For a worktree that cannot be
+            removed safely (uncommitted or unmerged work), so the board drops the card without losing any code.
 
     CompanyWorkItemDependenciesMessage:
       type: object
@@ -4782,6 +4788,27 @@ components:
         id:
           type: string
           format: uuid
+
+    CompanyCloudIssueCloseMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, workspacePath, issue]
+      description: >-
+        Close an open handoff Issue that no work item holds, so it leaves the cloud lane. Its omp/issue-N branch stays
+        on origin. Refused for an Issue the lane does not list.
+      properties:
+        type:
+          const: companyCloudIssueClose
+        requestId:
+          type: string
+          format: uuid
+        workspacePath:
+          type: string
+          minLength: 1
+          maxLength: 4096
+        issue:
+          type: integer
+          minimum: 1
 
 
     CompanyAgentRoleSetMessage:
