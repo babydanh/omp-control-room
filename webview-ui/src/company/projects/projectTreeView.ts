@@ -181,6 +181,14 @@ export function isRunningNode(node: ProjectTreeNode): boolean {
  */
 export type SessionFaceMood = 'sleep' | 'work' | 'waiting' | 'error' | 'done' | 'idle';
 
+/**
+ * The face actually drawn. The cheer only ever stands in for rest: a session that falls asleep,
+ * errs, waits on you or starts working again shows that at once, cheer or not.
+ */
+export function shownFaceMood(mood: SessionFaceMood, cheering: boolean): SessionFaceMood {
+  return cheering && (mood === 'idle' || mood === 'done') ? 'done' : mood;
+}
+
 export function sessionFaceMood(node: ProjectTreeNode): SessionFaceMood {
   const state = (node.state ?? '').toLowerCase();
   if (state === 'sleeping') return 'sleep';

@@ -20,6 +20,7 @@ import {
   sessionActivityCounts,
   sessionFaceHue,
   sessionFaceMood,
+  shownFaceMood,
 } from '../src/company/projects/projectTreeView.js';
 
 const node = (id: string, kind: ProjectTreeNode['kind'], parentId?: string, extra: Partial<ProjectTreeNode> = {}): ProjectTreeNode => ({
@@ -243,6 +244,16 @@ describe('TC-FEAT-02: a session face in the tree shows how the session is doing'
     expect(finishedTurn('work', 'error')).toBe(false);
     expect(finishedTurn('idle', 'work')).toBe(false);
     expect(finishedTurn('idle', 'idle')).toBe(false);
+  });
+
+  it('lets the cheer stand in only for rest: a mood change mid-cheer shows the new mood at once', () => {
+    // work → idle starts a cheer; idle → sleep/error/waiting/work before it ends must not stay "done".
+    expect(shownFaceMood('idle', true)).toBe('done');
+    expect(shownFaceMood('sleep', true)).toBe('sleep');
+    expect(shownFaceMood('error', true)).toBe('error');
+    expect(shownFaceMood('waiting', true)).toBe('waiting');
+    expect(shownFaceMood('work', true)).toBe('work');
+    expect(shownFaceMood('idle', false)).toBe('idle');
   });
 
   it('keeps one colour per session id, never the red that means an error', () => {

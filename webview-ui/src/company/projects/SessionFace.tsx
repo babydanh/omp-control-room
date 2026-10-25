@@ -2,7 +2,7 @@ import './SessionFace.css';
 
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 
-import { finishedTurn, SESSION_FACE_CHEER_MS, type SessionFaceMood } from './projectTreeView.js';
+import { finishedTurn, SESSION_FACE_CHEER_MS, type SessionFaceMood, shownFaceMood } from './projectTreeView.js';
 
 /**
  * A session's little face in the tree: a soft rounded square in the session's own colour with two
@@ -13,23 +13,28 @@ import { finishedTurn, SESSION_FACE_CHEER_MS, type SessionFaceMood } from './pro
  */
 export function SessionFace({ mood, hue }: { mood: SessionFaceMood; hue: number }) {
   const previous = useRef(mood);
-  const [cheerUntil, setCheerUntil] = useState(0);
+  const [cheering, setCheering] = useState(false);
+
+  // Every mood change decides the cheer afresh: a finished turn starts it, anything else ends it.
+  // Deferred a tick, so the state change follows the mood change rather than sitting in its render.
   useEffect(() => {
     const was = previous.current;
     previous.current = mood;
-    if (!finishedTurn(was, mood)) return undefined;
-    // Deferred a tick: the cheer starts from the mood change, not inside the same render pass.
-    const start = window.setTimeout(() => setCheerUntil(Date.now() + SESSION_FACE_CHEER_MS), 0);
-    const stop = window.setTimeout(() => setCheerUntil(0), SESSION_FACE_CHEER_MS);
-    return () => {
-      window.clearTimeout(start);
-      window.clearTimeout(stop);
-    };
+    const cheer = finishedTurn(was, mood);
+    const decide = window.setTimeout(() => setCheering(cheer), 0);
+    return () => window.clearTimeout(decide);
   }, [mood]);
-  const shown: SessionFaceMood = cheerUntil > 0 && mood !== 'work' ? 'done' : mood;
+
+  // The cheer ends on its own clock, which no mood change can cancel and leave it standing.
+  useEffect(() => {
+    if (!cheering) return undefined;
+    const stop = window.setTimeout(() => setCheering(false), SESSION_FACE_CHEER_MS);
+    return () => window.clearTimeout(stop);
+  }, [cheering]);
+
   const style = { '--face-hue': hue, '--face-delay': `${-((hue % 37) / 10)}s` } as CSSProperties;
   return (
-    <span aria-hidden="true" className="session-face" data-mood={shown} style={style}>
+    <span aria-hidden="true" className="session-face" data-mood={shownFaceMood(mood, cheering)} style={style}>
       <span className="session-face__body">
         <span className="session-face__eyes">
           <span className="session-face__eye session-face__eye--left">
