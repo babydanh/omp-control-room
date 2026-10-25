@@ -611,7 +611,14 @@ class HerdrLinkImpl implements HerdrLink {
 
   async close(paneId: string): Promise<void> {
     assertPaneId(paneId);
-    await this.call('pane.close', { pane_id: paneId });
+    // A deep sleep already closed its pane: `zz:` names the registry record, not a herdr pane, so
+    // pane.close could only fail. Removing it means dropping that record.
+    if (paneId.startsWith('zz:')) {
+      const closed = await this.assertSleeping(paneId);
+      if (closed !== undefined) await this.sleepRegistry.forgetClosed(closed.file);
+    } else {
+      await this.call('pane.close', { pane_id: paneId });
+    }
     if (this.running) this.scheduleRefresh();
   }
 

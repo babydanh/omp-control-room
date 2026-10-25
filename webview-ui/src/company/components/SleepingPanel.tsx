@@ -31,7 +31,9 @@ export interface SleepingPanelProps {
 
 export function SleepingPanel({ client, state, paneId, onClose }: SleepingPanelProps) {
   const now = useNow();
-  const session = state.herdr.sleeping.find((entry) => entry.paneId === paneId);
+  // The whole roster: the drawer already decided to show this session, and a folder view that
+  // hides its folder must not make the panel claim it is gone.
+  const session = state.herdrRoster.sleeping.find((entry) => entry.paneId === paneId);
   const [draft, setDraft] = useState('');
   const [wakeRequest, setWakeRequest] = useState<string | null>(null);
   const [closeRequest, setCloseRequest] = useState<string | null>(null);

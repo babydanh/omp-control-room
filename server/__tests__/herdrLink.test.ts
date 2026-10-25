@@ -1632,6 +1632,17 @@ describe('HerdrLink sleeping sessions and wake', () => {
       expect(JSON.parse(await fs.readFile(registryFile, 'utf8'))).toEqual([other]);
     });
 
+    it('removes it by dropping its record, never asking herdr to close a pane that is gone', async () => {
+      const other = { ...SLEPT, pane: 'wE:p1', file: 'C:/omp/sessions/x_00000000-0000-4000-8000-000000000001.jsonl', extra: 1 };
+      await writeRegistry([other, deep()]);
+      fake.reply('pane.list', () => ({ panes: [] }));
+
+      await link.close(ID);
+
+      expect(fake.requestsTo('pane.close')).toEqual([]);
+      expect(JSON.parse(await fs.readFile(registryFile, 'utf8'))).toEqual([other]);
+    });
+
     it('opens the tab anywhere when its workspace is gone', async () => {
       await writeRegistry([deep()]);
       fake.reply('pane.list', () => ({ panes: [] }));
