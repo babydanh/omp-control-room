@@ -480,6 +480,14 @@ describe('rowBand: a tool box keeps one even background however narrow the scree
     expect(rowBand([{ text: `├${'─'.repeat(198)}┤`, style: { fg: '#6b7280' } }]).rule).toBe(true);
   });
 
+  it('flags a labelled rule (a tool title or "Output") as one too, but not a tree line with text', () => {
+    // Captured from an omp pane: the label sits near the start, the rule runs on to the right corner.
+    expect(rowBand([{ text: `╭─── • Đóng tab smoke · (122ms) ${'─'.repeat(160)}╮`, style: {} }]).rule).toBe(true);
+    expect(rowBand([{ text: `├─── Output ${'─'.repeat(184)}┤`, style: {} }]).rule).toBe(true);
+    expect(rowBand([{ text: '├── src/app/page.tsx', style: {} }]).rule).toBeUndefined();
+    expect(rowBand([{ text: '└─ 🗂 browser close smoke', style: {} }]).rule).toBeUndefined();
+  });
+
   it('keeps an uncoloured table row exactly as drawn: its edges are not a box padding', () => {
     const table: ScreenLine = [{ text: '│ a │ b │', style: {} }];
     expect(rowBand(table)).toEqual({ segments: table });

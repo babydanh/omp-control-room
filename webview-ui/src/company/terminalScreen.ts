@@ -424,6 +424,8 @@ export interface ScreenRowBand {
 
 /** A box's top, bottom or divider: only box-drawing characters and spaces. */
 const BOX_RULE_ROW = /^[\s─━═┄┅┈┉╌╍╭╮╰╯├┤┌┐└┘┬┴┼│┃║]*$/;
+/** A labelled rule (`╭─── • Read ───╮`, `├─── Output ───┤`): opens on a corner or tee, closes on a run of rule then one. */
+const BOX_LABELLED_RULE = /^\s*[╭╰├┌└][\s\S]*[─━═]{3,}[╮╯┤┐┘]\s*$/;
 /** A box's right edge at the end of a row. */
 const BOX_RIGHT_EDGE = /[│┃║┤]\s*$/;
 
@@ -441,7 +443,7 @@ function backgroundOf(segment: ScreenSegment): string | undefined {
  */
 export function rowBand(line: ScreenLine): ScreenRowBand {
   const text = line.map((segment) => segment.text).join('');
-  if (/[─━═]/.test(text) && BOX_RULE_ROW.test(text)) return { segments: line, rule: true };
+  if (/[─━═]/.test(text) && (BOX_RULE_ROW.test(text) || BOX_LABELLED_RULE.test(text))) return { segments: line, rule: true };
   const segments = [...line];
   // Uncoloured spaces after the box are the terminal's own tail: not part of the row.
   while (segments.length > 0 && backgroundOf(segments[segments.length - 1]) === undefined && !/\S/.test(segments[segments.length - 1].text)) segments.pop();
