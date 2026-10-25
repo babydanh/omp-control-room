@@ -308,7 +308,8 @@ export function BoardShell({ client }: BoardShellProps) {
   // A folder switch settles the selection and drops a pane picked a moment before it landed, which
   // left the drawer showing the pane while the composer had nowhere to send. Pick it again, only
   // while nothing else is selected, so a session the user chose since is never overridden.
-  const selectionEmpty = state.selection.herdrPaneId === null && state.selection.sessionId === null;
+  const selectionEmpty =
+    state.selection.herdrPaneId === null && state.selection.sessionId === null && state.selection.taskId === null;
   useEffect(() => {
     if (selectedPaneId !== null && selectionEmpty) client.select({ herdrPaneId: selectedPaneId });
   }, [client, selectedPaneId, selectionEmpty]);
@@ -435,7 +436,8 @@ export function BoardShell({ client }: BoardShellProps) {
     else if (session.herdrPaneId !== undefined) openHerdr(revealPane(session.herdrPaneId, where));
     else if (session.agentKind === 'herdr' && session.state === 'sleeping') openSleeping(revealPane(id, where));
     else if (session.agentKind === 'herdr') openHerdr(revealPane(id, where));
-    else setSessionNotice(`Phiên ${session.name} chạy ngoài herdr (cửa sổ terminal riêng): board không mở hay gõ vào được. Gõ ở cửa sổ đang chạy nó, hoặc bấm "+ Phiên mới" để mở phiên trong herdr.`);
+    else if (session.engine === 'claude' || session.engine === 'agy') setSessionNotice(`Phiên ${session.name} chạy ngoài herdr (cửa sổ terminal riêng): board không mở hay gõ vào được. Gõ ở cửa sổ đang chạy nó, hoặc bấm "+ Phiên mới" để mở phiên trong herdr.`);
+    else setSessionNotice(`Phiên ${session.name} không có khung nào để mở trên board lúc này.`);
   }
 
   /**
