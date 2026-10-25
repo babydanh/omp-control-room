@@ -57,6 +57,7 @@ import { startScrollFades } from '../scrollFades.js';
 import {
   type DrawerSubject,
   drawerSubjectFor,
+  herdrPaneHidden,
   type OpenedSubject,
   pendingContract,
   selectionForSession,
@@ -421,9 +422,19 @@ export function BoardShell({ client }: BoardShellProps) {
     const boardKey = session.boardSessionId ?? (state.sessions[id] !== undefined ? id : null);
     if (boardKey !== null && state.sessions[boardKey] !== undefined) selectSession(boardKey);
     else if (boardKey !== null && where.folderPath !== undefined) selectWorkspaceSession(where.folderPath, boardKey);
-    else if (session.herdrPaneId !== undefined) openHerdr(session.herdrPaneId);
-    else if (session.agentKind === 'herdr' && session.state === 'sleeping') openSleeping(id);
-    else if (session.agentKind === 'herdr') openHerdr(id);
+    else if (session.herdrPaneId !== undefined) openHerdr(revealPane(session.herdrPaneId, where));
+    else if (session.agentKind === 'herdr' && session.state === 'sleeping') openSleeping(revealPane(id, where));
+    else if (session.agentKind === 'herdr') openHerdr(revealPane(id, where));
+  }
+
+  /**
+   * The folder view hides the panes of every other folder, even one the user just opened, so a
+   * click on another folder's session in the tree showed nothing. Point the board at that folder,
+   * as an omp session of another folder does; the pane shows once the switch lands.
+   */
+  function revealPane(paneId: string, where: { readonly folderPath?: string }): string {
+    if (where.folderPath !== undefined && herdrPaneHidden(state, paneId)) client.openWorkspace(where.folderPath);
+    return paneId;
   }
 
   /** Menu actions that leave the menu: pages and dialogs. Tree edits run in the menu itself. */
