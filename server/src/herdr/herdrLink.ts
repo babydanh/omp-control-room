@@ -21,6 +21,7 @@ import {
 import { isHerdrPaneId } from './paneId.js';
 import { screenDigest } from './screenDigest.js';
 import {
+  type ClosedSleepWake,
   type PaneFact,
   type SleepDropReason,
   type SleepingSession,
@@ -123,6 +124,7 @@ const WAKE_REFUSALS: Record<SleepDropReason, string> = {
   awake: 'Pane này đang chạy agent, phiên không còn ngủ đông.',
   'pane-changed': 'Pane này đã dùng cho việc khác, không còn là phiên ngủ đông.',
   'open-elsewhere': 'Phiên này đang mở ở pane khác, không thể đánh thức ở đây.',
+  expired: 'Phiên này ngủ quá 7 ngày nên bảng không mở lại nữa; mở tay bằng lệnh resume nếu cần.',
 };
 
 const NOTE_NOT_OMP = 'Agent này không chạy omp, nên chỉ có thư mục làm việc từ herdr.';
@@ -200,6 +202,11 @@ export interface HerdrLinkOptions {
   readonly runGit?: HerdrGitRunner;
   /** The sleep registry the omp sleep script keeps. Defaults to `~/.omp/agent/omp-ngu.json`. */
   readonly sleepRegistryFile?: string;
+  /**
+   * The wake prompt script a session whose pane the sleep closed reopens with, in a new tab.
+   * Defaults to `~/.omp/scripts/cho-omp.ps1`.
+   */
+  readonly wakeStubFile?: string;
   /** Receives problems with the sleep registry, once per distinct problem. Defaults to `console.warn`. */
   readonly warn?: (message: string) => void;
   /**
@@ -445,6 +452,7 @@ class HerdrLinkImpl implements HerdrLink {
   private readonly checkouts = new Map<string, GitCheckout | undefined>();
   private readonly pendingCheckouts = new Set<string>();
   private readonly sleepRegistry: SleepRegistry;
+  private readonly wakeStubFile: string;
   /** Cancels the expiry of each pane whose wake is in flight, keyed by pane id. */
   private readonly pendingWakes = new Map<string, () => void>();
   private cancelSleepPoll?: () => void;
@@ -460,6 +468,7 @@ class HerdrLinkImpl implements HerdrLink {
       file: options.sleepRegistryFile ?? path.join(os.homedir(), '.omp', 'agent', 'omp-ngu.json'),
       warn: options.warn ?? ((message: string) => console.warn(message)),
     });
+    this.wakeStubFile = options.wakeStubFile ?? path.join(os.homedir(), '.omp', 'scripts', 'cho-omp.ps1');
   }
 
   start(): void {
@@ -646,10 +655,14 @@ class HerdrLinkImpl implements HerdrLink {
       }, WAKE_PENDING_MS),
     );
     try {
-      await this.assertSleeping(paneId);
-      if (prompt !== undefined)
-        await this.call('pane.send_text', { pane_id: paneId, text: prompt });
-      await this.call('pane.send_keys', { pane_id: paneId, keys: ['enter'] });
+      const closed = await this.assertSleeping(paneId);
+      if (closed !== undefined) {
+        await this.wakeInNewTab(closed, prompt);
+      } else {
+        if (prompt !== undefined)
+          await this.call('pane.send_text', { pane_id: paneId, text: prompt });
+        await this.call('pane.send_keys', { pane_id: paneId, keys: ['enter'] });
+      }
     } catch (error) {
       this.pendingWakes.get(paneId)?.();
       this.pendingWakes.delete(paneId);
@@ -658,8 +671,11 @@ class HerdrLinkImpl implements HerdrLink {
     if (this.running) this.scheduleRefresh();
   }
 
-  /** Refuses unless herdr's panes and the sleep registry still show this pane holding a sleeping session. */
-  private async assertSleeping(paneId: string): Promise<void> {
+  /**
+   * Refuses unless herdr's panes and the sleep registry still show this pane holding a sleeping
+   * session. Returns how to reopen it when the sleep closed its pane; undefined when the pane is open.
+   */
+  private async assertSleeping(paneId: string): Promise<ClosedSleepWake | undefined> {
     const panes = parsePaneList(await this.call('pane.list', {}));
     const judgements = await this.sleepRegistry.judge(panes);
     // The registry lists records in write order, so the last one for a pane is its live state.
@@ -668,6 +684,33 @@ class HerdrLinkImpl implements HerdrLink {
     if (latest.status === 'dropped') {
       throw new HerdrError('not_sleeping', WAKE_REFUSALS[latest.reason]);
     }
+    return latest.closed;
+  }
+
+  /**
+   * Reopens a session whose pane the sleep closed: a new tab in its folder runs the wake prompt
+   * script with -Ngay, which refuses a session already open elsewhere and resumes at once.
+   */
+  private async wakeInNewTab(plan: ClosedSleepWake, prompt?: string): Promise<void> {
+    const tab = { cwd: plan.cwd, focus: false };
+    let created: unknown;
+    try {
+      created = await this.call(
+        'tab.create',
+        plan.workspaceId === undefined ? tab : { ...tab, workspace_id: plan.workspaceId },
+      );
+    } catch (error) {
+      // The workspace may be gone (herdr restarted): any workspace will do for the session.
+      if (plan.workspaceId === undefined || !(error instanceof HerdrError)) throw error;
+      created = await this.call('tab.create', tab);
+    }
+    const newPane = nonEmptyString(jsonField(jsonField(created, 'root_pane'), 'pane_id'));
+    if (newPane === undefined) throw new HerdrError('invalid_request', 'herdr không trả về pane của tab mới.');
+    await this.call('pane.send_text', {
+      pane_id: newPane,
+      text: closedWakeCommand(this.wakeStubFile, plan, prompt),
+    });
+    await this.call('pane.send_keys', { pane_id: newPane, keys: ['enter'] });
   }
 
   /** Working directory of the pane's foreground process; `undefined` when herdr cannot say. */
@@ -1432,6 +1475,26 @@ function assertPrompt(text: string): void {
   if (Buffer.byteLength(text, 'utf8') > HERDR_PROMPT_MAX_BYTES) {
     throw new HerdrError('invalid_request', PROMPT_TOO_LARGE_MESSAGE);
   }
+}
+
+/**
+ * The PowerShell line a new tab runs to reopen a session whose pane the sleep closed. Every value
+ * sits in a single-quoted string with `'` doubled, so a path or prompt cannot break out of it; the
+ * prompt is one line without control characters (assertWakePrompt).
+ */
+export function closedWakeCommand(stub: string, plan: ClosedSleepWake, prompt?: string): string {
+  const quote = (text: string): string => `'${text.replace(/'/g, "''")}'`;
+  return [
+    '&',
+    quote(stub),
+    '-Agent',
+    plan.agent,
+    '-File',
+    quote(plan.file),
+    '-Ngay',
+    ...(plan.fresh ? ['-Fresh'] : []),
+    ...(prompt !== undefined ? ['-Prompt', quote(prompt)] : []),
+  ].join(' ');
 }
 
 function assertWakePrompt(text: string): void {

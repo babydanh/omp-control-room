@@ -1583,6 +1583,70 @@ describe('HerdrLink sleeping sessions and wake', () => {
 
     expect((await later).sleeping).toHaveLength(1);
   });
+
+  describe('a session whose pane the sleep closed', () => {
+    const STUB = path.join(os.homedir(), '.omp', 'scripts', 'cho-omp.ps1');
+    const deep = (): Record<string, unknown> => ({
+      ...SLEPT,
+      ts: new Date().toISOString(),
+      closed: true,
+      workspace: 'wD',
+      title: 'Refactor modal',
+    });
+
+    it('wakes in a new tab of its workspace, running the wake script at once with the prompt', async () => {
+      await writeRegistry([deep()]);
+      fake.reply('pane.list', () => ({ panes: [] }));
+      fake.reply('tab.create', () => ({ tab: { tab_id: 'wD:t9' }, root_pane: { pane_id: 'wD:p20' } }));
+      fake.reply('pane.send_text', () => ({ type: 'ok' }));
+      fake.reply('pane.send_keys', () => ({ type: 'ok' }));
+
+      await link.wake(`zz:${SID8}`, "tiếp tục 'đi'");
+
+      expect(fake.requestsTo('tab.create').map((request) => request.params)).toEqual([
+        { cwd: 'V:\\Duancanhan', focus: false, workspace_id: 'wD' },
+      ]);
+      expect(fake.requestsTo('pane.send_text').map((request) => request.params)).toEqual([
+        {
+          pane_id: 'wD:p20',
+          text: `& '${STUB}' -Agent omp -File '${SESSION_FILE}' -Ngay -Prompt 'tiếp tục ''đi'''`,
+        },
+      ]);
+      expect(fake.requestsTo('pane.send_keys').map((request) => request.params)).toEqual([
+        { pane_id: 'wD:p20', keys: ['enter'] },
+      ]);
+    });
+
+    it('opens the tab anywhere when its workspace is gone', async () => {
+      await writeRegistry([deep()]);
+      fake.reply('pane.list', () => ({ panes: [] }));
+      fake.reply('tab.create', (params) => {
+        if ('workspace_id' in params) throw new ReplyError('workspace_not_found');
+        return { root_pane: { pane_id: 'wA:p30' } };
+      });
+      fake.reply('pane.send_text', () => ({ type: 'ok' }));
+      fake.reply('pane.send_keys', () => ({ type: 'ok' }));
+
+      await link.wake(`zz:${SID8}`);
+
+      expect(fake.requestsTo('tab.create')).toHaveLength(2);
+      expect(fake.requestsTo('pane.send_text')[0]?.params.text).toBe(
+        `& '${STUB}' -Agent omp -File '${SESSION_FILE}' -Ngay`,
+      );
+    });
+
+    it('refuses and opens no tab once a pane has the session open again', async () => {
+      await writeRegistry([deep()]);
+      fake.reply('pane.list', () => ({
+        panes: [sleepingPane({ pane_id: 'wA:p9', label: '', agent: 'omp', agent_session: { kind: 'path', value: SESSION_FILE } })],
+      }));
+
+      const error = await herdrFailure(link.wake(`zz:${SID8}`));
+
+      expect(error.code).toBe('not_sleeping');
+      expect(fake.requestsTo('tab.create')).toEqual([]);
+    });
+  });
 });
 
 describe('HerdrLink workspace tags', () => {

@@ -5,6 +5,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  closedSleepId,
   judgeSleepRecords,
   type PaneFact,
   parseSleepRegistry,
@@ -28,6 +29,9 @@ function sleepRecord(overrides: Partial<SleepRecord> = {}): SleepRecord {
     cwd: CWD,
     phase: 'sleeping',
     requestedAt: SLEPT_AT,
+    agent: 'omp',
+    fresh: false,
+    closed: false,
     ...overrides,
   };
 }
@@ -137,6 +141,56 @@ describe('judgeSleepRecords', () => {
   });
 });
 
+describe('judgeSleepRecords for a session whose pane the sleep closed', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const NOW = Date.parse(SLEPT_AT) + DAY;
+  const closed = (overrides: Partial<SleepRecord> = {}): SleepRecord =>
+    sleepRecord({ closed: true, workspace: 'wD', title: 'ATH: Refactor modal', ...overrides });
+
+  it('stands with no pane, under an id of its own, carrying how to reopen it', () => {
+    const [verdict] = judgeSleepRecords([closed()], [], NOW);
+
+    expect(verdict).toEqual({
+      status: 'sleeping',
+      paneId: `zz:${SID8}`,
+      sessionFile: SESSION_FILE,
+      sleptAt: SLEPT_AT,
+      cwd: CWD,
+      workspaceId: 'wD',
+      labelTitle: 'ATH: Refactor modal',
+      closed: { agent: 'omp', file: SESSION_FILE, fresh: false, cwd: CWD, workspaceId: 'wD' },
+    });
+  });
+
+  it('drops once any pane has the session open again', () => {
+    const woken = paneFact({ paneId: 'wA:p9', label: undefined, agent: 'omp', sessionFile: SESSION_FILE });
+
+    expect(judgeSleepRecords([closed()], [woken], NOW).map((v) => v.status === 'dropped' && v.reason)).toEqual(['awake']);
+  });
+
+  it('drops after seven days asleep', () => {
+    const later = Date.parse(SLEPT_AT) + 7 * DAY + 1;
+
+    expect(judgeSleepRecords([closed()], [], later).map((v) => v.status === 'dropped' && v.reason)).toEqual(['expired']);
+  });
+
+  it('claims no pane id: a later sleep in a pane herdr gave the same id still stands', () => {
+    const otherFile = 'C:/omp/sessions/new_00000000-0000-4000-8000-0000000000aa.jsonl';
+    const keptPane = sleepRecord({ file: otherFile, terminal: 'term_new' });
+    const pane = paneFact({ terminalId: 'term_new', label: undefined });
+
+    expect(judgeSleepRecords([closed(), keptPane], [pane], NOW).map((v) => v.status)).toEqual([
+      'sleeping',
+      'sleeping',
+    ]);
+  });
+
+  it('names its board id from the session, in the pane id shape', () => {
+    expect(closedSleepId('d0c9a1b2-1111-4222-8333-abcdef012345')).toBe('zz:ef012345');
+    expect(closedSleepId('C:/x/y.z')).toMatch(/^zz:[A-Za-z0-9_-]+$/);
+  });
+});
+
 describe('parseSleepRegistry', () => {
   it('reads invalid JSON as no records and reports it', () => {
     const parsed = parseSleepRegistry('{nope');
@@ -178,9 +232,23 @@ describe('parseSleepRegistry', () => {
         cwd: CWD,
         phase: 'sleeping',
         requestedAt: SLEPT_AT,
+        agent: 'omp',
+        fresh: false,
+        closed: false,
       },
     ]);
     expect(parsed.problem).toBe('Sleep registry: skipped 3 unusable entries.');
+  });
+
+  it('reads what a deep sleep adds: agent, empty session, closed pane, task and workspace', () => {
+    const entry = {
+      agent: 'claude', pane: 'wA:p7', terminal: 't', file: 'abc', cwd: CWD, phase: 'sleeping',
+      ts: '2026-01-01T00:00:00Z', fresh: true, closed: true, title: 'Sửa modal', workspace: 'wA',
+    };
+
+    expect(parseSleepRegistry(JSON.stringify([entry])).records[0]).toMatchObject({
+      agent: 'claude', fresh: true, closed: true, title: 'Sửa modal', workspace: 'wA',
+    });
   });
 });
 

@@ -16,8 +16,11 @@ const SLEEP_LABEL_PATTERN = /^zz omp(?:: (.+?))? #([0-9a-f]{8})$/i;
 /** omp session files end with the session uuid. */
 const SESSION_ID_PATTERN = /_([0-9a-f-]{36})\.jsonl$/i;
 const SID8_LENGTH = 8;
+/** A session asleep with its pane closed is offered for this long; older ones are no longer listed. */
+const CLOSED_SLEEP_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 
 export type SleepPhase = 'exit-requested' | 'sleeping';
+export type SleepAgent = 'omp' | 'claude' | 'agy';
 
 /** One entry of omp-ngu.json, as the sleep script writes it. */
 export interface SleepRecord {
@@ -28,6 +31,19 @@ export interface SleepRecord {
   readonly phase: SleepPhase;
   /** When the session's exit was requested. The sleep itself follows a moment later. */
   readonly requestedAt: string;
+  /** The agent the session belongs to; records written before agents other than omp slept have none. */
+  readonly agent: SleepAgent;
+  /** An empty Claude session (no message yet): waking opens a new `claude`, not a resume. */
+  readonly fresh: boolean;
+  /**
+   * The sleep closed the pane (omp-ngu.ts from 2026-10-25): the board holds the session alone and
+   * wakes it in a new tab. A record without this kept its pane open with the wake prompt.
+   */
+  readonly closed: boolean;
+  /** The session's task, as the pane label carried it. */
+  readonly title?: string;
+  /** The herdr workspace the pane was in, where a closed session reopens. */
+  readonly workspace?: string;
 }
 
 /** A herdr pane as `pane.list` describes it, reduced to the fields the judge reads. */
@@ -48,7 +64,22 @@ export interface PaneFact {
  * out waking the record: a stale entry, a pane that moved on, or a session open elsewhere.
  */
 export type SleepDropReason =
-  'exit-requested' | 'superseded' | 'pane-closed' | 'awake' | 'pane-changed' | 'open-elsewhere';
+  | 'exit-requested'
+  | 'superseded'
+  | 'pane-closed'
+  | 'awake'
+  | 'pane-changed'
+  | 'open-elsewhere'
+  | 'expired';
+
+/** What waking a session whose pane the sleep closed needs: a new tab here, running this resume. */
+export interface ClosedSleepWake {
+  readonly agent: SleepAgent;
+  readonly file: string;
+  readonly fresh: boolean;
+  readonly cwd: string;
+  readonly workspaceId?: string;
+}
 
 /** A record judged against the live panes, before its title is resolved. */
 export type SleepCandidate =
@@ -61,6 +92,8 @@ export type SleepCandidate =
       readonly workspaceId?: string;
       /** The `-Viec` text that the pane label carries, when the label names this session. */
       readonly labelTitle?: string;
+      /** Set when the pane is closed: the session wakes in a new tab. */
+      readonly closed?: ClosedSleepWake;
     }
   | {
       readonly status: 'dropped';
@@ -80,7 +113,12 @@ export interface SleepingSession {
 }
 
 export type SleepJudgement =
-  | { readonly status: 'sleeping'; readonly paneId: string; readonly session: SleepingSession }
+  | {
+      readonly status: 'sleeping';
+      readonly paneId: string;
+      readonly session: SleepingSession;
+      readonly closed?: ClosedSleepWake;
+    }
   | {
       readonly status: 'dropped';
       readonly paneId: string;
@@ -126,24 +164,42 @@ function toSleepRecord(entry: unknown): SleepRecord | undefined {
   if (typeof ts !== 'string') return undefined;
   const at = Date.parse(ts);
   if (Number.isNaN(at)) return undefined;
-  return { pane, terminal, file, cwd, phase, requestedAt: new Date(at).toISOString() };
+  const agent = jsonField(entry, 'agent');
+  const title = jsonField(entry, 'title');
+  const workspace = jsonField(entry, 'workspace');
+  return {
+    pane,
+    terminal,
+    file,
+    cwd,
+    phase,
+    requestedAt: new Date(at).toISOString(),
+    agent: agent === 'claude' || agent === 'agy' ? agent : 'omp',
+    fresh: jsonField(entry, 'fresh') === true,
+    closed: jsonField(entry, 'closed') === true,
+    ...(typeof title === 'string' && title !== '' ? { title } : {}),
+    ...(typeof workspace === 'string' && workspace !== '' ? { workspace } : {}),
+  };
 }
 
 /**
  * Judges every record against the live panes. A record stands only when it is the last one
- * for its pane and for its session, its phase is `sleeping`, its pane still exists and runs no
- * agent, the pane still names this session, and no other pane has the session open.
+ * for its pane and for its session, its phase is `sleeping`, and no other pane has the session
+ * open. A record that kept its pane also needs that pane to exist, run no agent and still name
+ * this session; one whose pane the sleep closed needs to be younger than CLOSED_SLEEP_MAX_AGE_MS.
  */
 export function judgeSleepRecords(
   records: readonly SleepRecord[],
   panes: readonly PaneFact[],
+  now = Date.now(),
 ): SleepCandidate[] {
   const latest: LatestRecords = { byPane: new Map(), byFile: new Map() };
   records.forEach((record, index) => {
-    latest.byPane.set(record.pane, index);
+    // herdr hands a closed pane's id to a later pane, so a closed record claims no pane id.
+    if (!record.closed) latest.byPane.set(record.pane, index);
     latest.byFile.set(sessionKey(record.file), index);
   });
-  return records.map((record, index) => judgeRecord(record, index, latest, panes));
+  return records.map((record, index) => judgeRecord(record, index, latest, panes, now));
 }
 
 interface LatestRecords {
@@ -156,6 +212,7 @@ function judgeRecord(
   index: number,
   latest: LatestRecords,
   panes: readonly PaneFact[],
+  now: number,
 ): SleepCandidate {
   const key = sessionKey(record.file);
   const dropped = (reason: SleepDropReason): SleepCandidate => ({
@@ -164,6 +221,7 @@ function judgeRecord(
     sessionFile: record.file,
     reason,
   });
+  if (record.closed) return judgeClosedRecord(record, index, latest, panes, now);
   if (latest.byPane.get(record.pane) !== index || latest.byFile.get(key) !== index) {
     return dropped('superseded');
   }
@@ -200,6 +258,58 @@ function judgeRecord(
     ...(pane.workspaceId !== undefined ? { workspaceId: pane.workspaceId } : {}),
     ...(labelTitle !== undefined ? { labelTitle } : {}),
   };
+}
+
+/**
+ * A session whose pane the sleep closed: no pane to check, so it stands while it is the latest
+ * record for its session, slept for good, is not older than CLOSED_SLEEP_MAX_AGE_MS, and no pane
+ * has it open (one does once it is woken, by the board or by hand). Its id is `zz:<session id>`,
+ * not the old pane id, which herdr may already have handed to another pane.
+ */
+function judgeClosedRecord(
+  record: SleepRecord,
+  index: number,
+  latest: LatestRecords,
+  panes: readonly PaneFact[],
+  now: number,
+): SleepCandidate {
+  const key = sessionKey(record.file);
+  const paneId = closedSleepId(key);
+  const dropped = (reason: SleepDropReason): SleepCandidate => ({
+    status: 'dropped',
+    paneId,
+    sessionFile: record.file,
+    reason,
+  });
+  if (latest.byFile.get(key) !== index) return dropped('superseded');
+  if (record.phase !== 'sleeping') return dropped('exit-requested');
+  if (now - Date.parse(record.requestedAt) > CLOSED_SLEEP_MAX_AGE_MS) return dropped('expired');
+  const open = panes.some(
+    (pane) => pane.sessionFile !== undefined && sessionKey(pane.sessionFile) === key,
+  );
+  if (open) return dropped('awake');
+  return {
+    status: 'sleeping',
+    paneId,
+    sessionFile: record.file,
+    sleptAt: record.requestedAt,
+    cwd: record.cwd,
+    ...(record.workspace !== undefined ? { workspaceId: record.workspace } : {}),
+    ...(record.title !== undefined ? { labelTitle: record.title } : {}),
+    closed: {
+      agent: record.agent,
+      file: record.file,
+      fresh: record.fresh,
+      cwd: record.cwd,
+      ...(record.workspace !== undefined ? { workspaceId: record.workspace } : {}),
+    },
+  };
+}
+
+/** The board's id for a closed-pane sleep: pane-id shaped, so clients and wake requests take it as one. */
+export function closedSleepId(sessionKeyValue: string): string {
+  const tail = sessionKeyValue.slice(-SID8_LENGTH).replace(/[^A-Za-z0-9_-]/g, '_');
+  return `zz:${tail === '' ? '_' : tail}`;
 }
 
 /** The session id that identifies a session file across panes; the path stands in when no uuid is found. */
@@ -248,7 +358,12 @@ export class SleepRegistry {
         ...(candidate.cwd !== undefined ? { cwd: candidate.cwd } : {}),
         ...(candidate.workspaceId !== undefined ? { workspaceId: candidate.workspaceId } : {}),
       };
-      judgements.push({ status: 'sleeping', paneId: candidate.paneId, session });
+      judgements.push({
+        status: 'sleeping',
+        paneId: candidate.paneId,
+        session,
+        ...(candidate.closed !== undefined ? { closed: candidate.closed } : {}),
+      });
     }
     this.titles = titles;
     return judgements;
