@@ -22,16 +22,24 @@
   animation: pet-loader-pace 6s linear infinite;
 }
 
-/* One 32×32 frame, drawn at 2× with crisp pixels. */
+/* One 32×32 window, drawn at 2× with crisp pixels; it clips the walking row behind it. */
 .pet-loader__sprite {
   width: 32px;
+  height: 32px;
+  overflow: hidden;
+  transform: scale(2);
+  transform-origin: top left;
+}
+
+/* The walking row (y 64–96 of the 96×96 sheet) as a 96px strip: three 32px frames side by side.
+ * It slides by whole frames with transform, so only a composited property animates. */
+.pet-loader__strip {
+  width: 96px;
   height: 32px;
   background-repeat: no-repeat;
   background-size: 96px 96px;
   background-position: 0 -64px;
   image-rendering: pixelated;
-  transform: scale(2);
-  transform-origin: top left;
   animation: pet-loader-steps 480ms steps(3) infinite;
 }
 
@@ -42,13 +50,13 @@
   text-align: center;
 }
 
-/* Three frames: 0, -32px, -64px along the walking row. */
+/* Three frames: the strip slides 0 → -96px in three steps of one frame each. */
 @keyframes pet-loader-steps {
   from {
-    background-position: 0 -64px;
+    transform: translateX(0);
   }
   to {
-    background-position: -96px -64px;
+    transform: translateX(-96px);
   }
 }
 
@@ -73,7 +81,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .pet-loader__walker,
-  .pet-loader__sprite {
+  .pet-loader__strip {
     animation: none;
   }
 }
