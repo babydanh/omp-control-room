@@ -148,6 +148,8 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledgerShown = activePage === 'ledger' && ledger.privileged === true;
   const ledgerAvailable = ledger.privileged === true;
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
+  // Why a session clicked in the tree opened nothing: it runs outside herdr, so there is no pane.
+  const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<SidebarPrefs>(() => readSidebarPrefs(browserStorage()));
   // A phone's sidebar sheet starts closed and is not remembered; other layouts keep the saved pref.
@@ -419,12 +421,13 @@ export function BoardShell({ client }: BoardShellProps) {
 
   /**
    * A board session opens in the drawer, a session in a herdr pane (a herdr row, or a
-   * ledger session herdr reports) in that pane's terminal. A session with neither has
-   * nothing to open: its changes are in its right-click menu.
+   * ledger session herdr reports) in that pane's terminal. A session with neither (a Claude or
+   * agy run in a terminal of its own) has no pane to open or type into: the board says so.
    */
   function openProjectSession(session: ProjectTreeNode, where: { readonly folderPath?: string }): void {
     const id = session.sessionId;
     if (id === undefined) return;
+    setSessionNotice(null);
     // The tree names omp sessions by their native id; the server adds the board session behind one.
     const boardKey = session.boardSessionId ?? (state.sessions[id] !== undefined ? id : null);
     if (boardKey !== null && state.sessions[boardKey] !== undefined) selectSession(boardKey);
@@ -432,6 +435,7 @@ export function BoardShell({ client }: BoardShellProps) {
     else if (session.herdrPaneId !== undefined) openHerdr(revealPane(session.herdrPaneId, where));
     else if (session.agentKind === 'herdr' && session.state === 'sleeping') openSleeping(revealPane(id, where));
     else if (session.agentKind === 'herdr') openHerdr(revealPane(id, where));
+    else setSessionNotice(`Phiên ${session.name} chạy ngoài herdr (cửa sổ terminal riêng): board không mở hay gõ vào được. Gõ ở cửa sổ đang chạy nó, hoặc bấm "+ Phiên mới" để mở phiên trong herdr.`);
   }
 
   /**
@@ -774,6 +778,12 @@ export function BoardShell({ client }: BoardShellProps) {
           className="bg-warning/12 px-3 py-1.5 text-2xs text-warning"
         >
           {state.workspaceSelectionNotice}
+        </p>
+      )}
+      {sessionNotice !== null && (
+        <p role="status" data-testid="session-open-notice" className="flex items-center gap-2 bg-warning/12 px-3 py-1.5 text-2xs text-warning">
+          <span className="min-w-0 flex-1">{sessionNotice}</span>
+          <button type="button" aria-label="Đóng thông báo" onClick={() => setSessionNotice(null)}>×</button>
         </p>
       )}
       <AttentionBar
