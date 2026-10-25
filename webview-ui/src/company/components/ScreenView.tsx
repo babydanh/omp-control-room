@@ -14,7 +14,7 @@ import type { CSSProperties, RefObject } from 'react';
 import { memo, useContext } from 'react';
 
 import { TERMINAL_THEME } from '../../constants.js';
-import type { ScreenLine, ScreenStyle } from '../terminalScreen.js';
+import { rowBand, type ScreenLine, type ScreenStyle } from '../terminalScreen.js';
 import { WrapLinesContext } from '../wrapLines.js';
 
 const SCREEN_COLORS: CSSProperties = {
@@ -61,15 +61,29 @@ interface ScreenRowProps {
   readonly newline: boolean;
 }
 
-/** One row of the screen. Memoised on its parsed segments: an unchanged row keeps its DOM. */
+const RULE_ROW_STYLE: CSSProperties = { display: 'block', overflow: 'hidden', whiteSpace: 'pre', minHeight: '1lh' };
+const BAND_ROW_STYLE: CSSProperties = { display: 'block', minHeight: '1lh' };
+
+/**
+ * One row of the screen. Memoised on its parsed segments: an unchanged row keeps its DOM. A row whose
+ * background the terminal padded out (a tool box) is drawn as a block filled in that colour, so the
+ * box stays one even band however narrow the screen and however its text wraps.
+ */
 const ScreenRow = memo(function ScreenRow({ line, newline }: ScreenRowProps) {
+  const { segments, band, rule } = rowBand(line);
+  const spans = segments.map((segment, index) => (
+    <span key={index} style={segmentStyle(segment.style)}>
+      {segment.text}
+    </span>
+  ));
+  // A box's ruled edge spans the terminal's width: clip it at the frame rather than wrap it.
+  if (rule === true) return <span style={RULE_ROW_STYLE}>{spans}</span>;
+  // A box row is a block in the box's colour. A block ends its own line, so no newline follows it,
+  // and an empty one still keeps one line's height.
+  if (band !== undefined) return <span style={{ ...BAND_ROW_STYLE, backgroundColor: band }}>{spans}</span>;
   return (
     <>
-      {line.map((segment, index) => (
-        <span key={index} style={segmentStyle(segment.style)}>
-          {segment.text}
-        </span>
-      ))}
+      {spans}
       {newline ? '\n' : null}
     </>
   );

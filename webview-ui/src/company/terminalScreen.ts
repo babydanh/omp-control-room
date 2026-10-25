@@ -412,6 +412,63 @@ export function clipRuleRows(lines: readonly ScreenLine[], columns: number): rea
   });
 }
 
+/**
+ * A row as the screen paints it: its segments, the background to fill the whole row with (a box
+ * row), and whether it is a box's ruled edge, which clips at the frame instead of wrapping.
+ */
+export interface ScreenRowBand {
+  readonly segments: ScreenLine;
+  readonly band?: string;
+  readonly rule?: boolean;
+}
+
+/** A box's top, bottom or divider: only box-drawing characters and spaces. */
+const BOX_RULE_ROW = /^[\s─━═┄┅┈┉╌╍╭╮╰╯├┤┌┐└┘┬┴┼│┃║]*$/;
+/** A box's right edge at the end of a row. */
+const BOX_RIGHT_EDGE = /[│┃║┤]\s*$/;
+
+function backgroundOf(segment: ScreenSegment): string | undefined {
+  return segment.style.inverse ? undefined : segment.style.bg;
+}
+
+/**
+ * omp draws a tool's output as a box as wide as its terminal (often 200 columns): each row is
+ * `│ text`, spaces in the box's background out to the width, then the right edge `│`; the top and
+ * bottom are full-width rules. Drawn narrower than the terminal, with lines wrapping, the padding,
+ * the edge and the rules broke onto the next lines as ragged dark bars. Here a box row loses its
+ * right edge and coloured padding and is returned with that colour as its band, so it paints as one
+ * even block at any width; a ruled edge is flagged so it clips at the frame. Other rows are untouched.
+ */
+export function rowBand(line: ScreenLine): ScreenRowBand {
+  const text = line.map((segment) => segment.text).join('');
+  if (/[─━═]/.test(text) && BOX_RULE_ROW.test(text)) return { segments: line, rule: true };
+  const segments = [...line];
+  // Uncoloured spaces after the box are the terminal's own tail: not part of the row.
+  while (segments.length > 0 && backgroundOf(segments[segments.length - 1]) === undefined && !/\S/.test(segments[segments.length - 1].text)) segments.pop();
+  const last = segments[segments.length - 1];
+  if (last !== undefined && BOX_RIGHT_EDGE.test(last.text)) {
+    const kept = last.text.replace(BOX_RIGHT_EDGE, '');
+    if (kept === '') segments.pop();
+    else segments[segments.length - 1] = { ...last, text: kept };
+  }
+  let band: string | undefined;
+  while (segments.length > 0) {
+    const segment = segments[segments.length - 1];
+    const bg = backgroundOf(segment);
+    if (bg === undefined || (band !== undefined && bg !== band)) break;
+    const trimmed = segment.text.trimEnd();
+    if (trimmed === segment.text) break;
+    band = bg;
+    if (trimmed !== '') {
+      segments[segments.length - 1] = { ...segment, text: trimmed };
+      break;
+    }
+    segments.pop();
+  }
+  // Without coloured padding the row is not a box row: keep it exactly as the terminal drew it.
+  return band === undefined ? { segments: line } : { segments, band };
+}
+
 /** The last `count` lines after dropping trailing lines that hold no visible character. */
 export function tailScreen(lines: readonly ScreenLine[], count: number): ScreenLine[] {
   if (count <= 0) return [];

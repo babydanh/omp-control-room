@@ -10,6 +10,7 @@ import {
   paletteColor,
   parseAnsiScreen,
   plainScreen,
+  rowBand,
   screenFitPx,
   type ScreenLine,
   type ScreenStyle,
@@ -435,5 +436,52 @@ describe('clipRuleRows', () => {
 
     expect(clippedRule).toEqual([{ text: '─'.repeat(50), style: { fg: '#888' } }, { text: '─'.repeat(10), style: {} }]);
     expect(keptText).toBe(text);
+  });
+});
+
+describe('rowBand: a tool box keeps one even background however narrow the screen', () => {
+  const box = { bg: '#101014' };
+
+  it('turns the padding a terminal paints out to its width into the row band, keeping the text', () => {
+    const line: ScreenLine = [
+      { text: '  1 # Handoff', style: { ...box, fg: '#eee' } },
+      { text: ' '.repeat(60), style: box },
+    ];
+    expect(rowBand(line)).toEqual({ segments: [line[0]], band: '#101014' });
+  });
+
+  it('makes an all-padding row an empty band, so the box has no gap', () => {
+    expect(rowBand([{ text: ' '.repeat(80), style: box }])).toEqual({ segments: [], band: '#101014' });
+  });
+
+  it('leaves rows without coloured padding as they are: plain text, inverse, or a padding of two colours', () => {
+    const plain: ScreenLine = [{ text: 'π Read file', style: {} }, { text: '   ', style: {} }];
+    expect(rowBand(plain)).toEqual({ segments: plain });
+    const inverse: ScreenLine = [{ text: 'x', style: {} }, { text: '   ', style: { bg: '#fff', inverse: true } }];
+    expect(rowBand(inverse)).toEqual({ segments: inverse });
+    const twoColours: ScreenLine = [{ text: 'a', style: {} }, { text: '  ', style: { bg: '#111' } }, { text: '  ', style: { bg: '#222' } }];
+    expect(rowBand(twoColours)).toEqual({ segments: twoColours.slice(0, 2), band: '#222' });
+  });
+
+  it('reads an omp tool box as herdr hands it over: drops the right edge and its coloured padding', () => {
+    // Captured shape of a 200-column omp box row: "│ text", padding in the box colour, then "│".
+    const edge = { fg: '#6b7280', bg: '#0f1216' };
+    const row: ScreenLine = [
+      { text: '│', style: edge },
+      { text: '  1 # Handoff: Vận hành', style: { fg: '#e5e7eb', bg: '#0f1216' } },
+      { text: ' '.repeat(170), style: { bg: '#0f1216' } },
+      { text: '│', style: edge },
+    ];
+    expect(rowBand(row)).toEqual({ segments: row.slice(0, 2), band: '#0f1216' });
+  });
+
+  it('flags a box top, bottom or divider as a rule that clips instead of wrapping', () => {
+    expect(rowBand([{ text: `╭${'─'.repeat(198)}╮`, style: { fg: '#6b7280' } }]).rule).toBe(true);
+    expect(rowBand([{ text: `├${'─'.repeat(198)}┤`, style: { fg: '#6b7280' } }]).rule).toBe(true);
+  });
+
+  it('keeps an uncoloured table row exactly as drawn: its edges are not a box padding', () => {
+    const table: ScreenLine = [{ text: '│ a │ b │', style: {} }];
+    expect(rowBand(table)).toEqual({ segments: table });
   });
 });
