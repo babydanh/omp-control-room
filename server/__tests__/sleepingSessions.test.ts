@@ -152,7 +152,7 @@ describe('judgeSleepRecords for a session whose pane the sleep closed', () => {
 
     expect(verdict).toEqual({
       status: 'sleeping',
-      paneId: `zz:${SID8}`,
+      paneId: closedSleepId(UUID),
       sessionFile: SESSION_FILE,
       sleptAt: SLEPT_AT,
       cwd: CWD,
@@ -185,9 +185,13 @@ describe('judgeSleepRecords for a session whose pane the sleep closed', () => {
     ]);
   });
 
-  it('names its board id from the session, in the pane id shape', () => {
-    expect(closedSleepId('d0c9a1b2-1111-4222-8333-abcdef012345')).toBe('zz:ef012345');
-    expect(closedSleepId('C:/x/y.z')).toMatch(/^zz:[A-Za-z0-9_-]+$/);
+  it('names its board id from the whole session key, in the pane id shape, distinct for ids that end alike', () => {
+    const a = closedSleepId('d0c9a1b2-1111-4222-8333-abcdef012345');
+    const b = closedSleepId('ffffffff-1111-4222-8333-abcdef012345');
+
+    expect(a).toMatch(/^zz:[0-9a-f]{16}$/);
+    expect(a).not.toBe(b);
+    expect(closedSleepId('C:/x/y.z')).toMatch(/^zz:[0-9a-f]{16}$/);
   });
 });
 

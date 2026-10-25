@@ -18,6 +18,7 @@ import {
   isHerdrPaneId,
   resolveHerdrSocketPath,
 } from '../src/herdr/herdrLink.js';
+import { closedSleepId } from '../src/herdr/sleepingSessions.js';
 
 type Handler = (params: Record<string, unknown>) => unknown;
 
@@ -1586,6 +1587,7 @@ describe('HerdrLink sleeping sessions and wake', () => {
 
   describe('a session whose pane the sleep closed', () => {
     const STUB = path.join(os.homedir(), '.omp', 'scripts', 'cho-omp.ps1');
+    const ID = closedSleepId('1f2e3d4c-5b6a-4978-8a9b-000087572576');
     const deep = (): Record<string, unknown> => ({
       ...SLEPT,
       ts: new Date().toISOString(),
@@ -1601,7 +1603,7 @@ describe('HerdrLink sleeping sessions and wake', () => {
       fake.reply('pane.send_text', () => ({ type: 'ok' }));
       fake.reply('pane.send_keys', () => ({ type: 'ok' }));
 
-      await link.wake(`zz:${SID8}`, "tiếp tục 'đi'");
+      await link.wake(ID, "tiếp tục 'đi'");
 
       expect(fake.requestsTo('tab.create').map((request) => request.params)).toEqual([
         { cwd: 'V:\\Duancanhan', focus: false, workspace_id: 'wD' },
@@ -1627,7 +1629,7 @@ describe('HerdrLink sleeping sessions and wake', () => {
       fake.reply('pane.send_text', () => ({ type: 'ok' }));
       fake.reply('pane.send_keys', () => ({ type: 'ok' }));
 
-      await link.wake(`zz:${SID8}`);
+      await link.wake(ID);
 
       expect(fake.requestsTo('tab.create')).toHaveLength(2);
       expect(fake.requestsTo('pane.send_text')[0]?.params.text).toBe(
@@ -1641,7 +1643,20 @@ describe('HerdrLink sleeping sessions and wake', () => {
         panes: [sleepingPane({ pane_id: 'wA:p9', label: '', agent: 'omp', agent_session: { kind: 'path', value: SESSION_FILE } })],
       }));
 
-      const error = await herdrFailure(link.wake(`zz:${SID8}`));
+      const error = await herdrFailure(link.wake(ID));
+
+      expect(error.code).toBe('not_sleeping');
+      expect(fake.requestsTo('tab.create')).toEqual([]);
+    });
+
+    it('refuses a Claude session that herdr reports open by its id', async () => {
+      const claudeId = 'f3b70de3-a936-4580-a14e-6e4c69403e36';
+      await writeRegistry([{ ...deep(), agent: 'claude', file: claudeId }]);
+      fake.reply('pane.list', () => ({
+        panes: [sleepingPane({ pane_id: 'wA:p9', label: '', agent: 'claude', agent_session: { kind: 'id', value: claudeId } })],
+      }));
+
+      const error = await herdrFailure(link.wake(closedSleepId(claudeId)));
 
       expect(error.code).toBe('not_sleeping');
       expect(fake.requestsTo('tab.create')).toEqual([]);

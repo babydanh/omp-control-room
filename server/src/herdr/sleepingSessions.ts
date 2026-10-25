@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -306,10 +307,12 @@ function judgeClosedRecord(
   };
 }
 
-/** The board's id for a closed-pane sleep: pane-id shaped, so clients and wake requests take it as one. */
+/**
+ * The board's id for a closed-pane sleep: pane-id shaped, so clients and wake requests take it as
+ * one. A hash of the whole session key, so two sessions whose ids end alike never share it.
+ */
 export function closedSleepId(sessionKeyValue: string): string {
-  const tail = sessionKeyValue.slice(-SID8_LENGTH).replace(/[^A-Za-z0-9_-]/g, '_');
-  return `zz:${tail === '' ? '_' : tail}`;
+  return `zz:${createHash('sha256').update(sessionKeyValue).digest('hex').slice(0, 16)}`;
 }
 
 /** The session id that identifies a session file across panes; the path stands in when no uuid is found. */

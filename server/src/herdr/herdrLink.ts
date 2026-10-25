@@ -1368,11 +1368,9 @@ function parsePaneList(result: unknown): PaneFact[] {
   for (const info of list as unknown[]) {
     const paneId = jsonField(info, 'pane_id');
     if (typeof paneId !== 'string') continue;
-    const session = jsonField(info, 'agent_session');
-    const sessionFile =
-      jsonField(session, 'kind') === 'path'
-        ? nonEmptyString(jsonField(session, 'value'))
-        : undefined;
+    // omp reports a path, Claude and agy an id: both are what omp-ngu.json records as `file`, so a woken
+    // Claude/agy session drops off the sleeping list like an omp one.
+    const sessionFile = nonEmptyString(jsonField(jsonField(info, 'agent_session'), 'value'));
     panes.push({
       paneId,
       workspaceId: nonEmptyString(jsonField(info, 'workspace_id')),
