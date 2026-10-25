@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SubmitPromptInput } from '../../core/src/company.js';
-import type { ProjectSessionStartMessage, ProjectTreeNode } from '../../core/src/messages.js';
+import type { HerdrAgentsMessage, ProjectSessionStartMessage, ProjectTreeNode } from '../../core/src/messages.js';
 import type { CompanyCoordinator } from '../src/company/companyCoordinator.js';
 import { type ProjectSessionServices, startProjectSession } from '../src/projects/newSession.js';
 import { createProjectSessionRuntime } from '../src/projects/newSessionRuntime.js';
@@ -50,6 +50,7 @@ function createServices(overrides: Partial<ProjectSessionServices> = {}) {
     },
     openChat: vi.fn(async () => 'omp-id'),
     startAgent: vi.fn(async ({ kind }: { kind: 'claude' | 'agy' }) => `${kind}-pane`),
+    findAgent: vi.fn((_name: string): { paneId: string; cwd: string } | undefined => undefined),
     runSetupScript: vi.fn(async () => ({ code: 0, stderr: '' })),
     ...overrides,
   } satisfies ProjectSessionServices;
@@ -148,6 +149,36 @@ describe('project session start', () => {
     expect(services.startAgent).toHaveBeenCalledWith(expect.objectContaining({ cwd: checkout, kind: 'claude' }));
   });
 
+  it('opens the live agent of the same name instead of starting a second one, even after losing a start race', async () => {
+    const existing = path.join(root, 'repo.worktrees', 'claude-sua-loi-dang-nhap');
+    const startAgent = vi.fn(async () => 'never');
+    const findAgent = vi.fn(() => ({ paneId: 'wA:p14', cwd: existing }));
+    const result = await startProjectSession(request('claude', 'separate'), deps(createServices({ startAgent, findAgent })));
+    expect(result).toMatchObject({ ok: true, sessionId: 'wA:p14', checkout: existing });
+    expect(startAgent).not.toHaveBeenCalled();
+    expect(fs.existsSync(path.join(root, 'repo.worktrees'))).toBe(false);
+
+    // Both starts passed the check; herdr refuses the second name, which then opens the winner.
+    let live: { paneId: string; cwd: string } | undefined;
+    const raced = vi.fn(async () => {
+      live = { paneId: 'wA:p15', cwd: repo };
+      throw new Error('herdr từ chối yêu cầu (agent_name_taken).');
+    });
+    const late = await startProjectSession(request('claude', 'shared'), deps(createServices({ startAgent: raced, findAgent: () => live })));
+    expect(late).toMatchObject({ ok: true, sessionId: 'wA:p15' });
+
+    // The same name in another repo is not this session: never opened, and the refusal says so.
+    const elsewhere = { paneId: 'wB:p3', cwd: path.join(root, 'other-repo') };
+    const foreign = vi.fn(async () => { throw new Error('herdr từ chối yêu cầu (agent_name_taken).'); });
+    await expect(startProjectSession(request('claude', 'shared'), deps(createServices({ startAgent: foreign, findAgent: () => elsewhere }))))
+      .rejects.toThrow('thư mục khác');
+    expect(foreign).toHaveBeenCalledTimes(1);
+
+    const refused = vi.fn(async () => { throw new Error('herdr từ chối yêu cầu (agent_blocked).'); });
+    await expect(startProjectSession(request('claude', 'shared'), deps(createServices({ startAgent: refused }))))
+      .rejects.toThrow('agent_blocked');
+  });
+
   it('refuses a shared checkout at the protected main repository root', async () => {
     const protectedPath = path.join(root, 'Duancanhan', 'Project_QuanLyGiaiDau', 'GiaiDau');
     const protectedTree = { nodes: [
@@ -178,7 +209,7 @@ describe('project session start', () => {
       openNewChat: vi.fn(async () => 'board-session'),
       submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
     };
-    const herdr = { startAgent: vi.fn(async () => 'wA:p9') };
+    const herdr = { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage };
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => coordinator),
       herdr,
@@ -211,7 +242,7 @@ describe('project session start', () => {
       openNewChat: vi.fn(async () => 'board-session'),
       submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
     };
-    const herdr = { startAgent: vi.fn(async () => 'wA:p9') };
+    const herdr = { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage };
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => coordinator),
       herdr,

@@ -68,7 +68,10 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
   useEffect(() => {
     if (opened?.sessionId !== undefined) onStarted?.({ sessionId: opened.sessionId, engine: started, folderPath });
   }, [opened, onStarted, started, folderPath]);
-  const blocked = pending || target === undefined || (selectedRepo === undefined && !plainFolder);
+  // A start sent from an earlier opening of this dialog is still on its way: a second one would ask
+  // for the same session again. The store keeps pending requests across dialog openings.
+  const earlierStart = !pending && Object.values(state.pending).some((sent) => sent.type === 'projectSessionStart');
+  const blocked = pending || earlierStart || target === undefined || (selectedRepo === undefined && !plainFolder);
 
   function start(choice: SessionEngine) {
     if (blocked || target === undefined) return;
@@ -164,6 +167,7 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
         {plainFolder && <p className="project-session-dialog__path">Thư mục này không phải repo git: phiên omp chạy ngay trong <code>{target?.path}</code>.</p>}
         {reason && <p role="alert" className="project-session-dialog__error">{reason}</p>}
         {pending && <p role="status">Đang mở…</p>}
+        {earlierStart && <p role="status">Phiên bấm mở lúc trước vẫn đang khởi động, chờ nó xong rồi hãy mở phiên khác.</p>}
         {opened !== undefined && <p role="status">Đã mở phiên tại <code>{opened.checkout}</code></p>}
       </form>
     </div>

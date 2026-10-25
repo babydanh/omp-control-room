@@ -3,6 +3,8 @@
   inset: 0;
   z-index: 1000;
   display: grid;
+  /* Without this the dialog stretches to the full height and its rows spread apart. */
+  place-items: center;
   background: color-mix(in srgb, var(--color-bg-dark) 70%, transparent);
   padding: 24px;
 }

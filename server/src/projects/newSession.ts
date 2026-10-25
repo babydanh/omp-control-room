@@ -6,6 +6,7 @@ import type {
   ProjectSettingsValues,
   ProjectTreeNode,
 } from '../../../core/src/messages.js';
+import { isInsideRepo } from '../company/workItems/workItemScheduler.js';
 import { LibraryUserError } from '../library/libraryError.js';
 import { createProjectSessionWorktree } from './projectSessionWorktree.js';
 import type { ProjectTreeSnapshot } from './projectTree.js';
@@ -22,6 +23,8 @@ export interface ProjectSessionServices {
   readonly openChat: (input: { readonly folder: string; readonly cwd: string; readonly prompt: string }) => Promise<string>;
   /** Opens an interactive Claude or agy agent in a new herdr tab in `cwd`; resolves with its pane id. */
   readonly startAgent: (input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly prompt: string }) => Promise<string>;
+  /** The live herdr agent under this name, if any: its pane id and working directory. */
+  readonly findAgent: (name: string) => { readonly paneId: string; readonly cwd: string } | undefined;
   readonly runSetupScript: (
     argv: readonly string[],
     cwd: string,
@@ -57,6 +60,21 @@ export async function startProjectSession(
   const repoPath = selectedRepo === undefined ? folderPath : selectedRepo.path;
   if (repoPath === undefined) throw new LibraryUserError('Đường dẫn repo không hợp lệ.');
   const sharedCheckout = node.kind === 'checkout' ? node.path : repoPath;
+  if (request.worktree === 'shared' && sharedCheckout !== undefined && isProtectedMainRepo(sharedCheckout)) {
+    throw new LibraryUserError('Không thể dùng chung thư mục chính của Project_QuanLyGiaiDau. Hãy tạo worktree riêng.');
+  }
+  // herdr names agents uniquely. A live agent under this name running where this request would run
+  // (the same shared checkout, or a worktree beside this repo) is this same session asked twice: the
+  // dialog reopened while the first start was still on its way. Open it; start no second one.
+  const name = request.engine === 'omp' ? undefined : agentName(request.engine, request.taskName);
+  const home = request.worktree === 'shared' ? sharedCheckout : `${repoPath}.worktrees`;
+  const sameSession = (agent: { readonly paneId: string; readonly cwd: string } | undefined) =>
+    agent !== undefined && home !== undefined && isInsideRepo(agent.cwd, home)
+    && (request.worktree !== 'shared' || isInsideRepo(home, agent.cwd))
+      ? agent
+      : undefined;
+  const running = name === undefined ? undefined : sameSession(deps.services.findAgent(name));
+  if (running !== undefined) return opened(request, running.paneId, running.cwd);
   const checkout = request.worktree === 'shared'
     ? sharedCheckout
     : (await createProjectSessionWorktree({
@@ -65,9 +83,6 @@ export async function startProjectSession(
       run: deps.services.runGit,
     })).path;
   if (checkout === undefined) throw new LibraryUserError('Đường dẫn checkout không hợp lệ.');
-  if (request.worktree === 'shared' && isProtectedMainRepo(checkout)) {
-    throw new LibraryUserError('Không thể dùng chung thư mục chính của Project_QuanLyGiaiDau. Hãy tạo worktree riêng.');
-  }
   if (request.worktree === 'separate') {
     const settings = await deps.services.effectiveSettings(folder.id);
     const script = settings.worktreePrepare;
@@ -81,24 +96,22 @@ export async function startProjectSession(
 
   let sessionId: string;
   try {
-    sessionId = request.engine === 'omp'
+    sessionId = request.engine === 'omp' || name === undefined
       ? await deps.services.openChat({ folder: folderPath, cwd: checkout, prompt: request.initialPrompt })
-      : await deps.services.startAgent({
-        cwd: checkout,
-        kind: request.engine,
-        name: agentName(request.engine, request.taskName),
-        prompt: request.initialPrompt,
-      });
+      : await deps.services.startAgent({ cwd: checkout, kind: request.engine, name, prompt: request.initialPrompt });
   } catch (error) {
+    const taken = name !== undefined && error instanceof Error && error.message.includes('agent_name_taken');
+    // Two starts of one session raced past the check above: the other one won, open it.
+    const winner = taken ? sameSession(deps.services.findAgent(name)) : undefined;
+    if (winner !== undefined) return opened(request, winner.paneId, winner.cwd);
+    if (taken) throw new LibraryUserError(`Tên phiên ${name} đang được một agent ở thư mục khác dùng. Hãy đặt "Tên việc" khác trong Tuỳ chọn thêm.`);
     throw new LibraryUserError(error instanceof Error ? error.message : 'Không mở được phiên mới.');
   }
-  return {
-    type: 'projectSessionStartResult',
-    requestId: request.requestId,
-    ok: true,
-    sessionId,
-    checkout,
-  };
+  return opened(request, sessionId, checkout);
+}
+
+function opened(request: ProjectSessionStartMessage, sessionId: string, checkout: string): ProjectSessionStartResultMessage {
+  return { type: 'projectSessionStartResult', requestId: request.requestId, ok: true, sessionId, checkout };
 }
 
 /** A herdr agent name for the session: the engine and the task's first words, as herdr allows. */

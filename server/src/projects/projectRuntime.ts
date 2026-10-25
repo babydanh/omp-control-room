@@ -29,8 +29,8 @@ export interface ProjectRuntimeInput {
   readonly company: ProjectFolders;
   readonly ledger: LedgerService;
   readonly runProcess: ProcessRunner;
-  /** Opens Claude and agy sessions as interactive herdr agents. */
-  readonly herdr: Pick<HerdrLink, 'startAgent'>;
+  /** Opens Claude and agy sessions as interactive herdr agents, and finds one already running. */
+  readonly herdr: Pick<HerdrLink, 'startAgent' | 'snapshot'>;
 }
 
 export interface ProjectRuntime {

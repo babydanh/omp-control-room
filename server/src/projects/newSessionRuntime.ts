@@ -15,7 +15,7 @@ const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 export interface ProjectSessionRuntimeOptions {
   readonly coordinatorFor: (folder: string) => Promise<SessionCoordinator>;
   /** Opens Claude and agy as interactive agents in herdr, where the user watches and types. */
-  readonly herdr: Pick<HerdrLink, 'startAgent'>;
+  readonly herdr: Pick<HerdrLink, 'startAgent' | 'snapshot'>;
   readonly runProcess: ProcessRunner;
   readonly effectiveSettings: (nodeId: string) => Promise<ProjectSettingsValues>;
 }
@@ -83,6 +83,10 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
     async startAgent({ cwd, kind, name, prompt }) {
       const text = prompt.trim();
       return options.herdr.startAgent({ cwd, kind, name, ...(text === '' ? {} : { prompt: text }) });
+    },
+    findAgent(name) {
+      const agent = options.herdr.snapshot().agents.find((entry) => entry.name === name);
+      return agent === undefined ? undefined : { paneId: agent.paneId, cwd: agent.cwd ?? '' };
     },
   };
 }
