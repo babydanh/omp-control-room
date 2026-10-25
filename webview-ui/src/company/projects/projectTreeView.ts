@@ -174,6 +174,21 @@ export function isRunningNode(node: ProjectTreeNode): boolean {
   return node.kind === 'session' && RUNNING_STATES.has((node.state ?? '').toLowerCase());
 }
 
+/** What a session's face shows: eyes shut while it sleeps, glancing around while it works, blinking at rest. */
+export type SessionFaceMood = 'sleep' | 'work' | 'idle';
+
+export function sessionFaceMood(node: ProjectTreeNode): SessionFaceMood {
+  if ((node.state ?? '').toLowerCase() === 'sleeping') return 'sleep';
+  return isRunningNode(node) ? 'work' : 'idle';
+}
+
+/** A steady hue per session, so a face keeps its colour across renders and reloads: identity, not status. */
+export function sessionFaceHue(id: string): number {
+  let hash = 0;
+  for (let index = 0; index < id.length; index += 1) hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
+  return hash % 360;
+}
+
 /** The session or herdr pane the detail drawer shows, so the tree can point at its row. */
 export interface TreeSelection {
   readonly sessionId: string | null;

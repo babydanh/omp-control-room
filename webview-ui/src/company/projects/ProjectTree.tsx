@@ -14,9 +14,12 @@ import {
   isSelectedSession,
   type ProjectTreeBranch,
   selectedAncestorIds,
+  sessionFaceHue,
+  sessionFaceMood,
   sessionProgressView,
   type TreeSelection,
 } from './projectTreeView.js';
+import { SessionFace } from './SessionFace.js';
 import { useSessionHover } from './sessionHover.js';
 import { SessionHoverCard } from './SessionHoverCard.js';
 
@@ -259,9 +262,9 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
         >
           {isSession ? (
             <>
-              <span aria-hidden="true" className={`size-2 shrink-0 rounded-full ${isRunningNode(node) ? 'bg-status-success' : 'bg-status-permission'}`} />
+              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} />
               <span className="min-w-0 flex-1 leading-snug">
-                {/* One line: the name, then only what a glance needs. A running session's green dot says "đang chạy"; main is the usual branch. */}
+                {/* One line: the name, then only what a glance needs. A running session's face glances around ("đang chạy"); main is the usual branch. */}
                 <span className="flex min-w-0 items-baseline gap-1.5">
                   <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
                   <span className="max-w-[45%] shrink-0 truncate text-2xs text-text-muted">

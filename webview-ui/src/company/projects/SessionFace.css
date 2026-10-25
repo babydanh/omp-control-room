@@ -1,0 +1,95 @@
+.session-face {
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  background: hsl(var(--face-hue) 62% 56%);
+}
+
+.session-face[data-mood='sleep'] {
+  background: hsl(var(--face-hue) 22% 42%);
+}
+
+.session-face__eyes {
+  display: flex;
+  gap: 2px;
+}
+
+.session-face__eye {
+  width: 3px;
+  height: 5px;
+  border-radius: 1px 1px 0.5px 0.5px;
+  background: #fff;
+  transform-origin: center 70%;
+}
+
+/* Asleep: eyes shut to a line, the face breathing slowly. */
+.session-face[data-mood='sleep'] .session-face__eye {
+  height: 1px;
+  margin-top: 2px;
+  background: rgb(255 255 255 / 0.8);
+}
+
+.session-face[data-mood='sleep'] {
+  animation: session-face-breathe 4s ease-in-out infinite var(--face-delay);
+}
+
+/* At work: the eyes look one way, then the other. */
+.session-face[data-mood='work'] .session-face__eyes {
+  animation: session-face-glance 3.2s steps(1, end) infinite var(--face-delay);
+}
+
+/* At rest: a blink every few seconds. */
+.session-face[data-mood='idle'] .session-face__eye {
+  animation: session-face-blink 5s ease-in-out infinite var(--face-delay);
+}
+
+@keyframes session-face-glance {
+  0%,
+  30% {
+    transform: translateX(0);
+  }
+  31%,
+  55% {
+    transform: translateX(-2px);
+  }
+  56%,
+  80% {
+    transform: translateX(2px);
+  }
+  81%,
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes session-face-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+  95% {
+    transform: scaleY(0.15);
+  }
+}
+
+@keyframes session-face-breathe {
+  0%,
+  100% {
+    opacity: 0.75;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-face,
+  .session-face__eyes,
+  .session-face__eye {
+    animation: none !important;
+  }
+}

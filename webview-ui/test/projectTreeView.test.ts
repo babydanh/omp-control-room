@@ -17,6 +17,8 @@ import {
   projectNodeMenuItems,
   selectedAncestorIds,
   sessionActivityCounts,
+  sessionFaceHue,
+  sessionFaceMood,
 } from '../src/company/projects/projectTreeView.js';
 
 const node = (id: string, kind: ProjectTreeNode['kind'], parentId?: string, extra: Partial<ProjectTreeNode> = {}): ProjectTreeNode => ({
@@ -213,5 +215,25 @@ describe('projectTreeView', () => {
       node('g', 'session', 'folder', { sessionId: 's6', state: 'unknown' }),
     ];
     expect(sessionActivityCounts(shared)).toEqual({ total: 3, working: 1, needs: 1, idle: 1, error: 0 });
+  });
+});
+
+describe('a session face in the tree', () => {
+  const session = (state: string): ProjectTreeNode => ({ id: `s-${state}`, kind: 'session', name: 'phiên', state });
+
+  it('sleeps with eyes shut, glances while working, and rests otherwise', () => {
+    expect(sessionFaceMood(session('sleeping'))).toBe('sleep');
+    expect(sessionFaceMood(session('running'))).toBe('work');
+    expect(sessionFaceMood(session('busy'))).toBe('work');
+    expect(sessionFaceMood(session('idle'))).toBe('idle');
+    expect(sessionFaceMood(session('waiting'))).toBe('idle');
+  });
+
+  it('keeps one colour per session id, so a face does not change colour between renders', () => {
+    const id = 'df490920-498d-4f6f-a082-92307c3ffac5';
+    expect(sessionFaceHue(id)).toBe(sessionFaceHue(id));
+    expect(sessionFaceHue(id)).toBeGreaterThanOrEqual(0);
+    expect(sessionFaceHue(id)).toBeLessThan(360);
+    expect(new Set(['a', 'b', 'c', 'd', 'e'].map(sessionFaceHue)).size).toBeGreaterThan(1);
   });
 });
