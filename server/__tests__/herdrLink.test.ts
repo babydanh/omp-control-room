@@ -1619,6 +1619,19 @@ describe('HerdrLink sleeping sessions and wake', () => {
       ]);
     });
 
+    it('drops the woken session from the registry, keeping every other entry as written', async () => {
+      const other = { ...SLEPT, pane: 'wE:p1', file: 'C:/omp/sessions/x_00000000-0000-4000-8000-000000000001.jsonl', extra: 1 };
+      await writeRegistry([other, deep()]);
+      fake.reply('pane.list', () => ({ panes: [] }));
+      fake.reply('tab.create', () => ({ root_pane: { pane_id: 'wD:p21' } }));
+      fake.reply('pane.send_text', () => ({ type: 'ok' }));
+      fake.reply('pane.send_keys', () => ({ type: 'ok' }));
+
+      await link.wake(ID);
+
+      expect(JSON.parse(await fs.readFile(registryFile, 'utf8'))).toEqual([other]);
+    });
+
     it('opens the tab anywhere when its workspace is gone', async () => {
       await writeRegistry([deep()]);
       fake.reply('pane.list', () => ({ panes: [] }));

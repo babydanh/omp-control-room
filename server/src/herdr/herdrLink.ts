@@ -711,6 +711,8 @@ class HerdrLinkImpl implements HerdrLink {
       text: closedWakeCommand(this.wakeStubFile, plan, prompt),
     });
     await this.call('pane.send_keys', { pane_id: newPane, keys: ['enter'] });
+    // The wake is under way in its own tab: the record has done its job (see forgetClosed).
+    await this.sleepRegistry.forgetClosed(plan.file);
   }
 
   /** Working directory of the pane's foreground process; `undefined` when herdr cannot say. */

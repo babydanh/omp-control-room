@@ -383,6 +383,26 @@ export class SleepRegistry {
     );
   }
 
+  /**
+   * Drops the closed-pane records of a session once the board has reopened it. Waking cannot
+   * rely on the new pane naming the same session: an empty Claude session (no transcript) comes
+   * back under a new id, and its old record would otherwise stay "asleep" for seven days. Every
+   * other entry is written back as read, unknown fields included. Never rejects.
+   */
+  async forgetClosed(file: string): Promise<void> {
+    try {
+      const parsed: unknown = JSON.parse(await fs.readFile(this.file, 'utf8'));
+      if (!Array.isArray(parsed)) return;
+      const kept = (parsed as unknown[]).filter(
+        (entry) => !(jsonField(entry, 'closed') === true && jsonField(entry, 'file') === file),
+      );
+      if (kept.length === parsed.length) return;
+      await fs.writeFile(this.file, `${JSON.stringify(kept, null, 2)}\n`);
+    } catch (error) {
+      this.warn(`Cannot drop the woken session from ${this.file}: ${String(error)}`);
+    }
+  }
+
   private async readRecords(): Promise<SleepRecord[]> {
     let text: string;
     try {
