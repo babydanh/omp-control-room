@@ -49,7 +49,7 @@ export function SleepingPanel({ client, state, paneId, onClose }: SleepingPanelP
     setWakeRequest(null);
     // The session runs in the pane the server names (a new tab when the sleep closed its pane):
     // pick it, so the drawer turns to that terminal instead of staying on a record now gone.
-    if (wakeOutcome.sessionId !== undefined) client.select({ herdrPaneId: wakeOutcome.sessionId });
+    if (wakeOutcome.paneId !== undefined) client.select({ herdrPaneId: wakeOutcome.paneId });
   }, [client, wakeOutcome]);
   const closeOutcome = closeRequest === null ? undefined : state.commandResults[closeRequest];
 

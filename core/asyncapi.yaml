@@ -7342,6 +7342,13 @@ components:
           type: string
           format: uuid
           description: The work item a companyWorkItemCreate made.
+        paneId:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: >-
+            The herdr pane a herdrWake left the session running in: a new tab's pane when the sleep had closed
+            its own, so the board can open that pane's screen.
         squadRunId:
           type: string
           format: uuid

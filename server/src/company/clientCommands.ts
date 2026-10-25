@@ -680,8 +680,9 @@ async function herdrCommand(
           fail(send, requestId, 'invalid_request', INVALID_HERDR_REQUEST_MESSAGE);
           return;
         }
-        // The pane the session runs in now, as a herdr session id: the board opens its screen.
-        ok(send, requestId, undefined, await herdr.wake(paneId, prompt));
+        // The pane the session runs in now: the board opens its screen.
+        const paneNow = await herdr.wake(paneId, prompt);
+        send({ type: 'companyCommandResult', requestId: requestId ?? FALLBACK_REQUEST_ID, ok: true, paneId: paneNow });
         return;
       }
       case 'herdrWatch': {

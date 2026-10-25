@@ -21,6 +21,8 @@ export interface CommandResultView {
   workspacePath?: string;
   /** The work item a create command filed, when the server names it. */
   workItemId?: string;
+  /** The herdr pane a wake left the session running in, when the server names one. */
+  paneId?: string;
 }
 
 export function viewCommandResult(
@@ -35,6 +37,7 @@ export function viewCommandResult(
     sessionId: message.sessionId,
     workspacePath: message.workspacePath,
     workItemId: message.workItemId,
+    paneId: message.paneId,
   };
 }
 

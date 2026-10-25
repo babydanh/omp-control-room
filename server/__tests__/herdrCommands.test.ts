@@ -210,7 +210,7 @@ describe('herdr board commands', () => {
       context({ herdr }),
     );
 
-    expect(await rec.next()).toEqual({ type: 'companyCommandResult', requestId: 'w-1', ok: true, sessionId: 'wA:p21' });
+    expect(await rec.next()).toEqual({ type: 'companyCommandResult', requestId: 'w-1', ok: true, paneId: 'wA:p21' });
     expect(herdr.wake).toHaveBeenCalledWith('zz:13ad3c46fac4c0e4', 'tiếp tục');
   });
 
