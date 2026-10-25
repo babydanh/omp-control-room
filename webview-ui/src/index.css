@@ -373,19 +373,6 @@
      from COMPANY_MOTION (constants.ts). The drawer's open state animates in on mount,
      and its closed state's translate transitions out. Every animation here is switched
      off by the reduced-motion block at the end. */
-  .company-spinner {
-    display: inline-block;
-    width: 1em;
-    height: 1em;
-    overflow: hidden;
-    line-height: 1em;
-    vertical-align: middle;
-  }
-  .company-spinner-track {
-    display: flex;
-    flex-direction: column;
-    animation: company-spin-steps 900ms steps(10) infinite;
-  }
   .company-breathe {
     animation: company-breathe 1.4s ease-in-out infinite;
   }
@@ -621,15 +608,6 @@
   }
   50% {
     opacity: 0.3;
-  }
-}
-
-@keyframes company-spin-steps {
-  from {
-    transform: translateY(0);
-  }
-  to {
-    transform: translateY(-10em);
   }
 }
 

@@ -28,6 +28,7 @@ import { useStickToBottom } from '../useStickToBottom.js';
 import { WrapLinesContext } from '../wrapLines.js';
 import { HerdrInfoTab } from './AgentInfoTab.js';
 import { CompanyButton } from './CompanyButton.js';
+import { PetLoader } from './PetLoader.js';
 import { ScreenFreezeChip } from './ScreenFrame.js';
 import { ScreenView } from './ScreenView.js';
 
@@ -82,9 +83,15 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange, starting =
 
   if (agent === undefined) {
     const missing = missingPaneView(starting, now - openedAt);
+    if (missing.loading) {
+      return (
+        <div data-testid="herdr-pane-starting" className="flex flex-1 items-center justify-center">
+          <PetLoader text={missing.text} />
+        </div>
+      );
+    }
     return (
-      <p role="status" data-testid={missing.loading ? 'herdr-pane-starting' : 'herdr-pane-missing'} className="flex items-center gap-2 p-2 text-2xs text-text-muted">
-        {missing.loading && <span aria-hidden="true" className="size-3 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />}
+      <p role="status" data-testid="herdr-pane-missing" className="p-2 text-2xs text-text-muted">
         {missing.text}
       </p>
     );

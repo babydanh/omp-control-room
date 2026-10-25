@@ -1,0 +1,79 @@
+.pet-loader {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 16px 8px;
+}
+
+/* The walk path: the dog crosses it, turns, and comes back. */
+.pet-loader__track {
+  position: relative;
+  width: 168px;
+  height: 64px;
+}
+
+.pet-loader__walker {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 64px;
+  height: 64px;
+  animation: pet-loader-pace 6s linear infinite;
+}
+
+/* One 32×32 frame, drawn at 2× with crisp pixels. */
+.pet-loader__sprite {
+  width: 32px;
+  height: 32px;
+  background-repeat: no-repeat;
+  background-size: 96px 96px;
+  background-position: 0 -64px;
+  image-rendering: pixelated;
+  transform: scale(2);
+  transform-origin: top left;
+  animation: pet-loader-steps 480ms steps(3) infinite;
+}
+
+.pet-loader__text {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+/* Three frames: 0, -32px, -64px along the walking row. */
+@keyframes pet-loader-steps {
+  from {
+    background-position: 0 -64px;
+  }
+  to {
+    background-position: -96px -64px;
+  }
+}
+
+/* Right across the path facing right, a turn, then back facing left. */
+@keyframes pet-loader-pace {
+  0% {
+    transform: translateX(0) scaleX(1);
+  }
+  48% {
+    transform: translateX(104px) scaleX(1);
+  }
+  50% {
+    transform: translateX(104px) scaleX(-1);
+  }
+  98% {
+    transform: translateX(0) scaleX(-1);
+  }
+  100% {
+    transform: translateX(0) scaleX(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pet-loader__walker,
+  .pet-loader__sprite {
+    animation: none;
+  }
+}

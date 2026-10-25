@@ -1,18 +1,18 @@
 /**
- * StatusDot: the one-glyph status mark the sidebar rows share. Working is a
- * braille spinner, a thing waiting on the user breathes red, and the rest are
- * still dots. Reduced motion freezes both (index.css).
+ * StatusDot: the one-glyph status mark the sidebar rows share. Working is the
+ * session face glancing about (the same character as the project tree), a thing
+ * waiting on the user breathes red, and the rest are still dots. Reduced motion
+ * freezes both.
  */
 
 import type { AgentTone } from '../agentSidebarView.js';
 import type { HerdrTone } from '../herdrView.js';
+import { SessionFace } from '../projects/SessionFace.js';
 
 export type DotTone = AgentTone | HerdrTone;
 
-const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const;
-// The first frame is repeated at the end, so the looping step lands on a frame
-// identical to the start and the spinner never visibly jumps back.
-const SPINNER_COLUMN: readonly string[] = [...SPINNER_FRAMES, SPINNER_FRAMES[0]];
+/** The working face's colour: the green the board uses for work in progress. */
+const WORKING_FACE_HUE = 160;
 
 const DOT_CLASS: Readonly<Record<Exclude<DotTone, 'working'>, string>> = {
   needs: 'bg-warning company-breathe',
@@ -23,16 +23,9 @@ const DOT_CLASS: Readonly<Record<Exclude<DotTone, 'working'>, string>> = {
   unknown: 'bg-idle',
 };
 
+/** The small "working" mark: a face at text size, eyes glancing left and right. */
 export function Spinner() {
-  return (
-    <span aria-hidden="true" className="company-spinner text-accent">
-      <span className="company-spinner-track">
-        {SPINNER_COLUMN.map((frame, index) => (
-          <span key={index}>{frame}</span>
-        ))}
-      </span>
-    </span>
-  );
+  return <SessionFace mood="work" hue={WORKING_FACE_HUE} size="sm" />;
 }
 
 export function StatusDot({ tone }: { tone: DotTone }) {
