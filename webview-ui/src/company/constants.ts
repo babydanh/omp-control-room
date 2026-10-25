@@ -98,7 +98,9 @@ export const COMPANY_SESSION_LOG_MAX_ENTRIES = 1000;
 /** Sidebar width bounds and default, in CSS pixels. */
 export const COMPANY_SIDEBAR_MIN_WIDTH_PX = 240;
 export const COMPANY_SIDEBAR_MAX_WIDTH_PX = 480;
-export const COMPANY_SIDEBAR_DEFAULT_WIDTH_PX = 300;
+export const COMPANY_SIDEBAR_DEFAULT_WIDTH_PX = 360;
+/** The default before 2026-10-25. Every pref write stored it, so a saved 300 means the user never dragged. */
+export const COMPANY_SIDEBAR_OLD_DEFAULT_WIDTH_PX = 300;
 
 /** The collapsed agent rail's width: an 84px badge (code over status word) per agent, with a margin either side. */
 export const COMPANY_RAIL_WIDTH_PX = 96;

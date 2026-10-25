@@ -176,24 +176,36 @@ export function isRunningNode(node: ProjectTreeNode): boolean {
 
 /**
  * The feeling a session's face shows, from its real state: asleep (eyes shut, a drifting "z"),
- * at work (eyes glancing), waiting on you (eyes wide, a little hop), in error (eyes slanted, a
- * shiver) or at rest (a slow blink).
+ * at work (eyes glancing), waiting on you (eyes wide, a little hop), in error (dizzy "× ×", a
+ * shiver), done (happy "^ ^", a hop and a sparkle) or at rest (a slow blink).
  */
-export type SessionFaceMood = 'sleep' | 'work' | 'waiting' | 'error' | 'idle';
+export type SessionFaceMood = 'sleep' | 'work' | 'waiting' | 'error' | 'done' | 'idle';
 
 export function sessionFaceMood(node: ProjectTreeNode): SessionFaceMood {
   const state = (node.state ?? '').toLowerCase();
   if (state === 'sleeping') return 'sleep';
   if (isRunningNode(node)) return 'work';
   if (state === 'error') return 'error';
+  if (state === 'done') return 'done';
   return waitsOnYou(node) ? 'waiting' : 'idle';
 }
 
-/** A steady hue per session, so a face keeps its colour across renders and reloads: identity, not status. */
+/** How long the happy face shows after a session finishes a turn. */
+export const SESSION_FACE_CHEER_MS = 3200;
+
+/** A session that was working and now rests has just finished a turn: the face cheers for a moment. */
+export function finishedTurn(previous: SessionFaceMood, next: SessionFaceMood): boolean {
+  return previous === 'work' && (next === 'idle' || next === 'done');
+}
+
+/**
+ * A steady hue per session, so a face keeps its colour across renders and reloads: identity, not
+ * status. Red (330°–30°) is left out, so a busy session never reads as one in error.
+ */
 export function sessionFaceHue(id: string): number {
   let hash = 0;
   for (let index = 0; index < id.length; index += 1) hash = (hash * 31 + id.charCodeAt(index)) >>> 0;
-  return hash % 360;
+  return 30 + (hash % 300);
 }
 
 /** The session or herdr pane the detail drawer shows, so the tree can point at its row. */

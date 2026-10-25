@@ -23,15 +23,12 @@
     inset 0 1px 0 hsl(var(--face-hue) 90% 80% / 0.55),
     inset 0 -1.5px 0 hsl(var(--face-hue) 60% 36% / 0.7),
     0 1px 2px rgb(0 0 0 / 0.35);
-  transition: filter 240ms ease-out;
-  will-change: transform;
 }
 
 .session-face__eyes {
   display: flex;
   gap: 3px;
   margin-top: -1px;
-  will-change: transform;
 }
 
 .session-face__eye {
@@ -167,6 +164,61 @@
 /* ── At rest: open eyes, a slow lazy blink. ── */
 .session-face[data-mood='idle'] .session-face__lid {
   animation: face-blink-slow 6s infinite var(--face-delay);
+}
+
+/* ── Done: happy "^ ^" eyes (the arc flipped up), one hop, and a sparkle popping beside. ── */
+.session-face[data-mood='done'] .session-face__body {
+  animation: face-cheer 700ms var(--face-pop) both;
+}
+.session-face[data-mood='done'] .session-face__lid {
+  opacity: 0;
+  transform: scaleY(0.1);
+}
+.session-face[data-mood='done'] .session-face__shut {
+  top: 1px;
+  opacity: 1;
+  transform: scaleY(-1);
+}
+.session-face[data-mood='done'] .session-face__mark {
+  color: hsl(50 100% 72%);
+  animation: face-sparkle 1.6s var(--face-pop) both;
+}
+.session-face[data-mood='done'] .session-face__mark::after {
+  content: '✦';
+}
+
+@keyframes face-cheer {
+  0% {
+    transform: translateY(0) scale(1);
+  }
+  35% {
+    transform: translateY(-3px) scale(1.08);
+  }
+  65% {
+    transform: translateY(0) scale(1.04, 0.96);
+  }
+  100% {
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes face-sparkle {
+  0% {
+    opacity: 0;
+    transform: scale(0.3) rotate(0deg);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.2) rotate(30deg);
+  }
+  70% {
+    opacity: 1;
+    transform: scale(1) rotate(60deg);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.8) rotate(90deg);
+  }
 }
 
 @keyframes face-glance {

@@ -13,6 +13,7 @@ import {
   canMoveProjectNode,
   countSessions,
   filterProjectTree,
+  finishedTurn,
   isSelectedSession,
   projectNodeMenuItems,
   selectedAncestorIds,
@@ -232,13 +233,23 @@ describe('TC-FEAT-02: a session face in the tree shows how the session is doing'
     // "waiting" is an idle session with nothing asked of you; a blocked step is a question for you.
     expect(sessionFaceMood(session('waiting'))).toBe('idle');
     expect(sessionFaceMood({ ...session('idle'), progress: { done: 1, total: 3, blocked: 'chờ duyệt' } })).toBe('waiting');
+    expect(sessionFaceMood(session('done'))).toBe('done');
   });
 
-  it('keeps one colour per session id, so a face does not change colour between renders', () => {
+  it('cheers only when a working session comes to rest, not when it sleeps, errs or starts', () => {
+    expect(finishedTurn('work', 'idle')).toBe(true);
+    expect(finishedTurn('work', 'done')).toBe(true);
+    expect(finishedTurn('work', 'sleep')).toBe(false);
+    expect(finishedTurn('work', 'error')).toBe(false);
+    expect(finishedTurn('idle', 'work')).toBe(false);
+    expect(finishedTurn('idle', 'idle')).toBe(false);
+  });
+
+  it('keeps one colour per session id, never the red that means an error', () => {
     const id = 'df490920-498d-4f6f-a082-92307c3ffac5';
     expect(sessionFaceHue(id)).toBe(sessionFaceHue(id));
-    expect(sessionFaceHue(id)).toBeGreaterThanOrEqual(0);
-    expect(sessionFaceHue(id)).toBeLessThan(360);
-    expect(new Set(['a', 'b', 'c', 'd', 'e'].map(sessionFaceHue)).size).toBeGreaterThan(1);
+    const hues = Array.from({ length: 500 }, (_, index) => sessionFaceHue(`phiên-${index}`));
+    expect(hues.every((hue) => hue >= 30 && hue < 330)).toBe(true);
+    expect(new Set(hues).size).toBeGreaterThan(100);
   });
 });

@@ -11,6 +11,7 @@ import {
   COMPANY_SIDEBAR_DEFAULT_WIDTH_PX,
   COMPANY_SIDEBAR_MAX_WIDTH_PX,
   COMPANY_SIDEBAR_MIN_WIDTH_PX,
+  COMPANY_SIDEBAR_OLD_DEFAULT_WIDTH_PX,
 } from './constants.js';
 
 export interface SidebarPrefs {
@@ -75,7 +76,9 @@ export function readSidebarPrefs(storage: SidebarStorage | null): SidebarPrefs {
   }
   if (typeof parsed !== 'object' || parsed === null) return defaultPrefs();
   const collapsed = 'collapsed' in parsed && parsed.collapsed === true;
-  const width = 'width' in parsed && typeof parsed.width === 'number' ? parsed.width : Number.NaN;
+  const saved = 'width' in parsed && typeof parsed.width === 'number' ? parsed.width : Number.NaN;
+  // Any pref write stored the width, so the old default says nothing about a choice: take the new one.
+  const width = saved === COMPANY_SIDEBAR_OLD_DEFAULT_WIDTH_PX ? COMPANY_SIDEBAR_DEFAULT_WIDTH_PX : saved;
   const folded = 'collapsedProjects' in parsed ? parsed.collapsedProjects : [];
   return { collapsed, width: clampSidebarWidth(width), collapsedProjects: keyList(folded) };
 }
