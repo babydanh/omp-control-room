@@ -102,11 +102,15 @@ export class FolderScope {
     return this.caseInsensitive ? tidied.toLowerCase() : tidied;
   }
 
-  /** Whether `targetKey` is `folderKey` or lies under it. The separator check keeps `Project2` out of `Project`. */
+  /**
+   * Whether `targetKey` is `folderKey`, lies under it, or lies in its sibling `<folder>.worktrees`:
+   * the board opens a repo folder's worktrees there, and their agents belong to that folder. The
+   * separator check keeps `Project2` and `Project.worktreesX` out of `Project`.
+   */
   private contains(folderKey: string, targetKey: string): boolean {
-    if (targetKey === folderKey) return true;
-    const prefix = folderKey.endsWith(this.pathApi.sep) ? folderKey : folderKey + this.pathApi.sep;
-    return targetKey.startsWith(prefix);
+    const sep = this.pathApi.sep;
+    const under = (root: string): boolean => targetKey === root || targetKey.startsWith(root.endsWith(sep) ? root : root + sep);
+    return under(folderKey) || (!folderKey.endsWith(sep) && under(`${folderKey}.worktrees`));
   }
 }
 

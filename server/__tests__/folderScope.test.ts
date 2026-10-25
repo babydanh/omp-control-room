@@ -75,6 +75,16 @@ describe('FolderScope', () => {
     expect(await scope.folderOf('D:\\')).toBeUndefined();
   });
 
+  it('tags an agent in the sibling "<folder>.worktrees" with that folder, and nothing for ".worktreesX"', async () => {
+    const scope = windowsScope();
+    await scope.setFolders(['V:\\Duancanhan\\Auto3Dvideo', 'V:\\Duancanhan\\Project_QuanLyGiaiDau']);
+
+    expect(await scope.folderOf('V:\\Duancanhan\\Auto3Dvideo.worktrees\\claude-1025-1438')).toBe('V:\\Duancanhan\\Auto3Dvideo');
+    expect(await scope.folderOf('v:/duancanhan/auto3dvideo.WORKTREES/x/')).toBe('V:\\Duancanhan\\Auto3Dvideo');
+    expect(await scope.folderOf('V:\\Duancanhan\\Auto3Dvideo.worktreesX\\x')).toBeUndefined();
+    expect(await scope.folderOf('V:\\Duancanhan\\Project_QuanLyGiaiDau.worktrees\\a')).toBe('V:\\Duancanhan\\Project_QuanLyGiaiDau');
+  });
+
   it('returns undefined before any folder is set', async () => {
     expect(await windowsScope().folderOf('V:\\Duan\\Project\\src')).toBeUndefined();
   });
