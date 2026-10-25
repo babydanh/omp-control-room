@@ -240,10 +240,11 @@ export interface HerdrLink {
   /** Where the agent in a pane runs, and what omp reports about it. Read-only. */
   info(paneId: string): Promise<BoardAgentInfo>;
   /**
-   * Wakes a sleeping omp session by resuming it in its pane, typing `prompt` first when one is
-   * given. Refuses unless herdr and the sleep registry still show the pane holding that session.
+   * Wakes a sleeping session by resuming it in its pane (or in a new tab when the sleep closed its
+   * pane), typing `prompt` first when one is given. Refuses unless herdr and the sleep registry
+   * still show the pane holding that session. Resolves with the pane the session now runs in.
    */
-  wake(paneId: string, prompt?: string): Promise<void>;
+  wake(paneId: string, prompt?: string): Promise<string>;
   close(paneId: string): Promise<void>;
   /**
    * Opens a new herdr tab in `cwd` and starts an interactive agent of `kind` in it, named `name`,
@@ -651,7 +652,7 @@ class HerdrLinkImpl implements HerdrLink {
     return paneId;
   }
 
-  async wake(paneId: string, prompt?: string): Promise<void> {
+  async wake(paneId: string, prompt?: string): Promise<string> {
     assertPaneId(paneId);
     if (prompt !== undefined) assertWakePrompt(prompt);
     if (this.pendingWakes.has(paneId)) throw new HerdrError('not_sleeping', WAKE_PENDING_MESSAGE);
@@ -661,10 +662,11 @@ class HerdrLinkImpl implements HerdrLink {
         this.pendingWakes.delete(paneId);
       }, WAKE_PENDING_MS),
     );
+    let awakeIn = paneId;
     try {
       const closed = await this.assertSleeping(paneId);
       if (closed !== undefined) {
-        await this.wakeInNewTab(closed, prompt);
+        awakeIn = await this.wakeInNewTab(closed, prompt);
       } else {
         if (prompt !== undefined)
           await this.call('pane.send_text', { pane_id: paneId, text: prompt });
@@ -676,6 +678,7 @@ class HerdrLinkImpl implements HerdrLink {
       throw error;
     }
     if (this.running) this.scheduleRefresh();
+    return awakeIn;
   }
 
   /**
@@ -698,7 +701,7 @@ class HerdrLinkImpl implements HerdrLink {
    * Reopens a session whose pane the sleep closed: a new tab in its folder runs the wake prompt
    * script with -Ngay, which refuses a session already open elsewhere and resumes at once.
    */
-  private async wakeInNewTab(plan: ClosedSleepWake, prompt?: string): Promise<void> {
+  private async wakeInNewTab(plan: ClosedSleepWake, prompt?: string): Promise<string> {
     const tab = { cwd: plan.cwd, focus: false };
     let created: unknown;
     try {
@@ -720,6 +723,7 @@ class HerdrLinkImpl implements HerdrLink {
     await this.call('pane.send_keys', { pane_id: newPane, keys: ['enter'] });
     // The wake is under way in its own tab: the record has done its job (see forgetClosed).
     await this.sleepRegistry.forgetClosed(plan.file);
+    return newPane;
   }
 
   /** Working directory of the pane's foreground process; `undefined` when herdr cannot say. */

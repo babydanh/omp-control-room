@@ -313,6 +313,14 @@ export function BoardShell({ client }: BoardShellProps) {
   useEffect(() => {
     if (selectedPaneId !== null && selectionEmpty) client.select({ herdrPaneId: selectedPaneId });
   }, [client, selectedPaneId, selectionEmpty]);
+  // A wake answers with the pane the session now runs in and picks it. The drawer still shows the
+  // sleep record, which the wake removed ("không còn trong herdr"): turn it to that pane's screen.
+  const pickedPane = state.selection.herdrPaneId;
+  useEffect(() => {
+    if (opened?.kind !== 'sleeping' || pickedPane === null || pickedPane === opened.paneId) return;
+    setOpened({ kind: 'herdr', paneId: pickedPane });
+    setHerdrTab('screen');
+  }, [opened, pickedPane]);
 
   // Diagnostics are a live measurement of processes the user owns: asked for
   // once the board is on screen, never polled in the background.

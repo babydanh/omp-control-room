@@ -1603,7 +1603,7 @@ describe('HerdrLink sleeping sessions and wake', () => {
       fake.reply('pane.send_text', () => ({ type: 'ok' }));
       fake.reply('pane.send_keys', () => ({ type: 'ok' }));
 
-      await link.wake(ID, "tiếp tục 'đi'");
+      expect(await link.wake(ID, "tiếp tục 'đi'")).toBe('wD:p20');
 
       expect(fake.requestsTo('tab.create').map((request) => request.params)).toEqual([
         { cwd: 'V:\\Duancanhan', focus: false, workspace_id: 'wD' },

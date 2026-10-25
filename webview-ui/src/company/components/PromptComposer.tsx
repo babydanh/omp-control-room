@@ -316,6 +316,8 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
       const current = client.getState().prompt.text;
       const remaining = draftAfterSend(current, draft.text);
       if (remaining !== current) client.setDraftText(remaining);
+      // The woken session runs in the pane the server names: aim at it and let the drawer show it.
+      if (verdict.sessionId !== undefined) client.select({ herdrPaneId: verdict.sessionId });
     });
   };
 

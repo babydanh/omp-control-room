@@ -46,7 +46,7 @@ function stubLink(overrides: Partial<HerdrLink> = {}): HerdrLink {
     rename: vi.fn(async (): Promise<void> => undefined),
     close: vi.fn(async (): Promise<void> => undefined),
     info: vi.fn(async (): Promise<AgentInfo> => INFO),
-    wake: vi.fn(async (): Promise<void> => undefined),
+    wake: vi.fn(async (paneId: string): Promise<string> => paneId),
     watch: vi.fn((): void => undefined),
     startAgent: vi.fn(async (): Promise<string> => 'wA:p9'),
     ...overrides,
@@ -199,18 +199,19 @@ describe('herdr board commands', () => {
   });
 
 
-  it('wakes a sleeping session with the typed prompt and answers ok', async () => {
-    const herdr = stubLink();
+  it('wakes a sleeping session with the typed prompt and answers with the pane it now runs in', async () => {
+    // A deep sleep closed the pane: the session comes back in a new tab, and the board opens that one.
+    const herdr = stubLink({ wake: vi.fn(async (): Promise<string> => 'wA:p21') });
     const rec = recorder();
 
     handleCompanyCommand(
-      { type: 'herdrWake', requestId: 'w-1', paneId: 'wF:p2', prompt: 'tiếp tục' },
+      { type: 'herdrWake', requestId: 'w-1', paneId: 'zz:13ad3c46fac4c0e4', prompt: 'tiếp tục' },
       rec.send,
       context({ herdr }),
     );
 
-    expect(await rec.next()).toEqual({ type: 'companyCommandResult', requestId: 'w-1', ok: true });
-    expect(herdr.wake).toHaveBeenCalledWith('wF:p2', 'tiếp tục');
+    expect(await rec.next()).toEqual({ type: 'companyCommandResult', requestId: 'w-1', ok: true, sessionId: 'wA:p21' });
+    expect(herdr.wake).toHaveBeenCalledWith('zz:13ad3c46fac4c0e4', 'tiếp tục');
   });
 
   it('wakes a sleeping session without a prompt when none is given', async () => {
@@ -229,7 +230,7 @@ describe('herdr board commands', () => {
 
   it('reports a refused wake with the herdr error code and message', async () => {
     const herdr = stubLink({
-      wake: vi.fn(async (): Promise<void> => {
+      wake: vi.fn(async (): Promise<string> => {
         throw new HerdrError('not_sleeping', 'Phiên này không còn ngủ đông. Hãy làm mới bảng.');
       }),
     });
