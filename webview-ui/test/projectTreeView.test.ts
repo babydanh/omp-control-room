@@ -218,15 +218,20 @@ describe('projectTreeView', () => {
   });
 });
 
-describe('a session face in the tree', () => {
+describe('TC-FEAT-02: a session face in the tree shows how the session is doing', () => {
   const session = (state: string): ProjectTreeNode => ({ id: `s-${state}`, kind: 'session', name: 'phiên', state });
 
-  it('sleeps with eyes shut, glances while working, and rests otherwise', () => {
+  it('sleeps, works, waits on you, errs, or rests, from the session state', () => {
     expect(sessionFaceMood(session('sleeping'))).toBe('sleep');
     expect(sessionFaceMood(session('running'))).toBe('work');
     expect(sessionFaceMood(session('busy'))).toBe('work');
+    expect(sessionFaceMood(session('waiting_input'))).toBe('waiting');
+    expect(sessionFaceMood(session('permission'))).toBe('waiting');
+    expect(sessionFaceMood(session('error'))).toBe('error');
     expect(sessionFaceMood(session('idle'))).toBe('idle');
+    // "waiting" is an idle session with nothing asked of you; a blocked step is a question for you.
     expect(sessionFaceMood(session('waiting'))).toBe('idle');
+    expect(sessionFaceMood({ ...session('idle'), progress: { done: 1, total: 3, blocked: 'chờ duyệt' } })).toBe('waiting');
   });
 
   it('keeps one colour per session id, so a face does not change colour between renders', () => {

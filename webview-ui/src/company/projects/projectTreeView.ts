@@ -174,12 +174,19 @@ export function isRunningNode(node: ProjectTreeNode): boolean {
   return node.kind === 'session' && RUNNING_STATES.has((node.state ?? '').toLowerCase());
 }
 
-/** What a session's face shows: eyes shut while it sleeps, glancing around while it works, blinking at rest. */
-export type SessionFaceMood = 'sleep' | 'work' | 'idle';
+/**
+ * The feeling a session's face shows, from its real state: asleep (eyes shut, a drifting "z"),
+ * at work (eyes glancing), waiting on you (eyes wide, a little hop), in error (eyes slanted, a
+ * shiver) or at rest (a slow blink).
+ */
+export type SessionFaceMood = 'sleep' | 'work' | 'waiting' | 'error' | 'idle';
 
 export function sessionFaceMood(node: ProjectTreeNode): SessionFaceMood {
-  if ((node.state ?? '').toLowerCase() === 'sleeping') return 'sleep';
-  return isRunningNode(node) ? 'work' : 'idle';
+  const state = (node.state ?? '').toLowerCase();
+  if (state === 'sleeping') return 'sleep';
+  if (isRunningNode(node)) return 'work';
+  if (state === 'error') return 'error';
+  return waitsOnYou(node) ? 'waiting' : 'idle';
 }
 
 /** A steady hue per session, so a face keeps its colour across renders and reloads: identity, not status. */

@@ -1,95 +1,314 @@
+/*
+ * Session face. Only transform and opacity animate (GPU-composited, no layout). Moves use
+ * easeInOutCubic, pops easeOutBack, blinks close fast and open slower, like a real eyelid.
+ */
 .session-face {
+  --face-move: cubic-bezier(0.65, 0, 0.35, 1);
+  --face-pop: cubic-bezier(0.34, 1.56, 0.64, 1);
+  position: relative;
   display: inline-grid;
-  place-items: center;
   flex-shrink: 0;
-  width: 15px;
-  height: 15px;
-  border-radius: 4px;
-  background: hsl(var(--face-hue) 62% 56%);
+  width: 16px;
+  height: 16px;
 }
 
-.session-face[data-mood='sleep'] {
-  background: hsl(var(--face-hue) 22% 42%);
+.session-face__body {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  border-radius: 5px;
+  background: linear-gradient(180deg, hsl(var(--face-hue) 72% 66%) 0%, hsl(var(--face-hue) 64% 52%) 100%);
+  box-shadow:
+    inset 0 1px 0 hsl(var(--face-hue) 90% 80% / 0.55),
+    inset 0 -1.5px 0 hsl(var(--face-hue) 60% 36% / 0.7),
+    0 1px 2px rgb(0 0 0 / 0.35);
+  transition: filter 240ms ease-out;
+  will-change: transform;
 }
 
 .session-face__eyes {
   display: flex;
-  gap: 2px;
+  gap: 3px;
+  margin-top: -1px;
+  will-change: transform;
 }
 
 .session-face__eye {
-  width: 3px;
+  position: relative;
+  width: 3.5px;
   height: 5px;
-  border-radius: 1px 1px 0.5px 0.5px;
+}
+
+/* The open eye: a white lid that blinks by squashing towards its lower edge. */
+.session-face__lid {
+  position: absolute;
+  inset: 0;
+  border-radius: 1.5px 1.5px 1px 1px;
   background: #fff;
-  transform-origin: center 70%;
+  transform-origin: 50% 80%;
+  transition:
+    transform 220ms var(--face-move),
+    opacity 160ms ease-out;
 }
 
-/* Asleep: eyes shut to a line, the face breathing slowly. */
-.session-face[data-mood='sleep'] .session-face__eye {
-  height: 1px;
-  margin-top: 2px;
-  background: rgb(255 255 255 / 0.8);
+/* The shut eye: a soft downward arc, faded in when the eye closes for good. */
+.session-face__shut {
+  position: absolute;
+  left: -0.5px;
+  right: -0.5px;
+  top: 2px;
+  height: 2.5px;
+  border-bottom: 1.4px solid rgb(255 255 255 / 0.92);
+  border-radius: 0 0 4px 4px;
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition:
+    transform 260ms var(--face-pop),
+    opacity 200ms ease-out;
 }
 
-.session-face[data-mood='sleep'] {
-  animation: session-face-breathe 4s ease-in-out infinite var(--face-delay);
+/* The mood's mark beside the face: "z" asleep, "!" waiting on you; hidden otherwise. */
+.session-face__mark {
+  position: absolute;
+  top: -5px;
+  right: -4px;
+  font: 800 7px/1 ui-rounded, system-ui, sans-serif;
+  color: hsl(var(--face-hue) 70% 82%);
+  opacity: 0;
+  pointer-events: none;
+}
+.session-face[data-mood='sleep'] .session-face__mark::after {
+  content: 'z';
+}
+.session-face[data-mood='waiting'] .session-face__mark::after {
+  content: '!';
 }
 
-/* At work: the eyes look one way, then the other. */
+/* The error eye: a small "×", two bars crossing, shown in place of the lid. */
+.session-face__eye::before,
+.session-face__eye::after {
+  content: '';
+  position: absolute;
+  left: -0.25px;
+  top: 1.9px;
+  width: 4px;
+  height: 1.3px;
+  border-radius: 1px;
+  background: #fff;
+  opacity: 0;
+  transform: rotate(45deg) scale(0.4);
+  transition:
+    transform 260ms var(--face-pop),
+    opacity 180ms ease-out;
+}
+.session-face__eye::after {
+  transform: rotate(-45deg) scale(0.4);
+}
+
+/* ── Asleep: eyes shut to arcs, slow breathing, a "z" drifting up. ── */
+.session-face[data-mood='sleep'] .session-face__body {
+  filter: saturate(0.45) brightness(0.82);
+  animation: face-breathe 3.6s var(--face-move) infinite var(--face-delay);
+}
+.session-face[data-mood='sleep'] .session-face__lid {
+  opacity: 0;
+  transform: scaleY(0.1);
+}
+.session-face[data-mood='sleep'] .session-face__shut {
+  opacity: 1;
+  transform: scaleY(1);
+}
+.session-face[data-mood='sleep'] .session-face__mark {
+  animation: face-z 3.6s ease-out infinite var(--face-delay);
+}
+
+/* ── At work: eyes glance left, then right, then back; a blink now and then. ── */
 .session-face[data-mood='work'] .session-face__eyes {
-  animation: session-face-glance 3.2s steps(1, end) infinite var(--face-delay);
+  animation: face-glance 4.8s infinite var(--face-delay);
+}
+.session-face[data-mood='work'] .session-face__lid {
+  animation: face-blink 4.8s infinite var(--face-delay);
 }
 
-/* At rest: a blink every few seconds. */
-.session-face[data-mood='idle'] .session-face__eye {
-  animation: session-face-blink 5s ease-in-out infinite var(--face-delay);
+/* ── Waiting on you: eyes wide and up, a small hop to catch the eye. ── */
+.session-face[data-mood='waiting'] .session-face__body {
+  animation: face-hop 1.8s infinite var(--face-delay);
+}
+.session-face[data-mood='waiting'] .session-face__eyes {
+  transform: translateY(-0.5px) scale(1.15);
+}
+.session-face[data-mood='waiting'] .session-face__lid {
+  animation: face-blink 3.6s infinite var(--face-delay);
+}
+.session-face[data-mood='waiting'] .session-face__mark {
+  color: hsl(var(--face-hue) 95% 72%);
+  animation: face-bob 1.8s infinite var(--face-delay);
 }
 
-@keyframes session-face-glance {
+/* ── Error: dizzy "× ×" eyes, a short shiver. ── */
+.session-face[data-mood='error'] .session-face__body {
+  filter: saturate(0.8);
+  animation: face-shiver 2.8s infinite var(--face-delay);
+}
+.session-face[data-mood='error'] .session-face__lid {
+  opacity: 0;
+  transform: scaleY(0.1);
+}
+.session-face[data-mood='error'] .session-face__eye::before {
+  opacity: 1;
+  transform: rotate(45deg) scale(1);
+}
+.session-face[data-mood='error'] .session-face__eye::after {
+  opacity: 1;
+  transform: rotate(-45deg) scale(1);
+}
+
+/* ── At rest: open eyes, a slow lazy blink. ── */
+.session-face[data-mood='idle'] .session-face__lid {
+  animation: face-blink-slow 6s infinite var(--face-delay);
+}
+
+@keyframes face-glance {
   0%,
-  30% {
+  26% {
     transform: translateX(0);
+    animation-timing-function: var(--face-move);
   }
   31%,
-  55% {
-    transform: translateX(-2px);
+  50% {
+    transform: translateX(-1.6px);
+    animation-timing-function: var(--face-move);
   }
   56%,
-  80% {
-    transform: translateX(2px);
+  74% {
+    transform: translateX(1.6px);
+    animation-timing-function: var(--face-move);
   }
-  81%,
+  80%,
   100% {
     transform: translateX(0);
   }
 }
 
-@keyframes session-face-blink {
+/* Close in ~70ms, open in ~120ms: a lid shuts faster than it lifts. */
+@keyframes face-blink {
   0%,
+  88% {
+    transform: scaleY(1);
+    animation-timing-function: cubic-bezier(0.5, 0, 1, 1);
+  }
+  89.5% {
+    transform: scaleY(0.1);
+    animation-timing-function: cubic-bezier(0, 0, 0.3, 1);
+  }
   92%,
   100% {
     transform: scaleY(1);
   }
-  95% {
-    transform: scaleY(0.15);
+}
+
+@keyframes face-blink-slow {
+  0%,
+  86% {
+    transform: scaleY(1);
+    animation-timing-function: cubic-bezier(0.5, 0, 1, 1);
+  }
+  88.5% {
+    transform: scaleY(0.1);
+    animation-timing-function: cubic-bezier(0, 0, 0.3, 1);
+  }
+  92%,
+  100% {
+    transform: scaleY(1);
   }
 }
 
-@keyframes session-face-breathe {
+@keyframes face-breathe {
   0%,
   100% {
-    opacity: 0.75;
+    transform: scale(0.94);
+  }
+  50% {
+    transform: scale(1);
+  }
+}
+
+@keyframes face-z {
+  0%,
+  35% {
+    opacity: 0;
+    transform: translate(0, 2px) scale(0.6);
+  }
+  55% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(3px, -5px) scale(1);
+  }
+}
+
+@keyframes face-hop {
+  0%,
+  62%,
+  100% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.33, 0, 0.67, 1);
+  }
+  72% {
+    transform: translateY(-2.5px) scale(1.04);
+    animation-timing-function: var(--face-pop);
+  }
+  84% {
+    transform: translateY(0) scale(0.98, 1.02);
+  }
+}
+
+@keyframes face-shiver {
+  0%,
+  80%,
+  100% {
+    transform: translateX(0);
+  }
+  83% {
+    transform: translateX(-1px);
+  }
+  86% {
+    transform: translateX(1px);
+  }
+  89% {
+    transform: translateX(-0.6px);
+  }
+  92% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes face-bob {
+  0%,
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    animation-timing-function: var(--face-move);
   }
   50% {
     opacity: 1;
+    transform: translateY(-1.5px);
+    animation-timing-function: var(--face-move);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .session-face,
+  .session-face__body,
   .session-face__eyes,
-  .session-face__eye {
+  .session-face__lid,
+  .session-face__mark {
     animation: none !important;
+  }
+  /* Still, the marks stay readable: "z" asleep, "!" waiting. */
+  .session-face[data-mood='sleep'] .session-face__mark,
+  .session-face[data-mood='waiting'] .session-face__mark {
+    opacity: 1;
   }
 }
