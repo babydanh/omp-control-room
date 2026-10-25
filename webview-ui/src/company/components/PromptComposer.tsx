@@ -172,6 +172,10 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
     state.selection.sessionId === null ? null : (state.sessions[state.selection.sessionId] ?? null);
   const selectedModel = selectedSession?.requestedModel ?? state.selectedModel;
   const herdrTarget = herdrAgentFor(state.selection.herdrPaneId, state.herdr.agents);
+  // A sleeping session picked on the board: its pane is closed, so a send wakes it with the line.
+  const sleepingTarget = herdrTarget === null
+    ? (state.herdrRoster.sleeping.find((session) => session.paneId === state.selection.herdrPaneId) ?? null)
+    : null;
   // An image still saving has no path in the draft yet: sending now would leave it out.
   const busy = draft.pendingSubmit !== null || herdrRequest !== null || images.saving > 0;
   const blocker = promptBlockReason(draft);
@@ -206,7 +210,7 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
     squadPending: squadRequest !== null,
     squadTeam,
     newSessionWaits,
-    herdrTarget: herdrTarget !== null,
+    herdrTarget: herdrTarget !== null || sleepingTarget !== null,
     hasFocus: focus !== null,
     folderLoading,
     hasText: draft.text.trim() !== '',
@@ -287,6 +291,30 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
       }
       const current = client.getState().prompt.text;
       const remaining = draftAfterSend(current, text);
+      if (remaining !== current) client.setDraftText(remaining);
+    });
+  };
+
+  /** Wake a sleeping session with the draft as its first prompt; the draft clears once the server accepts. */
+  const wakeWithPrompt = (session: { readonly paneId: string }) => {
+    if (herdrRequest !== null) return;
+    const text = draft.text.trim();
+    if (text === '') return;
+    const handle = client.herdrWake(session.paneId, text);
+    if (!handle.ok) {
+      setNotice(failureNotice(handle, 'Chưa đánh thức được.'));
+      return;
+    }
+    setNotice(null);
+    setHerdrRequest(handle.requestId);
+    void client.waitForCommand(handle).then((verdict) => {
+      setHerdrRequest((current) => (current === handle.requestId ? null : current));
+      if (!verdict.ok) {
+        setNotice(failureNotice(verdict, 'Chưa đánh thức được.'));
+        return;
+      }
+      const current = client.getState().prompt.text;
+      const remaining = draftAfterSend(current, draft.text);
       if (remaining !== current) client.setDraftText(remaining);
     });
   };
@@ -407,7 +435,8 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
         openResumePicker();
         return;
       case 'prompt':
-        if (herdrTarget === null) typeIntoSession();
+        if (sleepingTarget !== null) wakeWithPrompt(sleepingTarget);
+        else if (herdrTarget === null) typeIntoSession();
         else sendToHerdr(herdrTarget);
         return;
     }
@@ -756,7 +785,9 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
       </div>
       <p className="mt-0.5 flex min-w-0 items-center gap-2 text-2xs text-text-muted">
         <span className="min-w-0 truncate" data-testid="prompt-target">
-          {sendTargetLabel(selectedSession, herdrTarget)}
+          {sleepingTarget === null
+            ? sendTargetLabel(selectedSession, herdrTarget)
+            : `Gửi tới: ${sleepingTarget.title} (đang ngủ — gửi là đánh thức kèm lời nhắn)`}
         </span>
         {pickerFolders.length > 0 && focus !== null && (
           <select

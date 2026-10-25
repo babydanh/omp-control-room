@@ -474,6 +474,8 @@ export function BoardShell({ client }: BoardShellProps) {
 
   function openSleeping(paneId: string): void {
     setOpened({ kind: 'sleeping', paneId });
+    // The composer aims at it: a line sent there wakes the session with that line as its prompt.
+    client.select({ herdrPaneId: paneId });
     dismissSheet();
   }
 
