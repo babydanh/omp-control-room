@@ -84,7 +84,8 @@ export function canSendContractApproval(contract: Contract, view: ContractPlanVi
 export type DrawerSubject =
   | { kind: 'task'; taskId: string }
   | { kind: 'session'; sessionId: string }
-  | { kind: 'herdr'; paneId: string }
+  /** `starting`: the board just opened or woke this pane; herdr may not list it for a few seconds. */
+  | { kind: 'herdr'; paneId: string; starting?: boolean }
   | { kind: 'sleeping'; paneId: string }
   | { kind: 'contract'; contractId: string | null }
   | { kind: 'question'; questionId: string }

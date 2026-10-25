@@ -343,6 +343,7 @@ function DrawerContent(props: ContentProps) {
           paneId={subject.paneId}
           tab={props.herdrTab}
           onTabChange={props.onHerdrTab}
+          starting={subject.starting === true}
         />
       );
     case 'sleeping':

@@ -16,11 +16,12 @@ import type { HerdrKey } from '../../../../core/src/messages.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
-import { HERDR_CHOICE_KEYS, HERDR_DRAWER_TAB_LABELS, type HerdrDrawerTab } from '../herdrView.js';
+import { HERDR_CHOICE_KEYS, HERDR_DRAWER_TAB_LABELS, type HerdrDrawerTab, missingPaneView } from '../herdrView.js';
 import { formatLogTime } from '../sessionLogView.js';
 import { clipRuleRows, MONO_CHAR_EM, screenFitPx, type ScreenLine } from '../terminalScreen.js';
 import { useCoalescedFrame } from '../useCoalescedFrame.js';
 import { useHerdrScreenWatch } from '../useHerdrScreenWatch.js';
+import { useNow } from '../useNow.js';
 import { useParsedScreen } from '../useParsedScreen.js';
 import { useScreenSelection } from '../useScreenSelection.js';
 import { useStickToBottom } from '../useStickToBottom.js';
@@ -39,9 +40,13 @@ export interface HerdrPanelProps {
   /** The tab the panel shows. The drawer owns it, so a request for the info tab survives. */
   tab: HerdrDrawerTab;
   onTabChange: (tab: HerdrDrawerTab) => void;
+  /** The board just opened or woke this pane: herdr may not list it yet, so its absence is a wait. */
+  starting?: boolean;
 }
 
-export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPanelProps) {
+export function HerdrPanel({ client, state, paneId, tab, onTabChange, starting = false }: HerdrPanelProps) {
+  const [openedAt] = useState(() => Date.now());
+  const now = useNow();
   const agent = state.herdr.agents.find((entry) => entry.paneId === paneId);
   const status = agent?.status;
   const latest = state.herdr.screens[paneId];
@@ -76,7 +81,13 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange }: HerdrPan
   }
 
   if (agent === undefined) {
-    return <p className="p-2 text-2xs text-text-muted">Agent này không còn trong herdr.</p>;
+    const missing = missingPaneView(starting, now - openedAt);
+    return (
+      <p role="status" data-testid={missing.loading ? 'herdr-pane-starting' : 'herdr-pane-missing'} className="flex items-center gap-2 p-2 text-2xs text-text-muted">
+        {missing.loading && <span aria-hidden="true" className="size-3 animate-spin rounded-full border-2 border-text-muted border-t-transparent" />}
+        {missing.text}
+      </p>
+    );
   }
 
   return (

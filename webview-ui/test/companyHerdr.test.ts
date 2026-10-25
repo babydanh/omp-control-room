@@ -11,7 +11,13 @@ import {
   sessionLogRequest,
 } from '../src/company/companyMessages.js';
 import { applyCompanyMessage, emptyCompanyState } from '../src/company/companyState.js';
-import { HERDR_CHOICE_KEYS, HERDR_TONE_LABELS, herdrToneFor } from '../src/company/herdrView.js';
+import {
+  HERDR_CHOICE_KEYS,
+  HERDR_START_GRACE_MS,
+  HERDR_TONE_LABELS,
+  herdrToneFor,
+  missingPaneView,
+} from '../src/company/herdrView.js';
 
 function herdrAgent(overrides: Partial<HerdrAgent> = {}): HerdrAgent {
   return {
@@ -156,5 +162,17 @@ describe('outgoing herdr and session log messages', () => {
       requestId: 'r5',
       sessionId: 'session-1',
     });
+  });
+});
+
+describe('a pane herdr does not list yet', () => {
+  it('is a wait while a pane the board just woke or started launches, and a clear failure after the grace', () => {
+    expect(missingPaneView(true, 0)).toEqual({ loading: true, text: 'Đang khởi động phiên trong tab herdr mới…' });
+    expect(missingPaneView(true, HERDR_START_GRACE_MS - 1).loading).toBe(true);
+    expect(missingPaneView(true, HERDR_START_GRACE_MS)).toMatchObject({ loading: false, text: expect.stringContaining('chưa lên sau 1 phút') });
+  });
+
+  it('is gone at once for a pane the user only clicked', () => {
+    expect(missingPaneView(false, 0)).toEqual({ loading: false, text: 'Agent này không còn trong herdr.' });
   });
 });

@@ -56,3 +56,20 @@ export const HERDR_CHOICE_KEYS: readonly { key: HerdrKey; label: string }[] = [
   { key: 'esc', label: 'Esc' },
   { key: 'ctrl+c', label: 'Ctrl+C' },
 ];
+
+/** How long a pane the board just opened or woke may stay out of herdr's list before it counts as gone. */
+export const HERDR_START_GRACE_MS = 60_000;
+
+/**
+ * What the drawer shows for a pane herdr does not list. A pane the board just started or woke
+ * takes a few seconds to appear (the agent is still launching): that is a wait, not a loss.
+ */
+export function missingPaneView(starting: boolean, elapsedMs: number): { readonly loading: boolean; readonly text: string } {
+  if (starting && elapsedMs < HERDR_START_GRACE_MS) {
+    return { loading: true, text: 'Đang khởi động phiên trong tab herdr mới…' };
+  }
+  if (starting) {
+    return { loading: false, text: 'Phiên chưa lên sau 1 phút. Xem tab herdr mới mở để biết lỗi, hoặc đánh thức lại.' };
+  }
+  return { loading: false, text: 'Agent này không còn trong herdr.' };
+}

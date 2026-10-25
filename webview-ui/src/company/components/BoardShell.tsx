@@ -318,7 +318,7 @@ export function BoardShell({ client }: BoardShellProps) {
   const pickedPane = state.selection.herdrPaneId;
   useEffect(() => {
     if (opened?.kind !== 'sleeping' || pickedPane === null || pickedPane === opened.paneId) return;
-    setOpened({ kind: 'herdr', paneId: pickedPane });
+    setOpened({ kind: 'herdr', paneId: pickedPane, starting: true });
     setHerdrTab('screen');
   }, [opened, pickedPane]);
 
@@ -497,8 +497,8 @@ export function BoardShell({ client }: BoardShellProps) {
       : [{ role, model: profile.requestedModel, ...(profile.thinking ? { thinking: profile.thinking } : {}) }];
   });
 
-  function openHerdr(paneId: string, tab: HerdrDrawerTab = 'screen'): void {
-    setOpened({ kind: 'herdr', paneId });
+  function openHerdr(paneId: string, tab: HerdrDrawerTab = 'screen', starting = false): void {
+    setOpened({ kind: 'herdr', paneId, ...(starting ? { starting: true } : {}) });
     setHerdrTab(tab);
     client.select({ herdrPaneId: paneId });
     dismissSheet();
@@ -995,7 +995,7 @@ export function BoardShell({ client }: BoardShellProps) {
             setNewSessionNode(null);
             // Claude and agy open as interactive agents in a herdr tab: show that pane's screen.
             if (engine !== 'omp') {
-              openHerdr(sessionId);
+              openHerdr(sessionId, 'screen', true);
               return;
             }
             // An omp chat lives in its folder's board, so the board switches there to show it.
