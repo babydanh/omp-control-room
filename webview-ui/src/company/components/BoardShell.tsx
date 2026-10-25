@@ -303,6 +303,13 @@ export function BoardShell({ client }: BoardShellProps) {
     subject?.kind === 'squad'
       ? { runId: subject.runId, workspacePath: subject.workspacePath }
       : null;
+  // A folder switch settles the selection and drops a pane picked a moment before it landed, which
+  // left the drawer showing the pane while the composer had nowhere to send. Pick it again, only
+  // while nothing else is selected, so a session the user chose since is never overridden.
+  const selectionEmpty = state.selection.herdrPaneId === null && state.selection.sessionId === null;
+  useEffect(() => {
+    if (selectedPaneId !== null && selectionEmpty) client.select({ herdrPaneId: selectedPaneId });
+  }, [client, selectedPaneId, selectionEmpty]);
 
   // Diagnostics are a live measurement of processes the user owns: asked for
   // once the board is on screen, never polled in the background.
