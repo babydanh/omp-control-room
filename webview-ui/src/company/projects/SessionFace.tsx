@@ -11,7 +11,7 @@ import { finishedTurn, SESSION_FACE_CHEER_MS, type SessionFaceMood, shownFaceMoo
  * the hue staggers the loops so no two faces blink together. When a session finishes a turn (it was
  * working and now rests), the face cheers "^ ^" for a moment before settling.
  */
-export function SessionFace({ mood, hue }: { mood: SessionFaceMood; hue: number }) {
+export function SessionFace({ mood, hue, size = 'md' }: { mood: SessionFaceMood; hue: number; size?: 'md' | 'lg' }) {
   const previous = useRef(mood);
   const [cheering, setCheering] = useState(false);
 
@@ -34,7 +34,7 @@ export function SessionFace({ mood, hue }: { mood: SessionFaceMood; hue: number 
 
   const style = { '--face-hue': hue, '--face-delay': `${-((hue % 37) / 10)}s` } as CSSProperties;
   return (
-    <span aria-hidden="true" className="session-face" data-mood={shownFaceMood(mood, cheering)} style={style}>
+    <span aria-hidden="true" className={`session-face${size === 'lg' ? ' session-face--lg' : ''}`} data-mood={shownFaceMood(mood, cheering)} style={style}>
       <span className="session-face__body">
         <span className="session-face__eyes">
           <span className="session-face__eye session-face__eye--left">

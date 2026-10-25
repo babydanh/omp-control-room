@@ -234,7 +234,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           event.stopPropagation();
           onMove(event.dataTransfer.getData('text/plain'), node);
         }}
-        className="group flex min-w-0 items-center gap-1 rounded-(--company-radius-sm) hover:bg-hover"
+        className={`group flex min-w-0 items-center gap-1 rounded-(--company-radius-sm) ${isSession ? 'my-0.5' : 'hover:bg-hover'}`}
         style={{ paddingLeft: `${depth * 12}px` }}
       >
         <button
@@ -258,11 +258,16 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           aria-expanded={children.length > 0 && !isSession ? !isCollapsed : undefined}
           {...menu}
           {...hover.bind}
-          className={`touch-target flex min-w-0 flex-1 items-center gap-2 rounded px-1 text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} py-0.5`}
+          className={`touch-target flex min-w-0 flex-1 items-center text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} ${
+            isSession
+              // A session is a chip, as an agent is in ZCode: room around a bigger face, a soft card behind it.
+              ? `gap-2.5 rounded-lg border px-2 py-1.5 transition-colors duration-150 ${selected ? 'border-accent/50' : 'border-white/5 bg-white/[0.03] hover:border-white/10 hover:bg-hover'}`
+              : 'gap-2 rounded px-1 py-0.5'
+          }`}
         >
           {isSession ? (
             <>
-              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} />
+              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="lg" />
               <span className="min-w-0 flex-1 leading-snug">
                 {/* One line: the name, then only what a glance needs. A running session's face glances around ("đang chạy"); main is the usual branch. */}
                 <span className="flex min-w-0 items-baseline gap-1.5">

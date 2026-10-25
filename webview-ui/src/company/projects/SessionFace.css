@@ -12,6 +12,24 @@
   height: 16px;
 }
 
+/* The chip face in the sidebar: 20px. The eyes grow with the `scale` property, which composes with
+ * the `transform` the glance and blink animate, so every mood keeps its motion at the larger size. */
+.session-face--lg {
+  width: 20px;
+  height: 20px;
+}
+.session-face--lg .session-face__body {
+  border-radius: 6px;
+}
+.session-face--lg .session-face__eyes {
+  scale: 1.3;
+}
+.session-face--lg .session-face__mark {
+  top: -6px;
+  right: -5px;
+  font-size: 8px;
+}
+
 .session-face__body {
   display: grid;
   place-items: center;
