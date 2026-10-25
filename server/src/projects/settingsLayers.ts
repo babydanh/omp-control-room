@@ -137,7 +137,8 @@ function validSetting(field: ProjectSettingField, value: unknown): boolean {
       const argumentsList: unknown[] = argv;
       return argumentsList.length > 0 && argumentsList.length <= 128 &&
         argumentsList.every((arg) => typeof arg === 'string' && arg.length <= 4096 && !arg.includes('\0')) &&
-        typeof argumentsList[0] === 'string' && argumentsList[0].length > 0 &&
+        // The program is spawned by exact name: a pasted trailing newline made it a file that does not exist.
+        typeof argumentsList[0] === 'string' && argumentsList[0].length > 0 && argumentsList[0].trim() === argumentsList[0] &&
         typeof timeoutMs === 'number' && Number.isInteger(timeoutMs) &&
         timeoutMs >= 1_000 && timeoutMs <= 600_000;
     }

@@ -199,7 +199,8 @@ function SettingInput({ definition, value, onChange }: {
         <input aria-label="Đối số script dạng JSON array" className={fieldClass} value={JSON.stringify(script.argv)} placeholder='["npm", "install"]' onChange={(event) => {
           try {
             const argv: unknown = JSON.parse(event.target.value) as unknown;
-            if (Array.isArray(argv) && argv.every((part) => typeof part === 'string')) onChange({ ...script, argv });
+            // A path pasted with its newline would be spawned as a file that does not exist.
+            if (Array.isArray(argv) && argv.every((part) => typeof part === 'string')) onChange({ ...script, argv: argv.map((part, index) => (index === 0 ? part.trim() : part)) });
           } catch { /* Keep the last valid argv while the user edits JSON. */ }
         }} />
         <input aria-label="Timeout script chuẩn bị worktree (ms)" className={fieldClass} type="number" min={1000} max={600000} step={1000} value={script.timeoutMs} onChange={(event) => onChange({ ...script, timeoutMs: Number(event.target.value) })} />

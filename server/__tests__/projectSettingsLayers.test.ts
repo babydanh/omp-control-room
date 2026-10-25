@@ -179,4 +179,11 @@ describe('project settings layers', () => {
     expect(result.values.worktreePrepare).toEqual(script);
     expect(result.sources.worktreePrepare).toBe('project');
   });
+
+  it('rejects a worktree program whose path carries a pasted newline, which spawn cannot find', async () => {
+    await expect(setProjectSettings({
+      type: 'projectSettingsSet', requestId: 'script-newline', scope: 'project', nodeId: projectId,
+      field: 'worktreePrepare', value: { argv: ['D:\\DevTools\\Python312\\python.exe\n', 'copy-local-env.py', '.'], timeoutMs: 30_000 },
+    }, deps)).rejects.toThrow('Giá trị cài đặt không hợp lệ.');
+  });
 });
