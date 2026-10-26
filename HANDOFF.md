@@ -1,6 +1,6 @@
 # Handoff: Agent Board — đội nhiều vai, chế độ gọn, thống kê tool
 <!-- Đọc file này TRƯỚC khi làm tiếp nhánh. Cập nhật TRƯỚC khi báo xong, fast-handoff, hoặc hết phiên. -->
-Cập nhật: 2026-10-24 19:30 · bởi: omp · nhánh: feat/multi-role-company · OpenSpec: không có
+Cập nhật: 2026-10-26 23:55 · bởi: omp (ee459814) · nhánh: feat/multi-role-company · OpenSpec: không có
 
 ## Mục tiêu
 Board điều phối đội agent (trưởng đội chia việc, chế độ gọn mỗi repo một phiên trong tab herdr riêng), cây git có tab "Phối hợp" và "Thống kê tool". Lần này: tab "Thống kê tool" hiện % usage token Claude theo phiên chính/subagent/skill/plugin và nút chuyển skill Claude không dùng sang `name-only`.
@@ -33,6 +33,8 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
 - Xong (24/10 khuya): "Phiên mới · Claude/agy" mở agent tương tác trong tab herdr ngay, prompt đầu tuỳ chọn, không tạo work item/giám khảo (`newSession.ts`, `herdrLink.startAgent` qua socket `tab.create` + `agent.start`, `87aa5d9`, đã chạy thật trên board). Việc giao Claude/agy (Đội hoặc tay) cũng mở trong tab herdr khi herdr có mặt, assignee thành `herdr` pane `claude-<mã việc>`, `--permission-mode` theo cài đặt (plan khi chỉ đọc); không có herdr thì vẫn `claude -p` (`workItemService.openAgentPane`, `5ed95df`, **chưa khởi động lại board để nạp**). Ngăn việc hiện "Tóm tắt" kết quả ngay đầu.
 - Chưa push nhánh (upstream đang là `mine/main`).
 - Tiếp theo: hồ sơ vai của board (`state.settings.roleProfiles`) KHÔNG tự theo `omp config get modelRoles`; 23/10 đã đồng bộ tay qua `companySettingsUpdate`. Đổi vai trong omp sau này thì phải đồng bộ lại. Việc thử 24–44 trên bảng là của các lượt kiểm thử, tự vào Lưu trữ sau 7 ngày. Cột Xong xếp cũ trước nên việc mới nằm cuối cột.
+- Xong (26/10, người dùng chốt: "tạo thì dùng BROWSE của Windows, không tự chế"): mọi chỗ chọn thư mục mở hộp Browse của Windows qua `companyFolderPick` (`server/src/company/folderPicker.ts`, PowerShell `FolderBrowserDialog`, chỉ Windows, một hộp mỗi lúc). ➕ "Tạo project" chọn thư mục trước, project mang tên và chứa luôn thư mục; server rollback nếu thêm thư mục lỗi, webview báo lý do. Đã xoá `FolderBrowserDialog.tsx`, `companyFolderBrowse*`, `companyFolderCreate`. Commit `ec4cd7f`, `78c4097` (hộp hiện lên trước trình duyệt), `e0ab32c` (báo lỗi tạo project). CHƯA push.
+- Board 3197 (26/10 23:5x) chạy bản build từ `git archive e0ab32c` (build sạch ở thư mục tạm, chép đè `dist`, PID 26220), vì worktree không build được: phiên khác đang xoá dở `RolesDialog.tsx`/`SkillsPage.tsx` mà `BoardShell.tsx` còn import. Bản board này KHÔNG có các sửa chưa commit của phiên khác (`companyRuntime.ts`, `screenActivity.ts`).
 
 ## Đã thử
 | Cách | Kết quả | Vì sao / bằng chứng |
@@ -47,6 +49,7 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
 - % usage là ƯỚC LƯỢNG theo giá API công khai (sonnet = 1, opus 5/3, haiku 1/3; cache ghi 1,25, đọc 0,1, output 5), không phải cách Anthropic tính hạn mức; skill/plugin chồng lên phiên chính/subagent.
 - Thống kê đo lượt gọi skill/MCP/tool, không đo tính năng sản phẩm có ai dùng.
 - Ổ V: phải ≥10 GB thì `activity-ledger` mới cho chạy test/build (lần này người dùng chọn xoá `build/` của App).
+- Hộp chọn thư mục: owner là form 1×1 (Opacity 0 làm hộp vô hình); timer trên luồng hộp `AttachThreadInput` vào cửa sổ foreground rồi TOPMOST + `SetForegroundWindow`, thiếu bước này hộp mở SAU Chrome. Kiểm hiển thị bằng ảnh chụp toàn màn hình ảo, không tin UIA/`IsWindowVisible`.
 
 ## Ràng buộc thay đổi lần này
 - Đổi (24/10, người dùng chọn): việc sửa của đội gọn có worktree riêng cho từng việc để tránh nhiều việc cùng repo ghi đè; việc chỉ đọc vẫn chạy tại repo và dùng lại phiên theo vai.
@@ -56,7 +59,9 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
 - Bỏ: cổng `WorkItemRoster.wake`; `WorkItemHerdr` không còn `wake`.
 - Đổi (24/10): việc con đội gọn hiện trên bảng như việc thường (trước bị giấu trong thẻ đội); đội gọn xong vào Xong, không chờ bấm "Đóng". Test cũ đổi theo: `companySquadView.test.ts` "hides a working compact run…", `companyWorkItemView.test.ts` "shows compact-run children as cards…".
 - Đổi (24/10): area cùng tên ở repo khác không còn chặn nhau.
+- Đổi (26/10): bỏ hộp duyệt thư mục tự chế, thay bằng hộp Windows; ngoài Windows lệnh chọn trả `folder_pick_unsupported` (ô nhập đường dẫn chỉ còn trong "Thêm thư mục" của project). Test cũ đổi theo: `companyFolderBrowse.test.ts` → `companyFolderCommands.test.ts`, `folderBrowser.test.ts` → `folderName.test.ts` / `folderPicker.test.ts`.
 
 ## Câu hỏi còn mở
 - Người dùng chưa bấm thử nút chuyển name-only thật (sẽ sửa `~/.claude/settings.json`).
 - Token board từng hiện trong log phiên khi smoke; nên `scripts/board-start.ps1 -RotateToken`.
+- File dở của phiên khác còn trong worktree (`server/src/company/companyRuntime.ts`, `server/__tests__/companyRuntime.test.ts`, `webview-ui/src/company/screenActivity.ts`, `webview-ui/test/companyScreenActivity.test.ts`, các file bị xoá ở trên, `build/`): phiên đó xong thì `bun run build` lại và khởi động lại board.
