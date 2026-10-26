@@ -199,13 +199,10 @@ describe('company folder commands', () => {
     for (const dir of temps.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  /** A real folder holding two sub-folders and a file, so browse and create run against the disk. */
+  /** A real folder, so a display name is stored under the path the disk resolves it to. */
   function tempRoot(): { root: string; canonical: string } {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'folder-commands-'));
     temps.push(root);
-    fs.mkdirSync(path.join(root, 'beta'));
-    fs.mkdirSync(path.join(root, 'Alpha'));
-    fs.writeFileSync(path.join(root, 'notes.txt'), '');
     return { root, canonical: fs.realpathSync(root) };
   }
 
@@ -223,158 +220,6 @@ describe('company folder commands', () => {
     if (message === undefined) throw new Error('no reply was sent');
     return message;
   }
-
-  it('browses the start view when no path is sent', async () => {
-    expect(
-      await reply({ type: 'companyFolderBrowseRequest', requestId: REQUEST_ID }),
-    ).toMatchObject({
-      type: 'companyFolderBrowse',
-      requestId: REQUEST_ID,
-      path: null,
-      parent: null,
-      entries: [],
-      truncated: false,
-    });
-  });
-
-  it('lists only the folders inside a named folder, sorted by name', async () => {
-    const { root, canonical } = tempRoot();
-    expect(
-      await reply({ type: 'companyFolderBrowseRequest', requestId: REQUEST_ID, path: root }),
-    ).toMatchObject({
-      type: 'companyFolderBrowse',
-      path: canonical,
-      parent: path.dirname(canonical),
-      entries: [
-        { name: 'Alpha', path: path.join(canonical, 'Alpha') },
-        { name: 'beta', path: path.join(canonical, 'beta') },
-      ],
-      truncated: false,
-    });
-  });
-
-  it('answers a browse of a missing folder with its code and message', async () => {
-    const { root } = tempRoot();
-    expect(
-      await reply({
-        type: 'companyFolderBrowseRequest',
-        requestId: REQUEST_ID,
-        path: path.join(root, 'missing'),
-      }),
-    ).toMatchObject({
-      type: 'companyCommandResult',
-      requestId: REQUEST_ID,
-      ok: false,
-      errorCode: 'folder_not_found',
-      message: 'Thư mục không tồn tại.',
-    });
-  });
-
-  it('answers a browse of a file with not_a_folder', async () => {
-    const { root } = tempRoot();
-    expect(
-      await reply({
-        type: 'companyFolderBrowseRequest',
-        requestId: REQUEST_ID,
-        path: path.join(root, 'notes.txt'),
-      }),
-    ).toMatchObject({ ok: false, errorCode: 'not_a_folder', message: 'Đây không phải thư mục.' });
-  });
-
-  it('refuses a relative path before it reaches the disk', async () => {
-    expect(
-      await reply({
-        type: 'companyFolderBrowseRequest',
-        requestId: REQUEST_ID,
-        path: 'relative/folder',
-      }),
-    ).toMatchObject({
-      ok: false,
-      errorCode: 'folder_path_invalid',
-      message: 'Đường dẫn không hợp lệ.',
-    });
-  });
-
-  it('refuses a path that climbs with a .. segment', async () => {
-    const { root } = tempRoot();
-    expect(
-      await reply({
-        type: 'companyFolderBrowseRequest',
-        requestId: REQUEST_ID,
-        path: `${root}${path.sep}..${path.sep}escape`,
-      }),
-    ).toMatchObject({ ok: false, errorCode: 'folder_path_invalid' });
-  });
-
-  it('creates a folder named by the trimmed name and answers with its canonical path', async () => {
-    const { root, canonical } = tempRoot();
-    expect(
-      await reply({
-        type: 'companyFolderCreate',
-        requestId: REQUEST_ID,
-        parentPath: root,
-        name: '  Gamma  ',
-      }),
-    ).toMatchObject({
-      type: 'companyCommandResult',
-      requestId: REQUEST_ID,
-      ok: true,
-      workspacePath: path.join(canonical, 'Gamma'),
-    });
-    expect(fs.existsSync(path.join(canonical, 'Gamma'))).toBe(true);
-  });
-
-  it('refuses a name that already exists in the parent with folder_exists', async () => {
-    const { root } = tempRoot();
-    expect(
-      await reply({
-        type: 'companyFolderCreate',
-        requestId: REQUEST_ID,
-        parentPath: root,
-        name: 'Alpha',
-      }),
-    ).toMatchObject({ ok: false, errorCode: 'folder_exists', message: 'Thư mục đã tồn tại.' });
-  });
-
-  it('refuses a name with a forbidden character with folder_name_invalid', async () => {
-    const { root } = tempRoot();
-    expect(
-      await reply({
-        type: 'companyFolderCreate',
-        requestId: REQUEST_ID,
-        parentPath: root,
-        name: 'a/b',
-      }),
-    ).toMatchObject({ ok: false, errorCode: 'folder_name_invalid' });
-  });
-
-  it('refuses a name longer than 255 characters with folder_name_too_long', async () => {
-    const { root } = tempRoot();
-    expect(
-      await reply({
-        type: 'companyFolderCreate',
-        requestId: REQUEST_ID,
-        parentPath: root,
-        name: 'x'.repeat(256),
-      }),
-    ).toMatchObject({
-      ok: false,
-      errorCode: 'folder_name_too_long',
-      message: 'Tên thư mục quá dài.',
-    });
-  });
-
-  it('refuses to create inside a folder that does not exist', async () => {
-    const { root } = tempRoot();
-    expect(
-      await reply({
-        type: 'companyFolderCreate',
-        requestId: REQUEST_ID,
-        parentPath: path.join(root, 'missing'),
-        name: 'Gamma',
-      }),
-    ).toMatchObject({ ok: false, errorCode: 'folder_not_found' });
-  });
 
   it('stores a display name through the control and answers with the canonical path', async () => {
     const { root, canonical } = tempRoot();
@@ -477,23 +322,15 @@ describe('company folder commands', () => {
     });
   });
 
-  it('refuses folder commands from an unprivileged connection', async () => {
+  it('refuses a folder pick from an unprivileged connection before any dialog opens', async () => {
     expect(
-      await reply(
-        { type: 'companyFolderBrowseRequest', requestId: REQUEST_ID },
-        { privileged: false },
-      ),
+      await reply({ type: 'companyFolderPick', requestId: REQUEST_ID }, { privileged: false }),
     ).toMatchObject({ ok: false, errorCode: 'forbidden' });
   });
 
-  it('refuses folder creation in an untrusted workspace before touching the disk', async () => {
-    const { root } = tempRoot();
+  it('refuses a folder pick in an untrusted workspace before any dialog opens', async () => {
     expect(
-      await reply(
-        { type: 'companyFolderCreate', requestId: REQUEST_ID, parentPath: root, name: 'Gamma' },
-        { executionAllowed: false },
-      ),
+      await reply({ type: 'companyFolderPick', requestId: REQUEST_ID }, { executionAllowed: false }),
     ).toMatchObject({ ok: false, errorCode: 'workspace_untrusted' });
-    expect(fs.existsSync(path.join(root, 'Gamma'))).toBe(false);
   });
 });

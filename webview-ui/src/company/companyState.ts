@@ -41,7 +41,6 @@ import type {
   BrowserReaperStatusMessage,
   CompanyFileContent,
   CompanyFileEntry,
-  CompanyFolderBrowseMessage,
   CompanyRemoveChange,
   CompanySquadLiveMessage,
   CompanySquadMessage,
@@ -321,10 +320,6 @@ export interface CompanyViewState extends FolderScope {
   pendingWorkspaceSelection: PendingWorkspaceSelection | null;
   /** Why the last choice of a session in another folder did not land; null when none failed. */
   workspaceSelectionNotice: string | null;
-  /** The listing the server sent for the latest folder browse; null until one arrives. */
-  folderBrowse: CompanyFolderBrowseMessage | null;
-  /** requestId of the latest folder browse; a listing under any other id is dropped. */
-  folderBrowseRequest: string | null;
   /** The usage page's data: the latest answer per request, and which requests are waiting. */
   usageSlots: UsageState;
   /**
@@ -374,8 +369,6 @@ export function emptyCompanyState(
     openingSessionId: null,
     pendingWorkspaceSelection: null,
     workspaceSelectionNotice: null,
-    folderBrowse: null,
-    folderBrowseRequest: null,
     usageSlots: emptyUsageState(),
     workItems: {},
     squad: {},
@@ -1163,11 +1156,6 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
       return unchanged(applySquad(state, message));
     case 'companySquadLive':
       return unchanged(applySquadLive(state, message));
-    case 'companyFolderBrowse': {
-      // Only the listing that answers the latest browse is held; an older one is a late answer.
-      const current = message.requestId === state.folderBrowseRequest;
-      return unchanged(current ? { ...state, folderBrowse: message } : state);
-    }
     case 'companyArtifactPage': {
       const page = message.page;
       const previous: ArtifactView = state.artifacts[page.id] ?? {

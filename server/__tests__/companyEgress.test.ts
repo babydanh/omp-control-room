@@ -29,7 +29,6 @@ describe('company egress gate', () => {
       'companyArtifactPage',
       'companyFileList',
       'companyFileRead',
-      'companyFolderBrowse',
       'companyAttachmentUploaded',
       'herdrAgents',
       'herdrScreen',

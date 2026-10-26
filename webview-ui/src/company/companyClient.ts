@@ -695,25 +695,11 @@ export class CompanyClient {
   }
 
   /**
-   * List the folders under `path`, or the start view when none is named. The listing arrives
-   * as a companyFolderBrowse held for the board's latest browse; a refusal is a
-   * companyCommandResult under the handle's requestId. Refused while the folder list loads.
+   * Open Windows' folder dialog on the server's machine. The verdict is a companyCommandResult under
+   * the handle's requestId: workspacePath names the folder chosen, and is absent on cancel.
    */
-  browseFolders(path?: string): CompanyCommandHandle {
-    if (folderListLoading(this.state)) return this.folderListLoadingHandle();
-    const requestId = commands.newRequestId();
-    this.state = { ...this.state, folderBrowseRequest: requestId };
-    this.emit();
-    return { requestId, ...this.send(commands.folderBrowseRequest(requestId, path)) };
-  }
-
-  /**
-   * Create a folder inside `parentPath`. The verdict is a companyCommandResult under the
-   * handle's requestId. Refused while the folder list is loading.
-   */
-  createFolder(parentPath: string, name: string): CompanyCommandHandle {
-    if (folderListLoading(this.state)) return this.folderListLoadingHandle();
-    return this.command((requestId) => commands.folderCreate(requestId, parentPath, name));
+  pickFolder(): CompanyCommandHandle {
+    return this.command((requestId) => commands.folderPick(requestId));
   }
 
   /**

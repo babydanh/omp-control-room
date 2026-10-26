@@ -1,7 +1,7 @@
 /**
  * WorkspaceSwitcher: what the board shows. The menu lists the folders the server knows,
  * with a first row that stands for all of them together; a folder row opens that folder,
- * and right-click or its pencil names it. The menu's last row opens the folder browser,
+ * and right-click or its pencil names it. The menu's last row opens Windows' folder dialog,
  * and with no folder open the trigger opens it directly. Switching is a server command:
  * while it is in flight the trigger says so, and a refusal shows as a notice under it.
  * A folder whose directory is gone shows once, with a way to take it off the list.
@@ -12,17 +12,15 @@ import { useEffect, useRef, useState } from 'react';
 import type { CompanyWorkspaceEntry } from '../../../../core/src/messages.js';
 import type { CompanyClient } from '../companyClient.js';
 import type { CompanyViewState } from '../companyState.js';
+import { openPickedFolder } from '../folderPick.js';
 import { activeWorkspace, folderLabel, workspaceActivity } from '../workspaces.js';
 import { FloatingNotice } from './FloatingNotice.js';
-import { FolderBrowserDialog } from './FolderBrowserDialog.js';
 import { FolderNameDialog } from './FolderNameDialog.js';
 import { Icon } from './Icon.js';
 
 export interface WorkspaceSwitcherProps {
   client: CompanyClient;
   state: CompanyViewState;
-  /** Bumped by the command palette to open the folder browser; a new value opens it once. */
-  browseRequest?: number;
 }
 
 /** The class every control in the switcher shares: a small ghost button, no edge. */
@@ -38,28 +36,20 @@ interface NamingTarget {
   currentName: string | null;
 }
 
-export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: WorkspaceSwitcherProps) {
+export function WorkspaceSwitcher({ client, state }: WorkspaceSwitcherProps) {
   /** A refusal of the request itself, shown until it is closed or the next attempt. */
   const [refusal, setRefusal] = useState<string | null>(null);
   /** requestId of the last switch sent, so its verdict can be shown if it failed. */
   const [lastOpen, setLastOpen] = useState<string | null>(null);
   /** The request whose verdict the reader closed; its notice is not shown again. */
   const [closedRequest, setClosedRequest] = useState<string | null>(null);
-  /** The last palette request this switcher answered; a new value opens the folder browser. */
-  const [seenRequest, setSeenRequest] = useState(browseRequest);
   /** Whether the folder menu is open. */
   const [menuOpen, setMenuOpen] = useState(false);
-  /** Whether the folder browser dialog is open. */
-  const [browsing, setBrowsing] = useState(false);
+  /** Whether Windows' folder dialog is open for the switcher, so a second press cannot stack one. */
+  const [picking, setPicking] = useState(false);
   /** The folder being named, or null when no naming dialog is open. */
   const [naming, setNaming] = useState<NamingTarget | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  if (browseRequest !== seenRequest) {
-    setSeenRequest(browseRequest);
-    setRefusal(null);
-    setMenuOpen(false);
-    setBrowsing(true);
-  }
 
   // The menu closes on a press outside it, or on Escape.
   useEffect(() => {
@@ -134,10 +124,16 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
     if (!handle.ok) setRefusal(handle.message ?? 'Không gửi được yêu cầu gỡ thư mục.');
   }
 
-  function openBrowser(): void {
+  async function openBrowser(): Promise<void> {
     setMenuOpen(false);
     setRefusal(null);
-    setBrowsing(true);
+    setPicking(true);
+    try {
+      const opened = await openPickedFolder(client);
+      if (typeof opened === 'object') setRefusal(opened.notice);
+    } finally {
+      setPicking(false);
+    }
   }
 
   function closeNotice(): void {
@@ -157,8 +153,8 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
       ) : noFolders ? (
         <button
           type="button"
-          disabled={opening}
-          onClick={openBrowser}
+          disabled={opening || picking}
+          onClick={() => void openBrowser()}
           data-testid="folder-browser-open"
           className={`${CONTROL_CLASS} inline-flex items-center gap-1.5`}
         >
@@ -248,8 +244,8 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
                 <button
                   type="button"
                   data-testid="folder-browser-open"
-                  disabled={opening}
-                  onClick={openBrowser}
+                  disabled={opening || picking}
+                  onClick={() => void openBrowser()}
                   className={MENU_ROW_CLASS}
                 >
                   <Icon name="folder" className="shrink-0" />
@@ -264,14 +260,6 @@ export function WorkspaceSwitcher({ client, state, browseRequest = 0 }: Workspac
         <FloatingNotice align="left" testId="board-workspace-notice" onClose={closeNotice}>
           {message}
         </FloatingNotice>
-      )}
-      {browsing && (
-        <FolderBrowserDialog
-          client={client}
-          state={state}
-          purpose="open"
-          onClose={() => setBrowsing(false)}
-        />
       )}
       {naming !== null && (
         <FolderNameDialog

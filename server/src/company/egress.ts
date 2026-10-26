@@ -44,7 +44,6 @@ const COMPANY_PRIVATE_TYPES: ReadonlySet<string> = new Set([
   'companyOmpSessions',
   'companyArtifactPage',
   'companyFileList',
-  'companyFolderBrowse',
   'companyFileRead',
   'companyAttachmentUploaded',
   'herdrAgents',

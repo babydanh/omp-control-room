@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { GitRunner } from '../src/ledger/git.js';
 import { openLedgerSource, type SqliteDatabase } from '../src/ledger/ledgerDb.js';
@@ -380,5 +380,35 @@ describe('project tree request', () => {
     });
     expect(full?.some((node) => node.kind === 'repository')).toBe(true);
     ledger.close();
+  });
+});
+
+describe('projectNodeCreate for a Project', () => {
+  /** Send one create and wait for its verdict. */
+  async function create(store: ProjectStore, request: Record<string, unknown>): Promise<{ ok?: boolean; reason?: string }> {
+    const sent: Array<{ type: string; ok?: boolean; reason?: string }> = [];
+    handleProjectMessage({ type: 'projectNodeCreate', requestId: 'c1', ...request }, (message) => sent.push(message as never), { privileged: true, store });
+    await vi.waitFor(() => expect(sent.some((message) => message.type === 'projectCommandResult')).toBe(true));
+    return sent.find((message) => message.type === 'projectCommandResult') ?? {};
+  }
+
+  it('makes a Project from a picked folder that holds that folder at once', async () => {
+    const root = await makeTempDir();
+    const folder = path.join(root, 'Moi');
+    await fs.mkdir(folder);
+    const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
+
+    expect(await create(store, { kind: 'project', name: 'Moi', path: folder })).toMatchObject({ ok: true });
+    expect(store.snapshot().projects).toEqual([
+      expect.objectContaining({ name: 'Moi', children: [expect.objectContaining({ type: 'folder', path: await fs.realpath(folder) })] }),
+    ]);
+  });
+
+  it('keeps no empty Project when the picked folder cannot be added', async () => {
+    const root = await makeTempDir();
+    const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
+
+    expect(await create(store, { kind: 'project', name: 'Mat', path: path.join(root, 'missing') })).toMatchObject({ ok: false });
+    expect(store.snapshot().projects).toEqual([]);
   });
 });

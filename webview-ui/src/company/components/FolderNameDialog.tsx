@@ -15,7 +15,7 @@ import { createPortal } from 'react-dom';
 
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient } from '../companyClient.js';
-import { defaultFolderName, folderNameError } from '../folderBrowser.js';
+import { defaultFolderName, folderNameError } from '../folderName.js';
 import { CompanyButton } from './CompanyButton.js';
 
 export interface FolderNameDialogProps {

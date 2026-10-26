@@ -67,12 +67,7 @@ import {
   COMPANY_TERMINAL_INPUT_MAX_BYTES,
 } from './constants.js';
 import type { CompanyViewMode } from './egress.js';
-import {
-  createFolder,
-  listFolder,
-  resolveFolderPath,
-  startView,
-} from './folderBrowser.js';
+import { pickFolder, resolveFolderPath } from './folderPicker.js';
 import {
   isSessionLogId,
   readSessionLog,
@@ -245,10 +240,9 @@ function isPromptDelivery(value: string): value is SubmitPromptInput['delivery']
   return PROMPT_DELIVERIES.has(value);
 }
 
-/** Folder browser and folder naming commands. They answer for the folder list, so they need no open folder. */
+/** Folder picking and folder naming commands. They answer for the folder list, so they need no open folder. */
 const FOLDER_COMMAND_TYPES: ReadonlySet<string> = new Set([
-  'companyFolderBrowseRequest',
-  'companyFolderCreate',
+  'companyFolderPick',
   'companyFolderName',
   'companyFolderForget',
 ]);
@@ -787,8 +781,8 @@ async function usageCommand(
 }
 
 /**
- * Folder browser, folder creation and folder naming. They answer for the folder list rather than for one folder's
- * services, so they run before routing: a browse or a create needs no open folder.
+ * Folder picking, folder naming and forgetting. They answer for the folder list rather than for one folder's
+ * services, so they run before routing: a pick needs no open folder.
  */
 async function folderCommand(
   msg: Record<string, unknown>,
@@ -797,10 +791,8 @@ async function folderCommand(
   send: Send,
 ): Promise<void> {
   try {
-    if (msg.type === 'companyFolderBrowseRequest') {
-      await browseFolders(msg, requestId, send);
-    } else if (msg.type === 'companyFolderCreate') {
-      await createFolderCommand(msg, requestId, send);
+    if (msg.type === 'companyFolderPick') {
+      await pickFolderCommand(requestId, send);
     } else if (msg.type === 'companyFolderForget') {
       await forgetFolderCommand(msg, requestId, workspaces, send);
     } else {
@@ -811,42 +803,14 @@ async function folderCommand(
   }
 }
 
-/** The start view when no `path` is sent; otherwise the folders inside the named folder. */
-async function browseFolders(
-  msg: Record<string, unknown>,
-  requestId: string | null,
-  send: Send,
-): Promise<void> {
-  const requested = msg.path;
-  if (requested !== undefined && typeof requested !== 'string') {
-    fail(send, requestId, 'invalid_request', 'Đường dẫn thư mục phải là chuỗi.');
-    return;
-  }
-  const listing =
-    typeof requested === 'string'
-      ? await listFolder(await resolveFolderPath(requested))
-      : await startView();
-  send({ type: 'companyFolderBrowse', requestId: requestId ?? FALLBACK_REQUEST_ID, ...listing });
-}
-
-/** Create one folder inside the named parent and answer with the new folder's canonical path. */
-async function createFolderCommand(
-  msg: Record<string, unknown>,
-  requestId: string | null,
-  send: Send,
-): Promise<void> {
-  const parentPath = stringField(msg, 'parentPath');
-  const name = stringField(msg, 'name');
-  if (parentPath === null || name === null) {
-    fail(send, requestId, 'invalid_request', 'Cần thư mục cha và tên thư mục mới.');
-    return;
-  }
-  const created = await createFolder(parentPath, name);
+/** Open Windows' folder dialog on the board's machine; the verdict names the folder chosen, or none on cancel. */
+async function pickFolderCommand(requestId: string | null, send: Send): Promise<void> {
+  const chosen = await pickFolder();
   send({
     type: 'companyCommandResult',
     requestId: requestId ?? FALLBACK_REQUEST_ID,
     ok: true,
-    workspacePath: created,
+    ...(chosen === null ? {} : { workspacePath: chosen }),
   });
 }
 

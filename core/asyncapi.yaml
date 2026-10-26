@@ -134,7 +134,6 @@ components:
         - $ref: '#/components/schemas/CompanyWorkItemsMessage'
         - $ref: '#/components/schemas/CompanySquadMessage'
         - $ref: '#/components/schemas/CompanySquadLiveMessage'
-        - $ref: '#/components/schemas/CompanyFolderBrowseMessage'
         - $ref: '#/components/schemas/CompanyTextDeltaMessage'
         - $ref: '#/components/schemas/CompanySessionLogMessage'
         - $ref: '#/components/schemas/HerdrAgentsMessage'
@@ -240,8 +239,7 @@ components:
         - $ref: '#/components/schemas/CompanySessionInfoRequestMessage'
         - $ref: '#/components/schemas/CompanyChatNewMessage'
         - $ref: '#/components/schemas/CompanyViewModeMessage'
-        - $ref: '#/components/schemas/CompanyFolderBrowseRequestMessage'
-        - $ref: '#/components/schemas/CompanyFolderCreateMessage'
+        - $ref: '#/components/schemas/CompanyFolderPickMessage'
         - $ref: '#/components/schemas/CompanyFolderNameMessage'
         - $ref: '#/components/schemas/CompanyFolderForgetMessage'
         # Work items (privileged; manual assignment to herdr panes and omp sessions)
@@ -3770,47 +3768,20 @@ components:
           maxLength: 4096
           description: Folder to create the chat in. Required when the server runs several folders.
 
-    CompanyFolderBrowseRequestMessage:
+    CompanyFolderPickMessage:
       type: object
       additionalProperties: false
       required: [type, requestId]
       description: >-
-        List one folder's sub-folders for the folder browser. Without a path the answer is the
-        start view: the drives (or the root) and the home folder. A refusal is a
-        companyCommandResult under the same requestId.
+        Open Windows' own folder dialog on the machine the server runs on and wait for the user.
+        The verdict is a companyCommandResult: workspacePath names the canonical folder chosen, and
+        is absent when the dialog was cancelled. Refused off Windows and while a dialog is open.
       properties:
         type:
-          const: companyFolderBrowseRequest
+          const: companyFolderPick
         requestId:
           type: string
           format: uuid
-        path:
-          type: string
-          minLength: 1
-          maxLength: 4096
-          description: An absolute folder path. A path with a parent segment is refused.
-
-    CompanyFolderCreateMessage:
-      type: object
-      additionalProperties: false
-      required: [type, requestId, parentPath, name]
-      description: >-
-        Create one new folder inside an existing folder. The name is one path segment and must not
-        already exist. The verdict names the new folder through workspacePath.
-      properties:
-        type:
-          const: companyFolderCreate
-        requestId:
-          type: string
-          format: uuid
-        parentPath:
-          type: string
-          minLength: 1
-          maxLength: 4096
-        name:
-          type: string
-          minLength: 1
-          maxLength: 255
 
     CompanyFolderNameMessage:
       type: object
@@ -7357,58 +7328,7 @@ components:
           type: string
           minLength: 1
           maxLength: 4096
-          description: The folder a folder command created or named.
-
-    CompanyFolderBrowseMessage:
-      type: object
-      additionalProperties: false
-      required: [type, requestId, path, parent, roots, entries, truncated]
-      description: >-
-        The answer to a companyFolderBrowseRequest, sent to the asking socket only. path is the
-        canonical folder listed, or null for the start view, where roots holds the drives (or the
-        root) and the home folder.
-      properties:
-        type:
-          const: companyFolderBrowse
-        requestId:
-          type: string
-          format: uuid
-        path:
-          type: [string, 'null']
-        parent:
-          type: [string, 'null']
-          description: The folder above path; null at a drive root and in the start view.
-        roots:
-          type: array
-          maxItems: 64
-          items:
-            type: object
-            additionalProperties: false
-            required: [kind, name, path]
-            properties:
-              kind:
-                type: string
-                enum: [drive, root, home]
-              name:
-                type: string
-              path:
-                type: string
-        entries:
-          type: array
-          maxItems: 1000
-          description: Sub-folders of path, sorted by name. Files are never listed.
-          items:
-            type: object
-            additionalProperties: false
-            required: [name, path]
-            properties:
-              name:
-                type: string
-              path:
-                type: string
-        truncated:
-          type: boolean
-          description: True when the folder holds more sub-folders than entries carries.
+          description: The folder a folder command picked or named.
 
     CompanyTextDeltaMessage:
       type: object
@@ -8231,6 +8151,9 @@ components:
           type: string
           minLength: 1
           maxLength: 4096
+          description: >-
+            For a folder, the folder to add. For a project, a folder the new project holds at once; the
+            project is not kept when that folder cannot be added.
 
     ProjectNodeUpdateMessage:
       type: object

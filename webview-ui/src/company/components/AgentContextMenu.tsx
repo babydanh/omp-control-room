@@ -52,6 +52,7 @@ import { copyText } from '../clipboard.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
+import { pickFolder } from '../folderPick.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
 import type { ProjectStore } from '../projects/projectStore.js';
 import { canMoveProjectNode } from '../projects/projectTreeView.js';
@@ -64,7 +65,6 @@ import { judgeChipFor, worktreeOffer } from '../workItemReviewView.js';
 import { findWorkItem, statusWordVi } from '../workItemView.js';
 import { CompanyButton } from './CompanyButton.js';
 import { ConfirmAction } from './ConfirmAction.js';
-import { FolderBrowserDialog } from './FolderBrowserDialog.js';
 import { FolderNameDialog } from './FolderNameDialog.js';
 import { Icon } from './Icon.js';
 import type { WorkDialogRequest } from './WorkDialogHost.js';
@@ -417,7 +417,8 @@ export function AgentContextMenu({
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [projectPathDraft, setProjectPathDraft] = useState('');
-  const [browsingFolder, setBrowsingFolder] = useState(false);
+  /** Whether Windows' folder dialog is open for the add-folder form, so a second press cannot stack one. */
+  const [pickingFolder, setPickingFolder] = useState(false);
   // Recent board folders not yet in any Project: one click instead of typing a path.
   const folderSuggestions = (state.workspaces ?? []).filter((entry) => {
     if (entry.missing === true) return false;
@@ -470,8 +471,8 @@ export function AgentContextMenu({
 
   // Escape, a pointer press outside, scrolling anywhere else, or a resize closes the menu.
   useEffect(() => {
-    // The folder-name dialog and the folder browser take the keys and the pointer; the menu stays out of their way.
-    if (mode === 'folder-rename' || browsingFolder) return;
+    // The folder-name dialog takes the keys and the pointer; the menu stays out of its way.
+    if (mode === 'folder-rename') return;
     function onKeyDown(event: KeyboardEvent): void {
       if (event.key !== 'Escape') return;
       event.preventDefault();
@@ -501,7 +502,7 @@ export function AgentContextMenu({
       window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', onClose);
     };
-  }, [browsingFolder, mode, onClose, returnFocus]);
+  }, [mode, onClose, returnFocus]);
 
   // A rename, a focus or a control is in flight: the menu closes on success and
   // shows the server's reason on a refusal, read from the command result.
@@ -953,6 +954,20 @@ export function AgentContextMenu({
     if (sessionId !== null) track(client.renameSession(sessionId, name));
   }
 
+  /** Fill the add-folder form with a folder chosen in Windows' dialog. */
+  async function browseForFolder(): Promise<void> {
+    setPickingFolder(true);
+    setNotice(null);
+    try {
+      const picked = await pickFolder(client);
+      if (picked === null) return;
+      if ('notice' in picked) setNotice({ text: picked.notice, failed: true });
+      else setProjectPathDraft(picked.path);
+    } finally {
+      setPickingFolder(false);
+    }
+  }
+
   function submitProjectNodeCreate(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (subject.kind !== 'projectNode' || projectStore === undefined) return;
@@ -1011,8 +1026,7 @@ export function AgentContextMenu({
       tabIndex={-1}
       onKeyDown={onMenuKeyDown}
       className="fixed z-50 min-w-[220px] max-w-[min(280px,calc(100vw-16px))] rounded-(--company-radius-md) border border-hairline bg-raised py-1 text-xs text-text"
-      // The folder browser opens over the board; the menu hides under it and comes back with the path.
-      style={{ left: position.x, top: position.y, visibility: browsingFolder ? 'hidden' : undefined }}
+      style={{ left: position.x, top: position.y }}
     >
       <div className="px-3 pt-1.5 pb-2">
         <p className="truncate font-semibold text-text">{header.title}</p>
@@ -1062,21 +1076,9 @@ export function AgentContextMenu({
             Đường dẫn thư mục
             <span className="flex gap-1">
               <input ref={inputRef} autoFocus value={projectPathDraft} placeholder="D:\du-an\thu-muc" onChange={(event) => setProjectPathDraft(event.target.value)} className="min-w-0 flex-1 rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
-              <CompanyButton size="sm" onClick={() => setBrowsingFolder(true)}>Duyệt…</CompanyButton>
+              <CompanyButton size="sm" disabled={pickingFolder} onClick={() => void browseForFolder()}>Duyệt…</CompanyButton>
             </span>
           </label>
-          {browsingFolder && (
-            <FolderBrowserDialog
-              client={client}
-              state={state}
-              purpose="pick"
-              onPick={(path, name) => {
-                setProjectPathDraft(path);
-                if (name !== '') setDraft(name);
-              }}
-              onClose={() => setBrowsingFolder(false)}
-            />
-          )}
           <label className="flex flex-col gap-1 text-text-muted">
             Tên hiển thị (tuỳ chọn)
             <input value={draft} onChange={(event) => setDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />

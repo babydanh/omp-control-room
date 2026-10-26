@@ -56,7 +56,6 @@ const COMPANY_SERVER_MESSAGE_TYPES: Readonly<Record<string, true>> = {
   companyWorkspaces: true,
   companyWorkItems: true,
   companySquad: true,
-  companyFolderBrowse: true,
   herdrAgents: true,
   herdrScreen: true,
   browserReaperStatus: true,
@@ -178,18 +177,9 @@ export function workspaceOpen(requestId: string, path: string): ClientMessage {
   return { type: 'companyWorkspaceOpen', requestId, path };
 }
 
-/** List the folders under `path`, or the start view when none is named. */
-export function folderBrowseRequest(requestId: string, path?: string): ClientMessage {
-  return {
-    type: 'companyFolderBrowseRequest',
-    requestId,
-    ...(path === undefined ? {} : { path }),
-  };
-}
-
-/** Create a folder called `name` inside `parentPath`. The verdict is a companyCommandResult. */
-export function folderCreate(requestId: string, parentPath: string, name: string): ClientMessage {
-  return { type: 'companyFolderCreate', requestId, parentPath, name };
+/** Open Windows' folder dialog on the server's machine. The verdict names the folder chosen in workspacePath. */
+export function folderPick(requestId: string): ClientMessage {
+  return { type: 'companyFolderPick', requestId };
 }
 
 /** Give the folder at `path` a display name; an empty name removes it. */

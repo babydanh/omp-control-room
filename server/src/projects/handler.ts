@@ -124,7 +124,17 @@ async function runProjectRequest(
         const request = msg as unknown as ProjectNodeCreateMessage;
         let nodeId: string;
         if (request.kind === 'project') {
-          nodeId = (await store.createProject(request.name)).id;
+          const project = await store.createProject(request.name);
+          nodeId = project.id;
+          // A project made from a picked folder holds that folder at once; a folder that cannot be added leaves no empty project.
+          if (typeof request.path === 'string') {
+            try {
+              await store.addFolder(project.id, request.path);
+            } catch (error) {
+              await store.deleteProject(project.id);
+              throw error;
+            }
+          }
         } else {
           const target = targetForParent(await store.load(), request.parentId);
           if (request.kind === 'folder') {

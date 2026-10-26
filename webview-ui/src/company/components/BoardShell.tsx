@@ -25,7 +25,8 @@ import {
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
 import { folderIdentityOf, foldersWaitingForSnapshot, showsAllFolders } from '../folderIdentity.js';
-import type { FolderFocusInput } from '../folderView.js';
+import { openPickedFolder, pickFolder } from '../folderPick.js';
+import { folderBasename, type FolderFocusInput } from '../folderView.js';
 import type { HerdrDrawerTab } from '../herdrView.js';
 import type { IconName } from '../iconNames.js';
 import { sidebarPresentation } from '../layoutMode.js';
@@ -610,6 +611,25 @@ export function BoardShell({ client }: BoardShellProps) {
     }
   }
 
+  /** "Tạo project": a folder chosen in Windows' dialog becomes a new Project, named after it and holding it. */
+  async function createProjectFromPickedFolder(): Promise<void> {
+    setSessionNotice(null);
+    const picked = await pickFolder(client);
+    if (picked === null) return;
+    if ('notice' in picked) {
+      setSessionNotice(picked.notice);
+      return;
+    }
+    projectStore.createNode({ kind: 'project', name: folderBasename(picked.path) || picked.path, path: picked.path });
+  }
+
+  /** "Mở thư mục…" in the palette: choose a folder in Windows' dialog and show it on the board. */
+  async function openFolderFromPalette(): Promise<void> {
+    setSessionNotice(null);
+    const opened = await openPickedFolder(client);
+    if (typeof opened === 'object') setSessionNotice(opened.notice);
+  }
+
   function runPaletteAction(action: PaletteActionId): void {
     switch (action) {
       case 'new-chat':
@@ -626,6 +646,7 @@ export function BoardShell({ client }: BoardShellProps) {
         setOpened({ kind: 'files' });
         return;
       case 'open-folder':
+        void openFolderFromPalette();
         return;
       case 'open-roles':
         setRolesOpen(true);
@@ -854,6 +875,7 @@ export function BoardShell({ client }: BoardShellProps) {
                     client.setViewMode('folder');
                   }
                 },
+                onCreateProject: () => void createProjectFromPickedFolder(),
                 onOpenChanges: openProjectChanges,
                 onOpenSettings: openProjectSettings,
                 onNewSession: (nodeId, engine) => setNewSessionNode({ nodeId, ...(engine === undefined ? {} : { engine }) }),
