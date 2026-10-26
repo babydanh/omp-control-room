@@ -122,6 +122,24 @@ function snapshotNoticeText(state: CompanyViewState): string {
   return `Có thay đổi đã bị bỏ sót ở ${waiting.join(', ')}; đang chờ một bản chụp mới từ máy chủ.`;
 }
 
+/**
+ * Waits until the project create `requestId` is answered (or failed to send) and returns the
+ * server's refusal, or null when the Project was made. Executor form: the ES2022 lib has no
+ * Promise.withResolvers.
+ */
+function projectCreateRefusal(requestId: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const settle = (): void => {
+      const state = projectStore.getSnapshot();
+      if (state.pending[requestId] !== undefined) return;
+      unsubscribe();
+      resolve(state.errors['command:create'] || null);
+    };
+    const unsubscribe = projectStore.subscribe(settle);
+    settle();
+  });
+}
+
 export interface BoardShellProps {
   client: CompanyClient;
 }
@@ -620,7 +638,13 @@ export function BoardShell({ client }: BoardShellProps) {
       setSessionNotice(picked.notice);
       return;
     }
-    projectStore.createNode({ kind: 'project', name: folderBasename(picked.path) || picked.path, path: picked.path });
+    const requestId = projectStore.createNode({
+      kind: 'project',
+      name: folderBasename(picked.path) || picked.path,
+      path: picked.path,
+    });
+    const refusal = await projectCreateRefusal(requestId);
+    if (refusal !== null) setSessionNotice(`Không tạo được project: ${refusal}`);
   }
 
   /** "Mở thư mục…" in the palette: choose a folder in Windows' dialog and show it on the board. */
