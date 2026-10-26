@@ -31,12 +31,13 @@ import {
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
+import { transcriptFile } from './herdr/agentReply.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
 import type { LedgerService } from './ledger/ledgerService.js';
 import { resolveProofPath } from './library/storage.js';
 import { handleProjectMessage, type ProjectCommandContext } from './projects/handler.js';
 import { buildProjectTreeSnapshot, type HerdrProjectSession } from './projects/projectTree.js';
-import { createTranscriptProgress } from './projects/sessionProgress.js';
+import { createTranscriptProgress, type TranscriptFacts } from './projects/sessionProgress.js';
 import { processAlive } from './projects/sessionStop.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
 import { registerTerminalRoutes } from './terminal/terminalRoutes.js';
@@ -201,6 +202,12 @@ function registerLibraryProofRoute(app: FastifyInstance, token: string): void {
 /** One transcript reader for the process: it remembers how far each transcript was read. */
 const transcriptProgress = createTranscriptProgress();
 
+/** What a session's transcript says; a Claude session asleep or in a herdr pane is named by its id, not its file. */
+async function sessionFacts(fileOrId: string): Promise<TranscriptFacts> {
+  const file = await transcriptFile(fileOrId);
+  return file === undefined ? {} : transcriptProgress(file);
+}
+
 /** Project tree inputs from the ledger's caches, unless the caller supplied its own. */
 function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandContext, 'tree'> {
   const ledger = options.ledger;
@@ -212,7 +219,7 @@ function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandC
       isAlive: processAlive,
       readRepo: (repo) => ledger.repoScan(repo),
       overlapScans: () => ledger.currentOverlapScans(),
-      sessionFacts: transcriptProgress,
+      sessionFacts,
     },
   };
 }

@@ -23,7 +23,7 @@ import { HANDOFF_MAX_BYTES, type HandoffFile, readHandoffFiles } from './ledger/
 export const BOARD_HELP = [
   'board: xem và báo cho Agent Board từ terminal.',
   '',
-  '  board status                  phiên nào đang làm gì ở đâu, và các việc chưa xong trên bảng',
+  '  board status                  phiên nào đang làm gì ở đâu (kèm yêu cầu, cả phiên đang ngủ), và các việc chưa xong trên bảng',
   '  board task                    việc trên bảng giao cho chính phiên này',
   '  board report <#n> <nội dung>  ghi tiến độ vào lịch sử việc #n (không đổi trạng thái)',
   '  board handoff [#n]            in file bàn giao của worktree việc #n (không có #n: worktree đang đứng)',
@@ -87,6 +87,8 @@ export interface CliSession {
   readonly cwd: string;
   readonly paneId?: string;
   readonly progress?: CliProgress;
+  readonly request?: string;
+  readonly lastRequest?: string;
 }
 
 export interface CliItem {
@@ -174,6 +176,8 @@ function readSession(value: unknown): CliSession {
     cwd: need(value, 'cwd'),
     ...optional('paneId', text(value, 'paneId')),
     ...(progress === undefined ? {} : { progress }),
+    ...optional('request', text(value, 'request')),
+    ...optional('lastRequest', text(value, 'lastRequest')),
   };
 }
 
@@ -321,9 +325,18 @@ function progressText(progress: CliProgress | undefined): string {
   return ` · ${progress.done}/${progress.total} (${percent}%)${tail}`;
 }
 
+/** What the session was asked and its newest message, on its own line: a sleeping session titled by its id is found again by it. */
+function requestText(session: CliSession): string {
+  const parts = [
+    session.request && `Yêu cầu: ${clip(session.request, 140)}`,
+    session.lastRequest && `Gần nhất: ${clip(session.lastRequest, 140)}`,
+  ].filter(Boolean);
+  return parts.length === 0 ? '' : `\n      ${parts.join(' · ')}`;
+}
+
 function sessionLine(session: CliSession): string {
   const pane = session.paneId === undefined ? '' : ` [${session.paneId}]`;
-  return `  ${session.agent}${pane} · ${session.state} · ${clip(session.title, 80)} · ${session.cwd}${progressText(session.progress)}`;
+  return `  ${session.agent}${pane} · ${session.state} · ${clip(session.title, 80)} · ${session.cwd}${progressText(session.progress)}${requestText(session)}`;
 }
 
 function itemLine(item: CliItem): string {

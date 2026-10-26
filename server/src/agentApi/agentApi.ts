@@ -40,6 +40,9 @@ export interface AgentSessionRow {
   readonly cwd: string;
   readonly paneId?: string;
   readonly progress?: ProjectTreeNode['progress'];
+  /** The user's first message in the session's transcript, and the newest when it differs. */
+  readonly request?: string;
+  readonly lastRequest?: string;
 }
 
 /** A work item with the folder whose board holds it. */
@@ -81,6 +84,8 @@ export function sessionRows(nodes: readonly ProjectTreeNode[]): AgentSessionRow[
     cwd: node.path ?? '',
     ...(node.herdrPaneId === undefined ? {} : { paneId: node.herdrPaneId }),
     ...(node.progress === undefined ? {} : { progress: node.progress }),
+    ...(node.request === undefined ? {} : { request: node.request }),
+    ...(node.lastRequest === undefined ? {} : { lastRequest: node.lastRequest }),
   }]);
 }
 

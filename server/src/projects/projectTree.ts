@@ -40,7 +40,8 @@ export interface ProjectSessionSnapshot {
   readonly lastRequest?: string;
 }
 
-export interface HerdrProjectSession {
+/** A herdr pane; the transcript facts are filled in while the tree is built, from its `sessionFile`. */
+export interface HerdrProjectSession extends TranscriptFacts {
   readonly id: string;
   readonly cwd: string;
   readonly status: string;
@@ -289,7 +290,10 @@ function sessionsForCheckout(
   }
   for (const session of herdrSessions) {
     if (!owns(session.cwd)) continue;
-    sessions.push({ engine: 'herdr', agentKind: 'herdr', id: session.id, cwd: session.cwd, status: session.status, title: session.title });
+    sessions.push({
+      engine: 'herdr', agentKind: 'herdr', id: session.id, cwd: session.cwd, status: session.status, title: session.title,
+      ...factFields(session),
+    });
   }
   return sessions;
 }
@@ -700,6 +704,30 @@ async function withProgress(
   }));
 }
 
+/** The facts that are set, so a row or pane carries no field for an unset one. */
+function factFields(facts: TranscriptFacts): TranscriptFacts {
+  return {
+    ...(facts.progress === undefined ? {} : { progress: facts.progress }),
+    ...(facts.request === undefined ? {} : { request: facts.request }),
+    ...(facts.lastRequest === undefined ? {} : { lastRequest: facts.lastRequest }),
+  };
+}
+
+/**
+ * Panes no live ledger session joined (a sleeping one above all) with what their transcript says
+ * they were doing, so a sleeping session can be found again by its task.
+ */
+async function withPaneFacts(
+  panes: readonly HerdrProjectSession[],
+  read: ProjectTreeOptions['sessionFacts'],
+): Promise<readonly HerdrProjectSession[]> {
+  if (read === undefined) return panes;
+  return Promise.all(panes.map(async (pane) => {
+    if (pane.sessionFile === undefined) return pane;
+    return { ...pane, ...factFields(await read(pane.sessionFile).catch((): TranscriptFacts => ({}))) };
+  }));
+}
+
 export async function buildProjectTreeSnapshot(
   store: ProjectStore,
   options: ProjectTreeOptions,
@@ -713,7 +741,7 @@ export async function buildProjectTreeSnapshot(
   const pendingCheckouts = new Set(options.ledger.pendingRows().map((row) => canonicalKey(row.checkout)));
   const overlapScans = options.sessionsOnly === true ? [] : await (options.overlapScans?.() ?? Promise.resolve([]));
   const agents = [...(options.agents ?? [])];
-  const herdrSessions = linked.panes;
+  const herdrSessions = await withPaneFacts(linked.panes, options.sessionFacts);
   const nodes: ProjectTreeNode[] = [];
   const aggregates = new Map<string, NodeAggregate>();
   for (const project of state.projects) {

@@ -234,6 +234,40 @@ describe('buildProjectTreeSnapshot', () => {
     });
     expect(scanned.sort()).toEqual([path.resolve(repo), path.resolve(submodule)].sort());
   });
+
+  it('gives a herdr pane no ledger session joins, such as a sleeping one, what its transcript says it was doing', async () => {
+    const root = await makeTempDir();
+    const folder = path.join(root, 'folder');
+    await fs.mkdir(folder);
+    const cwd = await fs.realpath(folder);
+    const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
+    const project = await store.createProject('Test');
+    await store.addFolder(project.id, folder);
+    const read: string[] = [];
+    const snapshot = await buildProjectTreeSnapshot(store, {
+      ledger: openLedgerSource(path.join(root, 'missing.db'), () => {
+        throw new Error('no database');
+      }),
+      git: { run: async () => processResult() },
+      sessionsOnly: true,
+      herdrSessions: () => [
+        { id: 'zz:1', cwd, status: 'sleeping', title: '3d6cdbd2', sessionFile: 'C:/s/a.jsonl' },
+        { id: 'w1:p2', cwd, status: 'sleeping', title: 'Không có transcript' },
+      ],
+      sessionFacts: async (file) => {
+        read.push(file);
+        return { progress: { done: 1, total: 3, current: 'Thêm animation' }, request: 'làm animation nhân vật', lastRequest: 'làm tiếp' };
+      },
+    });
+    const sessions = snapshot.nodes.filter((node) => node.kind === 'session');
+    expect(sessions.find((node) => node.id === 'herdr:zz:1')).toMatchObject({
+      progress: { done: 1, total: 3, current: 'Thêm animation' },
+      request: 'làm animation nhân vật',
+      lastRequest: 'làm tiếp',
+    });
+    expect(sessions.find((node) => node.id === 'herdr:w1:p2')).not.toHaveProperty('request');
+    expect(read).toEqual(['C:/s/a.jsonl']);
+  });
 });
 
 describe('parentSessions', () => {

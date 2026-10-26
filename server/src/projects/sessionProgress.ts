@@ -26,8 +26,13 @@ const EMPTY = Buffer.alloc(0);
 const MAX_CURRENT = 400;
 const MAX_BLOCKED = 800;
 const MAX_REQUEST = 300;
-/** Claude Code's own blocks written as user turns: slash commands, their output, hooks, reminders. */
-const CLAUDE_WRAPPER = /^<(command-|local-command-|system-reminder|user-prompt-submit-hook|bash-)/;
+/**
+ * Claude Code's own blocks written as user turns: slash commands, their output, hooks, reminders,
+ * and the note it leaves when the user stops a turn.
+ */
+const CLAUDE_WRAPPER = /^(<(command-|local-command-|system-reminder|user-prompt-submit-hook|bash-)|\[Request interrupted by user)/;
+/** The tags Claude Code wraps pasted text in: the text inside is what the user typed. */
+const PASTED_TAG = /<\/?pasted_content[^>]*>/g;
 /** The first request is looked for this far into a transcript read from its tail. */
 const HEAD_BYTES = 256 * 1024;
 
@@ -74,7 +79,9 @@ export function todoFromTranscriptLine(line: string): CompanySessionTodo | undef
 
 /**
  * The text the user typed on this line, or undefined for anything else: agent turns, tool results,
- * subagent (sidechain) turns, and Claude Code's `<command-…>` / `<system-reminder>` wrappers.
+ * subagent (sidechain) turns, Claude Code's `<command-…>` / `<system-reminder>` wrappers, and what it
+ * writes as a user turn itself (`promptSource: system`: a peer session's message, a background
+ * task's notice; `isMeta`; `isCompactSummary`: the summary that continues a session past a full context).
  */
 export function requestFromTranscriptLine(line: string): string | undefined {
   if (!line.includes('"role":"user"')) return undefined;
@@ -84,7 +91,7 @@ export function requestFromTranscriptLine(line: string): string | undefined {
   } catch {
     return undefined;
   }
-  if (!isRecord(entry) || entry['isSidechain'] === true) return undefined;
+  if (!isRecord(entry) || entry['isSidechain'] === true || entry['isMeta'] === true || entry['isCompactSummary'] === true || entry['promptSource'] === 'system') return undefined;
   const message = entry['message'];
   if (!isRecord(message) || message['role'] !== 'user') return undefined;
   // omp tags what the user typed; its injected notices carry another attribution.
@@ -94,7 +101,7 @@ export function requestFromTranscriptLine(line: string): string | undefined {
   const parts = typeof content === 'string' ? [content] : Array.isArray(content)
     ? content.flatMap((part) => (isRecord(part) && part['type'] === 'text' && typeof part['text'] === 'string' ? [part['text']] : []))
     : [];
-  const text = parts.join(' ').replace(/\s+/g, ' ').trim();
+  const text = parts.join(' ').replace(PASTED_TAG, ' ').replace(/\s+/g, ' ').trim();
   if (text === '' || CLAUDE_WRAPPER.test(text)) return undefined;
   return clip(text, MAX_REQUEST);
 }

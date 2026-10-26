@@ -112,8 +112,8 @@ describe('agent API', () => {
     expect(sessionRows([
       { id: 'f', kind: 'folder', name: 'P', path: 'D:/p' },
       { id: 'r', parentId: 'f', kind: 'repository', name: 'api', path: 'D:/p/api' },
-      { id: 's', parentId: 'r', kind: 'session', name: 'x', title: 'Việc', agentKind: 'omp', state: 'working', path: 'D:/p/api', herdrPaneId: 'wA:p1' },
-    ])).toEqual([{ folder: 'D:/p', agent: 'omp', state: 'working', title: 'Việc', cwd: 'D:/p/api', paneId: 'wA:p1' }]);
+      { id: 's', parentId: 'r', kind: 'session', name: 'x', title: 'Việc', agentKind: 'omp', state: 'working', path: 'D:/p/api', herdrPaneId: 'wA:p1', request: 'sửa API', lastRequest: 'làm tiếp' },
+    ])).toEqual([{ folder: 'D:/p', agent: 'omp', state: 'working', title: 'Việc', cwd: 'D:/p/api', paneId: 'wA:p1', request: 'sửa API', lastRequest: 'làm tiếp' }]);
   });
 });
 
@@ -176,6 +176,19 @@ describe('board CLI', () => {
     });
     expect(formatStatus(answer)).toContain('Issue [Handoff] ngoài board (1)');
     expect(formatStatus(answer)).toContain('https://github.com/babydanh/agent-orchestrator/issues/42');
+  });
+
+  it('prints under each session what it was asked and its newest message, so a sleeping one is found again', () => {
+    const text = formatStatus(readStatusAnswer({
+      caller: {},
+      sessions: [
+        { agent: 'herdr', state: 'sleeping', title: '3d6cdbd2', cwd: 'D:/w', request: 'làm animation nhân vật', lastRequest: 'làm tiếp', progress: { done: 1, total: 3, current: 'Thêm animation' } },
+        { agent: 'herdr', state: 'sleeping', title: 'Chưa rõ', cwd: 'D:/x' },
+      ],
+      workItems: [],
+    }));
+    expect(text).toContain('herdr · sleeping · 3d6cdbd2 · D:/w · 1/3 (33%) · đang: Thêm animation\n      Yêu cầu: làm animation nhân vật · Gần nhất: làm tiếp');
+    expect(text).toContain('herdr · sleeping · Chưa rõ · D:/x\n');
   });
 
   it('refuses an answer that is not the agent API shape, such as an old board serving its web page', () => {

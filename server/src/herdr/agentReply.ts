@@ -73,6 +73,24 @@ async function claudeTranscript(sessionId: string, projectsDir: string): Promise
   return undefined;
 }
 
+/** Claude transcripts found so far, keyed by projects folder and session id: a session's file does not move. */
+const claudeFiles = new Map<string, string>();
+
+/**
+ * The transcript herdr or the sleep registry names: omp names its file, Claude Code only its
+ * session id, whose file is looked up under the projects folder once. Undefined when none is found.
+ */
+export async function transcriptFile(
+  fileOrId: string,
+  claudeProjectsDir = path.join(homedir(), '.claude', 'projects'),
+): Promise<string | undefined> {
+  if (path.isAbsolute(fileOrId)) return fileOrId;
+  const key = path.join(claudeProjectsDir, fileOrId);
+  const file = claudeFiles.get(key) ?? (await claudeTranscript(fileOrId, claudeProjectsDir));
+  if (file !== undefined) claudeFiles.set(key, file);
+  return file;
+}
+
 /** The agent's last reply, or undefined when its transcript is unknown or holds none. Never rejects. */
 export async function lastAgentReply(
   agent: ReplyAgent,

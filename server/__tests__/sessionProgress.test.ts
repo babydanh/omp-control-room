@@ -60,6 +60,16 @@ describe('requestFromTranscriptLine', () => {
     expect(requestFromTranscriptLine(claude('việc của subagent', { isSidechain: true }))).toBeUndefined();
     expect(requestFromTranscriptLine(claude('x'.repeat(400)))?.length).toBe(300);
   });
+
+  it('skips what Claude Code writes as a user turn, the summary after a full context and a peer session\'s message, and unwraps pasted text', () => {
+    const claude = (content: string, extra: Record<string, unknown> = {}) => JSON.stringify({ type: 'user', ...extra, message: { role: 'user', content } });
+    expect(requestFromTranscriptLine(claude('This session is being continued from a previous conversation…', { isCompactSummary: true, isVisibleInTranscriptOnly: true }))).toBeUndefined();
+    expect(requestFromTranscriptLine(claude('Another Claude session sent a message: <agent-message from="a1">xong</agent-message>', { isMeta: true, turnOrigin: 'peer' }))).toBeUndefined();
+    expect(requestFromTranscriptLine(claude('<pasted_content id="f1d4">\nKhảo sát luồng sửa VĐV\n</pasted_content> làm đi', { promptSource: 'typed' }))).toBe('Khảo sát luồng sửa VĐV làm đi');
+    expect(requestFromTranscriptLine(claude('<task-notification><task-id>b1</task-id></task-notification>', { promptSource: 'system', origin: { kind: 'task-notification' } }))).toBeUndefined();
+    expect(requestFromTranscriptLine(claude('[Request interrupted by user for tool use]'))).toBeUndefined();
+    expect(requestFromTranscriptLine(claude('rồi lên staging', { promptSource: 'queued' }))).toBe('rồi lên staging');
+  });
 });
 
 describe('createTranscriptProgress', () => {

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { lastAgentReply, lastAssistantText } from '../src/herdr/agentReply.js';
+import { lastAgentReply, lastAssistantText, transcriptFile } from '../src/herdr/agentReply.js';
 
 const SESSION = '1f2e3d4c-5b6a-4789-8abc-def012345678';
 
@@ -41,5 +41,24 @@ describe('lastAgentReply', () => {
     const last = claudeText('cuối');
     writeFileSync(file, [claudeText('x'.repeat(5000)), last, ''].join('\n'));
     expect(await lastAssistantText(file, last.length + 100)).toBe('cuối');
+  });
+});
+
+describe('transcriptFile', () => {
+  let dir = '';
+  afterEach(() => {
+    if (dir !== '') rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('keeps an omp path, finds a sleeping Claude session by the id the sleep registry names, and gives up on an unknown id', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'transcript-file-'));
+    mkdirSync(join(dir, 'V--repo-worktrees-x'));
+    const claude = join(dir, 'V--repo-worktrees-x', `${SESSION}.jsonl`);
+    writeFileSync(claude, `${user()}\n`);
+    const omp = join(dir, 'omp.jsonl');
+    expect(await transcriptFile(omp, dir)).toBe(omp);
+    expect(await transcriptFile(SESSION, dir)).toBe(claude);
+    expect(await transcriptFile('0f2e3d4c-5b6a-4789-8abc-def012345678', dir)).toBeUndefined();
+    expect(await transcriptFile('không-phải-id', dir)).toBeUndefined();
   });
 });
