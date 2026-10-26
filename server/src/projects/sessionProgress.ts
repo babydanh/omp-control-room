@@ -35,15 +35,18 @@ const CLAUDE_WRAPPER = /^(<(command-|local-command-|system-reminder|user-prompt-
 const PASTED_TAG = /<\/?pasted_content[^>]*>/g;
 /** The first request is looked for this far into a transcript read from its tail. */
 const HEAD_BYTES = 256 * 1024;
+const MAX_INTERRUPTED = 300;
 
 /**
  * What a transcript says about its session: the todo progress, the first thing the user asked
- * (the session's task), and the newest thing the user typed when it differs.
+ * (the session's task), the newest thing the user typed when it differs, and the error that cut
+ * the agent's last turn off (a usage limit, a lost connection) while no answer has followed it.
  */
 export interface TranscriptFacts {
   readonly progress?: SessionProgress;
   readonly request?: string;
   readonly lastRequest?: string;
+  readonly interrupted?: string;
 }
 
 function clip(text: string, max: number): string {
@@ -106,6 +109,36 @@ export function requestFromTranscriptLine(line: string): string | undefined {
   return clip(text, MAX_REQUEST);
 }
 
+/**
+ * How the agent turn on this line ended: the error that cut it off, null for an agent message that
+ * ended any other way, undefined for any other line. Claude Code writes the error as an assistant
+ * message marked `isApiErrorMessage`; omp ends its own message with `stopReason: error` and the
+ * `errorMessage`. A turn the user stopped (omp `aborted`) is no cut-off.
+ */
+export function turnErrorFromTranscriptLine(line: string): string | null | undefined {
+  if (!line.includes('"role":"assistant"') || line.includes('"isSidechain":true')) return undefined;
+  // Only a line that names an error is parsed: any other agent message simply ended.
+  if (!line.includes('"isApiErrorMessage":true') && !line.includes('"stopReason":"error"')) return null;
+  let entry: unknown;
+  try {
+    entry = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  const message = isRecord(entry) ? entry['message'] : undefined;
+  if (!isRecord(entry) || !isRecord(message) || message['role'] !== 'assistant') return undefined;
+  const errorMessage = message['errorMessage'];
+  const content = message['content'];
+  let text: string;
+  if (message['stopReason'] === 'error') text = typeof errorMessage === 'string' ? errorMessage : '';
+  else if (entry['isApiErrorMessage'] === true) {
+    text = typeof content === 'string' ? content : Array.isArray(content)
+      ? content.flatMap((part) => (isRecord(part) && part['type'] === 'text' && typeof part['text'] === 'string' ? [part['text']] : [])).join(' ')
+      : '';
+  } else return null;
+  return clip(text.replace(/\s+/g, ' ').trim() || 'lỗi không rõ', MAX_INTERRUPTED);
+}
+
 /** Done of total (abandoned tasks left out), the task in hand, and the first blocked task. */
 export function progressOfTodo(todo: CompanySessionTodo): SessionProgress | undefined {
   const tasks = todo.phases.flatMap((phase) => phase.tasks).filter((task) => task.status !== 'abandoned');
@@ -132,6 +165,8 @@ interface FileState {
   /** The first user message: found while reading from the start, or read once from the head. */
   request: string | undefined;
   lastRequest: string | undefined;
+  /** The error that cut the newest agent turn off; cleared by any later agent message. */
+  interrupted: string | undefined;
 }
 
 export interface TranscriptLimits {
@@ -166,6 +201,8 @@ export function createTranscriptProgress(
     for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
       const todo = todoFromTranscriptLine(line);
       if (todo !== undefined) state.todo = todo;
+      const turnError = turnErrorFromTranscriptLine(line);
+      if (turnError !== undefined) state.interrupted = turnError ?? undefined;
       const request = requestFromTranscriptLine(line);
       if (request === undefined) continue;
       state.lastRequest = request;
@@ -219,7 +256,7 @@ export function createTranscriptProgress(
     // A new file is read from its tail; a shorter file was rewritten and is read again.
     if (state === undefined || size < state.offset) {
       const offset = Math.max(0, size - limits.tailBytes);
-      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined, request: undefined, lastRequest: undefined };
+      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined, request: undefined, lastRequest: undefined, interrupted: undefined };
       if (files.size >= MAX_FILES) files.delete(files.keys().next().value ?? '');
       files.set(file, state);
       if (offset > 0) state.request = await readFirstRequest(file, size).catch(() => undefined);
@@ -230,6 +267,7 @@ export function createTranscriptProgress(
       ...(progress === undefined ? {} : { progress }),
       ...(state.request === undefined ? {} : { request: state.request }),
       ...(state.lastRequest === undefined || state.lastRequest === state.request ? {} : { lastRequest: state.lastRequest }),
+      ...(state.interrupted === undefined ? {} : { interrupted: state.interrupted }),
     };
   };
 }

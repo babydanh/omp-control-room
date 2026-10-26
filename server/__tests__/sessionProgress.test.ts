@@ -113,6 +113,27 @@ describe('createTranscriptProgress', () => {
     expect(await read(file)).toEqual({ progress: { done: 1, total: 1 } });
   });
 
+  it('reports a session whose last agent turn ended on an error, such as a usage limit, until the agent answers again', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'progress-'));
+    const file = join(dir, 'session.jsonl');
+    const limit = "You've hit your session limit · resets 8:50pm (Asia/Bangkok)";
+    const claudeError = JSON.stringify({ type: 'assistant', isApiErrorMessage: true, error: 'rate_limit', message: { role: 'assistant', content: [{ type: 'text', text: limit }] } });
+    const notice = JSON.stringify({ type: 'user', promptSource: 'system', message: { role: 'user', content: '<task-notification>xong</task-notification>' } });
+    writeFileSync(file, `${claudeTodoLine([{ content: 'A', status: 'in_progress' }])}\n${claudeError}\n${notice}\n`);
+    const read = createTranscriptProgress();
+    expect(await read(file)).toEqual({ progress: { done: 0, total: 1, current: 'A' }, interrupted: limit });
+    appendFileSync(file, `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Làm tiếp' }] } })}\n`);
+    expect(await read(file)).toEqual({ progress: { done: 0, total: 1, current: 'A' } });
+
+    const omp = (stopReason: string, errorMessage?: string) =>
+      `${JSON.stringify({ type: 'message', message: { role: 'assistant', content: [], stopReason, ...(errorMessage === undefined ? {} : { errorMessage }) } })}\n`;
+    appendFileSync(file, omp('error', 'Codex error event: The usage limit has been reached (code=usage_limit_reached)'));
+    expect(await read(file)).toMatchObject({ interrupted: 'Codex error event: The usage limit has been reached (code=usage_limit_reached)' });
+    // A retry that answers clears it, and a turn the user stopped is no cut-off.
+    appendFileSync(file, `${omp('stop')}${omp('aborted', 'Interrupted by user')}`);
+    expect(await read(file)).not.toHaveProperty('interrupted');
+  });
+
   it('finds the first request at the head of a transcript read only from its tail', async () => {
     dir = mkdtempSync(join(tmpdir(), 'progress-'));
     const file = join(dir, 'session.jsonl');

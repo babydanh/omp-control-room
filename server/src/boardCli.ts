@@ -89,6 +89,8 @@ export interface CliSession {
   readonly progress?: CliProgress;
   readonly request?: string;
   readonly lastRequest?: string;
+  /** The error that cut its last turn off, such as a usage limit, while no answer followed it. */
+  readonly interrupted?: string;
 }
 
 export interface CliItem {
@@ -178,6 +180,7 @@ function readSession(value: unknown): CliSession {
     ...(progress === undefined ? {} : { progress }),
     ...optional('request', text(value, 'request')),
     ...optional('lastRequest', text(value, 'lastRequest')),
+    ...optional('interrupted', text(value, 'interrupted')),
   };
 }
 
@@ -336,7 +339,8 @@ function requestText(session: CliSession): string {
 
 function sessionLine(session: CliSession): string {
   const pane = session.paneId === undefined ? '' : ` [${session.paneId}]`;
-  return `  ${session.agent}${pane} · ${session.state} · ${clip(session.title, 80)} · ${session.cwd}${progressText(session.progress)}${requestText(session)}`;
+  const cut = session.interrupted === undefined ? '' : ` · BỊ NGẮT: ${clip(session.interrupted, 160)}`;
+  return `  ${session.agent}${pane} · ${session.state} · ${clip(session.title, 80)} · ${session.cwd}${progressText(session.progress)}${cut}${requestText(session)}`;
 }
 
 function itemLine(item: CliItem): string {
@@ -350,7 +354,8 @@ function callerText(caller: CliCaller): string {
 
 export function formatStatus(answer: StatusAnswer): string {
   const lines = [`Bạn: ${callerText(answer.caller)}${answer.you ? ` · ${answer.you.agent} "${clip(answer.you.title, 60)}"` : ''}`, ''];
-  lines.push(`Phiên đang chạy (${answer.sessions.length}):`);
+  const cut = answer.sessions.filter((session) => session.interrupted !== undefined).length;
+  lines.push(`Phiên đang chạy (${answer.sessions.length}${cut === 0 ? '' : `, ${cut} bị ngắt giữa chừng`}):`);
   lines.push(...(answer.sessions.length === 0 ? ['  (không có)'] : answer.sessions.map(sessionLine)));
   lines.push('', `Việc chưa xong trên bảng (${answer.workItems.length}):`);
   lines.push(...(answer.workItems.length === 0 ? ['  (không có)'] : answer.workItems.map(itemLine)));

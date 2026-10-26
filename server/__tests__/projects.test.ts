@@ -256,7 +256,7 @@ describe('buildProjectTreeSnapshot', () => {
       ],
       sessionFacts: async (file) => {
         read.push(file);
-        return { progress: { done: 1, total: 3, current: 'Thêm animation' }, request: 'làm animation nhân vật', lastRequest: 'làm tiếp' };
+        return { progress: { done: 1, total: 3, current: 'Thêm animation' }, request: 'làm animation nhân vật', lastRequest: 'làm tiếp', interrupted: "You've hit your session limit" };
       },
     });
     const sessions = snapshot.nodes.filter((node) => node.kind === 'session');
@@ -264,6 +264,7 @@ describe('buildProjectTreeSnapshot', () => {
       progress: { done: 1, total: 3, current: 'Thêm animation' },
       request: 'làm animation nhân vật',
       lastRequest: 'làm tiếp',
+      interrupted: "You've hit your session limit",
     });
     expect(sessions.find((node) => node.id === 'herdr:w1:p2')).not.toHaveProperty('request');
     expect(read).toEqual(['C:/s/a.jsonl']);

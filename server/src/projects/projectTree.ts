@@ -38,6 +38,8 @@ export interface ProjectSessionSnapshot {
   readonly request?: string;
   /** The user's newest message, when it is not the first one. */
   readonly lastRequest?: string;
+  /** The error that cut the agent's last turn off (a usage limit, a lost connection), while no answer followed it. */
+  readonly interrupted?: string;
 }
 
 /** A herdr pane; the transcript facts are filled in while the tree is built, from its `sessionFile`. */
@@ -120,6 +122,7 @@ type TitledSessionRow = SessionRow & {
   readonly progress?: SessionProgress;
   readonly request?: string;
   readonly lastRequest?: string;
+  readonly interrupted?: string;
 };
 
 /**
@@ -272,9 +275,7 @@ function sessionsForCheckout(
       ...(row.parentSessionId === undefined ? {} : { parentSessionId: row.parentSessionId }),
       ...(row.herdrPaneId === undefined ? {} : { herdrPaneId: row.herdrPaneId }),
       ...(row.editCheckouts === undefined ? {} : { editCheckouts: row.editCheckouts }),
-      ...(row.progress === undefined ? {} : { progress: row.progress }),
-      ...(row.request === undefined ? {} : { request: row.request }),
-      ...(row.lastRequest === undefined ? {} : { lastRequest: row.lastRequest }),
+      ...factFields(row),
     });
   }
   for (const agent of agents) {
@@ -669,9 +670,7 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
       ...(session.parentSessionId === undefined ? {} : { parentSessionId: session.parentSessionId }),
       ...(session.herdrPaneId === undefined ? {} : { herdrPaneId: session.herdrPaneId }),
       ...(session.editCheckouts === undefined ? {} : { editCheckouts: [...session.editCheckouts] }),
-      ...(session.progress === undefined ? {} : { progress: session.progress }),
-      ...(session.request === undefined ? {} : { request: session.request }),
-      ...(session.lastRequest === undefined ? {} : { lastRequest: session.lastRequest }),
+      ...factFields(session),
     });
   }
 }
@@ -685,7 +684,7 @@ function withoutDeadProcesses(rows: readonly SessionRow[], isAlive: ((pid: numbe
   return rows.filter((row) => row.endedAt !== null || row.pid === null || isAlive(row.pid));
 }
 
-/** Live rows with the todo progress and request their transcript last wrote; an unreadable transcript gives none. */
+/** Live rows with what their transcript last wrote: todo progress, requests, a cut-off turn; an unreadable transcript gives none. */
 async function withProgress(
   rows: readonly TitledSessionRow[],
   read: ProjectTreeOptions['sessionFacts'],
@@ -693,14 +692,7 @@ async function withProgress(
   if (read === undefined) return rows;
   return Promise.all(rows.map(async (row) => {
     if (row.endedAt !== null || !row.sessionFile) return row;
-    const facts = await read(row.sessionFile).catch((): TranscriptFacts => ({}));
-    if (facts.progress === undefined && facts.request === undefined && facts.lastRequest === undefined) return row;
-    return {
-      ...row,
-      ...(facts.progress === undefined ? {} : { progress: facts.progress }),
-      ...(facts.request === undefined ? {} : { request: facts.request }),
-      ...(facts.lastRequest === undefined ? {} : { lastRequest: facts.lastRequest }),
-    };
+    return { ...row, ...factFields(await read(row.sessionFile).catch((): TranscriptFacts => ({}))) };
   }));
 }
 
@@ -710,6 +702,7 @@ function factFields(facts: TranscriptFacts): TranscriptFacts {
     ...(facts.progress === undefined ? {} : { progress: facts.progress }),
     ...(facts.request === undefined ? {} : { request: facts.request }),
     ...(facts.lastRequest === undefined ? {} : { lastRequest: facts.lastRequest }),
+    ...(facts.interrupted === undefined ? {} : { interrupted: facts.interrupted }),
   };
 }
 

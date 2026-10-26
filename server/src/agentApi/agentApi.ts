@@ -43,6 +43,8 @@ export interface AgentSessionRow {
   /** The user's first message in the session's transcript, and the newest when it differs. */
   readonly request?: string;
   readonly lastRequest?: string;
+  /** The error that cut the agent's last turn off, such as a usage limit, while no answer followed it. */
+  readonly interrupted?: string;
 }
 
 /** A work item with the folder whose board holds it. */
@@ -86,6 +88,7 @@ export function sessionRows(nodes: readonly ProjectTreeNode[]): AgentSessionRow[
     ...(node.progress === undefined ? {} : { progress: node.progress }),
     ...(node.request === undefined ? {} : { request: node.request }),
     ...(node.lastRequest === undefined ? {} : { lastRequest: node.lastRequest }),
+    ...(node.interrupted === undefined ? {} : { interrupted: node.interrupted }),
   }]);
 }
 

@@ -112,8 +112,8 @@ describe('agent API', () => {
     expect(sessionRows([
       { id: 'f', kind: 'folder', name: 'P', path: 'D:/p' },
       { id: 'r', parentId: 'f', kind: 'repository', name: 'api', path: 'D:/p/api' },
-      { id: 's', parentId: 'r', kind: 'session', name: 'x', title: 'Việc', agentKind: 'omp', state: 'working', path: 'D:/p/api', herdrPaneId: 'wA:p1', request: 'sửa API', lastRequest: 'làm tiếp' },
-    ])).toEqual([{ folder: 'D:/p', agent: 'omp', state: 'working', title: 'Việc', cwd: 'D:/p/api', paneId: 'wA:p1', request: 'sửa API', lastRequest: 'làm tiếp' }]);
+      { id: 's', parentId: 'r', kind: 'session', name: 'x', title: 'Việc', agentKind: 'omp', state: 'working', path: 'D:/p/api', herdrPaneId: 'wA:p1', request: 'sửa API', lastRequest: 'làm tiếp', interrupted: 'Connection error.' },
+    ])).toEqual([{ folder: 'D:/p', agent: 'omp', state: 'working', title: 'Việc', cwd: 'D:/p/api', paneId: 'wA:p1', request: 'sửa API', lastRequest: 'làm tiếp', interrupted: 'Connection error.' }]);
   });
 });
 
@@ -189,6 +189,18 @@ describe('board CLI', () => {
     }));
     expect(text).toContain('herdr · sleeping · 3d6cdbd2 · D:/w · 1/3 (33%) · đang: Thêm animation\n      Yêu cầu: làm animation nhân vật · Gần nhất: làm tiếp');
     expect(text).toContain('herdr · sleeping · Chưa rõ · D:/x\n');
+  });
+
+  it('marks a session cut off mid-turn, by a usage limit or a lost connection, and counts them in the heading', () => {
+    const session = (title: string, interrupted?: string) => ({ agent: 'herdr', state: 'sleeping', title, cwd: 'D:/w', request: 'popup minh hoạ', ...(interrupted === undefined ? {} : { interrupted }) });
+    const text = formatStatus(readStatusAnswer({
+      caller: {},
+      sessions: [session('Thuỵ Sĩ', "You've hit your session limit · resets 8:50pm"), session('Xong rồi')],
+      workItems: [],
+    }));
+    expect(text).toContain('Phiên đang chạy (2, 1 bị ngắt giữa chừng):');
+    expect(text).toContain("herdr · sleeping · Thuỵ Sĩ · D:/w · BỊ NGẮT: You've hit your session limit · resets 8:50pm\n      Yêu cầu: popup minh hoạ");
+    expect(text).toContain('herdr · sleeping · Xong rồi · D:/w\n      Yêu cầu: popup minh hoạ');
   });
 
   it('refuses an answer that is not the agent API shape, such as an old board serving its web page', () => {

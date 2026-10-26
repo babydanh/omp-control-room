@@ -8677,6 +8677,12 @@ components:
           maxLength: 300
           description: >-
             Session rows: the newest message the user typed, when it is not the first one.
+        interrupted:
+          type: string
+          maxLength: 300
+          description: >-
+            Session rows: the error that cut the agent's last turn off (a usage limit, a lost
+            connection), while no agent answer has followed it. Absent for a turn that ended normally.
         state:
           type: string
         title:
