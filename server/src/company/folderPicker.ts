@@ -60,9 +60,11 @@ export type PickerRun = (
 
 /**
  * The dialog script. The chosen path is printed on stdout and nothing is printed on cancel. The
- * title comes in through the environment, so no value is ever spliced into the script. An
- * invisible top-most form owns the dialog, so it opens in front of the browser rather than behind
- * it; the explicit exit stops PowerShell from lingering for seconds after the dialog closes.
+ * title comes in through the environment, so no value is ever spliced into the script. A 1×1
+ * borderless form owns the dialog. Windows keeps a background process from putting its windows in
+ * front, so the dialog opened behind the browser; a timer on the dialog's own thread therefore
+ * waits for it, joins the foreground window's input queue, and brings the dialog to the front,
+ * top-most. The explicit exit stops PowerShell from lingering after the dialog closes.
  */
 const PICK_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
@@ -70,8 +72,38 @@ const PICK_SCRIPT = [
   'Add-Type -AssemblyName System.Windows.Forms',
   '[Windows.Forms.Application]::EnableVisualStyles()',
   '$owner = New-Object Windows.Forms.Form',
-  "$owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.FormBorderStyle = 'None'; $owner.Opacity = 0; $owner.StartPosition = 'CenterScreen'",
+  "$owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.FormBorderStyle = 'None'; $owner.Width = 1; $owner.Height = 1; $owner.StartPosition = 'CenterScreen'",
   '$owner.Show(); $owner.Activate()',
+  "Add-Type -TypeDefinition @'",
+  'using System; using System.Runtime.InteropServices;',
+  'public static class PickerWindow {',
+  '  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);',
+  '  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();',
+  '  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr processId);',
+  '  [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();',
+  '  [DllImport("user32.dll")] static extern bool AttachThreadInput(uint from, uint to, bool attach);',
+  '  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int cx, int cy, uint flags);',
+  '  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr window);',
+  '  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);',
+  '  // GW_ENABLEDPOPUP (6) is the dialog once it is up; HWND_TOPMOST (-1), SWP_NOSIZE|SWP_NOMOVE|SWP_SHOWWINDOW (0x43).',
+  '  public static bool Raise(IntPtr owner) {',
+  '    IntPtr dialog = GetWindow(owner, 6);',
+  '    if (dialog == IntPtr.Zero || dialog == owner) return false;',
+  '    uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);',
+  '    uint self = GetCurrentThreadId();',
+  '    bool attached = foreground != 0 && foreground != self && AttachThreadInput(self, foreground, true);',
+  '    SetWindowPos(dialog, new IntPtr(-1), 0, 0, 0, 0, 0x43);',
+  '    BringWindowToTop(dialog);',
+  '    SetForegroundWindow(dialog);',
+  '    if (attached) AttachThreadInput(self, foreground, false);',
+  '    return true;',
+  '  }',
+  '}',
+  "'@",
+  '$raise = New-Object Windows.Forms.Timer',
+  '$raise.Interval = 100',
+  '$raise.Add_Tick({ if ([PickerWindow]::Raise($owner.Handle)) { $raise.Stop() } })',
+  '$raise.Start()',
   '$dialog = New-Object Windows.Forms.FolderBrowserDialog',
   '$dialog.Description = $env:PIXEL_AGENTS_PICK_TITLE',
   '$dialog.ShowNewFolderButton = $true',
