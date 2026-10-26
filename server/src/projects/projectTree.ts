@@ -10,9 +10,10 @@ import {
 } from '../ledger/constants.js';
 import { type GitRepoScan, type GitRunner, type GitRunOptions, readRepo } from '../ledger/git.js';
 import type { LedgerSource, SessionRow } from '../ledger/ledgerDb.js';
-import { normalizeLedgerPath } from '../ledger/ledgerPath.js';
+import { ledgerPathKey, normalizeLedgerPath } from '../ledger/ledgerPath.js';
 import { formatLedgerTime } from '../ledger/ledgerTime.js';
 import type { AgentState } from '../types.js';
+import { EDIT_KINDS } from './projectDiffEngine.js';
 import { type Project, type ProjectNode, ProjectStore } from './projectStore.js';
 import type { SessionProgress, TranscriptFacts } from './sessionProgress.js';
 
@@ -113,6 +114,8 @@ type TitledSessionRow = SessionRow & {
   readonly parentSessionId?: string;
   readonly herdrPaneId?: string;
   readonly editCheckouts?: readonly string[];
+  /** Path keys of the files the session edited lately; joins it to the changed files it owns. */
+  readonly editFiles?: ReadonlySet<string>;
   readonly progress?: SessionProgress;
   readonly request?: string;
   readonly lastRequest?: string;
@@ -174,9 +177,15 @@ function annotateLedgerRows(
   const intents = new Map<string, string>();
   // Events come oldest first, so re-adding a checkout moves it to the end; reversed below, newest first.
   const edited = new Map<string, Set<string>>();
+  const editedFiles = new Map<string, Set<string>>();
   for (const event of ledger.eventRows(formatLedgerTime(Date.now() - SESSION_INTENT_WINDOW_MS))) {
     const intent = event.intent?.trim();
     if (intent) intents.set(event.sessionId, intent);
+    if (EDIT_KINDS.has(event.kind) && event.path !== null) {
+      const files = editedFiles.get(event.sessionId) ?? new Set<string>();
+      files.add(ledgerPathKey(event.path));
+      editedFiles.set(event.sessionId, files);
+    }
     if (!event.checkout) continue;
     const checkouts = edited.get(event.sessionId) ?? new Set<string>();
     checkouts.delete(event.checkout);
@@ -189,8 +198,10 @@ function annotateLedgerRows(
     const boardSessionId = row.endedAt === null ? boardSessionFor?.(row.sessionId) : undefined;
     const parentSessionId = parents.get(row.sessionId);
     const editCheckouts = [...(edited.get(row.sessionId) ?? [])].reverse();
+    const editFiles = editedFiles.get(row.sessionId);
     return {
       ...row,
+      ...(editFiles === undefined ? {} : { editFiles }),
       ...(intent === undefined ? {} : { intent }),
       ...(boardSessionId === undefined ? {} : { boardSessionId }),
       ...(parentSessionId === undefined ? {} : { parentSessionId }),
@@ -508,6 +519,30 @@ function applyAggregates(nodes: ProjectTreeNode[], aggregates: Map<string, NodeA
     }
   }
 }
+/**
+ * A session's own lines: the changed files it edited, summed. A checkout's total is shared by every
+ * session working in it, so each session gets only the files its edits name (a file two sessions
+ * edited counts for both). Runs after `applyAggregates` so these never roll up into the checkout.
+ */
+function attachSessionChanges(nodes: ProjectTreeNode[], ledgerRows: readonly TitledSessionRow[]): void {
+  const filesOf = new Map(ledgerRows.flatMap((row) => (row.editFiles === undefined ? [] : [[row.sessionId, row.editFiles] as const])));
+  if (filesOf.size === 0) return;
+  const changed = nodes.filter((node) => node.kind === 'file-agg' && node.path !== undefined);
+  for (const node of nodes) {
+    const files = node.kind === 'session' && node.sessionId !== undefined ? filesOf.get(node.sessionId) : undefined;
+    if (files === undefined) continue;
+    let additions = 0;
+    let deletions = 0;
+    for (const file of changed) {
+      if (!files.has(ledgerPathKey(file.path ?? ''))) continue;
+      additions += file.additions ?? 0;
+      deletions += file.deletions ?? 0;
+    }
+    node.additions = additions;
+    node.deletions = deletions;
+  }
+}
+
 async function appendNodes(
   nodes: readonly ProjectNode[],
   parentId: string,
@@ -691,6 +726,7 @@ export async function buildProjectTreeSnapshot(
     );
   }
   applyAggregates(nodes, aggregates);
+  attachSessionChanges(nodes, ledgerRows);
   return { nodes };
 }
 export function findProjectForPath(projects: readonly Project[], folderPath: string): Project | undefined {

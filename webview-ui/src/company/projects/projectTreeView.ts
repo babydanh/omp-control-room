@@ -15,6 +15,24 @@ export interface ProjectTreeBranch {
 
 const STRUCTURE_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
 
+const SESSION_LABEL_MAX = 40;
+const UUID_NAME = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** A session row's name: its own name, or the first request when the name is just the session id. */
+export function sessionDisplayName(node: ProjectTreeNode): string {
+  const unnamed = node.name === node.sessionId || UUID_NAME.test(node.name);
+  const request = node.request?.trim().replace(/\s+/g, ' ');
+  if (!unnamed || request === undefined || request === '') return node.name;
+  return request.length > SESSION_LABEL_MAX ? `${request.slice(0, SESSION_LABEL_MAX - 1)}…` : request;
+}
+
+/** The one-line "what it is doing" under a session's name: the newest user message, else the first request. */
+export function sessionSummary(node: ProjectTreeNode): string | undefined {
+  const text = (node.lastRequest ?? node.request)?.trim().replace(/\s+/g, ' ');
+  if (text === undefined || text === '' || text === sessionDisplayName(node)) return undefined;
+  return text;
+}
+
 /**
  * The sidebar's tree: Project → groups → folders → repos → the sessions working
  * there, each subagent under the session that spawned it. A folder that holds

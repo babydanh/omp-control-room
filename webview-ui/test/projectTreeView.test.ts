@@ -7,6 +7,7 @@ import {
   checkoutChangesByPath,
   checkoutPathFor,
   projectMenuContext,
+  sessionChanges,
 } from '../src/company/projects/projectNodeTargets.js';
 import {
   buildAgentTree,
@@ -18,8 +19,10 @@ import {
   projectNodeMenuItems,
   selectedAncestorIds,
   sessionActivityCounts,
+  sessionDisplayName,
   sessionFaceHue,
   sessionFaceMood,
+  sessionSummary,
   shownFaceMood,
 } from '../src/company/projects/projectTreeView.js';
 
@@ -262,5 +265,35 @@ describe('TC-FEAT-02: a session face in the tree shows how the session is doing'
     const hues = Array.from({ length: 500 }, (_, index) => sessionFaceHue(`phiên-${index}`));
     expect(hues.every((hue) => hue >= 30 && hue < 330)).toBe(true);
     expect(new Set(hues).size).toBeGreaterThan(100);
+  });
+});
+
+describe('a session row names itself and says what it does', () => {
+  const uuid = '3f2c1a9e-1b2c-4d5e-8f90-a1b2c3d4e5f6';
+  const session = (extra: Partial<ProjectTreeNode>): ProjectTreeNode => ({ id: 's', kind: 'session', name: uuid, sessionId: uuid, ...extra });
+
+  it('uses the first request when the name is only the session id', () => {
+    expect(sessionDisplayName(session({ request: '  sửa lỗi\n đổi tên phiên ' }))).toBe('sửa lỗi đổi tên phiên');
+    expect(sessionDisplayName(session({ request: 'x'.repeat(80) }))).toHaveLength(40);
+  });
+
+  it('keeps a real name, and the id when there is no request', () => {
+    expect(sessionDisplayName(session({ name: 'Sửa board', request: 'khác' }))).toBe('Sửa board');
+    expect(sessionDisplayName(session({}))).toBe(uuid);
+  });
+
+  it('summarises with the newest message, and stays silent when it repeats the name', () => {
+    expect(sessionSummary(session({ request: 'a', lastRequest: 'b' }))).toBe('b');
+    expect(sessionSummary(session({ request: 'a' }))).toBeUndefined();
+    expect(sessionSummary(session({ name: 'a', request: 'a' }))).toBeUndefined();
+  });
+});
+
+describe('changed lines belong to the session, not to every session in its checkout', () => {
+  it('reads the session node own counts and stays silent without any', () => {
+    expect(sessionChanges({ id: 's', kind: 'session', name: 's', additions: 3, deletions: 1 })).toEqual({ additions: 3, deletions: 1 });
+    expect(sessionChanges({ id: 's', kind: 'session', name: 's', additions: 0, deletions: 0 })).toBeNull();
+    expect(sessionChanges({ id: 's', kind: 'session', name: 's' })).toBeNull();
+    expect(sessionChanges(undefined)).toBeNull();
   });
 });

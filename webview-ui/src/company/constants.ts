@@ -113,6 +113,12 @@ export const HERDR_SCREEN_LINES = 200;
 export const HERDR_WATCH_RENEW_MS = 10_000;
 
 /**
+ * How often the Project tree is re-requested while the tab is visible. The server reuses a build
+ * younger than 3 seconds, so this stays cheap while a new session shows up within a few seconds.
+ */
+export const PROJECT_TREE_REFRESH_MS = 5_000;
+
+/**
  * Board motion: every duration, stagger, lift, tone and curve the company board
  * animates. flip.ts, CompanyBoard and DetailDrawer read these, and the board's
  * CSS reads the same values through custom properties set inline. Durations are

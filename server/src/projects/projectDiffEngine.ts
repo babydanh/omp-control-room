@@ -29,7 +29,7 @@ const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904';
 /** Main branch names tried in order for the "whole branch" scope; each as local and origin/. */
 const BASE_BRANCHES = ['main', 'master'] as const;
 const SHA_PATTERN = /^[0-9a-f]{4,64}$/i;
-const EDIT_KINDS = new Set(['edit', 'write']);
+export const EDIT_KINDS = new Set(['edit', 'write']);
 
 export const PROJECT_DIFF_TEXT = {
   unknownCheckout: 'Worktree này không có trong cây Project, không xem được thay đổi.',

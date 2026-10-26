@@ -44,12 +44,11 @@ import { NewSessionDialog } from '../projects/NewSessionDialog.js';
 import { projectStore } from '../projects/projectClient.js';
 import {
   ancestorOf,
-  changesAt,
-  checkoutChangesByPath,
   checkoutPathFor,
   engineForAction,
   paneCheckouts,
   type ProjectSessionEngine,
+  sessionChanges,
 } from '../projects/projectNodeTargets.js';
 import { useProjectState } from '../projects/projectStore.js';
 import { COMPANY_ROLES, roleProfile } from '../roleProfiles.js';
@@ -128,7 +127,6 @@ export interface BoardShellProps {
 
 export function BoardShell({ client }: BoardShellProps) {
   const projects = useProjectState(projectStore);
-  const checkoutChanges = useMemo(() => checkoutChangesByPath(projects.nodes), [projects.nodes]);
   const paneCheckout = useMemo(() => paneCheckouts(projects.nodes), [projects.nodes]);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectSettingsNode, setProjectSettingsNode] = useState<string | null>(null);
@@ -908,7 +906,10 @@ export function BoardShell({ client }: BoardShellProps) {
               changesFor={(card) => {
                 // The session in the pane knows where it edits; the pane's own repo is the fallback.
                 const checkout = (card.subject.kind === 'herdr' ? paneCheckout.get(card.subject.paneId) : undefined) ?? card.checkout;
-                const changes = checkout === null ? null : changesAt(checkoutChanges, checkout);
+                // The counts are the session's own: sessions sharing a checkout must not all show its total.
+                const session = projects.nodes.find((node) =>
+                  node.kind === 'session' && (card.subject.kind === 'herdr' ? node.herdrPaneId === card.subject.paneId : node.boardSessionId === card.subject.sessionId));
+                const changes = sessionChanges(session);
                 return checkout === null || changes === null ? null : { checkout, ...changes };
               }}
               onOpenChanges={(checkout) => openProjectChanges(checkout)}

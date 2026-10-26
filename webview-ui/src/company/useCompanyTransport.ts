@@ -14,6 +14,7 @@ import type { ServerMessage } from '../../../core/src/messages.js';
 import { transport } from '../transport/index.js';
 import type { CompanyClient } from './companyClient.js';
 import { isCompanyServerMessage } from './companyMessages.js';
+import { PROJECT_TREE_REFRESH_MS } from './constants.js';
 import { ledgerStore } from './ledger/ledgerClient.js';
 import { libraryStore } from './library/libraryClient.js';
 import { projectStore } from './projects/projectClient.js';
@@ -35,7 +36,15 @@ export function useCompanyTransport(client: CompanyClient): void {
         projectStore.requestTree();
       }
     });
+    // New sessions reach the ledger/herdr a few seconds after the start ack, so the tree is re-asked
+    // while the tab is visible instead of waiting for a reload.
+    const refresh = setInterval(() => {
+      if (document.visibilityState === 'visible' && transport.state === TRANSPORT_STATE_CONNECTED) {
+        projectStore.requestTree();
+      }
+    }, PROJECT_TREE_REFRESH_MS);
     return () => {
+      clearInterval(refresh);
       unsubscribe();
       unsubscribeState();
     };

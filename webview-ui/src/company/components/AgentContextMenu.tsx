@@ -660,7 +660,18 @@ export function AgentContextMenu({
   function submitProjectRename(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (subject.kind !== 'projectNode' || draft.trim() === '') return;
-    projectStore?.updateNode({ nodeId: subject.node.id, name: draft.trim() });
+    const node = subject.node;
+    const name = draft.trim();
+    if (node.kind === 'session') {
+      if (projectRenameProblem !== null) return;
+      if (node.boardSessionId !== undefined) track(client.renameSession(node.boardSessionId, name));
+      else {
+        const pane = awakePaneOf(node);
+        if (pane !== null) track(client.herdrRename(pane, name));
+      }
+      return;
+    }
+    projectStore?.updateNode({ nodeId: node.id, name });
     onClose();
   }
 
@@ -924,6 +935,13 @@ export function AgentContextMenu({
   const showProblem = draft.trim() !== '' && problem !== null;
   const ruleHint = isHerdr ? HERDR_NAME_RULE : `Tối đa ${SESSION_NAME_MAX_LENGTH} ký tự.`;
 
+  // Renaming a project-tree session row: a board session takes a free name, a bare herdr pane the a-z rule.
+  const sessionRowNode = subject.kind === 'projectNode' && subject.node.kind === 'session' ? subject.node : null;
+  const sessionRowIsBoard = sessionRowNode?.boardSessionId !== undefined;
+  const projectRenameProblem =
+    sessionRowNode === null ? null : sessionRowIsBoard ? sessionNameProblem(draft) : herdrNameProblem(draft);
+  const showProjectRenameProblem = draft.trim() !== '' && projectRenameProblem !== null;
+
   function submitRename(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault();
     if (problem !== null) return;
@@ -1072,10 +1090,15 @@ export function AgentContextMenu({
         <form onSubmit={submitProjectRename} className="flex flex-col gap-2 px-3 py-2">
           <label className="flex flex-col gap-1 text-text-muted">
             Tên hiển thị
-            <input ref={inputRef} autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
+            <input ref={inputRef} autoFocus aria-invalid={showProjectRenameProblem} value={draft} onChange={(event) => setDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
           </label>
+          {sessionRowNode !== null && (
+            <p className={showProjectRenameProblem ? 'text-danger' : 'text-2xs text-text-muted'}>
+              {showProjectRenameProblem ? projectRenameProblem : sessionRowIsBoard ? `Tối đa ${SESSION_NAME_MAX_LENGTH} ký tự.` : HERDR_NAME_RULE}
+            </p>
+          )}
           <div className="flex gap-1">
-            <CompanyButton type="submit" size="sm" disabled={draft.trim() === '' || pending !== null}>Lưu</CompanyButton>
+            <CompanyButton type="submit" size="sm" disabled={draft.trim() === '' || projectRenameProblem !== null || pending !== null}>Lưu</CompanyButton>
             <CompanyButton size="sm" onClick={() => setMode('menu')}>Quay lại</CompanyButton>
           </div>
         </form>

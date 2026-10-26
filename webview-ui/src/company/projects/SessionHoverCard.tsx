@@ -31,8 +31,8 @@ export function SessionHoverCard({ node, anchor, where, checkout, stateLabel, ru
   const progress = node.progress;
   const left = Math.min(anchor.right + GAP_PX, window.innerWidth - CARD_WIDTH_PX - GAP_PX);
   const top = Math.max(GAP_PX, Math.min(anchor.top, window.innerHeight - CARD_ROOM_PX));
-  const added = checkout?.additions ?? 0;
-  const removed = checkout?.deletions ?? 0;
+  const added = node.additions ?? 0;
+  const removed = node.deletions ?? 0;
   const header = [node.agentKind === 'herdr' ? undefined : node.agentKind, stateLabel, where].filter(Boolean).join(' · ');
   // The portal leaves the board's DOM: the company-ui scope brings its text sizes and colours along.
   return createPortal(
@@ -54,10 +54,11 @@ export function SessionHoverCard({ node, anchor, where, checkout, stateLabel, ru
         </span>
       )}
       {progress?.blocked !== undefined && <Line icon="⚠" className="text-status-error">Kẹt: {progress.blocked}</Line>}
-      {checkout !== undefined && (checkout.dirty === true || added > 0 || removed > 0) && (
+      {/* The session's own lines: the files it edited that are still uncommitted. */}
+      {(added > 0 || removed > 0) && (
         <Line icon="⎇">
           <span className="text-status-success">+{added}</span> <span className="text-status-error">−{removed}</span>
-          {checkout.dirty === true && ' · chưa commit'}
+          {checkout?.dirty === true && ' · chưa commit'}
         </Line>
       )}
       <p className="border-t border-hairline pt-1.5 text-text">{sessionVerdict(progress, running)}</p>

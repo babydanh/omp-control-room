@@ -876,6 +876,10 @@ export function projectNodeMenuItems(
           ? [add('open-session', 'Mở phiên', 'external', 'openSession')]
           : []),
         ...changes(true),
+        // A board session renames freely; a herdr pane only while awake (a sleeping pane has no handle to rename).
+        ...(node.boardSessionId !== undefined || awakePaneOf(node) !== null
+          ? [add('rename', 'Đổi tên…', 'pencil', 'rename')]
+          : []),
         // fast-handoff carries an omp session to the cloud; a Claude or agy one has no transcript there.
         ...(node.agentKind === 'omp' && awakePaneOf(node) !== null
           ? [add('cloud-handoff', 'Đẩy lên cloud làm tiếp', 'send', 'cloudHandoff')]

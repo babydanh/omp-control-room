@@ -114,6 +114,10 @@ describe('buildProjectTreeSnapshot', () => {
           session_id: 'session-1', pid: 1, cwd: worktree, agent_kind: 'main', agent_name: 'Implement tree',
           parent_id: null, started_at: '2026-10-20', last_seen: '2026-10-20', ended_at: null,
           state: 'working', heartbeat: null,
+        }] : sql.includes('FROM events') ? [{
+          id: 1, ts: '2026-10-20', session_id: 'session-1', kind: 'edit', tool: 'Edit',
+          path: path.join(worktree, 'src', 'main.ts'), path_key: null, repo: null, checkout: null,
+          is_main_checkout: 0, branch: null, intent: null,
         }] : sql.includes('FROM pending') ? [{
           checkout: worktree, session_id: 'session-1', branch: 'feature', dirty: 1, unpushed: 0,
           not_in_main: 0, has_remote: true, ts: '2026-10-20',
@@ -192,6 +196,8 @@ describe('buildProjectTreeSnapshot', () => {
     expect(mainNode?.overlappingWorktrees).toEqual([normalizeLedgerPath(worktree)]);
     expect(trackedFile).toMatchObject({ additions: 1, deletions: 2, overlap: true });
     expect(untrackedFile).toMatchObject({ additions: 3, deletions: 0 });
+    // The session's own lines are only the changed files it edited (main.ts), not its checkout's total (4/2).
+    expect(snapshot.nodes.find((node) => node.kind === 'session')).toMatchObject({ additions: 1, deletions: 2 });
     // The session's cwd is inside both checkouts (feature nests under main): only the deeper one owns it.
     const sessionParents = snapshot.nodes.filter((node) => node.kind === 'session').map((node) => node.parentId);
     expect(sessionParents).toEqual([featureNode?.id]);

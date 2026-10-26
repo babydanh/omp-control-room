@@ -14,9 +14,11 @@ import {
   isSelectedSession,
   type ProjectTreeBranch,
   selectedAncestorIds,
+  sessionDisplayName,
   sessionFaceHue,
   sessionFaceMood,
   sessionProgressView,
+  sessionSummary,
   type TreeSelection,
 } from './projectTreeView.js';
 import { SessionFace } from './SessionFace.js';
@@ -241,7 +243,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           ref={rowRef}
           aria-current={selected ? 'true' : undefined}
           type="button"
-          aria-label={`${node.kind}: ${node.name}`}
+          aria-label={`${node.kind}: ${isSession ? sessionDisplayName(node) : node.name}`}
           title={isSession ? undefined : node.path ?? node.name}
           onClick={() => {
             // No chevron column (it took a fixed 24px per row): the row name toggles. A project selects on the
@@ -271,7 +273,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
               <span className="min-w-0 flex-1 leading-snug">
                 {/* One line: the name, then only what a glance needs. A running session's face glances around ("đang chạy"); main is the usual branch. */}
                 <span className="flex min-w-0 items-baseline gap-1.5">
-                  <span className="min-w-0 flex-1 truncate text-text">{node.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-text">{sessionDisplayName(node)}</span>
                   <span className="max-w-[45%] shrink-0 truncate text-2xs text-text-muted">
                     {/* Every session runs inside herdr, so "herdr" names no tool: show the tool only when it is known. */}
                     {[
@@ -284,6 +286,9 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                     ].filter((part) => part !== null).flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))}
                   </span>
                 </span>
+                {progress === null && sessionSummary(node) !== undefined && (
+                  <span className="block truncate text-xs text-text-muted" data-testid="session-summary">{sessionSummary(node)}</span>
+                )}
                 {progress !== null && (
                   <span className="mt-1 block" data-testid="session-progress" title={[progress.current && `Đang: ${progress.current}`, progress.blocked && `Kẹt: ${progress.blocked}`].filter(Boolean).join('\n')}>
                     <span className="flex items-center gap-2 text-xs text-text-muted">

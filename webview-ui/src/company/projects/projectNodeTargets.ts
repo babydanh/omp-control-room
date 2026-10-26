@@ -80,6 +80,13 @@ export function checkoutChangesByPath(
   return changes;
 }
 
+/** The lines this one session added and removed (not its checkout's total); null when it has none. */
+export function sessionChanges(node: ProjectTreeNode | undefined): { additions: number; deletions: number } | null {
+  const additions = node?.additions ?? 0;
+  const deletions = node?.deletions ?? 0;
+  return additions + deletions > 0 ? { additions, deletions } : null;
+}
+
 /** The changes `checkoutChangesByPath` holds for `path`; null when the tree does not hold it. */
 export function changesAt(
   changes: ReadonlyMap<string, { additions: number; deletions: number }>,
