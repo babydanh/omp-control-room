@@ -278,6 +278,7 @@ describe('a session row names itself and says what it does', () => {
   it('uses the first request when the name is only the session id', () => {
     expect(sessionDisplayName(session({ request: '  sửa lỗi\n đổi tên phiên ' }))).toBe('sửa lỗi đổi tên phiên');
     expect(sessionDisplayName(session({ request: 'x'.repeat(80) }))).toHaveLength(40);
+    expect(sessionDisplayName(session({ name: '…a1b2c3d4', request: 'nhập Excel' }))).toBe('nhập Excel');
   });
 
   it('keeps a real name, and the id when there is no request', () => {

@@ -750,15 +750,20 @@ function withoutDeadProcesses(rows: readonly SessionRow[], isAlive: ((pid: numbe
   return rows.filter((row) => row.endedAt !== null || row.pid === null || isAlive(row.pid));
 }
 
-/** Rows (live and recently ended) with what their transcript last wrote: todo progress, requests, a cut-off turn; an unreadable transcript gives none. */
+/**
+ * Rows (live and recently ended) with what their transcript last wrote: todo progress, requests, a
+ * cut-off turn. A Claude row the ledger gives no file is read by its session id; an unreadable
+ * transcript gives none.
+ */
 async function withProgress(
   rows: readonly TitledSessionRow[],
   read: ProjectTreeOptions['sessionFacts'],
 ): Promise<readonly TitledSessionRow[]> {
   if (read === undefined) return rows;
   return Promise.all(rows.map(async (row) => {
-    if (!row.sessionFile) return row;
-    return { ...row, ...factFields(await read(row.sessionFile).catch((): TranscriptFacts => ({}))) };
+    const source = row.sessionFile || (engineForLedger(row) === 'claude' ? row.sessionId : '');
+    if (source === '') return row;
+    return { ...row, ...factFields(await read(source).catch((): TranscriptFacts => ({}))) };
   }));
 }
 
