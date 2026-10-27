@@ -1,6 +1,6 @@
 # Handoff: Agent Board — đội nhiều vai, chế độ gọn, thống kê tool
 <!-- Đọc file này TRƯỚC khi làm tiếp nhánh. Cập nhật TRƯỚC khi báo xong, fast-handoff, hoặc hết phiên. -->
-Cập nhật: 2026-10-26 23:55 · bởi: omp (ee459814) · nhánh: feat/multi-role-company · OpenSpec: không có
+Cập nhật: 2026-10-27 09:30 · bởi: omp (ee459814) · nhánh: feat/multi-role-company · OpenSpec: không có
 
 ## Mục tiêu
 Board điều phối đội agent (trưởng đội chia việc, chế độ gọn mỗi repo một phiên trong tab herdr riêng), cây git có tab "Phối hợp" và "Thống kê tool". Lần này: tab "Thống kê tool" hiện % usage token Claude theo phiên chính/subagent/skill/plugin và nút chuyển skill Claude không dùng sang `name-only`.
@@ -34,7 +34,8 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
 - Chưa push nhánh (upstream đang là `mine/main`).
 - Tiếp theo: hồ sơ vai của board (`state.settings.roleProfiles`) KHÔNG tự theo `omp config get modelRoles`; 23/10 đã đồng bộ tay qua `companySettingsUpdate`. Đổi vai trong omp sau này thì phải đồng bộ lại. Việc thử 24–44 trên bảng là của các lượt kiểm thử, tự vào Lưu trữ sau 7 ngày. Cột Xong xếp cũ trước nên việc mới nằm cuối cột.
 - Xong (26/10, người dùng chốt: "tạo thì dùng BROWSE của Windows, không tự chế"): mọi chỗ chọn thư mục mở hộp Browse của Windows qua `companyFolderPick` (`server/src/company/folderPicker.ts`, PowerShell `FolderBrowserDialog`, chỉ Windows, một hộp mỗi lúc). ➕ "Tạo project" chọn thư mục trước, project mang tên và chứa luôn thư mục; server rollback nếu thêm thư mục lỗi, webview báo lý do. Đã xoá `FolderBrowserDialog.tsx`, `companyFolderBrowse*`, `companyFolderCreate`. Commit `ec4cd7f`, `78c4097` (hộp hiện lên trước trình duyệt), `e0ab32c` (báo lỗi tạo project). CHƯA push.
-- Board 3197 (26/10 23:5x) chạy bản build từ `git archive e0ab32c` (build sạch ở thư mục tạm, chép đè `dist`, PID 26220), vì worktree không build được: phiên khác đang xoá dở `RolesDialog.tsx`/`SkillsPage.tsx` mà `BoardShell.tsx` còn import. Bản board này KHÔNG có các sửa chưa commit của phiên khác (`companyRuntime.ts`, `screenActivity.ts`).
+- Xong (27/10, người dùng hỏi "biết con nào làm dở, con nào mới ngủ/tắt gần nhất"): sidebar gắn "bị ngắt"/"dở" cho phiên dừng khi việc chưa xong, ô lọc "Làm dở (N)", mục "Vừa ngủ / tắt" (6 phiên dừng gần nhất kèm thời gian). Server giữ phiên chính đã tắt trong 24 giờ (tối đa 20) với state `ended` + `stoppedAt`; `board status` vẫn chỉ phiên sống. Sửa kèm: `clientMessageHandler` từng tự map pane herdr và bỏ `sessionFile`/`sleptAt` của phiên ngủ (sidebar không có giờ ngủ, không có tên việc), nay dùng chung `herdrProjectSessions`. Commit `d0f3da7`, `b6101da`, `08a5e18`, `b3bb1b4`. CHƯA push.
+- Board 3197 chạy bản build sạch từ `git archive b3bb1b4` (PID 23180, bật bằng `scripts/board-start.ps1` qua WMI; đừng bật board từ eval/service của omp, kernel reset là board chết). Worktree vẫn không build trực tiếp được vì phiên khác đang xoá dở `RolesDialog.tsx`/`SkillsPage.tsx`. Build tạm có junction `node_modules`: gỡ junction bằng `rmdir` trước rồi mới xoá thư mục, KHÔNG `rm -rf` thẳng.
 
 ## Đã thử
 | Cách | Kết quả | Vì sao / bằng chứng |
