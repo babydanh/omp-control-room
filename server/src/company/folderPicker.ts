@@ -61,22 +61,23 @@ export type PickerRun = (
 /**
  * The dialog script. The chosen path is printed on stdout and nothing is printed on cancel. The
  * title comes in through the environment, so no value is ever spliced into the script. A 1×1
- * borderless form owns the dialog. Windows keeps a background process from putting its windows in
- * front, so the dialog opened behind the browser; a timer on the dialog's own thread therefore
- * waits for it, joins the foreground window's input queue, and brings the dialog to the front,
- * top-most. The explicit exit stops PowerShell from lingering after the dialog closes.
+ * borderless form owns the dialog. The window in front when the script starts is the browser the
+ * user clicked in: the owner and the dialog are centred on that window's monitor, so with the board
+ * on a second screen the dialog does not open on the other one. Windows keeps a background process
+ * from putting its windows in front, so the dialog opened behind the browser; a timer on the
+ * dialog's own thread therefore waits for it, joins the foreground window's input queue, and
+ * brings the dialog to the front, top-most. The explicit exit stops PowerShell from lingering.
  */
 const PICK_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
   '[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)',
   'Add-Type -AssemblyName System.Windows.Forms',
   '[Windows.Forms.Application]::EnableVisualStyles()',
-  '$owner = New-Object Windows.Forms.Form',
-  "$owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.FormBorderStyle = 'None'; $owner.Width = 1; $owner.Height = 1; $owner.StartPosition = 'CenterScreen'",
-  '$owner.Show(); $owner.Activate()',
   "Add-Type -TypeDefinition @'",
   'using System; using System.Runtime.InteropServices;',
   'public static class PickerWindow {',
+  '  [StructLayout(LayoutKind.Sequential)] struct Rect { public int Left, Top, Right, Bottom; }',
+  '  [StructLayout(LayoutKind.Sequential)] struct MonitorInfo { public int Size; public Rect Monitor; public Rect Work; public uint Flags; }',
   '  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr window, uint command);',
   '  [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();',
   '  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window, IntPtr processId);',
@@ -85,14 +86,28 @@ const PICK_SCRIPT = [
   '  [DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int cx, int cy, uint flags);',
   '  [DllImport("user32.dll")] static extern bool BringWindowToTop(IntPtr window);',
   '  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);',
-  '  // GW_ENABLEDPOPUP (6) is the dialog once it is up; HWND_TOPMOST (-1), SWP_NOSIZE|SWP_NOMOVE|SWP_SHOWWINDOW (0x43).',
+  '  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);',
+  '  [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);',
+  '  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rect);',
+  '  static IntPtr browser;',
+  '  public static void RememberBrowser() { browser = GetForegroundWindow(); }',
+  '  // Centres `window` on the browser monitor (MONITOR_DEFAULTTONEAREST = 2) and makes it top-most:',
+  '  // HWND_TOPMOST (-1), SWP_NOSIZE|SWP_SHOWWINDOW (0x41); without a browser it stays put (0x43 adds SWP_NOMOVE).',
+  '  public static void Place(IntPtr window) {',
+  '    Rect box; MonitorInfo info = new MonitorInfo(); info.Size = Marshal.SizeOf(info);',
+  '    if (browser == IntPtr.Zero || !GetWindowRect(window, out box) || !GetMonitorInfo(MonitorFromWindow(browser, 2), ref info)) { SetWindowPos(window, new IntPtr(-1), 0, 0, 0, 0, 0x43); return; }',
+  '    int x = info.Work.Left + (info.Work.Right - info.Work.Left - (box.Right - box.Left)) / 2;',
+  '    int y = info.Work.Top + (info.Work.Bottom - info.Work.Top - (box.Bottom - box.Top)) / 2;',
+  '    SetWindowPos(window, new IntPtr(-1), x, y, 0, 0, 0x41);',
+  '  }',
+  '  // GW_ENABLEDPOPUP (6) is the dialog once it is up.',
   '  public static bool Raise(IntPtr owner) {',
   '    IntPtr dialog = GetWindow(owner, 6);',
   '    if (dialog == IntPtr.Zero || dialog == owner) return false;',
   '    uint foreground = GetWindowThreadProcessId(GetForegroundWindow(), IntPtr.Zero);',
   '    uint self = GetCurrentThreadId();',
   '    bool attached = foreground != 0 && foreground != self && AttachThreadInput(self, foreground, true);',
-  '    SetWindowPos(dialog, new IntPtr(-1), 0, 0, 0, 0, 0x43);',
+  '    Place(dialog);',
   '    BringWindowToTop(dialog);',
   '    SetForegroundWindow(dialog);',
   '    if (attached) AttachThreadInput(self, foreground, false);',
@@ -100,6 +115,10 @@ const PICK_SCRIPT = [
   '  }',
   '}',
   "'@",
+  '[PickerWindow]::RememberBrowser()',
+  '$owner = New-Object Windows.Forms.Form',
+  "$owner.TopMost = $true; $owner.ShowInTaskbar = $false; $owner.FormBorderStyle = 'None'; $owner.Width = 1; $owner.Height = 1",
+  '$owner.Show(); [PickerWindow]::Place($owner.Handle); $owner.Activate()',
   '$raise = New-Object Windows.Forms.Timer',
   '$raise.Interval = 100',
   '$raise.Add_Tick({ if ([PickerWindow]::Raise($owner.Handle)) { $raise.Stop() } })',
