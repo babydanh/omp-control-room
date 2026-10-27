@@ -36,7 +36,7 @@ import type { HerdrLink } from './herdr/herdrLink.js';
 import type { LedgerService } from './ledger/ledgerService.js';
 import { resolveProofPath } from './library/storage.js';
 import { handleProjectMessage, type ProjectCommandContext } from './projects/handler.js';
-import { buildProjectTreeSnapshot, type HerdrProjectSession } from './projects/projectTree.js';
+import { buildProjectTreeSnapshot, herdrProjectSessions } from './projects/projectTree.js';
 import { createTranscriptProgress, type TranscriptFacts } from './projects/sessionProgress.js';
 import { processAlive } from './projects/sessionStop.js';
 import type { PtySessionManager } from './terminal/ptySessionManager.js';
@@ -224,24 +224,6 @@ function projectTreeFromLedger(options: HttpServerOptions): Pick<ProjectCommandC
   };
 }
 
-/** herdr's panes (working and sleeping) as Project tree sessions; a pane with no cwd is left out. */
-function herdrProjectSessions(herdr: HerdrLink | null | undefined): HerdrProjectSession[] {
-  const snapshot = herdr?.snapshot();
-  if (snapshot === undefined) return [];
-  const toSession = (
-    session: { paneId: string; cwd?: string; status?: string; title?: string; name?: string; sessionFile?: string; sessionId?: string; sleptAt?: string },
-  ): HerdrProjectSession[] => session.cwd === undefined ? [] : [{
-    id: session.paneId,
-    cwd: session.cwd,
-    status: session.status ?? 'sleeping',
-    title: session.title ?? session.name ?? '',
-    ...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
-    ...(session.sessionId === undefined ? {} : { sessionId: session.sessionId }),
-    ...(session.sleptAt === undefined ? {} : { sleptAt: session.sleptAt }),
-  }];
-  return [...snapshot.agents.flatMap(toSession), ...snapshot.sleeping.flatMap(toSession)];
-}
-
 // ── Agent CLI (`board`) ────────────────────────────────────────
 
 /** Live sessions for `board status`: the Project tree without its git scan, and without the ended sessions the sidebar keeps for a day. */
@@ -253,7 +235,7 @@ async function agentSessions(options: HttpServerOptions): Promise<AgentSessionRo
     ...tree,
     sessionsOnly: true,
     agents: options.store.values(),
-    herdrSessions: () => herdrProjectSessions(options.herdr),
+    herdrSessions: () => herdrProjectSessions(options.herdr?.snapshot()),
   });
   return sessionRows(nodes).filter((row) => row.state !== 'ended');
 }
@@ -361,7 +343,7 @@ function registerWebSocketRoute(
       ...projectTreeFromLedger(options),
       privileged,
       agents: store.values(),
-      herdrSessions: () => herdrProjectSessions(options.herdr),
+      herdrSessions: () => herdrProjectSessions(options.herdr?.snapshot()),
     });
     const scheduleProjectTree = () => {
       if (!projectTreeRequested || !privileged || projectTreeTimer !== undefined) return;

@@ -31,6 +31,7 @@ import { handleLedgerMessage } from './ledger/handler.js';
 import type { LedgerService } from './ledger/ledgerService.js';
 import { handleLibraryMessage } from './library/handler.js';
 import { handleProjectMessage, type ProjectCommandContext } from './projects/handler.js';
+import { herdrProjectSessions } from './projects/projectTree.js';
 import type { ConsentEffects } from './providers/hook/consentExecutor.js';
 import { applyConsentChoice } from './providers/hook/consentExecutor.js';
 import { hooksConsentRequest } from './providers/hook/consentGate.js';
@@ -218,30 +219,7 @@ export function handleClientMessage(
       ...ctx.projects,
       privileged: ctx.privileged === true,
       agents: ctx.store.values(),
-      herdrSessions: () => {
-        const snapshot = ctx.herdr?.snapshot();
-        if (snapshot === undefined) return [];
-        return [
-          ...snapshot.agents.flatMap((agent) =>
-            agent.cwd === undefined ? [] : [{
-              id: agent.paneId,
-              cwd: agent.cwd,
-              status: agent.status,
-              title: agent.title ?? agent.name ?? '',
-              ...(agent.sessionFile === undefined ? {} : { sessionFile: agent.sessionFile }),
-              ...(agent.sessionId === undefined ? {} : { sessionId: agent.sessionId }),
-            }],
-          ),
-          ...snapshot.sleeping.flatMap((session) =>
-            session.cwd === undefined ? [] : [{
-              id: session.paneId,
-              cwd: session.cwd,
-              status: 'sleeping',
-              title: session.title,
-            }],
-          ),
-        ];
-      },
+      herdrSessions: () => herdrProjectSessions(ctx.herdr?.snapshot()),
     })
   ) {
     return;

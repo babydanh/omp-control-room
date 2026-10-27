@@ -11,7 +11,7 @@ import type { ProcessResult } from '../src/ledger/processRunner.js';
 import { toPathKey } from '../src/pathKey.js';
 import { handleProjectMessage } from '../src/projects/handler.js';
 import { ProjectStore } from '../src/projects/projectStore.js';
-import { buildProjectTreeSnapshot, linkHerdrPanes, parentSessions, withRecentlyEnded } from '../src/projects/projectTree.js';
+import { buildProjectTreeSnapshot, herdrProjectSessions, linkHerdrPanes, parentSessions, withRecentlyEnded } from '../src/projects/projectTree.js';
 import { sessionRow } from './ledgerFixtures.js';
 
 function processResult(stdout = '', code = 0, ok = code === 0): ProcessResult {
@@ -352,6 +352,19 @@ describe('withRecentlyEnded', () => {
     expect(kept).toHaveLength(20);
     expect(kept).not.toContain('e0');
     expect(kept).not.toContain('e1');
+  });
+});
+
+describe('herdrProjectSessions', () => {
+  it('keeps a sleeping pane transcript and sleep time, so the sidebar can name it and say when it slept', () => {
+    const sessions = herdrProjectSessions({
+      agents: [{ paneId: 'w:p1', cwd: 'C:/w', status: 'working', name: 'omp' }, { paneId: 'w:p2' }],
+      sleeping: [{ paneId: 'w:p3', cwd: 'C:/w', title: 'Excel', sessionFile: 'C:/s/a.jsonl', sleptAt: '2026-10-27T03:00:00.000Z' }],
+    });
+    expect(sessions).toEqual([
+      { id: 'w:p1', cwd: 'C:/w', status: 'working', title: 'omp' },
+      { id: 'w:p3', cwd: 'C:/w', status: 'sleeping', title: 'Excel', sessionFile: 'C:/s/a.jsonl', sleptAt: '2026-10-27T03:00:00.000Z' },
+    ]);
   });
 });
 

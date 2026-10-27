@@ -58,6 +58,35 @@ export interface HerdrProjectSession extends TranscriptFacts {
   readonly sleptAt?: string;
 }
 
+/** A herdr pane as its snapshot lists it, working (`agents`, with a status) or sleeping (with `sleptAt`). */
+interface HerdrSnapshotPane {
+  readonly paneId: string;
+  readonly cwd?: string;
+  readonly status?: string;
+  readonly title?: string;
+  readonly name?: string;
+  readonly sessionFile?: string;
+  readonly sessionId?: string;
+  readonly sleptAt?: string;
+}
+
+/** herdr's panes (working and sleeping) as Project tree sessions; a pane with no cwd is left out. */
+export function herdrProjectSessions(
+  snapshot: { readonly agents: readonly HerdrSnapshotPane[]; readonly sleeping: readonly HerdrSnapshotPane[] } | undefined,
+): HerdrProjectSession[] {
+  if (snapshot === undefined) return [];
+  const toSession = (pane: HerdrSnapshotPane): HerdrProjectSession[] => pane.cwd === undefined ? [] : [{
+    id: pane.paneId,
+    cwd: pane.cwd,
+    status: pane.status ?? 'sleeping',
+    title: pane.title ?? pane.name ?? '',
+    ...(pane.sessionFile === undefined ? {} : { sessionFile: pane.sessionFile }),
+    ...(pane.sessionId === undefined ? {} : { sessionId: pane.sessionId }),
+    ...(pane.sleptAt === undefined ? {} : { sleptAt: pane.sleptAt }),
+  }];
+  return [...snapshot.agents.flatMap(toSession), ...snapshot.sleeping.flatMap(toSession)];
+}
+
 export interface ProjectTreeSnapshot {
   readonly nodes: ProjectTreeNode[];
 }
