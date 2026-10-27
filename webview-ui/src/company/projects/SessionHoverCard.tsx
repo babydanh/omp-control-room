@@ -1,7 +1,7 @@
 /**
  * SessionHoverCard: what a session row hides, shown beside it while the pointer rests on it. The
- * session's first request and the user's newest message, the task in hand, the todo progress,
- * what blocks it, the code it changed, and one verdict line.
+ * session's first request and the user's newest messages (up to five, newest first), the task in
+ * hand, the todo progress, what blocks it, the code it changed, and one verdict line.
  */
 
 import type { ReactNode } from 'react';
@@ -12,8 +12,8 @@ import { sessionVerdict } from './sessionHover.js';
 
 const CARD_WIDTH_PX = 320;
 const GAP_PX = 8;
-/** Room kept below the card's top so a row near the bottom does not push it off screen. */
-const CARD_ROOM_PX = 260;
+/** Room kept below the card's top so a row near the bottom does not push it off screen; five prompts make it tall. */
+const CARD_ROOM_PX = 420;
 
 export interface SessionHoverCardProps {
   readonly node: ProjectTreeNode;
@@ -43,7 +43,12 @@ export function SessionHoverCard({ node, anchor, where, checkout, stateLabel, ru
     >
       {header !== '' && <p className="text-2xs text-text-muted">{header}</p>}
       {node.request !== undefined && <Line icon="🎯" className="text-text">{node.request}</Line>}
-      {node.lastRequest !== undefined && <Line icon="💬">Mới nhất: {node.lastRequest}</Line>}
+      {(node.recentRequests?.length ?? 0) > 0 ? (
+        <>
+          <p className="text-2xs text-text-muted">{node.recentRequests?.length === 1 ? 'Câu gần nhất' : `${node.recentRequests?.length} câu gần nhất`}</p>
+          {node.recentRequests?.map((text, index) => <Line key={index} icon="💬">{text}</Line>)}
+        </>
+      ) : node.lastRequest !== undefined && <Line icon="💬">Mới nhất: {node.lastRequest}</Line>}
       {progress?.current !== undefined && <Line icon="▶">{progress.current}</Line>}
       {progress !== undefined && (
         <span className="flex items-center gap-2">

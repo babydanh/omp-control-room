@@ -93,9 +93,12 @@ describe('createTranscriptProgress', () => {
     // The first thing the user typed is the session's task; a later message travels as the newest.
     const typed = (text: string) => `${JSON.stringify({ type: 'message', message: { role: 'user', content: [{ type: 'text', text }], attribution: 'user' } })}\n`;
     appendFileSync(file, typed('sửa popup'));
-    expect(await read(file)).toEqual({ progress: { done: 1, total: 2, current: 'B' }, request: 'sửa popup' });
+    expect(await read(file)).toEqual({ progress: { done: 1, total: 2, current: 'B' }, request: 'sửa popup', recentRequests: ['sửa popup'] });
     appendFileSync(file, typed('làm tiếp'));
-    expect(await read(file)).toEqual({ progress: { done: 1, total: 2, current: 'B' }, request: 'sửa popup', lastRequest: 'làm tiếp' });
+    expect(await read(file)).toEqual({ progress: { done: 1, total: 2, current: 'B' }, request: 'sửa popup', lastRequest: 'làm tiếp', recentRequests: ['làm tiếp', 'sửa popup'] });
+    // The hover card lists the five newest messages, newest first.
+    for (const text of ['a', 'b', 'c', 'd']) appendFileSync(file, typed(text));
+    expect((await read(file)).recentRequests).toEqual(['d', 'c', 'b', 'a', 'làm tiếp']);
 
     expect(await read(join(dir, 'missing.jsonl'))).toEqual({});
   });
@@ -140,6 +143,6 @@ describe('createTranscriptProgress', () => {
     const typed = (text: string) => JSON.stringify({ type: 'user', message: { role: 'user', content: text } });
     writeFileSync(file, `${typed('việc ban đầu')}\n${'x'.repeat(5000)}\n${typed('câu gần đây')}\n`);
     const read = createTranscriptProgress({ tailBytes: 200, maxLineBytes: 1000 });
-    expect(await read(file)).toEqual({ request: 'việc ban đầu', lastRequest: 'câu gần đây' });
+    expect(await read(file)).toEqual({ request: 'việc ban đầu', lastRequest: 'câu gần đây', recentRequests: ['câu gần đây'] });
   });
 });

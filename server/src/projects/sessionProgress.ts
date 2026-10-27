@@ -36,16 +36,21 @@ const PASTED_TAG = /<\/?pasted_content[^>]*>/g;
 /** The first request is looked for this far into a transcript read from its tail. */
 const HEAD_BYTES = 256 * 1024;
 const MAX_INTERRUPTED = 300;
+/** How many of the user's newest messages a session row carries for its hover card. */
+const RECENT_REQUESTS_MAX = 5;
 
 /**
  * What a transcript says about its session: the todo progress, the first thing the user asked
- * (the session's task), the newest thing the user typed when it differs, and the error that cut
- * the agent's last turn off (a usage limit, a lost connection) while no answer has followed it.
+ * (the session's task), the newest thing the user typed when it differs, the user's last few
+ * messages, and the error that cut the agent's last turn off (a usage limit, a lost connection)
+ * while no answer has followed it.
  */
 export interface TranscriptFacts {
   readonly progress?: SessionProgress;
   readonly request?: string;
   readonly lastRequest?: string;
+  /** The user's newest messages, newest first, at most {@link RECENT_REQUESTS_MAX}. */
+  readonly recentRequests?: string[];
   readonly interrupted?: string;
 }
 
@@ -165,6 +170,8 @@ interface FileState {
   /** The first user message: found while reading from the start, or read once from the head. */
   request: string | undefined;
   lastRequest: string | undefined;
+  /** The user's newest messages, oldest first, at most {@link RECENT_REQUESTS_MAX}. */
+  recent: string[];
   /** The error that cut the newest agent turn off; cleared by any later agent message. */
   interrupted: string | undefined;
 }
@@ -206,6 +213,8 @@ export function createTranscriptProgress(
       const request = requestFromTranscriptLine(line);
       if (request === undefined) continue;
       state.lastRequest = request;
+      state.recent.push(request);
+      if (state.recent.length > RECENT_REQUESTS_MAX) state.recent.shift();
       state.request ??= request;
     }
   }
@@ -256,7 +265,7 @@ export function createTranscriptProgress(
     // A new file is read from its tail; a shorter file was rewritten and is read again.
     if (state === undefined || size < state.offset) {
       const offset = Math.max(0, size - limits.tailBytes);
-      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined, request: undefined, lastRequest: undefined, interrupted: undefined };
+      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined, request: undefined, lastRequest: undefined, recent: [], interrupted: undefined };
       if (files.size >= MAX_FILES) files.delete(files.keys().next().value ?? '');
       files.set(file, state);
       if (offset > 0) state.request = await readFirstRequest(file, size).catch(() => undefined);
@@ -268,6 +277,7 @@ export function createTranscriptProgress(
       ...(state.request === undefined ? {} : { request: state.request }),
       ...(state.lastRequest === undefined || state.lastRequest === state.request ? {} : { lastRequest: state.lastRequest }),
       ...(state.interrupted === undefined ? {} : { interrupted: state.interrupted }),
+      ...(state.recent.length === 0 ? {} : { recentRequests: [...state.recent].reverse() }),
     };
   };
 }

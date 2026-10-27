@@ -38,6 +38,8 @@ export interface ProjectSessionSnapshot {
   readonly request?: string;
   /** The user's newest message, when it is not the first one. */
   readonly lastRequest?: string;
+  /** The user's newest messages, newest first, at most five. */
+  readonly recentRequests?: string[];
   /** The error that cut the agent's last turn off (a usage limit, a lost connection), while no answer followed it. */
   readonly interrupted?: string;
   /** When the session stopped: a sleeping pane's sleep, an ended session's exit (ISO). */
@@ -159,6 +161,7 @@ type TitledSessionRow = SessionRow & {
   readonly progress?: SessionProgress;
   readonly request?: string;
   readonly lastRequest?: string;
+  readonly recentRequests?: string[];
   readonly interrupted?: string;
 };
 
@@ -777,6 +780,7 @@ function factFields(facts: TranscriptFacts): TranscriptFacts {
     ...(facts.progress === undefined ? {} : { progress: facts.progress }),
     ...(facts.request === undefined ? {} : { request: facts.request }),
     ...(facts.lastRequest === undefined ? {} : { lastRequest: facts.lastRequest }),
+    ...(facts.recentRequests === undefined ? {} : { recentRequests: facts.recentRequests }),
     ...(facts.interrupted === undefined ? {} : { interrupted: facts.interrupted }),
   };
 }

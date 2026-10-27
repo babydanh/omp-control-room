@@ -207,25 +207,32 @@ function RecentlyStopped({ nodes, onOpenSession }: Pick<ProjectTreeProps, 'nodes
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>Vừa ngủ / tắt
       </button>
-      {open && recent.map((node) => {
-        const folderPath = ancestorOf(nodes, node, 'folder')?.path;
-        return (
-          <button
-            key={node.id}
-            type="button"
-            data-testid="recent-stopped-row"
-            title={[node.path, node.lastRequest ?? node.request].filter(Boolean).join('\n')}
-            onClick={() => onOpenSession(node, folderPath === undefined ? {} : { folderPath })}
-            className="touch-target flex min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-hover"
-          >
-            <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" />
-            <span className="min-w-0 flex-1 truncate text-text">{sessionDisplayName(node)}</span>
-            <UnfinishedMark node={node} count />
-            <span className="shrink-0 text-2xs text-text-muted">{stoppedLabel(node, now)}</span>
-          </button>
-        );
-      })}
+      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} nodes={nodes} now={now} onOpenSession={onOpenSession} />)}
     </section>
+  );
+}
+
+/** One "Vừa ngủ / tắt" row; resting the pointer on it shows the session's card with its newest prompts. */
+function RecentStoppedRow({ node, nodes, now, onOpenSession }: Pick<ProjectTreeProps, 'nodes' | 'onOpenSession'> & { node: ProjectTreeNode; now: number }) {
+  const hover = useSessionHover(true);
+  const folderPath = ancestorOf(nodes, node, 'folder')?.path;
+  const label = stoppedLabel(node, now);
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="recent-stopped-row"
+        onClick={() => onOpenSession(node, folderPath === undefined ? {} : { folderPath })}
+        {...hover.bind}
+        className="touch-target flex min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-hover"
+      >
+        <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" />
+        <span className="min-w-0 flex-1 truncate text-text">{sessionDisplayName(node)}</span>
+        <UnfinishedMark node={node} count />
+        <span className="shrink-0 text-2xs text-text-muted">{label}</span>
+      </button>
+      {hover.anchor !== null && <SessionHoverCard node={node} anchor={hover.anchor} {...(label === null ? {} : { stateLabel: label })} running={false} />}
+    </>
   );
 }
 

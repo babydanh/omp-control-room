@@ -123,22 +123,38 @@ function snapshotNoticeText(state: CompanyViewState): string {
   return `Có thay đổi đã bị bỏ sót ở ${waiting.join(', ')}; đang chờ một bản chụp mới từ máy chủ.`;
 }
 
+/** How a project create ended: made (with the new Project's id when the server named it), or refused and why. */
+type ProjectCreateOutcome = { readonly nodeId: string | undefined } | { readonly refusal: string };
+
 /**
- * Waits until the project create `requestId` is answered (or failed to send) and returns the
- * server's refusal, or null when the Project was made. Executor form: the ES2022 lib has no
- * Promise.withResolvers.
+ * Waits until the project create `requestId` is answered (or failed to send). A create that a
+ * newer one replaced before its answer came reads as made, with no id: the newer one reports.
+ * Executor form: the ES2022 lib has no Promise.withResolvers.
  */
-function projectCreateRefusal(requestId: string): Promise<string | null> {
+function projectCreateOutcome(requestId: string): Promise<ProjectCreateOutcome> {
   return new Promise((resolve) => {
     const settle = (): void => {
       const state = projectStore.getSnapshot();
       if (state.pending[requestId] !== undefined) return;
       unsubscribe();
-      resolve(state.errors['command:create'] || null);
+      const result = state.results[requestId];
+      if (result?.type === 'projectCommandResult' && result.ok) {
+        resolve({ nodeId: result.nodeId });
+        return;
+      }
+      const reason = (result?.type === 'projectCommandResult' ? result.reason : undefined) || state.errors['command:create'];
+      resolve(reason ? { refusal: reason } : { nodeId: undefined });
     };
     const unsubscribe = projectStore.subscribe(settle);
     settle();
   });
+}
+
+/** The Project already holding `folderPath`, if any: a refused create shows where that folder is. */
+function projectHoldingFolder(nodes: readonly ProjectTreeNode[], folderPath: string): string | undefined {
+  const key = (value: string): string => value.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  const folder = nodes.find((node) => node.kind === 'folder' && node.path !== undefined && key(node.path) === key(folderPath));
+  return folder === undefined ? undefined : ancestorOf(nodes, folder, 'project')?.id;
 }
 
 /** What a click on an exited session says: it has no pane left, and how to bring it back. */
@@ -647,13 +663,18 @@ export function BoardShell({ client }: BoardShellProps) {
       setSessionNotice(picked.notice);
       return;
     }
-    const requestId = projectStore.createNode({
-      kind: 'project',
-      name: folderBasename(picked.path) || picked.path,
-      path: picked.path,
-    });
-    const refusal = await projectCreateRefusal(requestId);
-    if (refusal !== null) setSessionNotice(`Không tạo được project: ${refusal}`);
+    const name = folderBasename(picked.path) || picked.path;
+    const requestId = projectStore.createNode({ kind: 'project', name, path: picked.path });
+    const outcome = await projectCreateOutcome(requestId);
+    // The new Project lands at the end of the list, out of sight: show it on its own.
+    if ('refusal' in outcome) {
+      const holder = projectHoldingFolder(projects.nodes, picked.path);
+      if (holder !== undefined) setSelectedProjectId(holder);
+      setSessionNotice(`Không tạo được project: ${outcome.refusal}`);
+      return;
+    }
+    if (outcome.nodeId !== undefined) setSelectedProjectId(outcome.nodeId);
+    setSessionNotice(`Đã tạo project ${name}. Bấm "Tất cả dự án" để xem lại mọi project.`);
   }
 
   /** "Mở thư mục…" in the palette: choose a folder in Windows' dialog and show it on the board. */

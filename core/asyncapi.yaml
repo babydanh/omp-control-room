@@ -8600,6 +8600,15 @@ components:
           maxLength: 300
           description: >-
             Session rows: the newest message the user typed, when it is not the first one.
+        recentRequests:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            maxLength: 300
+          description: >-
+            Session rows: the user's newest messages in the transcript, newest first, at most
+            five; the hover card lists them.
         interrupted:
           type: string
           maxLength: 300
