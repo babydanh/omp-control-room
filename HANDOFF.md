@@ -49,7 +49,7 @@ Board điều phối đội agent (trưởng đội chia việc, chế độ g�
 - % usage là ƯỚC LƯỢNG theo giá API công khai (sonnet = 1, opus 5/3, haiku 1/3; cache ghi 1,25, đọc 0,1, output 5), không phải cách Anthropic tính hạn mức; skill/plugin chồng lên phiên chính/subagent.
 - Thống kê đo lượt gọi skill/MCP/tool, không đo tính năng sản phẩm có ai dùng.
 - Ổ V: phải ≥10 GB thì `activity-ledger` mới cho chạy test/build (lần này người dùng chọn xoá `build/` của App).
-- Hộp chọn thư mục: owner là form 1×1 (Opacity 0 làm hộp vô hình); timer trên luồng hộp `AttachThreadInput` vào cửa sổ foreground rồi TOPMOST + `SetForegroundWindow`, thiếu bước này hộp mở SAU Chrome. Kiểm hiển thị bằng ảnh chụp toàn màn hình ảo, không tin UIA/`IsWindowVisible`.
+- Hộp chọn thư mục: tiến trình nền mở hộp thì hộp nằm SAU Chrome (đã thử: owner TopMost, bỏ owner, `windowsHide:false` đều vẫn bị che). Cách đã kiểm chứng: timer trên luồng hộp `AttachThreadInput` vào cửa sổ foreground rồi TOPMOST + `SetForegroundWindow`. Chưa tách riêng ảnh hưởng của `Opacity 0` ở form owner. Kiểm hiển thị bằng ảnh chụp toàn màn hình ảo, không tin UIA/`IsWindowVisible`.
 
 ## Ràng buộc thay đổi lần này
 - Đổi (24/10, người dùng chọn): việc sửa của đội gọn có worktree riêng cho từng việc để tránh nhiều việc cùng repo ghi đè; việc chỉ đọc vẫn chạy tại repo và dùng lại phiên theo vai.
