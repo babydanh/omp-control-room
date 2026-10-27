@@ -74,6 +74,7 @@ interface FakeRunner {
   requestModelCatalog: ReturnType<typeof vi.fn>;
   requestSessionInfo: Mock<(runEpoch: number) => Promise<unknown>>;
   abort: ReturnType<typeof vi.fn>;
+  answerQuestion: Mock<(runEpoch: number, input: unknown) => Promise<void>>;
   sendPrompt: (runEpoch: number, prompt: { text: string; runEpoch?: number }) => Promise<void>;
   dispose: ReturnType<typeof vi.fn>;
   onEvent: (handler: (event: never) => void) => () => void;
@@ -137,6 +138,7 @@ function makeRunner(sessionId: string, runEpoch: number): FakeRunner {
       async () => LIVE_SESSION_DESCRIPTION,
     ),
     abort: vi.fn(async () => undefined),
+    answerQuestion: vi.fn<(runEpoch: number, input: unknown) => Promise<void>>(async () => undefined),
     sendPrompt: vi.fn(async (_epoch: number, prompt: { text: string; runEpoch?: number }) => {
       runner.prompts.push(prompt);
     }),
@@ -233,6 +235,7 @@ async function harness(overrides: Partial<CompanyRuntimeDeps> = {}): Promise<Har
         },
         sendPrompt: runner.sendPrompt,
         abort: runner.abort,
+        answerQuestion: runner.answerQuestion,
         requestModelCatalog: runner.requestModelCatalog,
         requestSessionInfo: runner.requestSessionInfo,
         dispose: runner.dispose,
@@ -946,6 +949,60 @@ describe('chat sessions', () => {
 
     expect(h.runners).toHaveLength(0);
     expect(h.coordinator.readState().sessions['chat-blank']).toMatchObject({ status: 'parked' });
+  });
+
+  it('puts a board answer into the open terminal ask, and never turns an answer into a second prompt', async () => {
+    const h = await harness();
+    const repo = path.join(WORKSPACE, 'repo-a');
+    await fs.promises.mkdir(repo, { recursive: true });
+    const chat = await h.coordinator.openNewChat({ cwd: repo, role: 'chat' });
+    const runner = h.runners[0]!;
+    const publish = (toolCallId: string) =>
+      h.rpcHandler()({
+        id: randomUUID(),
+        sessionId: chat,
+        runEpoch: runner.runEpoch,
+        method: 'publish_question',
+        toolCallId,
+        questions: [
+          { id: 'product', question: 'Gói 50.000đ bán gì?', options: [{ label: 'Gemini' }, { label: 'API' }] },
+          { id: 'telegram', question: 'Telegram dùng thế nào?', options: [{ label: 'Thủ công' }, { label: 'Bot' }] },
+        ],
+      } as never) as Promise<{ questionId: string }>;
+    const promptsBefore = runner.prompts.length;
+
+    const onBoard = await publish('call-board');
+    await h.coordinator.answerQuestion({
+      requestId: randomUUID(),
+      questionId: onBoard.questionId,
+      runEpoch: runner.runEpoch,
+      answers: {
+        product: { selectedIndices: [1], isOther: false },
+        telegram: { selectedIndices: [], text: 'Cả hai', isOther: true },
+      },
+    });
+    expect(runner.answerQuestion).toHaveBeenCalledWith(runner.runEpoch, {
+      questionId: onBoard.questionId,
+      answers: [
+        { id: 'product', selectedOptions: ['API'], multi: false },
+        { id: 'telegram', selectedOptions: [], customInput: 'Cả hai', multi: false },
+      ],
+    });
+
+    // A terminal answer is only recorded: the model already read it from its own tool result.
+    const inTerminal = await publish('call-terminal');
+    await h.rpcHandler()({
+      id: randomUUID(),
+      sessionId: chat,
+      runEpoch: runner.runEpoch,
+      method: 'answer_question',
+      toolCallId: 'call-terminal',
+      questionId: inTerminal.questionId,
+      answer: { selectedOptions: ['Gemini'], multi: false },
+    } as never);
+    expect(h.coordinator.readState().questions[inTerminal.questionId]?.status).toBe('answered');
+    expect(runner.answerQuestion).toHaveBeenCalledTimes(1);
+    expect(runner.prompts).toHaveLength(promptsBefore);
   });
 });
 

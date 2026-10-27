@@ -305,10 +305,16 @@ export interface OmpBridgeAskAnswer {
   readonly multi: boolean;
 }
 
+/** The answer to one question of an ask call, named by the question's own id. */
+export interface OmpBridgeQuestionAnswer extends OmpBridgeAskAnswer {
+  readonly id: string;
+}
+
 /** One board answer bound to the run that is still waiting on it. */
 export interface OmpBridgeAnswerQuestion {
   readonly questionId: string;
-  readonly answer: OmpBridgeAskAnswer;
+  /** One entry per question the user answered; an ask call may hold several. */
+  readonly answers: readonly OmpBridgeQuestionAnswer[];
   /** Run epoch the answer was accepted on; a restart invalidates it. */
   readonly runEpoch?: number;
 }
@@ -875,6 +881,20 @@ function parseAskAnswer(value: unknown): OmpBridgeAskAnswer | null {
   };
 }
 
+/** Read the per-question answers of one board answer, or refuse the whole of it. */
+function parseQuestionAnswers(value: unknown): OmpBridgeQuestionAnswer[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  if (value.length > OMP_BRIDGE_MAX_ASK_QUESTIONS) return null;
+  const answers: OmpBridgeQuestionAnswer[] = [];
+  for (const entry of value) {
+    const answer = parseAskAnswer(entry);
+    const id: unknown = isFrameObject(entry) ? entry['id'] : undefined;
+    if (answer === null || !isNonEmptyString(id)) return null;
+    answers.push({ id, ...answer });
+  }
+  return answers;
+}
+
 /**
  * Frame one prompt body as a chunk sequence the peer can verify end to end.
  *
@@ -1180,13 +1200,13 @@ class OmpBridge implements OmpBridgeHandle {
 
   async answerQuestion(input: OmpBridgeAnswerQuestion): Promise<void> {
     this.assertQuestionRun(input.questionId, input.runEpoch);
-    const answer = parseAskAnswer(input.answer);
-    if (answer === null) {
+    const answers = parseQuestionAnswers(input.answers);
+    if (answers === null) {
       throw new CompanyError('omp_bridge_question_malformed', ERROR_TEXT.question_malformed);
     }
     await this.writeQuestionFrame('question_result', {
       questionId: input.questionId,
-      answer,
+      answers,
     });
   }
 

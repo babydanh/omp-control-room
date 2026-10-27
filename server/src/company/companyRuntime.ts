@@ -105,6 +105,7 @@ import {
   type OmpModelDescriptor,
 } from './modelCatalog.js';
 import {
+  type OmpBridgeQuestionAnswer,
   OmpBridgeRpcError,
   type OmpBridgeRpcRequest,
   type OmpBridgeSendPrompt,
@@ -512,6 +513,8 @@ class NativeCompanyRuntime implements CompanyRuntime {
   private readonly handoffs = new Map<string, string>();
   /** Native child spawns holding a shared model-call lease, keyed by spawn key. */
   private readonly childLeases = new Map<string, { sessionId: string; runEpoch: number }>();
+  /** Native questions being recorded from their own terminal dialog, which already has the answer. */
+  private readonly terminalAnswers = new Set<string>();
   private ptyClient!: PtyClient;
   private ptySubscription: (() => void) | null = null;
   private readonly timers: NodeJS.Timeout[] = [];
@@ -2293,6 +2296,23 @@ class NativeCompanyRuntime implements CompanyRuntime {
       // else the session asked for becomes permitted.
       return;
     }
+    if (question.kind === 'clarification' && question.nativeToolCallId !== undefined) {
+      // The native ask is still waiting in the terminal. A terminal answer already reached the
+      // model; a board answer closes that same dialog with the user's choices. Neither becomes
+      // a second turn the model would read on top of its own tool result.
+      if (this.terminalAnswers.has(question.id)) return;
+      const answers = nativeAnswers(this.state().questions[question.id] ?? question, input);
+      try {
+        await run.runner.answerQuestion(run.runEpoch, { questionId: question.id, answers });
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logEntry(question.sessionId, run.runEpoch, {
+          kind: 'question',
+          text: `Không chuyển được câu trả lời vào phiên: ${reason}`,
+        });
+      }
+      return;
+    }
     const answered = this.state().questions[question.id];
     const text = Object.entries(input.answers)
       .map(([promptId, answer]) => {
@@ -2599,24 +2619,29 @@ class NativeCompanyRuntime implements CompanyRuntime {
     if (question.status !== 'pending') {
       return { status: 'already_resolved', answer: question.answer ?? {} };
     }
-    await this.coordinator().answerQuestion({
-      requestId: request.id,
-      questionId: request.questionId,
-      runEpoch: request.runEpoch,
-      ...(question.actionDigest === undefined ? {} : { actionDigest: question.actionDigest }),
-      answers: {
-        [question.questions[0]?.id ?? 'answer']: {
-          selectedIndices: request.answer.selectedOptions.map((label) =>
-            Math.max(
-              0,
-              (question.questions[0]?.options ?? []).findIndex((option) => option.label === label),
+    this.terminalAnswers.add(question.id);
+    try {
+      await this.coordinator().answerQuestion({
+        requestId: request.id,
+        questionId: request.questionId,
+        runEpoch: request.runEpoch,
+        ...(question.actionDigest === undefined ? {} : { actionDigest: question.actionDigest }),
+        answers: {
+          [question.questions[0]?.id ?? 'answer']: {
+            selectedIndices: request.answer.selectedOptions.map((label) =>
+              Math.max(
+                0,
+                (question.questions[0]?.options ?? []).findIndex((option) => option.label === label),
+              ),
             ),
-          ),
-          ...(request.answer.customInput === undefined ? {} : { text: request.answer.customInput }),
-          isOther: request.answer.customInput !== undefined,
+            ...(request.answer.customInput === undefined ? {} : { text: request.answer.customInput }),
+            isOther: request.answer.customInput !== undefined,
+          },
         },
-      },
-    });
+      });
+    } finally {
+      this.terminalAnswers.delete(question.id);
+    }
     return { status: 'recorded' };
   }
 
@@ -3795,6 +3820,28 @@ export async function createCompanyRuntime(
  */
 function modelRoleOf(role: CompanyRole, workstreamId: string): CompanyRole {
   return role === 'chat' ? (squadWorkstreamRole(workstreamId) ?? role) : role;
+}
+
+/** A board answer as the native ask reads it: the chosen labels and any typed text, per question. */
+function nativeAnswers(question: Question, input: QuestionAnswerInput): OmpBridgeQuestionAnswer[] {
+  return question.questions.flatMap((prompt) => {
+    const given = input.answers[prompt.id];
+    if (given === undefined) return [];
+    const selectedOptions = given.selectedIndices.flatMap((index) => {
+      const label = prompt.options[index]?.label;
+      return label === undefined ? [] : [label];
+    });
+    const customInput = given.text !== undefined && given.text.trim() !== '' ? given.text : undefined;
+    if (selectedOptions.length === 0 && customInput === undefined) return [];
+    return [
+      {
+        id: prompt.id,
+        selectedOptions,
+        ...(customInput === undefined ? {} : { customInput }),
+        multi: prompt.multi === true,
+      },
+    ];
+  });
 }
 
 /** A chat session the board opened for a work item, under a role key: no one watches its terminal. */

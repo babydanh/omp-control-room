@@ -572,8 +572,9 @@ export default function ompBridgeExtension(pi: OmpApi): void {
   const sessionId = process.env['PIXEL_AGENTS_OMP_BRIDGE_SESSION'];
   const runEpoch = Number(process.env['PIXEL_AGENTS_OMP_BRIDGE_EPOCH']);
   const role = process.env['PIXEL_AGENTS_OMP_BRIDGE_ROLE'] ?? '';
-  // Chat is the one role the user drives like plain omp: no company tools, no
-  // ask wrapper, and no authorization round trip for its native tools or subagents.
+  // Chat is the one role the user drives like plain omp: no company tools and no authorization
+  // round trip for its native tools or subagents. Its `ask` is still wrapped, so a question shows
+  // on the board as a card to click as well as in the terminal.
   const userDriven = role === 'chat';
   const rpcTimeoutMs = positiveNumber(
     process.env['PIXEL_AGENTS_OMP_BRIDGE_RPC_TIMEOUT_MS'],
@@ -1689,8 +1690,11 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     multi: boolean;
   }
 
+  /** Answers keyed by the id of the question they answer. */
+  type AskAnswers = ReadonlyMap<string, AskAnswer>;
+
   type AskOutcome =
-    | { readonly kind: 'board'; readonly answer: AskAnswer }
+    | { readonly kind: 'board'; readonly answers: AskAnswers }
     | { readonly kind: 'withdrawn' }
     | { readonly kind: 'native'; readonly result: OmpNativeToolResult }
     | { readonly kind: 'failed'; readonly reason: string };
@@ -1764,6 +1768,25 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     };
   }
 
+  /** A board answer, one entry per question; null when any entry is unreadable. */
+  function readAskAnswers(value: unknown): AskAnswers | null {
+    if (!Array.isArray(value) || value.length === 0) return null;
+    const answers = new Map<string, AskAnswer>();
+    for (const entry of value) {
+      const answer = readAskAnswer(entry);
+      const id = isFrameObject(entry) ? readString(entry, 'id') : undefined;
+      if (answer === null || !id) return null;
+      answers.set(id, answer);
+    }
+    return answers;
+  }
+
+  /** A single recorded answer belongs to the first question, the one the record names. */
+  function firstQuestionAnswer(questions: AskQuestion[], answer: AskAnswer): AskAnswers {
+    const first = questions[0];
+    return new Map(first === undefined ? [] : [[first.id, answer]]);
+  }
+
   /** The answer the native dialog produced, read from its structured output. */
   function answerFromNative(
     result: OmpNativeToolResult,
@@ -1792,28 +1815,32 @@ export default function ompBridgeExtension(pi: OmpApi): void {
    */
   function renderAskOutcome(
     questions: AskQuestion[],
-    answer: AskAnswer,
+    answers: AskAnswers,
     source: 'terminal' | 'board',
   ): OmpToolResult {
     const lines = questions.map((question) => {
+      const answer = answers.get(question.id);
       const chosen =
-        answer.selectedOptions.length > 0
+        answer !== undefined && answer.selectedOptions.length > 0
           ? answer.selectedOptions.join(', ')
           : '(no option selected)';
-      const custom = answer.customInput ? `\nCustom answer: ${answer.customInput}` : '';
+      const custom = answer?.customInput ? `\nCustom answer: ${answer.customInput}` : '';
       return `${question.question}\n${chosen}${custom}`;
     });
     return {
       content: [{ type: 'text', text: `${lines.join('\n\n')}\n\n(answered on the ${source})` }],
       details: {
-        results: questions.map((question) => ({
-          id: question.id,
-          question: question.question,
-          options: question.options.map((option) => option.label),
-          multi: answer.multi,
-          selectedOptions: answer.selectedOptions,
-          ...(answer.customInput === undefined ? {} : { customInput: answer.customInput }),
-        })),
+        results: questions.map((question) => {
+          const answer = answers.get(question.id);
+          return {
+            id: question.id,
+            question: question.question,
+            options: question.options.map((option) => option.label),
+            multi: answer?.multi ?? question.multi,
+            selectedOptions: answer?.selectedOptions ?? [],
+            ...(answer?.customInput === undefined ? {} : { customInput: answer.customInput }),
+          };
+        }),
         source,
       },
     };
@@ -1879,12 +1906,12 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       settle({ kind: 'withdrawn' });
       return;
     }
-    const answer = readAskAnswer(frame['answer']);
-    if (!answer) {
+    const answers = readAskAnswers(frame['answers']);
+    if (!answers) {
       report('warn', 'host sent a board answer this session cannot read');
       return;
     }
-    settle({ kind: 'board', answer });
+    settle({ kind: 'board', answers });
   }
 
   /**
@@ -1990,9 +2017,13 @@ export default function ompBridgeExtension(pi: OmpApi): void {
           });
           questionId = isFrameObject(published) ? readString(published, 'questionId') : undefined;
         } catch (error) {
+          // A chat session is plain omp to its user: when the board cannot carry the question,
+          // the native dialog alone still asks it, exactly as it would without the board.
+          if (userDriven) return askNatively(ctx.invokeTool, params);
           return textResult(`the question was refused: ${describe(error)}`, true);
         }
         if (!questionId) {
+          if (userDriven) return askNatively(ctx.invokeTool, params);
           return textResult('the question could not be published as a company question', true);
         }
 
@@ -2021,7 +2052,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
 
           if (outcome.kind === 'board') {
             dialog.abort();
-            return renderAskOutcome(questions, outcome.answer, 'board');
+            return renderAskOutcome(questions, outcome.answers, 'board');
           }
           if (outcome.kind === 'withdrawn') {
             dialog.abort();
@@ -2044,7 +2075,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
           }
           const recorded = await recordNativeAnswer(questionId, toolCallId, answer);
           if (recorded.kind === 'board') {
-            return renderAskOutcome(questions, recorded.answer, 'board');
+            return renderAskOutcome(questions, firstQuestionAnswer(questions, recorded.answer), 'board');
           }
           if (recorded.kind === 'failed') {
             return textResult(`the answer could not be recorded: ${recorded.reason}`, true);
@@ -2054,7 +2085,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
           const nativeContent = outcome.result.content;
           const nativeDetails = outcome.result.details;
           return nativeContent === undefined
-            ? renderAskOutcome(questions, answer, 'terminal')
+            ? renderAskOutcome(questions, firstQuestionAnswer(questions, answer), 'terminal')
             : {
                 content: nativeContent,
                 ...(nativeDetails === undefined
@@ -2067,6 +2098,18 @@ export default function ompBridgeExtension(pi: OmpApi): void {
         }
       },
     });
+  }
+
+  /** The native ask on its own, its result handed to the model untouched. */
+  async function askNatively(
+    invokeTool: NonNullable<OmpContext['invokeTool']>,
+    params: unknown,
+  ): Promise<OmpToolResult> {
+    const result = await invokeTool(params as Record<string, unknown>);
+    return {
+      content: result.content ?? [],
+      ...(result.details === undefined ? {} : { details: result.details as Record<string, unknown> }),
+    };
   }
 
   // ── Gates ─────────────────────────────────────────────────
@@ -2310,8 +2353,8 @@ export default function ompBridgeExtension(pi: OmpApi): void {
 
   if (!userDriven) {
     for (const spec of COMPANY_TOOLS) registerCompanyTool(spec);
-    registerAskWrapper();
   }
+  registerAskWrapper();
   registerHandlers();
   connect();
 }

@@ -7,6 +7,7 @@ import {
 } from './constants.js';
 import {
   createOmpBridge,
+  type OmpBridgeAnswerQuestion,
   type OmpBridgeEvent,
   type OmpBridgeHandle,
   type OmpBridgeModelCatalog,
@@ -176,6 +177,12 @@ export class OmpRunner {
   async abort(runEpoch: number): Promise<void> {
     this.assertActiveEpoch(runEpoch);
     await this.requireBridge().abort();
+  }
+
+  /** Hand a board answer to the native ask the live process is waiting on. */
+  async answerQuestion(runEpoch: number, input: OmpBridgeAnswerQuestion): Promise<void> {
+    this.assertActiveEpoch(runEpoch);
+    await this.requireBridge().answerQuestion({ ...input, runEpoch });
   }
 
   /**

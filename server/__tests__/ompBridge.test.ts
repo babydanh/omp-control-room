@@ -1830,6 +1830,29 @@ describe('omp bridge', () => {
     await call;
   });
 
+  it('gives a chat session no company tools but still puts its question on the board', async () => {
+    const requests: OmpBridgeRpcRequest[] = [];
+    const handle = startBridge({
+      rpcHandler: async (request) => {
+        requests.push(request);
+        return { questionId: 'question-chat' };
+      },
+    });
+    const pi = await startExtension(handle, 'chat');
+    expect([...pi.tools.keys()]).toEqual(['ask']);
+    const { probe, context } = nativeAskFixture();
+
+    const call = pi.tools.get('ask')!.execute('call-chat', ASK_CALL, undefined, undefined, context);
+    await waitFor(() => probe.params !== undefined, 'the native dialog');
+    // The terminal dialog opens as in plain omp, and the board has the same question to click.
+    expect(requests[0]).toMatchObject({ method: 'publish_question', toolCallId: 'call-chat' });
+    expect(probe.params).toEqual(ASK_CALL);
+
+    await handle.cancelQuestion({ questionId: 'question-chat', code: 'test_teardown' });
+    await waitFor(() => probe.signal?.aborted === true, 'the cancelled dialog');
+    await call;
+  });
+
   it('answers from the board and closes the native dialog with that same answer', async () => {
     const requests: OmpBridgeRpcRequest[] = [];
     const handle = startBridge({
@@ -1850,7 +1873,7 @@ describe('omp bridge', () => {
 
     await handle.answerQuestion({
       questionId: 'question-2',
-      answer: { selectedOptions: ['SQLite'], multi: false },
+      answers: [{ id: 'q1', selectedOptions: ['SQLite'], multi: false }],
     });
 
     const result = await call;
@@ -1862,6 +1885,36 @@ describe('omp bridge', () => {
     expect(result.content[0].text).toContain('board');
     // The host already persisted this answer, so nothing answers it twice.
     expect(requests.filter((request) => request.method === 'answer_question')).toHaveLength(0);
+  });
+
+  it('gives each question of a board answer its own choice', async () => {
+    const handle = startBridge({ rpcHandler: async () => ({ questionId: 'question-tabs' }) });
+    const pi = await startExtension(handle, 'chat');
+    const { probe, context } = nativeAskFixture();
+    const twoQuestions = {
+      questions: [
+        ...ASK_CALL.questions,
+        { id: 'q2', question: 'Where should it run?', options: [{ label: 'Docker' }, { label: 'Host' }] },
+      ],
+    };
+
+    const call = pi.tools.get('ask')!.execute('call-tabs', twoQuestions, undefined, undefined, context);
+    await waitFor(() => probe.signal !== undefined, 'the native dialog');
+    await handle.answerQuestion({
+      questionId: 'question-tabs',
+      answers: [
+        { id: 'q1', selectedOptions: ['PostgreSQL'], multi: false },
+        { id: 'q2', selectedOptions: [], customInput: 'on the staging box', multi: false },
+      ],
+    });
+    const result = await call;
+
+    expect(result.content[0].text).toBe(
+      'Which database should the service use?\nPostgreSQL\n\n' +
+        'Where should it run?\n(no option selected)\nCustom answer: on the staging box\n\n' +
+        '(answered on the board)',
+    );
+    expect(probe.signal?.aborted).toBe(true);
   });
 
   it('records a terminal answer against the same durable question', async () => {
@@ -1982,7 +2035,7 @@ describe('omp bridge', () => {
     await expect(
       handle.answerQuestion({
         questionId: 'question-7',
-        answer: { selectedOptions: [], multi: false },
+        answers: [{ id: 'q1', selectedOptions: [], multi: false }],
       }),
     ).rejects.toMatchObject({ code: 'omp_bridge_question_malformed' });
     // A restart mints a new epoch, so the answer that run was waiting on is no
@@ -1990,7 +2043,7 @@ describe('omp bridge', () => {
     await expect(
       handle.answerQuestion({
         questionId: 'question-7',
-        answer: { selectedOptions: ['SQLite'], multi: false },
+        answers: [{ id: 'q1', selectedOptions: ['SQLite'], multi: false }],
         runEpoch: 6,
       }),
     ).rejects.toMatchObject({ code: 'omp_bridge_stale_run_identity' });
@@ -2009,14 +2062,18 @@ describe('omp bridge', () => {
     // An accepted board answer names the question and the answer, and nothing else.
     await handle.answerQuestion({
       questionId: 'question-7',
-      answer: { selectedOptions: ['SQLite'], customInput: 'in a temp dir', multi: false },
+      answers: [
+        { id: 'q1', selectedOptions: ['SQLite'], customInput: 'in a temp dir', multi: false },
+      ],
     });
     const answer = await client.waitFor((candidate) => candidate['t'] === 'question_result');
     expect(answer).toMatchObject({
       sessionId: 'session-1',
       runEpoch: 7,
       questionId: 'question-7',
-      answer: { selectedOptions: ['SQLite'], customInput: 'in a temp dir', multi: false },
+      answers: [
+        { id: 'q1', selectedOptions: ['SQLite'], customInput: 'in a temp dir', multi: false },
+      ],
     });
   });
 
