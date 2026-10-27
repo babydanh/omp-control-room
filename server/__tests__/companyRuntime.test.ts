@@ -1003,6 +1003,25 @@ describe('chat sessions', () => {
     expect(h.coordinator.readState().questions[inTerminal.questionId]?.status).toBe('answered');
     expect(runner.answerQuestion).toHaveBeenCalledTimes(1);
     expect(runner.prompts).toHaveLength(promptsBefore);
+
+    // The terminal answered the board's question a moment too late: it is told the board's
+    // choices, per question, in the shape the native tool reads.
+    const late = await h.rpcHandler()({
+      id: randomUUID(),
+      sessionId: chat,
+      runEpoch: runner.runEpoch,
+      method: 'answer_question',
+      toolCallId: 'call-board',
+      questionId: onBoard.questionId,
+      answer: { selectedOptions: ['Gemini'], multi: false },
+    } as never);
+    expect(late).toEqual({
+      status: 'already_resolved',
+      answers: [
+        { id: 'product', selectedOptions: ['API'], multi: false },
+        { id: 'telegram', selectedOptions: [], customInput: 'Cả hai', multi: false },
+      ],
+    });
   });
 });
 

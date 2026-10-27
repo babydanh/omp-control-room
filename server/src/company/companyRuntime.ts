@@ -2301,7 +2301,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
       // model; a board answer closes that same dialog with the user's choices. Neither becomes
       // a second turn the model would read on top of its own tool result.
       if (this.terminalAnswers.has(question.id)) return;
-      const answers = nativeAnswers(this.state().questions[question.id] ?? question, input);
+      const answers = nativeAnswers(this.state().questions[question.id] ?? question, input.answers);
       try {
         await run.runner.answerQuestion(run.runEpoch, { questionId: question.id, answers });
       } catch (error) {
@@ -2602,7 +2602,7 @@ class NativeCompanyRuntime implements CompanyRuntime {
   private async answerNativeQuestion(
     run: ActiveRun,
     request: Extract<OmpBridgeRpcRequest, { method: 'answer_question' }>,
-  ): Promise<{ status: 'recorded' } | { status: 'already_resolved'; answer: Question['answer'] }> {
+  ): Promise<{ status: 'recorded' } | { status: 'already_resolved'; answers: OmpBridgeQuestionAnswer[] }> {
     const question = this.state().questions[request.questionId];
     if (
       question !== undefined &&
@@ -2617,7 +2617,8 @@ class NativeCompanyRuntime implements CompanyRuntime {
       throw new OmpBridgeRpcError('question_not_found', `Unknown question: ${request.questionId}`);
     }
     if (question.status !== 'pending') {
-      return { status: 'already_resolved', answer: question.answer ?? {} };
+      // The board won: its answer goes back in the native tool's own shape, question by question.
+      return { status: 'already_resolved', answers: nativeAnswers(question, recordedAnswers(question)) };
     }
     this.terminalAnswers.add(question.id);
     try {
@@ -3822,10 +3823,16 @@ function modelRoleOf(role: CompanyRole, workstreamId: string): CompanyRole {
   return role === 'chat' ? (squadWorkstreamRole(workstreamId) ?? role) : role;
 }
 
+/** What a resolved question recorded, per question id. The record is loosely typed; the engine wrote it from a checked answer. */
+function recordedAnswers(question: Question): QuestionAnswerInput['answers'] {
+  const answers: unknown = question.answer?.['answers'];
+  return typeof answers === 'object' && answers !== null ? (answers as QuestionAnswerInput['answers']) : {};
+}
+
 /** A board answer as the native ask reads it: the chosen labels and any typed text, per question. */
-function nativeAnswers(question: Question, input: QuestionAnswerInput): OmpBridgeQuestionAnswer[] {
+function nativeAnswers(question: Question, answers: QuestionAnswerInput['answers']): OmpBridgeQuestionAnswer[] {
   return question.questions.flatMap((prompt) => {
-    const given = input.answers[prompt.id];
+    const given = answers[prompt.id];
     if (given === undefined) return [];
     const selectedOptions = given.selectedIndices.flatMap((index) => {
       const label = prompt.options[index]?.label;

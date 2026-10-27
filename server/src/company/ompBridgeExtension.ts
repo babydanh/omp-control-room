@@ -1871,18 +1871,18 @@ export default function ompBridgeExtension(pi: OmpApi): void {
     toolCallId: string,
     answer: AskAnswer,
   ): Promise<
-    { kind: 'recorded' } | { kind: 'board'; answer: AskAnswer } | { kind: 'failed'; reason: string }
+    { kind: 'recorded' } | { kind: 'board'; answers: AskAnswers } | { kind: 'failed'; reason: string }
   > {
     try {
       const result = await rpc('answer_question', { toolCallId, questionId, answer });
       const status = isFrameObject(result) ? readString(result, 'status') : undefined;
       if (status === 'recorded') return { kind: 'recorded' };
       if (status === 'already_resolved') {
-        const existing = isFrameObject(result) ? readAskAnswer(result['answer']) : null;
+        const existing = isFrameObject(result) ? readAskAnswers(result['answers']) : null;
         // A host that claims the board won without returning its answer leaves
         // nothing to act on; reading that as a failure is the honest outcome.
         if (!existing) return { kind: 'failed', reason: 'the recorded answer was unreadable' };
-        return { kind: 'board', answer: existing };
+        return { kind: 'board', answers: existing };
       }
       return { kind: 'failed', reason: 'the runtime did not record the answer' };
     } catch (error) {
@@ -2075,7 +2075,7 @@ export default function ompBridgeExtension(pi: OmpApi): void {
           }
           const recorded = await recordNativeAnswer(questionId, toolCallId, answer);
           if (recorded.kind === 'board') {
-            return renderAskOutcome(questions, firstQuestionAnswer(questions, recorded.answer), 'board');
+            return renderAskOutcome(questions, recorded.answers, 'board');
           }
           if (recorded.kind === 'failed') {
             return textResult(`the answer could not be recorded: ${recorded.reason}`, true);

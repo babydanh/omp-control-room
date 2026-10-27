@@ -1951,10 +1951,10 @@ describe('omp bridge', () => {
       rpcHandler: async (request) => {
         if (request.method === 'publish_question') return { questionId: 'question-4' };
         // The durable record already holds a board answer that differs from the
-        // one the terminal produced a moment later.
+        // one the terminal produced a moment later, in the native shape per question.
         return {
           status: 'already_resolved',
-          answer: { selectedOptions: ['SQLite'], multi: false },
+          answers: [{ id: 'q1', selectedOptions: ['SQLite'], multi: false }],
         };
       },
     });
