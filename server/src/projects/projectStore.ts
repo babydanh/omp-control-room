@@ -10,6 +10,7 @@ import {
   readRecentCompanyWorkspaces,
 } from '../configPersistence.js';
 import { LAYOUT_FILE_DIR } from '../constants.js';
+import { LibraryUserError } from '../library/libraryError.js';
 
 export interface ProjectFolderNode {
   readonly id: string;
@@ -214,9 +215,11 @@ export class ProjectStore {
   async addFolder(projectId: string, folderPath: string, parentGroupId?: string): Promise<ProjectFolderNode> {
     return this.change(async () => {
       const canonicalPath = await this.canonicalize(folderPath);
-      const stat = await fs.stat(canonicalPath);
-      if (!stat.isDirectory()) throw new Error('Đường dẫn phải là thư mục.');
-      if (this.folderPathExists(canonicalPath)) throw new Error('Thư mục này đã có trong cây Project.');
+      // These refusals reach the user as they are: a plain Error would read "Không thể tạo nút Project."
+      const stat = await fs.stat(canonicalPath).catch(() => undefined);
+      if (stat === undefined) throw new LibraryUserError('Không tìm thấy thư mục này.');
+      if (!stat.isDirectory()) throw new LibraryUserError('Đường dẫn phải là thư mục.');
+      if (this.folderPathExists(canonicalPath)) throw new LibraryUserError('Thư mục này đã có trong cây Project.');
       const node: ProjectFolderNode = {
         id: randomUUID(), type: 'folder', path: canonicalPath,
         name: companyFolderNameFor(this.folderNames(), canonicalPath) ?? DEFAULT_FOLDER_NAME(canonicalPath),

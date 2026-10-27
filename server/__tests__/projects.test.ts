@@ -466,7 +466,18 @@ describe('projectNodeCreate for a Project', () => {
     const root = await makeTempDir();
     const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
 
-    expect(await create(store, { kind: 'project', name: 'Mat', path: path.join(root, 'missing') })).toMatchObject({ ok: false });
+    expect(await create(store, { kind: 'project', name: 'Mat', path: path.join(root, 'missing') })).toMatchObject({ ok: false, reason: 'Không tìm thấy thư mục này.' });
     expect(store.snapshot().projects).toEqual([]);
+  });
+
+  it('says the folder is already in the tree when a Project made from it is asked for twice', async () => {
+    const root = await makeTempDir();
+    const folder = path.join(root, 'Trung');
+    await fs.mkdir(folder);
+    const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
+
+    expect(await create(store, { kind: 'project', name: 'Trung', path: folder })).toMatchObject({ ok: true });
+    expect(await create(store, { kind: 'project', name: 'Trung', path: folder })).toMatchObject({ ok: false, reason: 'Thư mục này đã có trong cây Project.' });
+    expect(store.snapshot().projects).toHaveLength(1);
   });
 });
