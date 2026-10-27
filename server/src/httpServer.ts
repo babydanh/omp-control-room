@@ -229,7 +229,7 @@ function herdrProjectSessions(herdr: HerdrLink | null | undefined): HerdrProject
   const snapshot = herdr?.snapshot();
   if (snapshot === undefined) return [];
   const toSession = (
-    session: { paneId: string; cwd?: string; status?: string; title?: string; name?: string; sessionFile?: string; sessionId?: string },
+    session: { paneId: string; cwd?: string; status?: string; title?: string; name?: string; sessionFile?: string; sessionId?: string; sleptAt?: string },
   ): HerdrProjectSession[] => session.cwd === undefined ? [] : [{
     id: session.paneId,
     cwd: session.cwd,
@@ -237,13 +237,14 @@ function herdrProjectSessions(herdr: HerdrLink | null | undefined): HerdrProject
     title: session.title ?? session.name ?? '',
     ...(session.sessionFile === undefined ? {} : { sessionFile: session.sessionFile }),
     ...(session.sessionId === undefined ? {} : { sessionId: session.sessionId }),
+    ...(session.sleptAt === undefined ? {} : { sleptAt: session.sleptAt }),
   }];
   return [...snapshot.agents.flatMap(toSession), ...snapshot.sleeping.flatMap(toSession)];
 }
 
 // ── Agent CLI (`board`) ────────────────────────────────────────
 
-/** Live sessions for `board status`: the Project tree without its git scan. */
+/** Live sessions for `board status`: the Project tree without its git scan, and without the ended sessions the sidebar keeps for a day. */
 async function agentSessions(options: HttpServerOptions): Promise<AgentSessionRow[]> {
   const store = options.projects?.store;
   const tree = options.projects?.tree ?? projectTreeFromLedger(options).tree;
@@ -254,7 +255,7 @@ async function agentSessions(options: HttpServerOptions): Promise<AgentSessionRo
     agents: options.store.values(),
     herdrSessions: () => herdrProjectSessions(options.herdr),
   });
-  return sessionRows(nodes);
+  return sessionRows(nodes).filter((row) => row.state !== 'ended');
 }
 
 /** The work item boards of the open folders. */

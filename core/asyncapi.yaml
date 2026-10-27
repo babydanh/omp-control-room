@@ -8606,6 +8606,13 @@ components:
           description: >-
             Session rows: the error that cut the agent's last turn off (a usage limit, a lost
             connection), while no agent answer has followed it. Absent for a turn that ended normally.
+        stoppedAt:
+          type: string
+          format: date-time
+          description: >-
+            Session rows: when the session stopped, for a sleeping herdr pane the moment it was put
+            to sleep, for an ended one (state ended, kept for a day) the moment it exited. The
+            sidebar lists the latest of these first.
         state:
           type: string
         title:

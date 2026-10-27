@@ -11,7 +11,7 @@ import {
 import { type GitRepoScan, type GitRunner, type GitRunOptions, readRepo } from '../ledger/git.js';
 import type { LedgerSource, SessionRow } from '../ledger/ledgerDb.js';
 import { ledgerPathKey, normalizeLedgerPath } from '../ledger/ledgerPath.js';
-import { formatLedgerTime } from '../ledger/ledgerTime.js';
+import { formatLedgerTime, parseLedgerTime } from '../ledger/ledgerTime.js';
 import type { AgentState } from '../types.js';
 import { EDIT_KINDS } from './projectDiffEngine.js';
 import { type Project, type ProjectNode, ProjectStore } from './projectStore.js';
@@ -40,6 +40,8 @@ export interface ProjectSessionSnapshot {
   readonly lastRequest?: string;
   /** The error that cut the agent's last turn off (a usage limit, a lost connection), while no answer followed it. */
   readonly interrupted?: string;
+  /** When the session stopped: a sleeping pane's sleep, an ended session's exit (ISO). */
+  readonly stoppedAt?: string;
 }
 
 /** A herdr pane; the transcript facts are filled in while the tree is built, from its `sessionFile`. */
@@ -52,6 +54,8 @@ export interface HerdrProjectSession extends TranscriptFacts {
   readonly sessionFile?: string;
   /** The agent's session id, when it reported an id instead. */
   readonly sessionId?: string;
+  /** When a sleeping pane was put to sleep (ISO); absent for a working pane. */
+  readonly sleptAt?: string;
 }
 
 export interface ProjectTreeSnapshot {
@@ -78,6 +82,10 @@ export interface ProjectTreeOptions {
 }
 /** How far back a session's latest intent is looked up for its title. */
 const SESSION_INTENT_WINDOW_MS = 6 * 60 * 60 * 1000;
+/** How long an ended session stays in the tree, so the sidebar can tell which one stopped last. */
+const ENDED_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** At most this many ended sessions stay, the newest ones. */
+const ENDED_SESSIONS_MAX = 20;
 function canonicalKey(folder: string): string {
   const resolved = path.resolve(folder);
   return process.platform === 'win32' ? resolved.toLocaleLowerCase('en-US') : resolved;
@@ -143,6 +151,32 @@ function titleForLedger(row: TitledSessionRow): string {
 /** A transcript path compared case- and separator-blind, without its extension. */
 function fileStem(file: string): string {
   return file.replace(/\\/g, '/').toLowerCase().replace(/\.jsonl?$/, '');
+}
+
+/**
+ * Live rows, plus the main sessions (no subagents) that ended within a day: the newest
+ * {@link ENDED_SESSIONS_MAX}, leaving out one a herdr pane already lists as sleeping.
+ */
+export function withRecentlyEnded(rows: readonly SessionRow[], panes: readonly HerdrProjectSession[], now: number): SessionRow[] {
+  const paneFiles = new Set(panes.flatMap((pane) => (pane.sessionFile === undefined ? [] : [fileStem(pane.sessionFile)])));
+  const paneIds = new Set(panes.flatMap((pane) => (pane.sessionId === undefined ? [] : [pane.sessionId])));
+  const ended = rows
+    .flatMap((row) => {
+      const at = parseLedgerTime(row.endedAt);
+      if (at === null || now - at > ENDED_SESSION_WINDOW_MS || agentKindForLedger(row) === 'sub') return [];
+      if (paneIds.has(row.sessionId) || (row.sessionFile && paneFiles.has(fileStem(row.sessionFile)))) return [];
+      return [{ row, at }];
+    })
+    .sort((a, b) => b.at - a.at)
+    .slice(0, ENDED_SESSIONS_MAX);
+  const kept = new Set(ended.map((entry) => entry.row));
+  return rows.filter((row) => row.endedAt === null || kept.has(row));
+}
+
+/** An ended row's exit as ISO, for the node's `stoppedAt`. */
+function endedAtIso(row: SessionRow): { stoppedAt?: string } {
+  const at = parseLedgerTime(row.endedAt);
+  return at === null ? {} : { stoppedAt: new Date(at).toISOString() };
 }
 
 /**
@@ -248,9 +282,9 @@ function ledgerStatus(row: SessionRow): string {
 }
 
 /**
- * Live sessions working in `checkout`. A cwd inside a nested checkout (a
- * `.worktrees/<name>` under the main one) belongs to that deeper checkout only.
- * Ended ledger sessions are left out: the tree shows who is working, not history.
+ * Sessions working in `checkout`, and the recently ended ones {@link withRecentlyEnded} kept
+ * (state `ended`, with `stoppedAt`). A cwd inside a nested checkout (a `.worktrees/<name>`
+ * under the main one) belongs to that deeper checkout only.
  */
 function sessionsForCheckout(
   checkout: string,
@@ -263,7 +297,7 @@ function sessionsForCheckout(
     pathContains(checkout, cwd) && !nestedCheckouts.some((nested) => pathContains(nested, cwd));
   const sessions: ProjectSessionSnapshot[] = [];
   for (const row of ledgerRows) {
-    if (row.cwd === null || row.endedAt !== null || !owns(row.cwd)) continue;
+    if (row.cwd === null || !owns(row.cwd)) continue;
     sessions.push({
       engine: engineForLedger(row),
       agentKind: agentKindForLedger(row),
@@ -276,6 +310,7 @@ function sessionsForCheckout(
       ...(row.herdrPaneId === undefined ? {} : { herdrPaneId: row.herdrPaneId }),
       ...(row.editCheckouts === undefined ? {} : { editCheckouts: row.editCheckouts }),
       ...factFields(row),
+      ...endedAtIso(row),
     });
   }
   for (const agent of agents) {
@@ -294,6 +329,7 @@ function sessionsForCheckout(
     sessions.push({
       engine: 'herdr', agentKind: 'herdr', id: session.id, cwd: session.cwd, status: session.status, title: session.title,
       ...factFields(session),
+      ...(session.sleptAt === undefined ? {} : { stoppedAt: session.sleptAt }),
     });
   }
   return sessions;
@@ -671,6 +707,7 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
       ...(session.herdrPaneId === undefined ? {} : { herdrPaneId: session.herdrPaneId }),
       ...(session.editCheckouts === undefined ? {} : { editCheckouts: [...session.editCheckouts] }),
       ...factFields(session),
+      ...(session.stoppedAt === undefined ? {} : { stoppedAt: session.stoppedAt }),
     });
   }
 }
@@ -684,14 +721,14 @@ function withoutDeadProcesses(rows: readonly SessionRow[], isAlive: ((pid: numbe
   return rows.filter((row) => row.endedAt !== null || row.pid === null || isAlive(row.pid));
 }
 
-/** Live rows with what their transcript last wrote: todo progress, requests, a cut-off turn; an unreadable transcript gives none. */
+/** Rows (live and recently ended) with what their transcript last wrote: todo progress, requests, a cut-off turn; an unreadable transcript gives none. */
 async function withProgress(
   rows: readonly TitledSessionRow[],
   read: ProjectTreeOptions['sessionFacts'],
 ): Promise<readonly TitledSessionRow[]> {
   if (read === undefined) return rows;
   return Promise.all(rows.map(async (row) => {
-    if (row.endedAt !== null || !row.sessionFile) return row;
+    if (!row.sessionFile) return row;
     return { ...row, ...factFields(await read(row.sessionFile).catch((): TranscriptFacts => ({}))) };
   }));
 }
@@ -726,10 +763,9 @@ export async function buildProjectTreeSnapshot(
   options: ProjectTreeOptions,
 ): Promise<ProjectTreeSnapshot> {
   const state = await store.load();
-  const linked = linkHerdrPanes(
-    annotateLedgerRows(withoutDeadProcesses(options.ledger.sessionRows(), options.isAlive), options.ledger, options.boardSessionFor),
-    options.herdrSessions?.() ?? [],
-  );
+  const panes = options.herdrSessions?.() ?? [];
+  const rows = withRecentlyEnded(withoutDeadProcesses(options.ledger.sessionRows(), options.isAlive), panes, Date.now());
+  const linked = linkHerdrPanes(annotateLedgerRows(rows, options.ledger, options.boardSessionFor), panes);
   const ledgerRows = await withProgress(linked.rows, options.sessionFacts);
   const pendingCheckouts = new Set(options.ledger.pendingRows().map((row) => canonicalKey(row.checkout)));
   const overlapScans = options.sessionsOnly === true ? [] : await (options.overlapScans?.() ?? Promise.resolve([]));

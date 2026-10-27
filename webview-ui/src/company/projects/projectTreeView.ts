@@ -1,5 +1,5 @@
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
-import type { ActivityCounts } from '../agentSidebarView.js';
+import { type ActivityCounts, relativeTimeVi } from '../agentSidebarView.js';
 export { projectNodeMenuItems } from '../agentMenu.js';
 
 export interface ProjectTreeBranch {
@@ -127,6 +127,8 @@ export interface ProjectTreeFilters {
   agentKind: ProjectTreeNode['agentKind'] | 'all';
   /** Hide idle and ended sessions; running ones and ones waiting on you stay. */
   liveOnly: boolean;
+  /** Only sessions left unfinished ({@link isUnfinishedNode}). */
+  unfinishedOnly?: boolean;
   /** The session the drawer shows: kept whatever the filters say, so its row can be pointed at. */
   keep?: TreeSelection;
 }
@@ -148,7 +150,8 @@ export function filterProjectTree(
     const matched =
       (filters.keep !== undefined && isSelectedSession(branch.node, filters.keep)) ||
       ((filters.agentKind === 'all' || branch.node.agentKind === filters.agentKind) &&
-        (!filters.liveOnly || isLiveNode(branch.node)));
+        (!filters.liveOnly || isLiveNode(branch.node)) &&
+        (filters.unfinishedOnly !== true || isUnfinishedNode(branch.node)));
     return matched || children.length > 0 ? { ...branch, children } : null;
   };
   return roots.map(filterBranch).filter((branch): branch is ProjectTreeBranch => branch !== null);
@@ -271,6 +274,42 @@ function waitsOnYou(node: ProjectTreeNode): boolean {
 /** A session the "Đang hoạt động" filter keeps: working now, or stopped waiting for you. */
 export function isLiveNode(node: ProjectTreeNode): boolean {
   return isRunningNode(node) || waitsOnYou(node);
+}
+
+/**
+ * A session that stopped with its work not done: its last turn was cut off, or it stopped with
+ * todo tasks left. One still working is not unfinished, it is at it.
+ */
+export function isUnfinishedNode(node: ProjectTreeNode): boolean {
+  if (node.kind !== 'session' || isRunningNode(node)) return false;
+  return node.interrupted !== undefined || (node.progress !== undefined && node.progress.done < node.progress.total);
+}
+
+/** A session that exited (the server keeps those of the last day): listed under "Vừa ngủ / tắt", not in the tree. */
+export function isEndedNode(node: ProjectTreeNode): boolean {
+  return node.kind === 'session' && (node.state ?? '').toLowerCase() === 'ended';
+}
+
+/** The sessions that stopped last (put to sleep or exited), newest first, each once even when two Projects hold its folder. */
+export function recentlyStoppedSessions(nodes: readonly ProjectTreeNode[], limit: number): ProjectTreeNode[] {
+  const seen = new Set<string>();
+  const stopped: { node: ProjectTreeNode; at: number }[] = [];
+  for (const node of nodes) {
+    if (node.kind !== 'session' || node.stoppedAt === undefined) continue;
+    const at = Date.parse(node.stoppedAt);
+    const key = node.sessionId ?? node.id;
+    if (Number.isNaN(at) || seen.has(key)) continue;
+    seen.add(key);
+    stopped.push({ node, at });
+  }
+  return stopped.sort((a, b) => b.at - a.at).slice(0, limit).map((entry) => entry.node);
+}
+
+/** "ngủ 5 phút trước", "tắt 2 giờ trước", "tắt vừa xong"; null when the session has no readable stop time. */
+export function stoppedLabel(node: ProjectTreeNode, now: number): string | null {
+  const ago = node.stoppedAt === undefined ? null : relativeTimeVi(node.stoppedAt, now);
+  if (ago === null) return null;
+  return `${isEndedNode(node) ? 'tắt' : 'ngủ'} ${ago}`;
 }
 
 /** States the "rảnh" chip counts: stopped, nothing asked of you. */

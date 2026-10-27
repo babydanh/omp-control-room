@@ -11,7 +11,7 @@ import type { ProcessResult } from '../src/ledger/processRunner.js';
 import { toPathKey } from '../src/pathKey.js';
 import { handleProjectMessage } from '../src/projects/handler.js';
 import { ProjectStore } from '../src/projects/projectStore.js';
-import { buildProjectTreeSnapshot, linkHerdrPanes, parentSessions } from '../src/projects/projectTree.js';
+import { buildProjectTreeSnapshot, linkHerdrPanes, parentSessions, withRecentlyEnded } from '../src/projects/projectTree.js';
 import { sessionRow } from './ledgerFixtures.js';
 
 function processResult(stdout = '', code = 0, ok = code === 0): ProcessResult {
@@ -314,6 +314,44 @@ describe('linkHerdrPanes', () => {
     ]);
     expect(linked.map((row) => row.herdrPaneId)).toEqual(['w1:p1', 'w1:p2', undefined]);
     expect(panes.map((entry) => entry.id)).toEqual(['w1:p3', 'w1:p4']);
+  });
+});
+
+describe('withRecentlyEnded', () => {
+  const now = new Date(2026, 9, 27, 12, 0, 0).getTime();
+  const ids = (rows: readonly { sessionId: string }[]) => rows.map((row) => row.sessionId);
+
+  it('keeps live sessions and main sessions that ended within a day, not older ones nor subagents', () => {
+    const rows = [
+      sessionRow('live'),
+      sessionRow('ended-1h', { endedAt: '2026-10-27 11:00:00' }),
+      sessionRow('ended-2d', { endedAt: '2026-10-25 11:00:00' }),
+      sessionRow('sub-1h', { agentKind: 'sub', endedAt: '2026-10-27 11:00:00' }),
+      sessionRow('bad-time', { endedAt: '2026-10-27' }),
+    ];
+    expect(ids(withRecentlyEnded(rows, [], now))).toEqual(['live', 'ended-1h']);
+  });
+
+  it('leaves out an ended session a herdr pane already lists as sleeping, by transcript or id', () => {
+    const rows = [
+      sessionRow('by-file', { sessionFile: 'C:\\s\\a.jsonl', endedAt: '2026-10-27 11:00:00' }),
+      sessionRow('by-id', { endedAt: '2026-10-27 11:00:00' }),
+      sessionRow('alone', { endedAt: '2026-10-27 11:00:00' }),
+    ];
+    const panes = [
+      { id: 'w:p1', cwd: 'C:/w', status: 'sleeping', title: 'a', sessionFile: 'c:/s/a.jsonl' },
+      { id: 'w:p2', cwd: 'C:/w', status: 'sleeping', title: 'b', sessionId: 'by-id' },
+    ];
+    expect(ids(withRecentlyEnded(rows, panes, now))).toEqual(['alone']);
+  });
+
+  it('keeps only the 20 newest ended sessions', () => {
+    const rows = Array.from({ length: 22 }, (_, minute) =>
+      sessionRow(`e${minute}`, { endedAt: `2026-10-27 11:${String(minute).padStart(2, '0')}:00` }));
+    const kept = ids(withRecentlyEnded(rows, [], now));
+    expect(kept).toHaveLength(20);
+    expect(kept).not.toContain('e0');
+    expect(kept).not.toContain('e1');
   });
 });
 

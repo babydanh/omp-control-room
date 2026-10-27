@@ -2245,6 +2245,7 @@ export interface ProjectTreeNode {
   request?: string;
   lastRequest?: string;
   interrupted?: string;
+  stoppedAt?: string;
   state?: string;
   title?: string;
   color?: string;
@@ -2276,26 +2277,26 @@ export interface ProjectDiffMessage {
   type: 'projectDiff';
   requestId: string;
   checkout: string;
-  scope: AnonymousSchema_1271;
+  scope: AnonymousSchema_1272;
   sha: string;
   files: ProjectDiffFile[];
   truncated: boolean;
   reason?: string;
 }
 
-export type AnonymousSchema_1271 = 'uncommitted' | 'branch' | 'commit' | 'compare';
+export type AnonymousSchema_1272 = 'uncommitted' | 'branch' | 'commit' | 'compare';
 
 export interface ProjectDiffFile {
   path: string;
   oldPath?: string;
-  status: AnonymousSchema_1276;
+  status: AnonymousSchema_1277;
   additions: number;
   deletions: number;
   author: string;
   hunks: ProjectDiffHunk[];
 }
 
-export type AnonymousSchema_1276 =
+export type AnonymousSchema_1277 =
   'added' | 'modified' | 'deleted' | 'renamed' | 'copied' | 'binary';
 
 export interface ProjectDiffHunk {
@@ -2312,9 +2313,9 @@ export interface ProjectSettingsMessage {
 }
 
 export interface ProjectSettingsValues {
-  engineLeader?: AnonymousSchema_1288;
-  engineJudge?: AnonymousSchema_1289;
-  engineWorker?: AnonymousSchema_1290;
+  engineLeader?: AnonymousSchema_1289;
+  engineJudge?: AnonymousSchema_1290;
+  engineWorker?: AnonymousSchema_1291;
   claudeModelLeader?: string;
   claudeModelJudge?: string;
   maxParallel?: number;
@@ -2325,11 +2326,11 @@ export interface ProjectSettingsValues {
   worktreePrepare?: ProjectPrepareScript;
 }
 
-export type AnonymousSchema_1288 = 'omp' | 'claude' | 'agy';
-
 export type AnonymousSchema_1289 = 'omp' | 'claude' | 'agy';
 
 export type AnonymousSchema_1290 = 'omp' | 'claude' | 'agy';
+
+export type AnonymousSchema_1291 = 'omp' | 'claude' | 'agy';
 
 export interface ProjectPrepareScript {
   argv: string[];
@@ -2337,20 +2338,18 @@ export interface ProjectPrepareScript {
 }
 
 export interface ProjectSettingsSources {
-  engineLeader?: AnonymousSchema_1301;
-  engineJudge?: AnonymousSchema_1302;
-  engineWorker?: AnonymousSchema_1303;
-  claudeModelLeader?: AnonymousSchema_1304;
-  claudeModelJudge?: AnonymousSchema_1305;
-  maxParallel?: AnonymousSchema_1306;
-  maxPerRepo?: AnonymousSchema_1307;
-  minFreeDiskGb?: AnonymousSchema_1308;
-  maxClaudeRuns?: AnonymousSchema_1309;
-  maxAgyRuns?: AnonymousSchema_1310;
-  worktreePrepare?: AnonymousSchema_1311;
+  engineLeader?: AnonymousSchema_1302;
+  engineJudge?: AnonymousSchema_1303;
+  engineWorker?: AnonymousSchema_1304;
+  claudeModelLeader?: AnonymousSchema_1305;
+  claudeModelJudge?: AnonymousSchema_1306;
+  maxParallel?: AnonymousSchema_1307;
+  maxPerRepo?: AnonymousSchema_1308;
+  minFreeDiskGb?: AnonymousSchema_1309;
+  maxClaudeRuns?: AnonymousSchema_1310;
+  maxAgyRuns?: AnonymousSchema_1311;
+  worktreePrepare?: AnonymousSchema_1312;
 }
-
-export type AnonymousSchema_1301 = 'global' | 'project' | 'folder';
 
 export type AnonymousSchema_1302 = 'global' | 'project' | 'folder';
 
@@ -2372,16 +2371,18 @@ export type AnonymousSchema_1310 = 'global' | 'project' | 'folder';
 
 export type AnonymousSchema_1311 = 'global' | 'project' | 'folder';
 
+export type AnonymousSchema_1312 = 'global' | 'project' | 'folder';
+
 export interface ProjectCommandResultMessage {
   type: 'projectCommandResult';
   requestId: string;
-  command: AnonymousSchema_1314;
+  command: AnonymousSchema_1315;
   ok: boolean;
   nodeId?: string;
   reason?: string;
 }
 
-export type AnonymousSchema_1314 =
+export type AnonymousSchema_1315 =
   | 'create'
   | 'update'
   | 'delete'
@@ -2442,10 +2443,10 @@ export interface ProjectBranchCompareSide {
   lastCommitAt: string | null;
   lastCommitSubject: string | null;
   checkout?: string;
-  dirtyFiles: AnonymousSchema_1347[];
+  dirtyFiles: AnonymousSchema_1348[];
 }
 
-export interface AnonymousSchema_1347 {
+export interface AnonymousSchema_1348 {
   path: string;
   status: string;
 }
@@ -2485,7 +2486,7 @@ export interface LibraryClaudeRolesSnapshot {
 export interface LibraryClaudeRole {
   id: string;
   name: string;
-  source: AnonymousSchema_1376;
+  source: AnonymousSchema_1377;
   plugin?: string;
   description: string;
   model: string;
@@ -2496,7 +2497,7 @@ export interface LibraryClaudeRole {
   overridden: boolean;
 }
 
-export type AnonymousSchema_1376 = 'builtin' | 'user' | 'plugin';
+export type AnonymousSchema_1377 = 'builtin' | 'user' | 'plugin';
 
 export interface LibraryAccountsSnapshot {
   type: 'libraryAccountsSnapshot';
@@ -2506,7 +2507,7 @@ export interface LibraryAccountsSnapshot {
 }
 
 export interface LibraryAccount {
-  tool: AnonymousSchema_1389;
+  tool: AnonymousSchema_1390;
   loggedIn: boolean;
   authMethod?: string;
   subscriptionType?: string;
@@ -2519,7 +2520,7 @@ export interface LibraryAccount {
   reason?: string;
 }
 
-export type AnonymousSchema_1389 = 'claude' | 'agy' | 'omp';
+export type AnonymousSchema_1390 = 'claude' | 'agy' | 'omp';
 
 export interface LibraryCredential {
   provider: string;
@@ -2541,26 +2542,26 @@ export interface LibrarySkill {
   id: string;
   name: string;
   description: string;
-  tools: AnonymousSchema_1415[];
-  claudeMode: AnonymousSchema_1416;
+  tools: AnonymousSchema_1416[];
+  claudeMode: AnonymousSchema_1417;
   plugin?: string;
   sizeBytes: number;
-  preferredSource?: AnonymousSchema_1419;
+  preferredSource?: AnonymousSchema_1420;
   preferredSourceId?: string;
   sources?: LibrarySkillSource[];
-  ignoredTools?: AnonymousSchema_1430[];
+  ignoredTools?: AnonymousSchema_1431[];
   hasContentDifferences?: boolean;
 }
 
-export type AnonymousSchema_1415 = 'omp' | 'claude' | 'agents' | 'agy';
+export type AnonymousSchema_1416 = 'omp' | 'claude' | 'agents' | 'agy';
 
-export type AnonymousSchema_1416 = 'on' | 'name-only' | 'user-invocable-only' | 'off';
+export type AnonymousSchema_1417 = 'on' | 'name-only' | 'user-invocable-only' | 'off';
 
-export type AnonymousSchema_1419 = 'omp' | 'claude' | 'agents' | 'agy';
+export type AnonymousSchema_1420 = 'omp' | 'claude' | 'agents' | 'agy';
 
 export interface LibrarySkillSource {
   id: string;
-  tool: AnonymousSchema_1423;
+  tool: AnonymousSchema_1424;
   location: string;
   contentHash: string;
   lineCount: number;
@@ -2568,9 +2569,9 @@ export interface LibrarySkillSource {
   kind?: string;
 }
 
-export type AnonymousSchema_1423 = 'omp' | 'claude' | 'agents' | 'agy';
+export type AnonymousSchema_1424 = 'omp' | 'claude' | 'agents' | 'agy';
 
-export type AnonymousSchema_1430 = 'omp' | 'claude' | 'agents' | 'agy';
+export type AnonymousSchema_1431 = 'omp' | 'claude' | 'agents' | 'agy';
 
 export interface LibraryMcpSnapshot {
   type: 'libraryMcpSnapshot';
@@ -2581,32 +2582,32 @@ export interface LibraryMcpSnapshot {
 
 export interface LibraryMcpServer {
   name: string;
-  tools: AnonymousSchema_1438[];
-  transport: AnonymousSchema_1439;
+  tools: AnonymousSchema_1439[];
+  transport: AnonymousSchema_1440;
   commandName?: string;
   endpoint?: string;
-  status: AnonymousSchema_1442;
+  status: AnonymousSchema_1443;
 }
 
-export type AnonymousSchema_1438 = 'omp' | 'claude' | 'agy';
+export type AnonymousSchema_1439 = 'omp' | 'claude' | 'agy';
 
-export type AnonymousSchema_1439 = 'stdio' | 'http' | 'sse';
+export type AnonymousSchema_1440 = 'stdio' | 'http' | 'sse';
 
-export type AnonymousSchema_1442 = 'connected' | 'error' | 'unchecked';
+export type AnonymousSchema_1443 = 'connected' | 'error' | 'unchecked';
 
 export interface LibraryStorageSearchResult {
   type: 'libraryStorageSearchResult';
   requestId: string;
-  kind: AnonymousSchema_1446;
+  kind: AnonymousSchema_1447;
   results: LibraryStorageResult[];
   reason?: string;
 }
 
-export type AnonymousSchema_1446 = 'workItems' | 'sessions' | 'openViking' | 'proofs';
+export type AnonymousSchema_1447 = 'workItems' | 'sessions' | 'openViking' | 'proofs';
 
 export interface LibraryStorageResult {
   id: string;
-  kind: AnonymousSchema_1449;
+  kind: AnonymousSchema_1450;
   title: string;
   description?: string;
   repo?: string;
@@ -2622,7 +2623,7 @@ export interface LibraryStorageResult {
   mediaType?: string;
 }
 
-export type AnonymousSchema_1449 = 'workItems' | 'sessions' | 'openViking' | 'proofs';
+export type AnonymousSchema_1450 = 'workItems' | 'sessions' | 'openViking' | 'proofs';
 
 export interface LibrarySkillPreview {
   type: 'librarySkillPreview';
@@ -2637,13 +2638,13 @@ export interface LibrarySkillPreview {
 export interface LibraryCommandResult {
   type: 'libraryCommandResult';
   requestId: string;
-  command: AnonymousSchema_1473;
+  command: AnonymousSchema_1474;
   ok: boolean;
   reason?: string;
   target?: string;
 }
 
-export type AnonymousSchema_1473 =
+export type AnonymousSchema_1474 =
   'restoreWorkItem' | 'login' | 'checkMcp' | 'setClaudeRole' | 'setSkillMode';
 
 export interface TerminalAttachedMessage {
@@ -2838,25 +2839,25 @@ export interface SubmitPromptInput {
   text: string;
   targetContractId?: string;
   targetSessionId?: string;
-  delivery: AnonymousSchema_1563;
-  mode?: AnonymousSchema_1564;
+  delivery: AnonymousSchema_1564;
+  mode?: AnonymousSchema_1565;
   attachments?: PromptAttachment[];
 }
 
-export type AnonymousSchema_1563 = 'prompt' | 'steer' | 'follow_up';
+export type AnonymousSchema_1564 = 'prompt' | 'steer' | 'follow_up';
 
-export type AnonymousSchema_1564 = 'chat' | 'company';
+export type AnonymousSchema_1565 = 'chat' | 'company';
 
 export interface CompanyContractDecisionMessage {
   type: 'companyContractDecision';
   requestId: string;
   contractId: string;
   revision: number;
-  decision: AnonymousSchema_1571;
+  decision: AnonymousSchema_1572;
   note?: string;
 }
 
-export type AnonymousSchema_1571 = 'approve' | 'reject';
+export type AnonymousSchema_1572 = 'approve' | 'reject';
 
 export interface CompanyQuestionAnswerMessage {
   type: 'companyQuestionAnswer';
@@ -2869,7 +2870,7 @@ export interface QuestionAnswerInput {
   runEpoch: number;
   actionDigest?: string;
   answers: Record<string, QuestionAnswer>;
-  decision?: AnonymousSchema_1583;
+  decision?: AnonymousSchema_1584;
 }
 
 export interface QuestionAnswer {
@@ -2878,17 +2879,17 @@ export interface QuestionAnswer {
   isOther: boolean;
 }
 
-export type AnonymousSchema_1583 = 'approve_once' | 'reject';
+export type AnonymousSchema_1584 = 'approve_once' | 'reject';
 
 export interface CompanySessionControlMessage {
   type: 'companySessionControl';
   requestId: string;
   sessionId: string;
   runEpoch: number;
-  action: AnonymousSchema_1588;
+  action: AnonymousSchema_1589;
 }
 
-export type AnonymousSchema_1588 =
+export type AnonymousSchema_1589 =
   'pause' | 'resume' | 'kill' | 'restart' | 'archive' | 'interrupt' | 'delete';
 
 export interface CompanyPromptCancelMessage {
@@ -2992,10 +2993,10 @@ export interface CompanyChatNewMessage {
 export interface CompanyViewModeMessage {
   type: 'companyViewMode';
   requestId: string;
-  mode: AnonymousSchema_1647;
+  mode: AnonymousSchema_1648;
 }
 
-export type AnonymousSchema_1647 = 'all' | 'folder';
+export type AnonymousSchema_1648 = 'all' | 'folder';
 
 export interface CompanyFolderPickMessage {
   type: 'companyFolderPick';
@@ -3213,10 +3214,10 @@ export interface LedgerViewRequestMessage {
 export interface LedgerTimelineRequestMessage {
   type: 'ledgerTimelineRequest';
   requestId: string;
-  windowMinutes: AnonymousSchema_1774;
+  windowMinutes: AnonymousSchema_1775;
 }
 
-export type AnonymousSchema_1774 = 15 | 60 | 360 | 1440;
+export type AnonymousSchema_1775 = 15 | 60 | 360 | 1440;
 
 export interface LedgerFileDiffRequestMessage {
   type: 'ledgerFileDiffRequest';
@@ -3257,13 +3258,13 @@ export interface ProjectTreeRequestMessage {
 export interface ProjectNodeCreateMessage {
   type: 'projectNodeCreate';
   requestId: string;
-  kind: AnonymousSchema_1795;
+  kind: AnonymousSchema_1796;
   parentId?: string;
   name: string;
   path?: string;
 }
 
-export type AnonymousSchema_1795 = 'project' | 'folder' | 'group';
+export type AnonymousSchema_1796 = 'project' | 'folder' | 'group';
 
 export interface ProjectNodeUpdateMessage {
   type: 'projectNodeUpdate';
@@ -3290,11 +3291,11 @@ export interface ProjectDiffRequestMessage {
   type: 'projectDiffRequest';
   requestId: string;
   checkout: string;
-  scope: AnonymousSchema_1814;
+  scope: AnonymousSchema_1815;
   sha: string;
 }
 
-export type AnonymousSchema_1814 = 'uncommitted' | 'branch' | 'commit' | 'compare';
+export type AnonymousSchema_1815 = 'uncommitted' | 'branch' | 'commit' | 'compare';
 
 export interface ProjectCommentMessage {
   type: 'projectComment';
@@ -3316,13 +3317,13 @@ export interface ProjectSettingsRequestMessage {
 export interface ProjectSettingsSetMessage {
   type: 'projectSettingsSet';
   requestId: string;
-  scope: AnonymousSchema_1829;
+  scope: AnonymousSchema_1830;
   nodeId: string;
   field: ProjectSettingField;
   value: ProjectEngine | string | number | number | ProjectPrepareScript | number;
 }
 
-export type AnonymousSchema_1829 = 'project' | 'folder';
+export type AnonymousSchema_1830 = 'project' | 'folder';
 
 export type ProjectSettingField =
   | 'engineLeader'
@@ -3342,26 +3343,26 @@ export type ProjectEngine = 'omp' | 'claude' | 'agy';
 export interface ProjectSettingsClearMessage {
   type: 'projectSettingsClear';
   requestId: string;
-  scope: AnonymousSchema_1837;
+  scope: AnonymousSchema_1838;
   nodeId: string;
   field: ProjectSettingField;
 }
 
-export type AnonymousSchema_1837 = 'project' | 'folder';
+export type AnonymousSchema_1838 = 'project' | 'folder';
 
 export interface ProjectSessionStartMessage {
   type: 'projectSessionStart';
   requestId: string;
   nodeId: string;
-  engine: AnonymousSchema_1842;
-  worktree: AnonymousSchema_1843;
+  engine: AnonymousSchema_1843;
+  worktree: AnonymousSchema_1844;
   taskName: string;
   initialPrompt: string;
 }
 
-export type AnonymousSchema_1842 = 'omp' | 'claude' | 'agy';
+export type AnonymousSchema_1843 = 'omp' | 'claude' | 'agy';
 
-export type AnonymousSchema_1843 = 'separate' | 'shared';
+export type AnonymousSchema_1844 = 'separate' | 'shared';
 
 export interface ProjectSessionStopMessage {
   type: 'projectSessionStop';
@@ -3373,11 +3374,11 @@ export interface ProjectImageSaveMessage {
   type: 'projectImageSave';
   requestId: string;
   fileName: string;
-  mediaType: AnonymousSchema_1852;
+  mediaType: AnonymousSchema_1853;
   dataBase64: string;
 }
 
-export type AnonymousSchema_1852 = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
+export type AnonymousSchema_1853 = 'image/png' | 'image/jpeg' | 'image/gif' | 'image/webp';
 
 export interface ProjectBranchCompareRequestMessage {
   type: 'projectBranchCompareRequest';
@@ -3398,11 +3399,11 @@ export interface ProjectMergePreviewRequestMessage {
 export interface LibrarySnapshotRequest {
   type: 'librarySnapshotRequest';
   requestId: string;
-  section: AnonymousSchema_1866;
+  section: AnonymousSchema_1867;
   refresh?: boolean;
 }
 
-export type AnonymousSchema_1866 = 'accounts' | 'storage' | 'skills' | 'mcp' | 'claudeRoles';
+export type AnonymousSchema_1867 = 'accounts' | 'storage' | 'skills' | 'mcp' | 'claudeRoles';
 
 export interface LibrarySkillPreviewRequest {
   type: 'librarySkillPreviewRequest';
@@ -3431,18 +3432,18 @@ export interface LibrarySkillModeSet {
 export interface LibraryStorageSearchRequest {
   type: 'libraryStorageSearchRequest';
   requestId: string;
-  kind: AnonymousSchema_1886;
+  kind: AnonymousSchema_1887;
   query?: string;
   repo?: string;
-  agentType?: AnonymousSchema_1889;
+  agentType?: AnonymousSchema_1890;
   from?: string;
   to?: string;
   refresh?: boolean;
 }
 
-export type AnonymousSchema_1886 = 'workItems' | 'sessions' | 'openViking' | 'proofs';
+export type AnonymousSchema_1887 = 'workItems' | 'sessions' | 'openViking' | 'proofs';
 
-export type AnonymousSchema_1889 = 'main' | 'sub' | 'claude' | 'agy';
+export type AnonymousSchema_1890 = 'main' | 'sub' | 'claude' | 'agy';
 
 export interface LibraryWorkItemRestore {
   type: 'libraryWorkItemRestore';
@@ -3453,11 +3454,11 @@ export interface LibraryWorkItemRestore {
 export interface LibraryAccountLogin {
   type: 'libraryAccountLogin';
   requestId: string;
-  tool: AnonymousSchema_1898;
+  tool: AnonymousSchema_1899;
   provider?: string;
 }
 
-export type AnonymousSchema_1898 = 'claude' | 'agy' | 'omp';
+export type AnonymousSchema_1899 = 'claude' | 'agy' | 'omp';
 
 export interface LibraryMcpCheckRequest {
   type: 'libraryMcpCheckRequest';
@@ -3553,11 +3554,11 @@ export interface UsageLimitsRequestMessage {
 export interface UsageHistoryRequestMessage {
   type: 'usageHistoryRequest';
   requestId: string;
-  days: AnonymousSchema_1942;
+  days: AnonymousSchema_1943;
   force?: boolean;
 }
 
-export type AnonymousSchema_1942 = 1 | 7 | 30;
+export type AnonymousSchema_1943 = 1 | 7 | 30;
 
 export interface UsageStatsRequestMessage {
   type: 'usageStatsRequest';

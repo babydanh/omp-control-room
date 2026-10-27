@@ -52,6 +52,7 @@ import {
   sessionChanges,
 } from '../projects/projectNodeTargets.js';
 import { useProjectState } from '../projects/projectStore.js';
+import { isEndedNode } from '../projects/projectTreeView.js';
 import { COMPANY_ROLES, roleProfile } from '../roleProfiles.js';
 import { startScrollFades } from '../scrollFades.js';
 import {
@@ -138,6 +139,13 @@ function projectCreateRefusal(requestId: string): Promise<string | null> {
     const unsubscribe = projectStore.subscribe(settle);
     settle();
   });
+}
+
+/** What a click on an exited session says: it has no pane left, and how to bring it back. */
+function endedSessionNotice(session: ProjectTreeNode, id: string): string {
+  if (session.engine === 'claude') return `Phiên ${session.name} đã tắt. Mở lại trong terminal ở thư mục của nó: claude --resume ${id}`;
+  if (session.engine === 'omp') return `Phiên ${session.name} đã tắt. Mở omp ở thư mục của nó rồi gõ /resume để chọn lại phiên.`;
+  return `Phiên ${session.name} đã tắt, không còn khung nào để mở.`;
 }
 
 export interface BoardShellProps {
@@ -458,6 +466,7 @@ export function BoardShell({ client }: BoardShellProps) {
     const boardKey = session.boardSessionId ?? (state.sessions[id] !== undefined ? id : null);
     if (boardKey !== null && state.sessions[boardKey] !== undefined) selectSession(boardKey);
     else if (boardKey !== null && where.folderPath !== undefined) selectWorkspaceSession(where.folderPath, boardKey);
+    else if (isEndedNode(session)) setSessionNotice(endedSessionNotice(session, id));
     else if (session.herdrPaneId !== undefined) openHerdr(revealPane(session.herdrPaneId, where));
     else if (session.agentKind === 'herdr' && session.state === 'sleeping') openSleeping(revealPane(id, where));
     else if (session.agentKind === 'herdr') openHerdr(revealPane(id, where));

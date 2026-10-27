@@ -16,7 +16,9 @@ import {
   filterProjectTree,
   finishedTurn,
   isSelectedSession,
+  isUnfinishedNode,
   projectNodeMenuItems,
+  recentlyStoppedSessions,
   selectedAncestorIds,
   sessionActivityCounts,
   sessionDisplayName,
@@ -24,6 +26,7 @@ import {
   sessionFaceMood,
   sessionSummary,
   shownFaceMood,
+  stoppedLabel,
 } from '../src/company/projects/projectTreeView.js';
 
 const node = (id: string, kind: ProjectTreeNode['kind'], parentId?: string, extra: Partial<ProjectTreeNode> = {}): ProjectTreeNode => ({
@@ -295,5 +298,47 @@ describe('changed lines belong to the session, not to every session in its check
     expect(sessionChanges({ id: 's', kind: 'session', name: 's', additions: 0, deletions: 0 })).toBeNull();
     expect(sessionChanges({ id: 's', kind: 'session', name: 's' })).toBeNull();
     expect(sessionChanges(undefined)).toBeNull();
+  });
+});
+
+describe('which sessions left their work unfinished, and which stopped last', () => {
+  const session = (id: string, extra: Partial<ProjectTreeNode> = {}) => node(id, 'session', undefined, { sessionId: id, ...extra });
+
+  it('calls a stopped session unfinished when its turn was cut off or its todo list has tasks left, never a working one', () => {
+    expect(isUnfinishedNode(session('cut', { state: 'idle', interrupted: 'hết lượt' }))).toBe(true);
+    expect(isUnfinishedNode(session('left', { state: 'ended', progress: { done: 3, total: 6 } }))).toBe(true);
+    expect(isUnfinishedNode(session('done', { state: 'sleeping', progress: { done: 6, total: 6 } }))).toBe(false);
+    expect(isUnfinishedNode(session('busy', { state: 'running', progress: { done: 1, total: 6 }, interrupted: 'x' }))).toBe(false);
+    expect(isUnfinishedNode(session('plain', { state: 'idle' }))).toBe(false);
+  });
+
+  it('lists the sessions put to sleep or exited newest first, each once, skipping unreadable times', () => {
+    const stopped = [
+      session('old', { state: 'sleeping', stoppedAt: '2026-10-27T01:00:00Z' }),
+      session('new', { state: 'ended', stoppedAt: '2026-10-27T03:00:00Z' }),
+      { ...session('new', { state: 'ended', stoppedAt: '2026-10-27T03:00:00Z' }), id: 'new-in-other-project' },
+      session('mid', { state: 'sleeping', stoppedAt: '2026-10-27T02:00:00Z' }),
+      session('bad', { state: 'sleeping', stoppedAt: 'not a time' }),
+      session('awake', { state: 'running' }),
+    ];
+    expect(recentlyStoppedSessions(stopped, 2).map((entry) => entry.id)).toEqual(['new', 'mid']);
+  });
+
+  it('says whether the session fell asleep or exited, and how long ago', () => {
+    const now = Date.parse('2026-10-27T03:05:00Z');
+    expect(stoppedLabel(session('s', { state: 'sleeping', stoppedAt: '2026-10-27T03:00:00Z' }), now)).toBe('ngủ 5 phút trước');
+    expect(stoppedLabel(session('e', { state: 'ended', stoppedAt: '2026-10-27T01:05:00Z' }), now)).toBe('tắt 2 giờ trước');
+    expect(stoppedLabel(session('n', { state: 'sleeping' }), now)).toBeNull();
+  });
+
+  it('keeps only unfinished sessions when that filter is on', () => {
+    const tree = buildAgentTree([
+      node('p', 'project'),
+      node('f', 'folder', 'p', { path: 'C:/f' }),
+      session('dở', { parentId: 'f', state: 'idle', interrupted: 'hết lượt' }),
+      session('xong', { parentId: 'f', state: 'idle' }),
+    ]);
+    const shown = filterProjectTree(tree, { agentKind: 'all', liveOnly: false, unfinishedOnly: true });
+    expect(shown[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['dở']);
   });
 });

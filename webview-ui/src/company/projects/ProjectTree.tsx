@@ -3,22 +3,27 @@ import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
-import { projectMenuContext } from './projectNodeTargets.js';
+import { useNow } from '../useNow.js';
+import { ancestorOf, projectMenuContext } from './projectNodeTargets.js';
 import type { ProjectStore } from './projectStore.js';
 import {
   buildAgentTree,
   canMoveProjectNode,
   countSessions,
   filterProjectTree,
+  isEndedNode,
   isRunningNode,
   isSelectedSession,
+  isUnfinishedNode,
   type ProjectTreeBranch,
+  recentlyStoppedSessions,
   selectedAncestorIds,
   sessionDisplayName,
   sessionFaceHue,
   sessionFaceMood,
   sessionProgressView,
   sessionSummary,
+  stoppedLabel,
   type TreeSelection,
 } from './projectTreeView.js';
 import { SessionFace } from './SessionFace.js';
@@ -46,6 +51,7 @@ const SESSION_STATE_LABEL: Readonly<Record<string, string>> = {
   blocked: 'chờ bạn',
   idle: 'rảnh',
   sleeping: 'ngủ',
+  ended: 'đã tắt',
 };
 const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>> = {
   project: '▰',
@@ -63,6 +69,8 @@ const ROW_TEXT_CLASS: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>>
 };
 /** Branches a session row leaves unsaid: most sessions work on one of them. */
 const MAIN_BRANCHES: ReadonlySet<string> = new Set(['main', 'master']);
+/** How many sessions the "Vừa ngủ / tắt" list shows. */
+const RECENT_STOPPED_MAX = 6;
 
 function readCollapsed(): ReadonlySet<string> {
   try {
@@ -98,11 +106,14 @@ export function ProjectTree(props: ProjectTreeProps) {
   const [agentKind, setAgentKind] = useState<ProjectTreeNode['agentKind'] | 'all'>('all');
   // Every open session shows by default: an idle omp pane is the user's own work, waiting for them.
   const [liveOnly, setLiveOnly] = useState(false);
-  const tree = useMemo(() => buildAgentTree(nodes), [nodes]);
+  const [unfinishedOnly, setUnfinishedOnly] = useState(false);
+  // Ended sessions are history: the tree lists them only when asked for the unfinished ones.
+  const tree = useMemo(() => buildAgentTree(unfinishedOnly ? nodes : nodes.filter((node) => !isEndedNode(node))), [nodes, unfinishedOnly]);
+  const unfinishedCount = useMemo(() => new Set(nodes.filter(isUnfinishedNode).map((node) => node.sessionId ?? node.id)).size, [nodes]);
   const selectedRoots = selectedProjectId === null
     ? tree
     : tree.filter((branch) => branch.node.id === selectedProjectId);
-  const visible = filterProjectTree(selectedRoots, { agentKind, liveOnly, ...(props.selection === undefined ? {} : { keep: props.selection }) });
+  const visible = filterProjectTree(selectedRoots, { agentKind, liveOnly, unfinishedOnly, ...(props.selection === undefined ? {} : { keep: props.selection }) });
   // The drawer opened a session inside a folded folder: unfold the way down to its row, once per
   // session, so folding that folder again afterwards stays folded on later tree updates.
   const selection = props.selection;
@@ -153,7 +164,9 @@ export function ProjectTree(props: ProjectTreeProps) {
           {AGENT_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
         </select>
         <label className="flex items-center gap-1" title="Chỉ hiện phiên đang làm hoặc đang chờ bạn, ẩn phiên rảnh"><input type="checkbox" checked={liveOnly} onChange={(event) => setLiveOnly(event.target.checked)} />Ẩn phiên rảnh</label>
+        <label className={`flex shrink-0 items-center gap-1 ${unfinishedCount > 0 ? 'text-warning' : ''}`} title="Chỉ hiện phiên làm dở: bị ngắt giữa chừng, hoặc đã dừng khi todo chưa xong (kể cả phiên đã tắt trong 24 giờ qua)"><input type="checkbox" checked={unfinishedOnly} onChange={(event) => setUnfinishedOnly(event.target.checked)} />Làm dở{unfinishedCount > 0 ? ` (${unfinishedCount})` : ''}</label>
       </div>
+      <RecentlyStopped nodes={nodes} onOpenSession={props.onOpenSession} />
       <div className="min-h-0 overflow-y-auto">
         {visible.map((branch) => (
           <ProjectTreeRow key={branch.node.id} branch={branch} depth={0} collapsed={collapsed} onToggleCollapse={toggleCollapse} onMove={moveNode} {...props} />
@@ -165,6 +178,54 @@ export function ProjectTree(props: ProjectTreeProps) {
         )}
       </div>
     </nav>
+  );
+}
+
+/** "bị ngắt" (its last turn was cut off) or "dở" (it stopped with todo tasks left); nothing for a finished or working session. */
+function UnfinishedMark({ node, count = false }: { node: ProjectTreeNode; count?: boolean }) {
+  if (!isUnfinishedNode(node)) return null;
+  if (node.interrupted !== undefined) {
+    return <span className="shrink-0 text-status-error" title={`Bị ngắt: ${node.interrupted}`}>bị ngắt</span>;
+  }
+  const left = count && node.progress !== undefined ? ` ${node.progress.done}/${node.progress.total}` : '';
+  return <span className="shrink-0 text-warning" title="Agent đã dừng khi todo còn việc chưa xong">dở{left}</span>;
+}
+
+/** The sessions put to sleep or exited last, newest first: which one, how long ago, and whether it left work undone. */
+function RecentlyStopped({ nodes, onOpenSession }: Pick<ProjectTreeProps, 'nodes' | 'onOpenSession'>) {
+  const now = useNow();
+  const [open, setOpen] = useState(true);
+  const recent = useMemo(() => recentlyStoppedSessions(nodes, RECENT_STOPPED_MAX), [nodes]);
+  if (recent.length === 0) return null;
+  return (
+    <section aria-label="Vừa ngủ / tắt" className="flex flex-col">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen(!open)}
+        className="touch-target flex items-center gap-1 rounded px-2 text-left text-xs font-semibold text-text-muted hover:bg-hover"
+      >
+        <span aria-hidden="true">{open ? '▾' : '▸'}</span>Vừa ngủ / tắt
+      </button>
+      {open && recent.map((node) => {
+        const folderPath = ancestorOf(nodes, node, 'folder')?.path;
+        return (
+          <button
+            key={node.id}
+            type="button"
+            data-testid="recent-stopped-row"
+            title={[node.path, node.lastRequest ?? node.request].filter(Boolean).join('\n')}
+            onClick={() => onOpenSession(node, folderPath === undefined ? {} : { folderPath })}
+            className="touch-target flex min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-hover"
+          >
+            <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" />
+            <span className="min-w-0 flex-1 truncate text-text">{sessionDisplayName(node)}</span>
+            <UnfinishedMark node={node} count />
+            <span className="shrink-0 text-2xs text-text-muted">{stoppedLabel(node, now)}</span>
+          </button>
+        );
+      })}
+    </section>
   );
 }
 
@@ -259,6 +320,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                         : null,
                       !isRunningNode(node) && stateLabel !== undefined ? stateLabel : null,
                       children.length > 0 ? `+${children.length}` : null,
+                      isUnfinishedNode(node) ? <UnfinishedMark key="left" node={node} /> : null,
                       branch.where !== undefined && !MAIN_BRANCHES.has(branch.where) ? branch.where : null,
                     ].filter((part) => part !== null).flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))}
                   </span>
