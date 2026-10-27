@@ -34,6 +34,8 @@ export function SessionHoverCard({ node, anchor, where, checkout, stateLabel, ru
   const added = node.additions ?? 0;
   const removed = node.deletions ?? 0;
   const header = [node.agentKind === 'herdr' ? undefined : node.agentKind, stateLabel, where].filter(Boolean).join(' · ');
+  // The first request already has its own line: the newest prompts list the others.
+  const recent = (node.recentRequests ?? []).filter((text) => text !== node.request);
   // The portal leaves the board's DOM: the company-ui scope brings its text sizes and colours along.
   return createPortal(
     <div
@@ -43,10 +45,10 @@ export function SessionHoverCard({ node, anchor, where, checkout, stateLabel, ru
     >
       {header !== '' && <p className="text-2xs text-text-muted">{header}</p>}
       {node.request !== undefined && <Line icon="🎯" className="text-text">{node.request}</Line>}
-      {(node.recentRequests?.length ?? 0) > 0 ? (
+      {recent.length > 0 ? (
         <>
-          <p className="text-2xs text-text-muted">{node.recentRequests?.length === 1 ? 'Câu gần nhất' : `${node.recentRequests?.length} câu gần nhất`}</p>
-          {node.recentRequests?.map((text, index) => <Line key={index} icon="💬">{text}</Line>)}
+          <p className="text-2xs text-text-muted">{recent.length === 1 ? 'Câu gần nhất' : `${recent.length} câu gần nhất`}</p>
+          {recent.map((text, index) => <Line key={index} icon="💬">{text}</Line>)}
         </>
       ) : node.lastRequest !== undefined && <Line icon="💬">Mới nhất: {node.lastRequest}</Line>}
       {progress?.current !== undefined && <Line icon="▶">{progress.current}</Line>}

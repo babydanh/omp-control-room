@@ -123,13 +123,13 @@ function snapshotNoticeText(state: CompanyViewState): string {
   return `Có thay đổi đã bị bỏ sót ở ${waiting.join(', ')}; đang chờ một bản chụp mới từ máy chủ.`;
 }
 
-/** How a project create ended: made (with the new Project's id when the server named it), or refused and why. */
-type ProjectCreateOutcome = { readonly nodeId: string | undefined } | { readonly refusal: string };
+/** How a project create ended: made (with the new Project's id when the server named it), refused and why, or replaced by a newer create. */
+type ProjectCreateOutcome = { readonly nodeId: string | undefined } | { readonly refusal: string } | { readonly superseded: true };
 
 /**
  * Waits until the project create `requestId` is answered (or failed to send). A create that a
- * newer one replaced before its answer came reads as made, with no id: the newer one reports.
- * Executor form: the ES2022 lib has no Promise.withResolvers.
+ * newer one replaced before its answer came has no result of its own: it says nothing, the
+ * newer one reports. Executor form: the ES2022 lib has no Promise.withResolvers.
  */
 function projectCreateOutcome(requestId: string): Promise<ProjectCreateOutcome> {
   return new Promise((resolve) => {
@@ -143,7 +143,7 @@ function projectCreateOutcome(requestId: string): Promise<ProjectCreateOutcome> 
         return;
       }
       const reason = (result?.type === 'projectCommandResult' ? result.reason : undefined) || state.errors['command:create'];
-      resolve(reason ? { refusal: reason } : { nodeId: undefined });
+      resolve(reason ? { refusal: reason } : { superseded: true });
     };
     const unsubscribe = projectStore.subscribe(settle);
     settle();
@@ -666,6 +666,7 @@ export function BoardShell({ client }: BoardShellProps) {
     const name = folderBasename(picked.path) || picked.path;
     const requestId = projectStore.createNode({ kind: 'project', name, path: picked.path });
     const outcome = await projectCreateOutcome(requestId);
+    if ('superseded' in outcome) return;
     // The new Project lands at the end of the list, out of sight: show it on its own.
     if ('refusal' in outcome) {
       const holder = projectHoldingFolder(projects.nodes, picked.path);

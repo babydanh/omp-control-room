@@ -216,8 +216,10 @@ export class ProjectStore {
     return this.change(async () => {
       const canonicalPath = await this.canonicalize(folderPath);
       // These refusals reach the user as they are: a plain Error would read "Không thể tạo nút Project."
-      const stat = await fs.stat(canonicalPath).catch(() => undefined);
-      if (stat === undefined) throw new LibraryUserError('Không tìm thấy thư mục này.');
+      const stat = await fs.stat(canonicalPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') throw new LibraryUserError('Không tìm thấy thư mục này.');
+        throw error;
+      });
       if (!stat.isDirectory()) throw new LibraryUserError('Đường dẫn phải là thư mục.');
       if (this.folderPathExists(canonicalPath)) throw new LibraryUserError('Thư mục này đã có trong cây Project.');
       const node: ProjectFolderNode = {
