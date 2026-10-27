@@ -758,12 +758,17 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
 }
 
 /**
- * Live ledger rows whose process is gone are dropped: a killed agent never records
- * its own end, so the ledger would otherwise list it as working.
+ * A live ledger row whose process is gone was killed (a closed terminal, a crash): it never recorded
+ * its own end, so the ledger would list it as working. It ends when it was last seen instead, so
+ * "Vừa ngủ / tắt" lists it and it can be woken; one with no time at all is dropped.
  */
-function withoutDeadProcesses(rows: readonly SessionRow[], isAlive: ((pid: number) => boolean) | undefined): readonly SessionRow[] {
+export function withDeadProcessesEnded(rows: readonly SessionRow[], isAlive: ((pid: number) => boolean) | undefined): readonly SessionRow[] {
   if (isAlive === undefined) return rows;
-  return rows.filter((row) => row.endedAt !== null || row.pid === null || isAlive(row.pid));
+  return rows.flatMap((row) => {
+    if (row.endedAt !== null || row.pid === null || isAlive(row.pid)) return [row];
+    const endedAt = row.lastSeen ?? row.heartbeat ?? row.startedAt;
+    return endedAt === null ? [] : [{ ...row, endedAt }];
+  });
 }
 
 /**
@@ -823,7 +828,7 @@ export async function buildProjectTreeSnapshot(
 ): Promise<ProjectTreeSnapshot> {
   const state = await store.load();
   const panes = options.herdrSessions?.() ?? [];
-  const rows = withRecentlyEnded(withoutDeadProcesses(options.ledger.sessionRows(), options.isAlive), panes, Date.now());
+  const rows = withRecentlyEnded(withDeadProcessesEnded(options.ledger.sessionRows(), options.isAlive), panes, Date.now());
   const linked = linkHerdrPanes(annotateLedgerRows(rows, options.ledger, options.boardSessionFor), panes);
   const ledgerRows = await withProgress(linked.rows, options.sessionFacts);
   const pendingCheckouts = new Set(options.ledger.pendingRows().map((row) => canonicalKey(row.checkout)));

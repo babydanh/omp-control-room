@@ -33,6 +33,7 @@ import {
   type HerdrProjectSession,
   type ProjectTreeOptions,
   type ProjectTreeSnapshot,
+  withDeadProcessesEnded,
 } from './projectTree.js';
 import type { ProjectModuleDeps, ProjectServices } from './services.js';
 import { processAlive, stopLedgerSession } from './sessionStop.js';
@@ -254,7 +255,8 @@ async function runProjectRequest(
           typeof msg.sessionId === 'string' ? msg.sessionId : '',
           typeof msg.prompt === 'string' ? msg.prompt : '',
           {
-            sessionRows: () => ledger.sessionRows(),
+            // A killed session never wrote its end: its dead process is what says it ended.
+            sessionRows: () => withDeadProcessesEnded(ledger.sessionRows(), processAlive),
             ...(services.reopenBoardChat === undefined ? {} : { reopenBoardChat: services.reopenBoardChat }),
             startAgent: (input) => services.startAgent(input),
             findAgent: (name) => services.findAgent(name),

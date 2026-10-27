@@ -11,7 +11,7 @@ import type { ProcessResult } from '../src/ledger/processRunner.js';
 import { toPathKey } from '../src/pathKey.js';
 import { handleProjectMessage } from '../src/projects/handler.js';
 import { ProjectStore } from '../src/projects/projectStore.js';
-import { buildProjectTreeSnapshot, herdrProjectSessions, linkHerdrPanes, parentSessions, withRecentlyEnded } from '../src/projects/projectTree.js';
+import { buildProjectTreeSnapshot, herdrProjectSessions, linkHerdrPanes, parentSessions, withDeadProcessesEnded, withRecentlyEnded } from '../src/projects/projectTree.js';
 import { sessionRow } from './ledgerFixtures.js';
 
 function processResult(stdout = '', code = 0, ok = code === 0): ProcessResult {
@@ -365,6 +365,25 @@ describe('withRecentlyEnded', () => {
     expect(kept).toHaveLength(20);
     expect(kept).not.toContain('e0');
     expect(kept).not.toContain('e1');
+  });
+});
+
+describe('withDeadProcessesEnded', () => {
+  it('ends a live row whose process is gone when it was last seen, so it can be listed and woken', () => {
+    const rows = [
+      sessionRow('alive', { pid: 1 }),
+      sessionRow('killed', { pid: 2, lastSeen: '2026-10-27 22:08:41', startedAt: '2026-10-27 21:22:10' }),
+      sessionRow('killed-early', { pid: 3, startedAt: '2026-10-27 21:00:00' }),
+      sessionRow('no-time', { pid: 4 }),
+      sessionRow('ended', { pid: 5, endedAt: '2026-10-27 20:00:00' }),
+    ];
+    const ended = withDeadProcessesEnded(rows, (pid) => pid === 1);
+    expect(ended.map((row) => [row.sessionId, row.endedAt])).toEqual([
+      ['alive', null],
+      ['killed', '2026-10-27 22:08:41'],
+      ['killed-early', '2026-10-27 21:00:00'],
+      ['ended', '2026-10-27 20:00:00'],
+    ]);
   });
 });
 
