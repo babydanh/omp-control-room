@@ -265,7 +265,7 @@ describe('project session start', () => {
   });
 
   it('reopens the board chat that ran an omp session, in the board folder holding it, and types the prompt', async () => {
-    const stopped = boardCoordinator([{ id: 'board-1', status: 'stopped', runEpoch: 3 } as CompanySessionSummary]);
+    const stopped = boardCoordinator([{ id: 'board-1', status: 'crashed', runEpoch: 3 } as CompanySessionSummary]);
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => stopped),
       boardFolders: () => [path.join(root, 'other'), root],
@@ -274,7 +274,8 @@ describe('project session start', () => {
       effectiveSettings: async () => ({}),
     });
     await expect(runtime.reopenBoardChat?.({ nativeSessionId: 'native-1', cwd: repo, prompt: 'làm tiếp' })).resolves.toEqual({ folder: root, sessionId: 'board-1' });
-    expect(stopped.controlSession).toHaveBeenCalledWith('board-1', 'resume', 3);
+    // A crashed chat has no process to resume: it restarts on its own omp file.
+    expect(stopped.controlSession).toHaveBeenCalledWith('board-1', 'restart', 3);
     expect(stopped.submitPrompt).toHaveBeenCalledWith(expect.objectContaining({ targetSessionId: 'board-1', text: 'làm tiếp', mode: 'chat' }));
     // An omp session no board chat ran, or one outside every board folder, has no chat to reopen.
     await expect(runtime.reopenBoardChat?.({ nativeSessionId: 'native-2', cwd: repo, prompt: '' })).resolves.toBeUndefined();

@@ -10,8 +10,8 @@ import type { ProjectSessionServices } from './newSession.js';
 
 type SessionCoordinator = Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt' | 'sessionForNative' | 'snapshot' | 'controlSession'>;
 
-/** Board session states that hold no process and reopen on `resume`. */
-const REOPENABLE_STATES: ReadonlySet<string> = new Set(['parked', 'paused', 'stopped', 'crashed']);
+/** How a board chat with no process comes back: a parked or paused one resumes, a stopped or crashed one restarts. */
+const REOPEN_ACTION: Readonly<Record<string, 'resume' | 'restart'>> = { parked: 'resume', paused: 'resume', stopped: 'restart', crashed: 'restart' };
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_GIT_TIMEOUT_MS = 120_000;
@@ -103,7 +103,8 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
       const sessionId = coordinator.sessionForNative?.(nativeSessionId) ?? null;
       const session = coordinator.snapshot().sessions.find((candidate) => candidate.id === sessionId);
       if (sessionId === null || session === undefined) return undefined;
-      if (REOPENABLE_STATES.has(session.status)) await coordinator.controlSession(sessionId, 'resume', session.runEpoch);
+      const action = REOPEN_ACTION[session.status];
+      if (action !== undefined) await coordinator.controlSession(sessionId, action, session.runEpoch);
       const text = prompt.trim();
       if (text !== '') {
         await coordinator.submitPrompt({ requestId: randomUUID(), text, targetSessionId: sessionId, delivery: 'prompt', mode: 'chat' });
