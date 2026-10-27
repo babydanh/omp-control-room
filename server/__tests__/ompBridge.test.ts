@@ -549,6 +549,26 @@ describe('omp bridge', () => {
     expect(pi.subscribedEvents()).toContain('tool_call');
   });
 
+  it('tells the host the file a session moved to, as the fresh session of an approved plan does', async () => {
+    const handle = startBridge();
+    const pi = await startExtension(handle, 'chat');
+    const moved = makeContext({
+      sessionManager: {
+        getSessionId: () => 'native-session-2',
+        getSessionFile: () => '/workspace/.company/sessions/native-session-2.jsonl',
+      },
+    });
+
+    await pi.emit('session_switch', { type: 'session_switch', reason: 'new', previousSessionFile: '/workspace/.company/sessions/native-session-1.jsonl' }, moved);
+    await waitFor(() => events.some((event) => event.k === 'session' && event.phase === 'switched'), 'the switched event');
+
+    // Reopening the session later must resume this file, not the one it left.
+    expect(events.find((event) => event.k === 'session' && event.phase === 'switched')).toMatchObject({
+      nativeSessionId: 'native-session-2',
+      nativeSessionPath: '/workspace/.company/sessions/native-session-2.jsonl',
+    });
+  });
+
   it('refuses a client that presents the wrong nonce and never becomes ready', async () => {
     const handle = startBridge();
     let ready = false;

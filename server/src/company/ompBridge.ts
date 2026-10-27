@@ -352,7 +352,8 @@ export class OmpBridgeRpcError extends Error {
 export type OmpBridgeEvent =
   | {
       readonly k: 'session';
-      readonly phase: 'started' | 'shutdown';
+      /** `switched`: the same process moved to another session file (an approved plan, /new, /resume). */
+      readonly phase: 'started' | 'switched' | 'shutdown';
       readonly nativeSessionId?: string;
       readonly nativeSessionPath?: string;
     }

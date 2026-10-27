@@ -2288,6 +2288,21 @@ export default function ompBridgeExtension(pi: OmpApi): void {
       startInsightRefresh();
       scheduleInsight();
     });
+    // An approved plan starts a fresh session, and /new, /resume, /fork and /branch move to another
+    // file, all in the same process: the host must learn the file it now writes, or reopening the
+    // session later resumes the one it left.
+    const reportSwitch = (_event: unknown, ctx: OmpContext): void => {
+      sessionContext = ctx;
+      nativeSessionId = ctx.sessionManager?.getSessionId?.();
+      sendEvent({
+        k: 'session',
+        phase: 'switched',
+        nativeSessionId,
+        nativeSessionPath: ctx.sessionManager?.getSessionFile?.(),
+      });
+    };
+    pi.on('session_switch', reportSwitch);
+    pi.on('session_branch', reportSwitch);
     pi.on('session_shutdown', () => {
       stopIdleRecheck();
       stopInsightTimers();
