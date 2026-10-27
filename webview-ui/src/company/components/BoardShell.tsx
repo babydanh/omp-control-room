@@ -1090,9 +1090,10 @@ export function BoardShell({ client }: BoardShellProps) {
           client={client}
           store={projectStore}
           onClose={() => setStoppedNode(null)}
-          onWoken={(paneId) => {
+          onWoken={(target) => {
             setStoppedNode(null);
-            openHerdr(paneId, 'screen', true);
+            if ('paneId' in target) openHerdr(target.paneId, 'screen', true);
+            else selectWorkspaceSession(target.folder, target.boardSessionId);
           }}
         />
       )}

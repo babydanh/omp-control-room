@@ -250,17 +250,18 @@ async function runProjectRequest(
         const services = context.services?.session;
         if (services === undefined) throw new LibraryUserError('Chức năng chưa được kết nối.');
         const ledger = context.tree.ledger;
-        const paneId = await wakeEndedSession(
+        const target = await wakeEndedSession(
           typeof msg.sessionId === 'string' ? msg.sessionId : '',
           typeof msg.prompt === 'string' ? msg.prompt : '',
           {
             sessionRows: () => ledger.sessionRows(),
+            ...(services.reopenBoardChat === undefined ? {} : { reopenBoardChat: services.reopenBoardChat }),
             startAgent: (input) => services.startAgent(input),
             findAgent: (name) => services.findAgent(name),
             isDirectory: (folder) => statSync(folder, { throwIfNoEntry: false })?.isDirectory() === true,
           },
         );
-        send({ ...commandResult(requestId, 'wake', true, ''), paneId });
+        send({ ...commandResult(requestId, 'wake', true, ''), ...target });
         await sendTreeSnapshot(requestId, send, store, context);
         return;
       }

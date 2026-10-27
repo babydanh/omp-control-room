@@ -15,7 +15,7 @@ import { failureNotice } from '../commandResults.js';
 import type { CompanyClient } from '../companyClient.js';
 import { CompanyButton } from '../components/CompanyButton.js';
 import { useNow } from '../useNow.js';
-import { type ProjectStore, waitForProjectWake } from './projectStore.js';
+import { type ProjectStore, type ProjectWakeTarget, waitForProjectWake } from './projectStore.js';
 import { isEndedNode, sessionCode, sessionDisplayName, stoppedLabel, stoppedWakeKind } from './projectTreeView.js';
 
 /** The server's limit on a wake prompt, in characters. */
@@ -26,8 +26,8 @@ export interface StoppedSessionDialogProps {
   readonly client: CompanyClient;
   readonly store: ProjectStore;
   readonly onClose: () => void;
-  /** The wake went through: the session runs in this herdr pane now. */
-  readonly onWoken: (paneId: string) => void;
+  /** The wake went through: the session runs here now. */
+  readonly onWoken: (target: ProjectWakeTarget) => void;
 }
 
 export function StoppedSessionDialog({ node, client, store, onClose, onWoken }: StoppedSessionDialogProps) {
@@ -62,15 +62,14 @@ export function StoppedSessionDialog({ node, client, store, onClose, onWoken }: 
     if (wakeKind === 'pane') {
       const verdict = await client.waitForCommand(client.herdrWake(sessionId, text === '' ? undefined : text));
       if (verdict.ok) {
-        onWoken(verdict.paneId ?? sessionId);
+        onWoken({ paneId: verdict.paneId ?? sessionId });
         return;
       }
       setNotice(failureNotice(verdict, 'Không đánh thức được.'));
     } else {
       const outcome = await waitForProjectWake(store, store.wakeSession(sessionId, text), sessionId);
-      if ('paneId' in outcome) {
-        if (outcome.paneId === undefined) onClose();
-        else onWoken(outcome.paneId);
+      if ('target' in outcome) {
+        onWoken(outcome.target);
         return;
       }
       if ('refusal' in outcome) setNotice(outcome.refusal);

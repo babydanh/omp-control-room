@@ -31,6 +31,15 @@ export interface ProjectSessionServices {
   }) => Promise<string>;
   /** The live herdr agent under this name, if any: its pane id and working directory. */
   readonly findAgent: (name: string) => { readonly paneId: string; readonly cwd: string } | undefined;
+  /**
+   * Reopens the board chat that ran this omp session, in the board folder holding `cwd`, then types
+   * the prompt into it; undefined when no board chat ran it. Unset where no board folders exist.
+   */
+  readonly reopenBoardChat?: (input: {
+    readonly nativeSessionId: string;
+    readonly cwd: string;
+    readonly prompt: string;
+  }) => Promise<{ readonly folder: string; readonly sessionId: string } | undefined>;
   readonly runSetupScript: (
     argv: readonly string[],
     cwd: string,

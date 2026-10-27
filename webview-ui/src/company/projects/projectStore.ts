@@ -193,8 +193,11 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
 /** How a create ended: made (with the new node's id when the server named it), refused and why, or replaced by a newer create. */
 export type ProjectCreateOutcome = { readonly nodeId: string | undefined } | { readonly refusal: string } | { readonly superseded: true };
 
-/** How a wake ended: the pane the session runs in now, or why the server refused. */
-export type ProjectWakeOutcome = { readonly paneId: string | undefined } | { readonly refusal: string } | { readonly superseded: true };
+/** Where a woken session runs now: a herdr pane, or a board chat in its board folder. */
+export type ProjectWakeTarget = { readonly paneId: string } | { readonly boardSessionId: string; readonly folder: string };
+
+/** How a wake ended: where the session runs now, or why the server refused. */
+export type ProjectWakeOutcome = { readonly target: ProjectWakeTarget } | { readonly refusal: string } | { readonly superseded: true };
 
 /**
  * Waits until the command `requestId` is answered (or failed to send). A command that a newer one
@@ -231,6 +234,11 @@ export async function waitForProjectCreate(store: ProjectStore, requestId: strin
 
 export async function waitForProjectWake(store: ProjectStore, requestId: string, sessionId: string): Promise<ProjectWakeOutcome> {
   const outcome = await waitForProjectCommand(store, requestId, `command:wake:${sessionId}`);
-  return 'result' in outcome ? { paneId: outcome.result.paneId } : outcome;
+  if (!('result' in outcome)) return outcome;
+  const { paneId, boardSessionId, folder } = outcome.result;
+  if (boardSessionId !== undefined && folder !== undefined) return { target: { boardSessionId, folder } };
+  if (paneId !== undefined) return { target: { paneId } };
+  return { refusal: 'Máy chủ không nói phiên đang chạy ở đâu.' };
 }
+
 export function useProjectState(store: ProjectStore): ProjectState { return useSyncExternalStore(store.subscribe, store.getSnapshot); }

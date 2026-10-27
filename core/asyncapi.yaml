@@ -8515,6 +8515,12 @@ components:
         paneId:
           type: string
           description: Wake only, the herdr pane the reopened session runs in.
+        boardSessionId:
+          type: string
+          description: Wake only, the board chat the reopened omp session runs as.
+        folder:
+          type: string
+          description: Wake only, the board folder holding that board chat.
         reason:
           type: string
           description: Vietnamese refusal or failure reason.

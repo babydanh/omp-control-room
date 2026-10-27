@@ -3,17 +3,23 @@ import { randomUUID } from 'node:crypto';
 import type { SubmitPromptInput } from '../../../core/src/company.js';
 import type { ProjectPrepareScript, ProjectSettingsValues } from '../../../core/src/messages.js';
 import type { CompanyCoordinator } from '../company/companyCoordinator.js';
+import { isInsideRepo } from '../company/workItems/workItemScheduler.js';
 import type { HerdrLink } from '../herdr/herdrLink.js';
 import type { ProcessRunner } from '../ledger/processRunner.js';
 import type { ProjectSessionServices } from './newSession.js';
 
-type SessionCoordinator = Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt'>;
+type SessionCoordinator = Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt' | 'sessionForNative' | 'snapshot' | 'controlSession'>;
+
+/** Board session states that hold no process and reopen on `resume`. */
+const REOPENABLE_STATES: ReadonlySet<string> = new Set(['parked', 'paused', 'stopped', 'crashed']);
 
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 
 export interface ProjectSessionRuntimeOptions {
   readonly coordinatorFor: (folder: string) => Promise<SessionCoordinator>;
+  /** The board's folders, open or not: a board chat lives in one of them. */
+  readonly boardFolders: () => readonly string[];
   /** Opens Claude and agy as interactive agents in herdr, where the user watches and types. */
   readonly herdr: Pick<HerdrLink, 'startAgent' | 'snapshot'>;
   readonly runProcess: ProcessRunner;
@@ -89,6 +95,20 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
         ...(args === undefined ? {} : { args }),
         ...(text === '' ? {} : { prompt: text }),
       });
+    },
+    async reopenBoardChat({ nativeSessionId, cwd, prompt }) {
+      const folder = options.boardFolders().find((candidate) => isInsideRepo(cwd, candidate));
+      if (folder === undefined) return undefined;
+      const coordinator = await options.coordinatorFor(folder);
+      const sessionId = coordinator.sessionForNative?.(nativeSessionId) ?? null;
+      const session = coordinator.snapshot().sessions.find((candidate) => candidate.id === sessionId);
+      if (sessionId === null || session === undefined) return undefined;
+      if (REOPENABLE_STATES.has(session.status)) await coordinator.controlSession(sessionId, 'resume', session.runEpoch);
+      const text = prompt.trim();
+      if (text !== '') {
+        await coordinator.submitPrompt({ requestId: randomUUID(), text, targetSessionId: sessionId, delivery: 'prompt', mode: 'chat' });
+      }
+      return { folder, sessionId };
     },
     findAgent(name) {
       const agent = options.herdr.snapshot().agents.find((entry) => entry.name === name);

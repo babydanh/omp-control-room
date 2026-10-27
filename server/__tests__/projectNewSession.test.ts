@@ -6,7 +6,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { SubmitPromptInput } from '../../core/src/company.js';
-import type { HerdrAgentsMessage, ProjectSessionStartMessage, ProjectTreeNode } from '../../core/src/messages.js';
+import type { CompanySessionSummary, CompanySnapshot, HerdrAgentsMessage, ProjectSessionStartMessage, ProjectTreeNode } from '../../core/src/messages.js';
 import type { CompanyCoordinator } from '../src/company/companyCoordinator.js';
 import { type ProjectSessionServices, startProjectSession } from '../src/projects/newSession.js';
 import { createProjectSessionRuntime } from '../src/projects/newSessionRuntime.js';
@@ -16,6 +16,17 @@ import type { ProjectStore } from '../src/projects/projectStore.js';
 let root: string;
 let repo: string;
 let bare: string;
+
+/** A folder's coordinator as the session runtime uses it; `native-1` is the omp session board chat `board-1` ran. */
+function boardCoordinator(sessions: CompanySessionSummary[] = []) {
+  return {
+    openNewChat: vi.fn(async () => 'board-session'),
+    submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
+    sessionForNative: vi.fn((nativeSessionId: string) => (nativeSessionId === 'native-1' ? 'board-1' : null)),
+    snapshot: () => ({ sessions }) as unknown as CompanySnapshot,
+    controlSession: vi.fn(async () => undefined),
+  } satisfies Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt' | 'sessionForNative' | 'snapshot' | 'controlSession'>;
+}
 
 function git(cwd: string, ...args: string[]): string {
   return execFileSync('git', ['-c', 'user.name=Test', '-c', 'user.email=test@example.com', ...args], {
@@ -205,13 +216,11 @@ describe('project session start', () => {
   });
 
   it('adapts the coordinator and herdr using their runtime contracts', async () => {
-    const coordinator: Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt'> = {
-      openNewChat: vi.fn(async () => 'board-session'),
-      submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
-    };
+    const coordinator = boardCoordinator();
     const herdr = { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage };
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => coordinator),
+      boardFolders: () => [],
       herdr,
       runProcess: vi.fn(async () => ({
         ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false,
@@ -238,13 +247,11 @@ describe('project session start', () => {
   });
 
   it('opens every engine with no first prompt: the user types into the session', async () => {
-    const coordinator: Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt'> = {
-      openNewChat: vi.fn(async () => 'board-session'),
-      submitPrompt: vi.fn(async (_input: SubmitPromptInput) => ({}) as never),
-    };
+    const coordinator = boardCoordinator();
     const herdr = { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage };
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => coordinator),
+      boardFolders: () => [],
       herdr,
       runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
       effectiveSettings: async () => ({}),
@@ -255,6 +262,36 @@ describe('project session start', () => {
     await expect(startProjectSession(empty('claude'), deps(runtime))).resolves.toMatchObject({ ok: true, sessionId: 'wA:p9' });
     await expect(startProjectSession(empty('agy'), deps(runtime))).resolves.toMatchObject({ ok: true, sessionId: 'wA:p9' });
     expect(herdr.startAgent).toHaveBeenCalledWith({ cwd: repo, kind: 'agy', name: 'agy-sua-loi-dang-nhap' });
+  });
+
+  it('reopens the board chat that ran an omp session, in the board folder holding it, and types the prompt', async () => {
+    const stopped = boardCoordinator([{ id: 'board-1', status: 'stopped', runEpoch: 3 } as CompanySessionSummary]);
+    const runtime = createProjectSessionRuntime({
+      coordinatorFor: vi.fn(async () => stopped),
+      boardFolders: () => [path.join(root, 'other'), root],
+      herdr: { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
+      runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
+      effectiveSettings: async () => ({}),
+    });
+    await expect(runtime.reopenBoardChat?.({ nativeSessionId: 'native-1', cwd: repo, prompt: 'làm tiếp' })).resolves.toEqual({ folder: root, sessionId: 'board-1' });
+    expect(stopped.controlSession).toHaveBeenCalledWith('board-1', 'resume', 3);
+    expect(stopped.submitPrompt).toHaveBeenCalledWith(expect.objectContaining({ targetSessionId: 'board-1', text: 'làm tiếp', mode: 'chat' }));
+    // An omp session no board chat ran, or one outside every board folder, has no chat to reopen.
+    await expect(runtime.reopenBoardChat?.({ nativeSessionId: 'native-2', cwd: repo, prompt: '' })).resolves.toBeUndefined();
+    await expect(runtime.reopenBoardChat?.({ nativeSessionId: 'native-1', cwd: os.tmpdir(), prompt: '' })).resolves.toBeUndefined();
+
+    // A board chat still running is only pointed at, never resumed again.
+    const live = boardCoordinator([{ id: 'board-1', status: 'idle', runEpoch: 4 } as CompanySessionSummary]);
+    const liveRuntime = createProjectSessionRuntime({
+      coordinatorFor: vi.fn(async () => live),
+      boardFolders: () => [root],
+      herdr: { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
+      runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
+      effectiveSettings: async () => ({}),
+    });
+    await expect(liveRuntime.reopenBoardChat?.({ nativeSessionId: 'native-1', cwd: repo, prompt: '' })).resolves.toEqual({ folder: root, sessionId: 'board-1' });
+    expect(live.controlSession).not.toHaveBeenCalled();
+    expect(live.submitPrompt).not.toHaveBeenCalled();
   });
 
   it('makes a separate worktree for Claude as for omp, and starts the agent in it', async () => {

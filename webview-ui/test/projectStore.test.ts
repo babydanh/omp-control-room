@@ -112,11 +112,18 @@ describe('waiting for a wake', () => {
     const woken = waitForProjectWake(store, store.wakeSession('s-1', 'làm tiếp'), 's-1');
     expect(sent[0]).toEqual({ type: 'projectSessionWake', requestId: 'w1', sessionId: 's-1', prompt: 'làm tiếp' });
     store.accept({ type: 'projectCommandResult', requestId: 'w1', command: 'wake', ok: true, paneId: 'p_9' } as ServerMessage);
-    await expect(woken).resolves.toEqual({ paneId: 'p_9' });
+    await expect(woken).resolves.toEqual({ target: { paneId: 'p_9' } });
 
     const refused = waitForProjectWake(store, store.wakeSession('s-2', ''), 's-2');
     expect(sent[1]).not.toHaveProperty('prompt');
     store.accept({ type: 'projectCommandResult', requestId: 'w2', command: 'wake', ok: false, reason: 'Phiên này vẫn đang chạy.' } as ServerMessage);
     await expect(refused).resolves.toEqual({ refusal: 'Phiên này vẫn đang chạy.' });
+  });
+
+  it('names the board chat an omp session reopened as, in its board folder', async () => {
+    const store = createProjectStore({ send: () => undefined, newRequestId: () => 'w3' });
+    const woken = waitForProjectWake(store, store.wakeSession('s-3', ''), 's-3');
+    store.accept({ type: 'projectCommandResult', requestId: 'w3', command: 'wake', ok: true, boardSessionId: 'board-1', folder: 'V:/f' } as ServerMessage);
+    await expect(woken).resolves.toEqual({ target: { boardSessionId: 'board-1', folder: 'V:/f' } });
   });
 });

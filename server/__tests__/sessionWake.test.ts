@@ -41,7 +41,7 @@ function deps(rows: SessionRow[], extra: Partial<SessionWakeDeps> = {}) {
 describe('wakeEndedSession', () => {
   it('reopens an ended omp session from its file and a Claude one from its id, in the folder it ran in', async () => {
     const omp = deps([row({})]);
-    await expect(wakeEndedSession(OMP_ID, 'làm tiếp', omp.deps)).resolves.toBe('p_new');
+    await expect(wakeEndedSession(OMP_ID, 'làm tiếp', omp.deps)).resolves.toEqual({ paneId: 'p_new' });
     expect(omp.startAgent).toHaveBeenCalledWith({
       cwd: 'V:/repo',
       kind: 'omp',
@@ -59,8 +59,20 @@ describe('wakeEndedSession', () => {
 
   it('opens the pane of a wake already under way instead of starting a second agent', async () => {
     const twice = deps([row({})], { findAgent: (name) => (name === 'omp-2d87aec8' ? { paneId: 'p_first' } : undefined) });
-    await expect(wakeEndedSession(OMP_ID, '', twice.deps)).resolves.toBe('p_first');
+    await expect(wakeEndedSession(OMP_ID, '', twice.deps)).resolves.toEqual({ paneId: 'p_first' });
     expect(twice.startAgent).not.toHaveBeenCalled();
+  });
+
+  it('reopens an omp session a board chat ran as that chat, never as a second process on its file', async () => {
+    const reopenBoardChat = vi.fn<NonNullable<SessionWakeDeps['reopenBoardChat']>>(async () => ({ folder: 'V:/repo', sessionId: 'board-1' }));
+    const board = deps([row({})], { reopenBoardChat });
+    await expect(wakeEndedSession(OMP_ID, 'làm tiếp', board.deps)).resolves.toEqual({ boardSessionId: 'board-1', folder: 'V:/repo' });
+    expect(reopenBoardChat).toHaveBeenCalledWith({ nativeSessionId: OMP_ID, cwd: 'V:/repo', prompt: 'làm tiếp' });
+    expect(board.startAgent).not.toHaveBeenCalled();
+
+    // No board chat ran it: it resumes in herdr.
+    const plain = deps([row({})], { reopenBoardChat: async () => undefined });
+    await expect(wakeEndedSession(OMP_ID, '', plain.deps)).resolves.toEqual({ paneId: 'p_new' });
   });
 
   it('refuses a live session, a subagent, another agent kind and a folder that is gone', async () => {

@@ -113,6 +113,7 @@ export function createProjectRuntime(input: ProjectRuntimeInput): ProjectRuntime
       }),
       session: createProjectSessionRuntime({
         coordinatorFor: async (folder) => (await company.ensure(folder)).coordinator,
+        boardFolders: () => company.entries().map((entry) => entry.path),
         herdr,
         runProcess,
         effectiveSettings: (nodeId) => resolveProjectSettings(nodeId, settingsDeps),
