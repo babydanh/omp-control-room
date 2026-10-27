@@ -293,6 +293,20 @@ describe('project session start', () => {
     await expect(liveRuntime.reopenBoardChat?.({ nativeSessionId: 'native-1', cwd: repo, prompt: '' })).resolves.toEqual({ folder: root, sessionId: 'board-1' });
     expect(live.controlSession).not.toHaveBeenCalled();
     expect(live.submitPrompt).not.toHaveBeenCalled();
+
+    // Nested board folders: the first one holding the folder never ran it, the next one did.
+    const inner = boardCoordinator();
+    inner.sessionForNative.mockImplementation(() => null);
+    const outer = boardCoordinator([{ id: 'board-1', status: 'parked', runEpoch: 5 } as CompanySessionSummary]);
+    const nestedRuntime = createProjectSessionRuntime({
+      coordinatorFor: vi.fn(async (folder: string) => (folder === repo ? inner : outer)),
+      boardFolders: () => [repo, root],
+      herdr: { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
+      runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
+      effectiveSettings: async () => ({}),
+    });
+    await expect(nestedRuntime.reopenBoardChat?.({ nativeSessionId: 'native-1', cwd: repo, prompt: '' })).resolves.toEqual({ folder: root, sessionId: 'board-1' });
+    expect(outer.controlSession).toHaveBeenCalledWith('board-1', 'resume', 5);
   });
 
   it('makes a separate worktree for Claude as for omp, and starts the agent in it', async () => {

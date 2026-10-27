@@ -97,19 +97,22 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
       });
     },
     async reopenBoardChat({ nativeSessionId, cwd, prompt }) {
-      const folder = options.boardFolders().find((candidate) => isInsideRepo(cwd, candidate));
-      if (folder === undefined) return undefined;
-      const coordinator = await options.coordinatorFor(folder);
-      const sessionId = coordinator.sessionForNative?.(nativeSessionId) ?? null;
-      const session = coordinator.snapshot().sessions.find((candidate) => candidate.id === sessionId);
-      if (sessionId === null || session === undefined) return undefined;
-      const action = REOPEN_ACTION[session.status];
-      if (action !== undefined) await coordinator.controlSession(sessionId, action, session.runEpoch);
-      const text = prompt.trim();
-      if (text !== '') {
-        await coordinator.submitPrompt({ requestId: randomUUID(), text, targetSessionId: sessionId, delivery: 'prompt', mode: 'chat' });
+      // Folders nest (a repo and a worktree beside it may both be board folders): only the one whose
+      // board ran this session can reopen it, and missing it would start a second process on its file.
+      for (const folder of options.boardFolders().filter((candidate) => isInsideRepo(cwd, candidate))) {
+        const coordinator = await options.coordinatorFor(folder);
+        const sessionId = coordinator.sessionForNative?.(nativeSessionId) ?? null;
+        const session = coordinator.snapshot().sessions.find((candidate) => candidate.id === sessionId);
+        if (sessionId === null || session === undefined) continue;
+        const action = REOPEN_ACTION[session.status];
+        if (action !== undefined) await coordinator.controlSession(sessionId, action, session.runEpoch);
+        const text = prompt.trim();
+        if (text !== '') {
+          await coordinator.submitPrompt({ requestId: randomUUID(), text, targetSessionId: sessionId, delivery: 'prompt', mode: 'chat' });
+        }
+        return { folder, sessionId };
       }
-      return { folder, sessionId };
+      return undefined;
     },
     findAgent(name) {
       const agent = options.herdr.snapshot().agents.find((entry) => entry.name === name);
