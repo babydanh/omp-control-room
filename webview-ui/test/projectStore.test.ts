@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ClientMessage, ServerMessage } from '../../core/src/messages.js';
-import { createProjectStore, waitForProjectCreate } from '../src/company/projects/projectStore.js';
+import { createProjectStore, waitForProjectCreate, waitForProjectWake } from '../src/company/projects/projectStore.js';
 
 const snapshot = (requestId: string, name: string, partial = false): ServerMessage =>
   ({
@@ -101,5 +101,22 @@ describe('waiting for a create', () => {
   it('reports a create the transport could not send', async () => {
     const store = createProjectStore({ send: () => { throw new Error('Mất kết nối tới board.'); } });
     await expect(waitForProjectCreate(store, store.createNode({ kind: 'project', name: 'A', path: 'D:/a' }))).resolves.toEqual({ refusal: 'Mất kết nối tới board.' });
+  });
+});
+
+describe('waiting for a wake', () => {
+  it('answers with the pane the woken session runs in, or the reason the server refused it', async () => {
+    const sent: ClientMessage[] = [];
+    const ids = ['w1', 'w2'];
+    const store = createProjectStore({ send: (message) => sent.push(message), newRequestId: () => ids.shift() ?? 'x' });
+    const woken = waitForProjectWake(store, store.wakeSession('s-1', 'làm tiếp'), 's-1');
+    expect(sent[0]).toEqual({ type: 'projectSessionWake', requestId: 'w1', sessionId: 's-1', prompt: 'làm tiếp' });
+    store.accept({ type: 'projectCommandResult', requestId: 'w1', command: 'wake', ok: true, paneId: 'p_9' } as ServerMessage);
+    await expect(woken).resolves.toEqual({ paneId: 'p_9' });
+
+    const refused = waitForProjectWake(store, store.wakeSession('s-2', ''), 's-2');
+    expect(sent[1]).not.toHaveProperty('prompt');
+    store.accept({ type: 'projectCommandResult', requestId: 'w2', command: 'wake', ok: false, reason: 'Phiên này vẫn đang chạy.' } as ServerMessage);
+    await expect(refused).resolves.toEqual({ refusal: 'Phiên này vẫn đang chạy.' });
   });
 });

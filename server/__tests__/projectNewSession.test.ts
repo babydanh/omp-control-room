@@ -49,7 +49,7 @@ function createServices(overrides: Partial<ProjectSessionServices> = {}) {
       }
     },
     openChat: vi.fn(async () => 'omp-id'),
-    startAgent: vi.fn(async ({ kind }: { kind: 'claude' | 'agy' }) => `${kind}-pane`),
+    startAgent: vi.fn(async ({ kind }: { kind: 'omp' | 'claude' | 'agy' }) => `${kind}-pane`),
     findAgent: vi.fn((_name: string): { paneId: string; cwd: string } | undefined => undefined),
     runSetupScript: vi.fn(async () => ({ code: 0, stderr: '' })),
     ...overrides,

@@ -126,7 +126,7 @@ describe('createTranscriptProgress', () => {
     const read = createTranscriptProgress();
     expect(await read(file)).toEqual({ progress: { done: 0, total: 1, current: 'A' }, interrupted: limit });
     appendFileSync(file, `${JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'Làm tiếp' }] } })}\n`);
-    expect(await read(file)).toEqual({ progress: { done: 0, total: 1, current: 'A' } });
+    expect(await read(file)).toEqual({ progress: { done: 0, total: 1, current: 'A' }, lastReply: 'Làm tiếp' });
 
     const omp = (stopReason: string, errorMessage?: string) =>
       `${JSON.stringify({ type: 'message', message: { role: 'assistant', content: [], stopReason, ...(errorMessage === undefined ? {} : { errorMessage }) } })}\n`;
@@ -144,5 +144,21 @@ describe('createTranscriptProgress', () => {
     writeFileSync(file, `${typed('việc ban đầu')}\n${'x'.repeat(5000)}\n${typed('câu gần đây')}\n`);
     const read = createTranscriptProgress({ tailBytes: 200, maxLineBytes: 1000 });
     expect(await read(file)).toEqual({ request: 'việc ban đầu', lastRequest: 'câu gần đây', recentRequests: ['câu gần đây'] });
+  });
+
+  it("keeps the agent's newest answer with text, never a tool call, a subagent's line or an API error", async () => {
+    dir = mkdtempSync(join(tmpdir(), 'progress-'));
+    const file = join(dir, 'session.jsonl');
+    const omp = (text: string) => JSON.stringify({ type: 'message', message: { role: 'assistant', content: [{ type: 'text', text }] } });
+    const sidechain = JSON.stringify({ type: 'assistant', isSidechain: true, message: { role: 'assistant', content: [{ type: 'text', text: 'subagent nói' }] } });
+    const apiError = JSON.stringify({ type: 'assistant', isApiErrorMessage: true, message: { role: 'assistant', content: [{ type: 'text', text: 'rate limit' }] } });
+    writeFileSync(file, `${omp('Đã sửa xong popup, test 12/12 PASS.')}\n${claudeTodoLine([{ content: 'A', status: 'completed' }])}\n${sidechain}\n${apiError}\n`);
+    const read = createTranscriptProgress();
+    expect((await read(file)).lastReply).toBe('Đã sửa xong popup, test 12/12 PASS.');
+
+    appendFileSync(file, `${omp('x'.repeat(5000))}\n`);
+    const long = (await read(file)).lastReply ?? '';
+    expect(long).toHaveLength(1200);
+    expect(long.endsWith('…')).toBe(true);
   });
 });

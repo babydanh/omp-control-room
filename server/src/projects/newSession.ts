@@ -21,8 +21,14 @@ export interface ProjectSessionServices {
     timeoutMs: number,
   ) => Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }>;
   readonly openChat: (input: { readonly folder: string; readonly cwd: string; readonly prompt: string }) => Promise<string>;
-  /** Opens an interactive Claude or agy agent in a new herdr tab in `cwd`; resolves with its pane id. */
-  readonly startAgent: (input: { readonly cwd: string; readonly kind: 'claude' | 'agy'; readonly name: string; readonly prompt: string }) => Promise<string>;
+  /** Opens an interactive agent in a new herdr tab in `cwd`, with its own command-line arguments; resolves with its pane id. */
+  readonly startAgent: (input: {
+    readonly cwd: string;
+    readonly kind: 'omp' | 'claude' | 'agy';
+    readonly name: string;
+    readonly args?: readonly string[];
+    readonly prompt: string;
+  }) => Promise<string>;
   /** The live herdr agent under this name, if any: its pane id and working directory. */
   readonly findAgent: (name: string) => { readonly paneId: string; readonly cwd: string } | undefined;
   readonly runSetupScript: (

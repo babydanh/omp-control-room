@@ -314,6 +314,29 @@ export function stoppedLabel(node: ProjectTreeNode, now: number): string | null 
   return `${isEndedNode(node) ? 'tắt' : 'ngủ'} ${ago}`;
 }
 
+/** A session's own id and its short form: a herdr pane's transcript id, else the row's session id. */
+export interface SessionCode {
+  readonly full: string;
+  /** The last 8 characters, as the server's stand-in title "…xxxxxxxx" writes it. */
+  readonly short: string;
+}
+
+export function sessionCode(node: ProjectTreeNode): SessionCode | null {
+  const full = node.transcriptId ?? node.sessionId;
+  if (full === undefined || full === '') return null;
+  return { full, short: full.length > 8 ? full.slice(-8) : full };
+}
+
+/**
+ * How a stopped session is woken from the board: a sleeping herdr pane by herdr itself; an exited
+ * omp or Claude session by a new herdr tab that resumes it; anything else not at all.
+ */
+export function stoppedWakeKind(node: ProjectTreeNode): 'pane' | 'resume' | null {
+  if (node.agentKind === 'herdr' && (node.state ?? '').toLowerCase() === 'sleeping') return 'pane';
+  if (isEndedNode(node) && (node.engine === 'omp' || node.engine === 'claude')) return 'resume';
+  return null;
+}
+
 /** States the "rảnh" chip counts: stopped, nothing asked of you. */
 const IDLE_STATES: ReadonlySet<string> = new Set(['idle', 'waiting']);
 

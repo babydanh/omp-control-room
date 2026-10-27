@@ -13,6 +13,7 @@ import { open, stat } from 'node:fs/promises';
 import type { CompanySessionTodo, ProjectTreeNode } from '../../../core/src/messages.js';
 import { readTodo } from '../company/sessionInsight.js';
 import { isRecord } from '../company/typeGuards.js';
+import { assistantText } from '../herdr/agentReply.js';
 
 export type SessionProgress = NonNullable<ProjectTreeNode['progress']>;
 
@@ -38,6 +39,8 @@ const HEAD_BYTES = 256 * 1024;
 const MAX_INTERRUPTED = 300;
 /** How many of the user's newest messages a session row carries for its hover card. */
 const RECENT_REQUESTS_MAX = 5;
+/** Characters of the agent's last answer a session row carries: enough to tell what it did. */
+const MAX_REPLY = 1200;
 
 /**
  * What a transcript says about its session: the todo progress, the first thing the user asked
@@ -52,6 +55,8 @@ export interface TranscriptFacts {
   /** The user's newest messages, newest first, at most {@link RECENT_REQUESTS_MAX}. */
   readonly recentRequests?: string[];
   readonly interrupted?: string;
+  /** The agent's newest answer with text in it, clipped: what it reported having done. */
+  readonly lastReply?: string;
 }
 
 function clip(text: string, max: number): string {
@@ -174,6 +179,8 @@ interface FileState {
   recent: string[];
   /** The error that cut the newest agent turn off; cleared by any later agent message. */
   interrupted: string | undefined;
+  /** The agent's newest answer with text in it. */
+  lastReply: string | undefined;
 }
 
 export interface TranscriptLimits {
@@ -210,6 +217,9 @@ export function createTranscriptProgress(
       if (todo !== undefined) state.todo = todo;
       const turnError = turnErrorFromTranscriptLine(line);
       if (turnError !== undefined) state.interrupted = turnError ?? undefined;
+      // An error the API wrote in the agent's place, or a subagent's message, is no answer of its own.
+      const reply = typeof turnError === 'string' || line.includes('"isSidechain":true') ? '' : assistantText(line);
+      if (reply !== '') state.lastReply = reply;
       const request = requestFromTranscriptLine(line);
       if (request === undefined) continue;
       state.lastRequest = request;
@@ -265,7 +275,7 @@ export function createTranscriptProgress(
     // A new file is read from its tail; a shorter file was rewritten and is read again.
     if (state === undefined || size < state.offset) {
       const offset = Math.max(0, size - limits.tailBytes);
-      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined, request: undefined, lastRequest: undefined, recent: [], interrupted: undefined };
+      state = { offset, carry: EMPTY, skipping: offset > 0, todo: undefined, request: undefined, lastRequest: undefined, recent: [], interrupted: undefined, lastReply: undefined };
       if (files.size >= MAX_FILES) files.delete(files.keys().next().value ?? '');
       files.set(file, state);
       if (offset > 0) state.request = await readFirstRequest(file, size).catch(() => undefined);
@@ -278,6 +288,7 @@ export function createTranscriptProgress(
       ...(state.lastRequest === undefined || state.lastRequest === state.request ? {} : { lastRequest: state.lastRequest }),
       ...(state.interrupted === undefined ? {} : { interrupted: state.interrupted }),
       ...(state.recent.length === 0 ? {} : { recentRequests: [...state.recent].reverse() }),
+      ...(state.lastReply === undefined ? {} : { lastReply: clip(state.lastReply, MAX_REPLY) }),
     };
   };
 }

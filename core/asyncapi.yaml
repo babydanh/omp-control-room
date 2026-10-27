@@ -287,6 +287,7 @@ components:
         - $ref: '#/components/schemas/ProjectSettingsClearMessage'
         - $ref: '#/components/schemas/ProjectSessionStartMessage'
         - $ref: '#/components/schemas/ProjectSessionStopMessage'
+        - $ref: '#/components/schemas/ProjectSessionWakeMessage'
         - $ref: '#/components/schemas/ProjectImageSaveMessage'
         - $ref: '#/components/schemas/ProjectBranchCompareRequestMessage'
         - $ref: '#/components/schemas/ProjectMergePreviewRequestMessage'
@@ -8341,6 +8342,28 @@ components:
           minLength: 1
           maxLength: 256
 
+    ProjectSessionWakeMessage:
+      type: object
+      additionalProperties: false
+      description: >-
+        Reopens a main omp or Claude Code session that exited lately (the ledger still lists it as
+        ended): a new herdr tab in its folder runs the agent resuming its own transcript, and the
+        optional prompt is typed into it. The result names the pane it runs in.
+      required: [type, requestId, sessionId]
+      properties:
+        type:
+          const: projectSessionWake
+        requestId:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          minLength: 1
+          maxLength: 256
+        prompt:
+          type: string
+          maxLength: 4000
+
     ProjectImageSaveMessage:
       type: object
       additionalProperties: false
@@ -8484,11 +8507,14 @@ components:
           format: uuid
         command:
           type: string
-          enum: [create, update, delete, move, comment, settingsSet, settingsClear, stop, imageSave]
+          enum: [create, update, delete, move, comment, settingsSet, settingsClear, stop, wake, imageSave]
         ok:
           type: boolean
         nodeId:
           type: string
+        paneId:
+          type: string
+          description: Wake only, the herdr pane the reopened session runs in.
         reason:
           type: string
           description: Vietnamese refusal or failure reason.
@@ -8622,6 +8648,18 @@ components:
             Session rows: when the session stopped, for a sleeping herdr pane the moment it was put
             to sleep, for an ended one (state ended, kept for a day) the moment it exited. The
             sidebar lists the latest of these first.
+        lastReply:
+          type: string
+          maxLength: 1200
+          description: >-
+            Session rows: the agent's newest answer with text in it (no tool call, no subagent
+            line, no API error), clipped. What it reported having done; the stopped-session card
+            shows it.
+        transcriptId:
+          type: string
+          description: >-
+            Herdr pane rows: the agent's own session id, the one it reported or the uuid its
+            transcript file is named after. A ledger row's sessionId is that id already.
         state:
           type: string
         title:

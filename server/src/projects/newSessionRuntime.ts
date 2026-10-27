@@ -80,9 +80,15 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
       await coordinator.submitPrompt(input);
       return sessionId;
     },
-    async startAgent({ cwd, kind, name, prompt }) {
+    async startAgent({ cwd, kind, name, args, prompt }) {
       const text = prompt.trim();
-      return options.herdr.startAgent({ cwd, kind, name, ...(text === '' ? {} : { prompt: text }) });
+      return options.herdr.startAgent({
+        cwd,
+        kind,
+        name,
+        ...(args === undefined ? {} : { args }),
+        ...(text === '' ? {} : { prompt: text }),
+      });
     },
     findAgent(name) {
       const agent = options.herdr.snapshot().agents.find((entry) => entry.name === name);

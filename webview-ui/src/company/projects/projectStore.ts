@@ -19,6 +19,7 @@ import type {
   ProjectSessionStartMessage,
   ProjectSessionStartResultMessage,
   ProjectSessionStopMessage,
+  ProjectSessionWakeMessage,
   ProjectSettingsClearMessage,
   ProjectSettingsMessage,
   ProjectSettingsRequestMessage,
@@ -51,6 +52,7 @@ type ProjectRequest =
   | ProjectSettingsClearMessage
   | ProjectSessionStartMessage
   | ProjectSessionStopMessage
+  | ProjectSessionWakeMessage
   | ProjectImageSaveMessage
   | ProjectCommentMessage
   | ProjectMergePreviewRequestMessage
@@ -83,6 +85,8 @@ export interface ProjectStore {
   startSession: (input: Omit<ProjectSessionStartMessage, 'type' | 'requestId'>) => string;
   /** Stops a live ledger session: its process tree ends. */
   stopSession: (sessionId: string) => string;
+  /** Reopens a session that exited lately in a new herdr tab resuming its transcript, the prompt typed into it. */
+  wakeSession: (sessionId: string, prompt: string) => string;
   /** Saves an image from the prompt box; its result is `projectImageSaved` with the file's path. */
   saveImage: (input: Omit<ProjectImageSaveMessage, 'type' | 'requestId'>) => string;
   sendComment: (input: Omit<ProjectCommentMessage, 'type' | 'requestId'>) => string;
@@ -151,6 +155,7 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
       case 'projectSettingsClear': return `command:settingsClear:${request.nodeId}:${request.field}`;
       case 'projectSessionStart': return 'sessionStart';
       case 'projectSessionStop': return `command:stop:${request.sessionId}`;
+      case 'projectSessionWake': return `command:wake:${request.sessionId}`;
       case 'projectImageSave': return `image:${request.requestId}`;
       case 'projectComment': return `comment:${request.requestId}`;
       case 'projectMergePreviewRequest': return `merge:${request.repo}:${request.branchA}:${request.branchB}`;
@@ -170,6 +175,10 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     setSetting: (input) => { const req = { ...input, type: 'projectSettingsSet' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     startSession: (input) => { const req = { ...input, type: 'projectSessionStart' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     stopSession: (sessionId) => { const req = { type: 'projectSessionStop' as const, requestId: requestId(), sessionId }; return transmit(req, latestKey(req)); },
+    wakeSession: (sessionId, prompt) => {
+      const req = { type: 'projectSessionWake' as const, requestId: requestId(), sessionId, ...(prompt === '' ? {} : { prompt }) };
+      return transmit(req, latestKey(req));
+    },
     saveImage: (input) => { const req = { ...input, type: 'projectImageSave' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     sendComment: (input) => { const req = { ...input, type: 'projectComment' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
     previewMerge: (input) => { const req = { ...input, type: 'projectMergePreviewRequest' as const, requestId: requestId() }; return transmit(req, latestKey(req)); },
@@ -184,12 +193,19 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
 /** How a create ended: made (with the new node's id when the server named it), refused and why, or replaced by a newer create. */
 export type ProjectCreateOutcome = { readonly nodeId: string | undefined } | { readonly refusal: string } | { readonly superseded: true };
 
+/** How a wake ended: the pane the session runs in now, or why the server refused. */
+export type ProjectWakeOutcome = { readonly paneId: string | undefined } | { readonly refusal: string } | { readonly superseded: true };
+
 /**
- * Waits until the create `requestId` is answered (or failed to send). A create that a newer one
- * replaced before its answer came has no result of its own: it says nothing, the newer one
- * reports. Executor form: the ES2022 lib has no Promise.withResolvers.
+ * Waits until the command `requestId` is answered (or failed to send). A command that a newer one
+ * of the same key replaced before its answer came has no result of its own: it says nothing, the
+ * newer one reports. Executor form: the ES2022 lib has no Promise.withResolvers.
  */
-export function waitForProjectCreate(store: ProjectStore, requestId: string): Promise<ProjectCreateOutcome> {
+function waitForProjectCommand(
+  store: ProjectStore,
+  requestId: string,
+  key: string,
+): Promise<{ readonly result: ProjectCommandResultMessage } | { readonly refusal: string } | { readonly superseded: true }> {
   return new Promise((resolve) => {
     const settle = (): void => {
       const state = store.getSnapshot();
@@ -197,14 +213,24 @@ export function waitForProjectCreate(store: ProjectStore, requestId: string): Pr
       unsubscribe();
       const result = state.results[requestId];
       if (result?.type === 'projectCommandResult' && result.ok) {
-        resolve({ nodeId: result.nodeId });
+        resolve({ result });
         return;
       }
-      const reason = (result?.type === 'projectCommandResult' ? result.reason : undefined) || state.errors['command:create'];
+      const reason = (result?.type === 'projectCommandResult' ? result.reason : undefined) || state.errors[key];
       resolve(reason ? { refusal: reason } : { superseded: true });
     };
     const unsubscribe = store.subscribe(settle);
     settle();
   });
+}
+
+export async function waitForProjectCreate(store: ProjectStore, requestId: string): Promise<ProjectCreateOutcome> {
+  const outcome = await waitForProjectCommand(store, requestId, 'command:create');
+  return 'result' in outcome ? { nodeId: outcome.result.nodeId } : outcome;
+}
+
+export async function waitForProjectWake(store: ProjectStore, requestId: string, sessionId: string): Promise<ProjectWakeOutcome> {
+  const outcome = await waitForProjectCommand(store, requestId, `command:wake:${sessionId}`);
+  return 'result' in outcome ? { paneId: outcome.result.paneId } : outcome;
 }
 export function useProjectState(store: ProjectStore): ProjectState { return useSyncExternalStore(store.subscribe, store.getSnapshot); }

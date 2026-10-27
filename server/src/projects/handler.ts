@@ -1,3 +1,5 @@
+import { statSync } from 'node:fs';
+
 import type {
   ProjectBranchCompareRequestMessage,
   ProjectCommandResultMessage,
@@ -34,6 +36,7 @@ import {
 } from './projectTree.js';
 import type { ProjectModuleDeps, ProjectServices } from './services.js';
 import { processAlive, stopLedgerSession } from './sessionStop.js';
+import { wakeEndedSession } from './sessionWake.js';
 import { clearProjectSettings, getProjectSettings, refreshProjectSettings, setProjectSettings } from './settingsLayers.js';
 
 const FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
@@ -50,6 +53,7 @@ const REQUEST_TYPES: Record<string, true> = {
   projectSettingsClear: true,
   projectSessionStart: true,
   projectSessionStop: true,
+  projectSessionWake: true,
   projectImageSave: true,
   projectMergePreviewRequest: true,
   projectBranchCompareRequest: true,
@@ -241,6 +245,25 @@ async function runProjectRequest(
         send(commandResult(requestId, 'stop', true, ''));
         return;
       }
+      case 'projectSessionWake': {
+        if (context.tree === undefined) throw new LibraryUserError('Sổ hoạt động chưa được kết nối.');
+        const services = context.services?.session;
+        if (services === undefined) throw new LibraryUserError('Chức năng chưa được kết nối.');
+        const ledger = context.tree.ledger;
+        const paneId = await wakeEndedSession(
+          typeof msg.sessionId === 'string' ? msg.sessionId : '',
+          typeof msg.prompt === 'string' ? msg.prompt : '',
+          {
+            sessionRows: () => ledger.sessionRows(),
+            startAgent: (input) => services.startAgent(input),
+            findAgent: (name) => services.findAgent(name),
+            isDirectory: (folder) => statSync(folder, { throwIfNoEntry: false })?.isDirectory() === true,
+          },
+        );
+        send({ ...commandResult(requestId, 'wake', true, ''), paneId });
+        await sendTreeSnapshot(requestId, send, store, context);
+        return;
+      }
       case 'projectImageSave': {
         const path = await savePromptImage(msg as unknown as ProjectImageSaveMessage);
         send({ type: 'projectImageSaved', requestId, path });
@@ -383,6 +406,7 @@ function commandFor(type: string): ProjectCommandResultMessage['command'] {
     case 'projectComment': return 'comment';
     case 'projectSettingsClear': return 'settingsClear';
     case 'projectSessionStop': return 'stop';
+    case 'projectSessionWake': return 'wake';
     case 'projectImageSave': return 'imageSave';
     default: return 'settingsSet';
   }
@@ -411,6 +435,7 @@ function safeReason(type: string): string {
     case 'projectSettingsSet':
     case 'projectSettingsClear': return 'Không thể cập nhật cài đặt Project.';
     case 'projectSessionStop': return 'Không thể tắt phiên.';
+    case 'projectSessionWake': return 'Không mở lại được phiên.';
     case 'projectImageSave': return 'Không lưu được ảnh.';
     default: return 'Không thể thực hiện yêu cầu Project.';
   }

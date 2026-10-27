@@ -42,6 +42,10 @@ export interface ProjectSessionSnapshot {
   readonly recentRequests?: string[];
   /** The error that cut the agent's last turn off (a usage limit, a lost connection), while no answer followed it. */
   readonly interrupted?: string;
+  /** The agent's newest answer with text in it, clipped: what it reported having done. */
+  readonly lastReply?: string;
+  /** The agent's own session id (what its resume takes), for a herdr pane that named its transcript. */
+  readonly transcriptId?: string;
   /** When the session stopped: a sleeping pane's sleep, an ended session's exit (ISO). */
   readonly stoppedAt?: string;
 }
@@ -117,6 +121,8 @@ const SESSION_INTENT_WINDOW_MS = 6 * 60 * 60 * 1000;
 const ENDED_SESSION_WINDOW_MS = 24 * 60 * 60 * 1000;
 /** At most this many ended sessions stay, the newest ones. */
 const ENDED_SESSIONS_MAX = 20;
+/** The uuid a transcript file is named after: Claude `<uuid>.jsonl`, omp `<time>_<uuid>.jsonl`. */
+const TRANSCRIPT_ID = /(?:^|_)([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/i;
 function canonicalKey(folder: string): string {
   const resolved = path.resolve(folder);
   return process.platform === 'win32' ? resolved.toLocaleLowerCase('en-US') : resolved;
@@ -134,7 +140,7 @@ function pathContains(parent: string, candidate: string): boolean {
 type ProjectAgentKind = NonNullable<ProjectTreeNode['agentKind']>;
 type ProjectSessionEngine = NonNullable<ProjectTreeNode['engine']>;
 
-function engineForLedger(row: SessionRow): ProjectSessionEngine {
+export function engineForLedger(row: SessionRow): ProjectSessionEngine {
   const kind = (row.agentKind ?? '').toLowerCase();
   if (kind.includes('claude')) return 'claude';
   if (kind.includes('agy')) return 'agy';
@@ -163,6 +169,7 @@ type TitledSessionRow = SessionRow & {
   readonly lastRequest?: string;
   readonly recentRequests?: string[];
   readonly interrupted?: string;
+  readonly lastReply?: string;
 };
 
 /**
@@ -366,6 +373,7 @@ function sessionsForCheckout(
       engine: 'herdr', agentKind: 'herdr', id: session.id, cwd: session.cwd, status: session.status, title: session.title,
       ...factFields(session),
       ...(session.sleptAt === undefined ? {} : { stoppedAt: session.sleptAt }),
+      ...transcriptIdOf(session),
     });
   }
   return sessions;
@@ -744,6 +752,7 @@ function pushSessions(output: ProjectTreeNode[], parentId: string, sessions: rea
       ...(session.editCheckouts === undefined ? {} : { editCheckouts: [...session.editCheckouts] }),
       ...factFields(session),
       ...(session.stoppedAt === undefined ? {} : { stoppedAt: session.stoppedAt }),
+      ...(session.transcriptId === undefined ? {} : { transcriptId: session.transcriptId }),
     });
   }
 }
@@ -782,7 +791,15 @@ function factFields(facts: TranscriptFacts): TranscriptFacts {
     ...(facts.lastRequest === undefined ? {} : { lastRequest: facts.lastRequest }),
     ...(facts.recentRequests === undefined ? {} : { recentRequests: facts.recentRequests }),
     ...(facts.interrupted === undefined ? {} : { interrupted: facts.interrupted }),
+    ...(facts.lastReply === undefined ? {} : { lastReply: facts.lastReply }),
   };
+}
+
+/** A pane's session id: the one it reported, else the uuid its transcript file is named after. */
+function transcriptIdOf(pane: HerdrProjectSession): { transcriptId?: string } {
+  const fromFile = pane.sessionFile === undefined ? undefined : TRANSCRIPT_ID.exec(path.basename(pane.sessionFile))?.[1];
+  const id = pane.sessionId ?? fromFile;
+  return id === undefined ? {} : { transcriptId: id };
 }
 
 /**

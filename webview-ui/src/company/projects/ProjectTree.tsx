@@ -4,7 +4,7 @@ import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
-import { ancestorOf, projectMenuContext } from './projectNodeTargets.js';
+import { projectMenuContext } from './projectNodeTargets.js';
 import type { ProjectStore } from './projectStore.js';
 import {
   buildAgentTree,
@@ -18,6 +18,7 @@ import {
   type ProjectTreeBranch,
   recentlyStoppedSessions,
   selectedAncestorIds,
+  sessionCode,
   sessionDisplayName,
   sessionFaceHue,
   sessionFaceMood,
@@ -94,6 +95,8 @@ export interface ProjectTreeProps {
   onNewSession: (nodeId: string, engine?: 'omp' | 'claude' | 'agy') => void;
   /** Opens a session row's terminal; the branch carries the Project folder it works under. */
   onOpenSession: (session: ProjectTreeNode, where: { readonly folderPath?: string }) => void;
+  /** Opens a "Vừa ngủ / tắt" session's details: its prompts, its last answer, and its wake. */
+  onOpenStopped: (session: ProjectTreeNode) => void;
   onMenu: (request: AgentMenuRequest) => void;
   /** The session the detail drawer shows; its row is highlighted and scrolled into view. */
   selection?: TreeSelection;
@@ -166,7 +169,7 @@ export function ProjectTree(props: ProjectTreeProps) {
         <label className="flex items-center gap-1" title="Chỉ hiện phiên đang làm hoặc đang chờ bạn, ẩn phiên rảnh"><input type="checkbox" checked={liveOnly} onChange={(event) => setLiveOnly(event.target.checked)} />Ẩn phiên rảnh</label>
         <label className={`flex shrink-0 items-center gap-1 ${unfinishedCount > 0 ? 'text-warning' : ''}`} title="Chỉ hiện phiên làm dở: bị ngắt giữa chừng, hoặc đã dừng khi todo chưa xong (kể cả phiên đã tắt trong 24 giờ qua)"><input type="checkbox" checked={unfinishedOnly} onChange={(event) => setUnfinishedOnly(event.target.checked)} />Làm dở{unfinishedCount > 0 ? ` (${unfinishedCount})` : ''}</label>
       </div>
-      <RecentlyStopped nodes={nodes} onOpenSession={props.onOpenSession} />
+      <RecentlyStopped nodes={nodes} onOpenStopped={props.onOpenStopped} />
       <div className="min-h-0 overflow-y-auto">
         {visible.map((branch) => (
           <ProjectTreeRow key={branch.node.id} branch={branch} depth={0} collapsed={collapsed} onToggleCollapse={toggleCollapse} onMove={moveNode} {...props} />
@@ -192,7 +195,7 @@ function UnfinishedMark({ node, count = false }: { node: ProjectTreeNode; count?
 }
 
 /** The sessions put to sleep or exited last, newest first: which one, how long ago, and whether it left work undone. */
-function RecentlyStopped({ nodes, onOpenSession }: Pick<ProjectTreeProps, 'nodes' | 'onOpenSession'>) {
+function RecentlyStopped({ nodes, onOpenStopped }: Pick<ProjectTreeProps, 'nodes' | 'onOpenStopped'>) {
   const now = useNow();
   const [open, setOpen] = useState(true);
   const recent = useMemo(() => recentlyStoppedSessions(nodes, RECENT_STOPPED_MAX), [nodes]);
@@ -207,27 +210,28 @@ function RecentlyStopped({ nodes, onOpenSession }: Pick<ProjectTreeProps, 'nodes
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>Vừa ngủ / tắt
       </button>
-      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} nodes={nodes} now={now} onOpenSession={onOpenSession} />)}
+      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} now={now} onOpenStopped={onOpenStopped} />)}
     </section>
   );
 }
 
-/** One "Vừa ngủ / tắt" row; resting the pointer on it shows the session's card with its newest prompts. */
-function RecentStoppedRow({ node, nodes, now, onOpenSession }: Pick<ProjectTreeProps, 'nodes' | 'onOpenSession'> & { node: ProjectTreeNode; now: number }) {
+/** One "Vừa ngủ / tắt" row with its session code; the pointer shows its card, a click opens its details. */
+function RecentStoppedRow({ node, now, onOpenStopped }: Pick<ProjectTreeProps, 'onOpenStopped'> & { node: ProjectTreeNode; now: number }) {
   const hover = useSessionHover(true);
-  const folderPath = ancestorOf(nodes, node, 'folder')?.path;
   const label = stoppedLabel(node, now);
+  const code = sessionCode(node);
   return (
     <>
       <button
         type="button"
         data-testid="recent-stopped-row"
-        onClick={() => onOpenSession(node, folderPath === undefined ? {} : { folderPath })}
+        onClick={() => onOpenStopped(node)}
         {...hover.bind}
         className="touch-target flex min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-hover"
       >
         <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" />
         <span className="min-w-0 flex-1 truncate text-text">{sessionDisplayName(node)}</span>
+        {code !== null && <span className="shrink-0 font-mono text-2xs text-text-muted" title={`Mã phiên ${code.full}`}>#{code.short}</span>}
         <UnfinishedMark node={node} count />
         <span className="shrink-0 text-2xs text-text-muted">{label}</span>
       </button>

@@ -251,12 +251,13 @@ describe('buildProjectTreeSnapshot', () => {
       git: { run: async () => processResult() },
       sessionsOnly: true,
       herdrSessions: () => [
-        { id: 'zz:1', cwd, status: 'sleeping', title: '3d6cdbd2', sessionFile: 'C:/s/a.jsonl' },
+        { id: 'zz:1', cwd, status: 'sleeping', title: '3d6cdbd2', sessionFile: 'C:/s/2026-10-27T08-04-52-332Z_01a17c64-05ec-7096-9639-6d082d87aec8.jsonl' },
         { id: 'w1:p2', cwd, status: 'sleeping', title: 'Không có transcript' },
+        { id: 'w1:p3', cwd, status: 'sleeping', title: 'Claude', sessionId: '5320e2e5-e5ac-4fe5-94b2-ce1e84d6ed51' },
       ],
       sessionFacts: async (file) => {
         read.push(file);
-        return { progress: { done: 1, total: 3, current: 'Thêm animation' }, request: 'làm animation nhân vật', lastRequest: 'làm tiếp', interrupted: "You've hit your session limit" };
+        return { progress: { done: 1, total: 3, current: 'Thêm animation' }, request: 'làm animation nhân vật', lastRequest: 'làm tiếp', interrupted: "You've hit your session limit", lastReply: 'Đã thêm 2/3 animation.' };
       },
     });
     const sessions = snapshot.nodes.filter((node) => node.kind === 'session');
@@ -265,9 +266,14 @@ describe('buildProjectTreeSnapshot', () => {
       request: 'làm animation nhân vật',
       lastRequest: 'làm tiếp',
       interrupted: "You've hit your session limit",
+      lastReply: 'Đã thêm 2/3 animation.',
+      // The id its resume takes, read from the transcript's name.
+      transcriptId: '01a17c64-05ec-7096-9639-6d082d87aec8',
     });
     expect(sessions.find((node) => node.id === 'herdr:w1:p2')).not.toHaveProperty('request');
-    expect(read).toEqual(['C:/s/a.jsonl']);
+    expect(sessions.find((node) => node.id === 'herdr:w1:p2')).not.toHaveProperty('transcriptId');
+    expect(sessions.find((node) => node.id === 'herdr:w1:p3')?.transcriptId).toBe('5320e2e5-e5ac-4fe5-94b2-ce1e84d6ed51');
+    expect(read).toEqual(['C:/s/2026-10-27T08-04-52-332Z_01a17c64-05ec-7096-9639-6d082d87aec8.jsonl']);
   });
 });
 

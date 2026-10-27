@@ -53,6 +53,7 @@ import {
 } from '../projects/projectNodeTargets.js';
 import { useProjectState, waitForProjectCreate } from '../projects/projectStore.js';
 import { isEndedNode } from '../projects/projectTreeView.js';
+import { StoppedSessionDialog } from '../projects/StoppedSessionDialog.js';
 import { COMPANY_ROLES, roleProfile } from '../roleProfiles.js';
 import { startScrollFades } from '../scrollFades.js';
 import {
@@ -130,13 +131,6 @@ function projectHoldingFolder(nodes: readonly ProjectTreeNode[], folderPath: str
   return folder === undefined ? undefined : ancestorOf(nodes, folder, 'project')?.id;
 }
 
-/** What a click on an exited session says: it has no pane left, and how to bring it back. */
-function endedSessionNotice(session: ProjectTreeNode, id: string): string {
-  if (session.engine === 'claude') return `Phiên ${session.name} đã tắt. Mở lại trong terminal ở thư mục của nó: claude --resume ${id}`;
-  if (session.engine === 'omp') return `Phiên ${session.name} đã tắt. Mở omp ở thư mục của nó rồi gõ /resume để chọn lại phiên.`;
-  return `Phiên ${session.name} đã tắt, không còn khung nào để mở.`;
-}
-
 export interface BoardShellProps {
   client: CompanyClient;
 }
@@ -147,6 +141,8 @@ export function BoardShell({ client }: BoardShellProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectSettingsNode, setProjectSettingsNode] = useState<string | null>(null);
   const [newSessionNode, setNewSessionNode] = useState<{ nodeId: string; engine?: ProjectSessionEngine } | null>(null);
+  /** The "Vừa ngủ / tắt" session whose details are open, to be woken from there. */
+  const [stoppedNode, setStoppedNode] = useState<ProjectTreeNode | null>(null);
   const [selectedCheckoutId, setSelectedCheckoutId] = useState('');
   const [changesTab, setChangesTab] = useState<'diff' | 'merge' | 'compare'>('diff');
   const [compareBranchA, setCompareBranchA] = useState('');
@@ -455,7 +451,7 @@ export function BoardShell({ client }: BoardShellProps) {
     const boardKey = session.boardSessionId ?? (state.sessions[id] !== undefined ? id : null);
     if (boardKey !== null && state.sessions[boardKey] !== undefined) selectSession(boardKey);
     else if (boardKey !== null && where.folderPath !== undefined) selectWorkspaceSession(where.folderPath, boardKey);
-    else if (isEndedNode(session)) setSessionNotice(endedSessionNotice(session, id));
+    else if (isEndedNode(session)) setStoppedNode(session);
     else if (session.herdrPaneId !== undefined) openHerdr(revealPane(session.herdrPaneId, where));
     else if (session.agentKind === 'herdr' && session.state === 'sleeping') openSleeping(revealPane(id, where));
     else if (session.agentKind === 'herdr') openHerdr(revealPane(id, where));
@@ -940,6 +936,7 @@ export function BoardShell({ client }: BoardShellProps) {
                 onOpenSettings: openProjectSettings,
                 onNewSession: (nodeId, engine) => setNewSessionNode({ nodeId, ...(engine === undefined ? {} : { engine }) }),
                 onOpenSession: openProjectSession,
+                onOpenStopped: setStoppedNode,
                 onMenu: openMenu,
                 store: projectStore,
                 selection: { sessionId: selectedSessionId, paneId: selectedPaneId },
@@ -1083,6 +1080,19 @@ export function BoardShell({ client }: BoardShellProps) {
             }
             // An omp chat lives in its folder's board, so the board switches there to show it.
             if (folderPath !== undefined) selectWorkspaceSession(folderPath, sessionId);
+          }}
+        />
+      )}
+      {stoppedNode !== null && (
+        <StoppedSessionDialog
+          // The tree refreshes while it is open: show the node's newest facts.
+          node={projects.nodes.find((candidate) => candidate.id === stoppedNode.id) ?? stoppedNode}
+          client={client}
+          store={projectStore}
+          onClose={() => setStoppedNode(null)}
+          onWoken={(paneId) => {
+            setStoppedNode(null);
+            openHerdr(paneId, 'screen', true);
           }}
         />
       )}

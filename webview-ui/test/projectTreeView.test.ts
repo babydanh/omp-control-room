@@ -21,12 +21,14 @@ import {
   recentlyStoppedSessions,
   selectedAncestorIds,
   sessionActivityCounts,
+  sessionCode,
   sessionDisplayName,
   sessionFaceHue,
   sessionFaceMood,
   sessionSummary,
   shownFaceMood,
   stoppedLabel,
+  stoppedWakeKind,
 } from '../src/company/projects/projectTreeView.js';
 
 const node = (id: string, kind: ProjectTreeNode['kind'], parentId?: string, extra: Partial<ProjectTreeNode> = {}): ProjectTreeNode => ({
@@ -341,5 +343,20 @@ describe('which sessions left their work unfinished, and which stopped last', ()
     ]);
     const shown = filterProjectTree(tree, { agentKind: 'all', liveOnly: false, unfinishedOnly: true });
     expect(shown[0]?.children[0]?.children.map((child) => child.node.id)).toEqual(['dở']);
+  });
+
+  it("codes a session by its own id, a herdr pane by its transcript's, and shows the last 8 characters", () => {
+    expect(sessionCode(session('01a17c64-05ec-7096-9639-6d082d87aec8'))).toEqual({ full: '01a17c64-05ec-7096-9639-6d082d87aec8', short: '2d87aec8' });
+    expect(sessionCode(session('w1:p3', { agentKind: 'herdr', transcriptId: '5320e2e5-e5ac-4fe5-94b2-ce1e84d6ed51' }))?.short).toBe('84d6ed51');
+    // A pane that named no transcript is known by its pane id.
+    expect(sessionCode(session('w1:p2', { agentKind: 'herdr' }))).toEqual({ full: 'w1:p2', short: 'w1:p2' });
+  });
+
+  it('wakes a sleeping pane through herdr, resumes an exited omp or Claude session, and offers nothing else', () => {
+    expect(stoppedWakeKind(session('p', { agentKind: 'herdr', state: 'sleeping' }))).toBe('pane');
+    expect(stoppedWakeKind(session('o', { engine: 'omp', state: 'ended' }))).toBe('resume');
+    expect(stoppedWakeKind(session('c', { engine: 'claude', state: 'ended' }))).toBe('resume');
+    expect(stoppedWakeKind(session('a', { engine: 'agy', state: 'ended' }))).toBeNull();
+    expect(stoppedWakeKind(session('r', { engine: 'omp', state: 'running' }))).toBeNull();
   });
 });
