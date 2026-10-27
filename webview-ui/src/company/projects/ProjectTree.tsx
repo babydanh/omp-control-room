@@ -158,8 +158,8 @@ export function ProjectTree(props: ProjectTreeProps) {
         <button type="button" aria-pressed={selectedProjectId === null} onClick={() => onSelectProject(null)} className="touch-target min-w-0 flex-1 rounded px-2 text-left text-sm text-text-secondary aria-pressed:bg-selected">Tất cả dự án</button>
         <button type="button" aria-label="Tạo project" title="Tạo project từ một thư mục (mở hộp chọn thư mục của Windows)" onClick={props.onCreateProject} className="touch-target rounded px-2 text-text-secondary">➕</button>
       </div>
-      <div className="flex items-center gap-2 px-2 text-xs text-text-muted">
-        <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-0 flex-1 rounded bg-well px-1 py-1 text-sm text-text">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 text-xs text-text-muted">
+        <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-28 flex-1 rounded bg-well px-1 py-1 text-sm text-text">
           <option value="all">Mọi công cụ</option>
           {AGENT_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
         </select>
