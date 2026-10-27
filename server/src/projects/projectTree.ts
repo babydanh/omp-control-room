@@ -184,16 +184,20 @@ function fileStem(file: string): string {
 
 /**
  * Live rows, plus the main sessions (no subagents) that ended within a day: the newest
- * {@link ENDED_SESSIONS_MAX}, leaving out one a herdr pane already lists as sleeping.
+ * {@link ENDED_SESSIONS_MAX}, leaving out one a herdr pane already lists as sleeping. A Claude
+ * session's transcript is named after its id, so a pane's file name stands for an id too.
  */
 export function withRecentlyEnded(rows: readonly SessionRow[], panes: readonly HerdrProjectSession[], now: number): SessionRow[] {
   const paneFiles = new Set(panes.flatMap((pane) => (pane.sessionFile === undefined ? [] : [fileStem(pane.sessionFile)])));
-  const paneIds = new Set(panes.flatMap((pane) => (pane.sessionId === undefined ? [] : [pane.sessionId])));
+  const paneIds = new Set(panes.flatMap((pane) => [
+    ...(pane.sessionId === undefined ? [] : [pane.sessionId.toLowerCase()]),
+    ...(pane.sessionFile === undefined ? [] : [path.posix.basename(fileStem(pane.sessionFile))]),
+  ]));
   const ended = rows
     .flatMap((row) => {
       const at = parseLedgerTime(row.endedAt);
       if (at === null || now - at > ENDED_SESSION_WINDOW_MS || agentKindForLedger(row) === 'sub') return [];
-      if (paneIds.has(row.sessionId) || (row.sessionFile && paneFiles.has(fileStem(row.sessionFile)))) return [];
+      if (paneIds.has(row.sessionId.toLowerCase()) || (row.sessionFile && paneFiles.has(fileStem(row.sessionFile)))) return [];
       return [{ row, at }];
     })
     .sort((a, b) => b.at - a.at)

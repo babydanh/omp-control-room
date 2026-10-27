@@ -345,6 +345,13 @@ describe('withRecentlyEnded', () => {
     expect(ids(withRecentlyEnded(rows, panes, now))).toEqual(['alone']);
   });
 
+  it('leaves out a Claude session the ledger names by id when a sleeping pane holds its transcript', () => {
+    const id = '3d6cdbd2-f152-406b-98d2-c936b1a582b8';
+    const rows = [sessionRow(id, { agentKind: 'claude', endedAt: '2026-10-27 11:00:00' })];
+    const panes = [{ id: 'w:p1', cwd: 'C:/w', status: 'sleeping', title: 'a', sessionFile: `C:\\Users\\me\\.claude\\projects\\V--w\\${id}.jsonl` }];
+    expect(withRecentlyEnded(rows, panes, now)).toEqual([]);
+  });
+
   it('keeps only the 20 newest ended sessions', () => {
     const rows = Array.from({ length: 22 }, (_, minute) =>
       sessionRow(`e${minute}`, { endedAt: `2026-10-27 11:${String(minute).padStart(2, '0')}:00` }));
