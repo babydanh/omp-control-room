@@ -51,7 +51,7 @@ import {
   type ProjectSessionEngine,
   sessionChanges,
 } from '../projects/projectNodeTargets.js';
-import { useProjectState } from '../projects/projectStore.js';
+import { useProjectState, waitForProjectCreate } from '../projects/projectStore.js';
 import { isEndedNode } from '../projects/projectTreeView.js';
 import { COMPANY_ROLES, roleProfile } from '../roleProfiles.js';
 import { startScrollFades } from '../scrollFades.js';
@@ -121,33 +121,6 @@ function snapshotNoticeText(state: CompanyViewState): string {
     return 'Có thay đổi đã bị bỏ sót; đang chờ một bản chụp mới từ máy chủ.';
   }
   return `Có thay đổi đã bị bỏ sót ở ${waiting.join(', ')}; đang chờ một bản chụp mới từ máy chủ.`;
-}
-
-/** How a project create ended: made (with the new Project's id when the server named it), refused and why, or replaced by a newer create. */
-type ProjectCreateOutcome = { readonly nodeId: string | undefined } | { readonly refusal: string } | { readonly superseded: true };
-
-/**
- * Waits until the project create `requestId` is answered (or failed to send). A create that a
- * newer one replaced before its answer came has no result of its own: it says nothing, the
- * newer one reports. Executor form: the ES2022 lib has no Promise.withResolvers.
- */
-function projectCreateOutcome(requestId: string): Promise<ProjectCreateOutcome> {
-  return new Promise((resolve) => {
-    const settle = (): void => {
-      const state = projectStore.getSnapshot();
-      if (state.pending[requestId] !== undefined) return;
-      unsubscribe();
-      const result = state.results[requestId];
-      if (result?.type === 'projectCommandResult' && result.ok) {
-        resolve({ nodeId: result.nodeId });
-        return;
-      }
-      const reason = (result?.type === 'projectCommandResult' ? result.reason : undefined) || state.errors['command:create'];
-      resolve(reason ? { refusal: reason } : { superseded: true });
-    };
-    const unsubscribe = projectStore.subscribe(settle);
-    settle();
-  });
 }
 
 /** The Project already holding `folderPath`, if any: a refused create shows where that folder is. */
@@ -516,6 +489,10 @@ export function BoardShell({ client }: BoardShellProps) {
       if (paneId !== undefined) client.herdrClose(paneId);
       return;
     }
+    if (action === 'addFolderBrowse') {
+      void addFolderFromPicker(node);
+      return;
+    }
     if (action === 'wake') {
       const paneId = node.herdrPaneId ?? node.sessionId;
       if (paneId !== undefined) client.herdrWake(paneId);
@@ -665,7 +642,7 @@ export function BoardShell({ client }: BoardShellProps) {
     }
     const name = folderBasename(picked.path) || picked.path;
     const requestId = projectStore.createNode({ kind: 'project', name, path: picked.path });
-    const outcome = await projectCreateOutcome(requestId);
+    const outcome = await waitForProjectCreate(projectStore, requestId);
     if ('superseded' in outcome) return;
     // The new Project lands at the end of the list, out of sight: show it on its own.
     if ('refusal' in outcome) {
@@ -676,6 +653,34 @@ export function BoardShell({ client }: BoardShellProps) {
     }
     if (outcome.nodeId !== undefined) setSelectedProjectId(outcome.nodeId);
     setSessionNotice(`Đã tạo project ${name}. Bấm "Tất cả dự án" để xem lại mọi project.`);
+  }
+
+  /**
+   * "Duyệt…" in a Project's "Thêm thư mục": the folder chosen in Windows' dialog joins that Project
+   * (or group) at once. The menu closed when the dialog opened, so the outcome is told here.
+   */
+  async function addFolderFromPicker(node: ProjectTreeNode): Promise<void> {
+    const project = node.kind === 'project' ? node : ancestorOf(projects.nodes, node, 'project');
+    if (project === undefined) return;
+    setSessionNotice(null);
+    const picked = await pickFolder(client);
+    if (picked === null) return;
+    if ('notice' in picked) {
+      setSessionNotice(picked.notice);
+      return;
+    }
+    const name = folderBasename(picked.path) || picked.path;
+    const requestId = projectStore.createNode({ kind: 'folder', parentId: node.kind === 'group' ? node.id : project.id, name, path: picked.path });
+    const outcome = await waitForProjectCreate(projectStore, requestId);
+    if ('superseded' in outcome) return;
+    if ('refusal' in outcome) {
+      const holder = projectHoldingFolder(projects.nodes, picked.path);
+      if (holder !== undefined) setSelectedProjectId(holder);
+      setSessionNotice(`Không thêm được thư mục ${name}: ${outcome.refusal}`);
+      return;
+    }
+    setSelectedProjectId(project.id);
+    setSessionNotice(`Đã thêm thư mục ${name} vào project ${project.name}.`);
   }
 
   /** "Mở thư mục…" in the palette: choose a folder in Windows' dialog and show it on the board. */

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { ClientMessage, ServerMessage } from '../../core/src/messages.js';
-import { createProjectStore } from '../src/company/projects/projectStore.js';
+import { createProjectStore, waitForProjectCreate } from '../src/company/projects/projectStore.js';
 
 const snapshot = (requestId: string, name: string, partial = false): ServerMessage =>
   ({
@@ -69,5 +69,37 @@ describe('project store branch comparison', () => {
     store.accept(result);
     expect(store.getSnapshot().results['compare-2']).toEqual(result);
     expect(store.getSnapshot().pending).toEqual({});
+  });
+});
+
+describe('waiting for a create', () => {
+  const result = (requestId: string, ok: boolean, extra: object = {}) =>
+    ({ type: 'projectCommandResult', requestId, command: 'create', ok, ...extra }) as ServerMessage;
+
+  it('answers with the new node id, or the reason the server refused it', async () => {
+    const ids = ['c1', 'c2'];
+    const store = createProjectStore({ send: () => undefined, newRequestId: () => ids.shift() ?? 'x' });
+    const made = waitForProjectCreate(store, store.createNode({ kind: 'folder', parentId: 'p', name: 'a', path: 'D:/a' }));
+    store.accept(result('c1', true, { nodeId: 'folder-1' }));
+    await expect(made).resolves.toEqual({ nodeId: 'folder-1' });
+
+    const refused = waitForProjectCreate(store, store.createNode({ kind: 'folder', parentId: 'p', name: 'a', path: 'D:/a' }));
+    store.accept(result('c2', false, { reason: 'Thư mục này đã có trong cây Project.' }));
+    await expect(refused).resolves.toEqual({ refusal: 'Thư mục này đã có trong cây Project.' });
+  });
+
+  it('says nothing for a create a newer one replaced, and the newer one reports', async () => {
+    const ids = ['old', 'new'];
+    const store = createProjectStore({ send: () => undefined, newRequestId: () => ids.shift() ?? 'x' });
+    const older = waitForProjectCreate(store, store.createNode({ kind: 'project', name: 'A', path: 'D:/a' }));
+    const newer = waitForProjectCreate(store, store.createNode({ kind: 'project', name: 'B', path: 'D:/b' }));
+    await expect(older).resolves.toEqual({ superseded: true });
+    store.accept(result('new', true, { nodeId: 'project-b' }));
+    await expect(newer).resolves.toEqual({ nodeId: 'project-b' });
+  });
+
+  it('reports a create the transport could not send', async () => {
+    const store = createProjectStore({ send: () => { throw new Error('Mất kết nối tới board.'); } });
+    await expect(waitForProjectCreate(store, store.createNode({ kind: 'project', name: 'A', path: 'D:/a' }))).resolves.toEqual({ refusal: 'Mất kết nối tới board.' });
   });
 });

@@ -52,9 +52,8 @@ import { copyText } from '../clipboard.js';
 import { failureNotice } from '../commandResults.js';
 import type { CompanyClient, CompanyCommandHandle } from '../companyClient.js';
 import type { CompanyDrawerTab, CompanyViewState } from '../companyState.js';
-import { pickFolder } from '../folderPick.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
-import type { ProjectStore } from '../projects/projectStore.js';
+import { type ProjectStore, waitForProjectCreate } from '../projects/projectStore.js';
 import { canMoveProjectNode } from '../projects/projectTreeView.js';
 import { screenPlainText } from '../screenText.js';
 import { DELETE_CONFIRM_DETAIL, REFUSED_NOTICE, sessionHoldsWork } from '../sessionActions.js';
@@ -417,8 +416,6 @@ export function AgentContextMenu({
   const [busy, setBusy] = useState(false);
   const [draft, setDraft] = useState('');
   const [projectPathDraft, setProjectPathDraft] = useState('');
-  /** Whether Windows' folder dialog is open for the add-folder form, so a second press cannot stack one. */
-  const [pickingFolder, setPickingFolder] = useState(false);
   // Recent board folders not yet in any Project: one click instead of typing a path.
   const folderSuggestions = (state.workspaces ?? []).filter((entry) => {
     if (entry.missing === true) return false;
@@ -954,21 +951,17 @@ export function AgentContextMenu({
     if (sessionId !== null) track(client.renameSession(sessionId, name));
   }
 
-  /** Fill the add-folder form with a folder chosen in Windows' dialog. */
-  async function browseForFolder(): Promise<void> {
-    setPickingFolder(true);
-    setNotice(null);
-    try {
-      const picked = await pickFolder(client);
-      if (picked === null) return;
-      if ('notice' in picked) setNotice({ text: picked.notice, failed: true });
-      else setProjectPathDraft(picked.path);
-    } finally {
-      setPickingFolder(false);
-    }
+  /**
+   * "Duyệt…": the board opens Windows' dialog and adds the folder chosen to this Project. The menu
+   * closes now: it closes on any scroll or click, and the dialog may stay open for a while.
+   */
+  function browseIntoProject(): void {
+    if (subject.kind !== 'projectNode') return;
+    onProjectNodeAction?.(subject.node, 'addFolderBrowse');
+    onClose();
   }
 
-  function submitProjectNodeCreate(event: FormEvent<HTMLFormElement>): void {
+  async function submitProjectNodeCreate(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (subject.kind !== 'projectNode' || projectStore === undefined) return;
     const node = subject.node;
@@ -983,7 +976,13 @@ export function AgentContextMenu({
     const folderPath = projectPathDraft.trim();
     if (mode !== 'project-add-folder' || folderPath === '') return;
     const name = draft.trim() || folderPath.replace(/[\\/]+$/, '').split(/[\\/]/).at(-1) || folderPath;
-    projectStore.createNode({ kind: 'folder', parentId, name, path: folderPath });
+    setNotice(null);
+    const outcome = await waitForProjectCreate(projectStore, projectStore.createNode({ kind: 'folder', parentId, name, path: folderPath }));
+    // A refused folder keeps the form open with the reason, so the path can be fixed.
+    if ('refusal' in outcome) {
+      setNotice({ text: `Không thêm được thư mục: ${outcome.refusal}`, failed: true });
+      return;
+    }
     onClose();
   }
 
@@ -1044,7 +1043,7 @@ export function AgentContextMenu({
           ))}
         </div>
       ) : mode === 'project-create-group' ? (
-        <form onSubmit={submitProjectNodeCreate} className="flex flex-col gap-2 px-3 py-2">
+        <form onSubmit={(event) => void submitProjectNodeCreate(event)} className="flex flex-col gap-2 px-3 py-2">
           <label className="flex flex-col gap-1 text-text-muted">
             Tên nhóm
             <input ref={inputRef} autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} className="rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
@@ -1055,7 +1054,7 @@ export function AgentContextMenu({
           </div>
         </form>
       ) : mode === 'project-add-folder' ? (
-        <form onSubmit={submitProjectNodeCreate} className="flex flex-col gap-2 px-3 py-2">
+        <form onSubmit={(event) => void submitProjectNodeCreate(event)} className="flex flex-col gap-2 px-3 py-2">
           {folderSuggestions.length > 0 && (
             <div className="flex flex-col gap-1">
               <p className="text-text-muted">Thư mục gần đây</p>
@@ -1076,7 +1075,7 @@ export function AgentContextMenu({
             Đường dẫn thư mục
             <span className="flex gap-1">
               <input ref={inputRef} autoFocus value={projectPathDraft} placeholder="D:\du-an\thu-muc" onChange={(event) => setProjectPathDraft(event.target.value)} className="min-w-0 flex-1 rounded-(--company-radius-sm) bg-well px-2 py-1 text-xs text-text" />
-              <CompanyButton size="sm" disabled={pickingFolder} onClick={() => void browseForFolder()}>Duyệt…</CompanyButton>
+              <CompanyButton size="sm" onClick={browseIntoProject}>Duyệt…</CompanyButton>
             </span>
           </label>
           <label className="flex flex-col gap-1 text-text-muted">

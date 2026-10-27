@@ -180,4 +180,31 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     },
   };
 }
+
+/** How a create ended: made (with the new node's id when the server named it), refused and why, or replaced by a newer create. */
+export type ProjectCreateOutcome = { readonly nodeId: string | undefined } | { readonly refusal: string } | { readonly superseded: true };
+
+/**
+ * Waits until the create `requestId` is answered (or failed to send). A create that a newer one
+ * replaced before its answer came has no result of its own: it says nothing, the newer one
+ * reports. Executor form: the ES2022 lib has no Promise.withResolvers.
+ */
+export function waitForProjectCreate(store: ProjectStore, requestId: string): Promise<ProjectCreateOutcome> {
+  return new Promise((resolve) => {
+    const settle = (): void => {
+      const state = store.getSnapshot();
+      if (state.pending[requestId] !== undefined) return;
+      unsubscribe();
+      const result = state.results[requestId];
+      if (result?.type === 'projectCommandResult' && result.ok) {
+        resolve({ nodeId: result.nodeId });
+        return;
+      }
+      const reason = (result?.type === 'projectCommandResult' ? result.reason : undefined) || state.errors['command:create'];
+      resolve(reason ? { refusal: reason } : { superseded: true });
+    };
+    const unsubscribe = store.subscribe(settle);
+    settle();
+  });
+}
 export function useProjectState(store: ProjectStore): ProjectState { return useSyncExternalStore(store.subscribe, store.getSnapshot); }

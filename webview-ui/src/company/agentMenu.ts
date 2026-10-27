@@ -30,6 +30,8 @@ export type ProjectNodeAction =
   | 'newSessionClaude'
   | 'newSessionAgy'
   | 'addFolder'
+  /** "Duyệt…" in the add-folder form: the board opens Windows' dialog and adds the folder chosen. */
+  | 'addFolderBrowse'
   | 'createGroup'
   | 'rename'
   | 'settings'
