@@ -212,20 +212,27 @@ export function createTranscriptProgress(
     const rest = bytes.subarray(end + 1);
     if (rest.length > limits.maxLineBytes) state.skipping = true;
     else state.carry = rest;
+    // Agent lines are most of a transcript: only the newest one holding text is parsed for the answer.
+    const replyLines: string[] = [];
     for (const line of bytes.subarray(0, end).toString('utf8').split('\n')) {
       const todo = todoFromTranscriptLine(line);
       if (todo !== undefined) state.todo = todo;
       const turnError = turnErrorFromTranscriptLine(line);
       if (turnError !== undefined) state.interrupted = turnError ?? undefined;
       // An error the API wrote in the agent's place, or a subagent's message, is no answer of its own.
-      const reply = typeof turnError === 'string' || line.includes('"isSidechain":true') ? '' : assistantText(line);
-      if (reply !== '') state.lastReply = reply;
+      if (turnError === null && line.includes('"type":"text"')) replyLines.push(line);
       const request = requestFromTranscriptLine(line);
       if (request === undefined) continue;
       state.lastRequest = request;
       state.recent.push(request);
       if (state.recent.length > RECENT_REQUESTS_MAX) state.recent.shift();
       state.request ??= request;
+    }
+    for (let index = replyLines.length - 1; index >= 0; index -= 1) {
+      const reply = assistantText(replyLines[index] ?? '');
+      if (reply === '') continue;
+      state.lastReply = reply;
+      break;
     }
   }
 
