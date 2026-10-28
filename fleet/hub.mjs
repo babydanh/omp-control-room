@@ -32,7 +32,7 @@ export function createHub({ keysPath, statePath, now = () => Date.now(), started
   };
   const persist = () => {
     if (!statePath) return;
-    writeFileSync(`${statePath}.tmp`, JSON.stringify(reports));
+    writeFileSync(`${statePath}.tmp`, JSON.stringify(reports), { mode: 0o600 });
     renameSync(`${statePath}.tmp`, statePath);
   };
 
