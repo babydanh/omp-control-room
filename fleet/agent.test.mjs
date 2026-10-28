@@ -15,3 +15,10 @@ test('a small report is left untouched', () => {
   const report = { agent_id: 'danh', sessions: [], repos: [{ path: '/x', branch: 'b', dirty_files: ['a.ts'], changes: [{ path: 'a.ts', ranges: [[1, 2]] }] }] };
   assert.deepEqual(fitReport(structuredClone(report)), report);
 });
+
+test('many repos with long dirty paths still end under the limit', () => {
+  const long = 'x'.repeat(200);
+  const repos = Array.from({ length: 20 }, (_, r) => ({ path: `/data/home/${long}-${r}`, branch: long, dirty_files: Array.from({ length: 200 }, (_, i) => `${long}/${i}.ts`), changes: [] }));
+  const report = fitReport({ agent_id: 'danh', sessions: [], repos });
+  assert.ok(Buffer.byteLength(JSON.stringify(report)) <= 60_000);
+});

@@ -113,6 +113,13 @@ export function fitReport(report, limit = 60_000) {
     if (size() <= limit) break;
     if (repo.dirty_files.length > 20) { repo.dirty_files = repo.dirty_files.slice(0, 20); repo.dirty_truncated = true; }
   }
+  // Last resort: keep only branch-level data, then drop repos from the end.
+  for (const repo of report.repos) {
+    if (size() <= limit) break;
+    repo.dirty_files = []; repo.dirty_truncated = true;
+  }
+  while (size() > limit && report.repos.length > 0) { report.repos.pop(); report.repos_truncated = true; }
+  if (size() > limit) throw new Error(`report still ${size()} bytes after trimming`);
   return report;
 }
 
