@@ -6356,6 +6356,8 @@ components:
           minimum: 0
         merged:
           type: boolean
+        staged:
+          type: boolean
 
     FleetOverlapWarning:
       type: object
@@ -6373,6 +6375,11 @@ components:
             type: string
         local:
           type: boolean
+        level:
+          type: string
+          enum: [line, file]
+        detail:
+          type: string
 
     FleetCommandResultMessage:
       type: object

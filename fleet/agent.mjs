@@ -29,13 +29,45 @@ function sessions() {
 }
 
 
-// Refresh origin/main at most every 5 minutes so "merged" follows GitHub without fetching every 30 s.
-function refreshMain(repoRoots) {
+// Refresh origin/main and origin/staging at most every 5 minutes, not every 30 s report.
+function refreshRemotes(repoRoots) {
   const stamp = join(process.env.HOME ?? '/tmp', '.fleet', 'last-fetch');
   try { if (Date.now() - statSync(stamp).mtimeMs < 300_000) return; } catch { /* first run */ }
-  for (const root of repoRoots) git(root, 'fetch', '-q', 'origin', 'main');
+  for (const root of repoRoots) git(root, 'fetch', '-q', 'origin', 'main', 'staging');
   writeFileSync(stamp, '');
 }
+
+/** True when merging HEAD into `ref` changes nothing (content check: also catches squash merges). */
+function contentIn(path, ref) {
+  const target = git(path, 'rev-parse', `${ref}^{tree}`);
+  return Boolean(target) && git(path, 'merge-tree', '--write-tree', ref, 'HEAD').split('\n')[0] === target;
+}
+
+/**
+ * Changed line ranges per file, in the coordinates of the merge base with origin/main, covering
+ * committed and uncommitted edits. Line numbers only, never content. Approximate: machines on
+ * different bases can be a few lines off; the local overlap.py merge-tree check is exact.
+ */
+function changedRanges(path) {
+  const base = git(path, 'merge-base', 'origin/main', 'HEAD');
+  if (!base) return [];
+  const out = git(path, 'diff', '-U0', '--no-color', '--no-ext-diff', base, '--');
+  const files = new Map();
+  let current = null;
+  for (const line of out.split('\n')) {
+    if (line.startsWith('--- ')) { current = line === '--- /dev/null' ? null : line.slice(6); continue; }
+    if (line.startsWith('+++ ') && current === null && line !== '+++ /dev/null') { current = line.slice(6); continue; }
+    const hunk = /^@@ -(\d+)(?:,(\d+))? /.exec(line);
+    if (!hunk || current === null) continue;
+    const start = Number(hunk[1]);
+    const count = hunk[2] === undefined ? 1 : Number(hunk[2]);
+    const ranges = files.get(current) ?? [];
+    if (ranges.length < 20) ranges.push([Math.max(start, 1), Math.max(start, 1) + Math.max(count, 1) - 1]);
+    files.set(current, ranges);
+  }
+  return [...files].slice(0, 200).map(([file, ranges]) => ({ path: file, ranges }));
+}
+
 function repos() {
   const roots = [];
   for (const name of readdirSync(ROOT)) {
@@ -43,19 +75,18 @@ function repos() {
     if (existsSync(join(dir, '.git'))) roots.push(dir);
     if (name.endsWith('.worktrees')) for (const wt of readdirSync(dir)) roots.push(join(dir, wt));
   }
-  refreshMain(roots.filter((p) => existsSync(join(p, '.git')) && statSync(join(p, '.git')).isDirectory()));
+  refreshRemotes(roots.filter((p) => existsSync(join(p, '.git')) && statSync(join(p, '.git')).isDirectory()));
   return roots.map((path) => {
     const counts = git(path, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD').split(/\s+/);
-    // Content-level check (catches squash merges): merging HEAD into origin/main changes nothing.
-    const mergedTree = git(path, 'merge-tree', '--write-tree', 'origin/main', 'HEAD').split('\n')[0];
-    const mainTree = git(path, 'rev-parse', 'origin/main^{tree}');
     return {
       path,
       branch: git(path, 'branch', '--show-current'),
       behind: Number(counts[0]) || 0,
       ahead: Number(counts[1]) || 0,
-      merged: Boolean(mainTree) && mergedTree === mainTree,
+      merged: contentIn(path, 'origin/main'),
+      staged: contentIn(path, 'origin/staging'),
       dirty_files: git(path, 'status', '--porcelain').split('\n').filter(Boolean).map((l) => l.slice(3)).slice(0, 200),
+      changes: changedRanges(path),
     };
   });
 }

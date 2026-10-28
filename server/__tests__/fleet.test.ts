@@ -26,7 +26,7 @@ describe('fleet snapshot calculations', () => {
         [],
       ),
     ).toEqual([
-      { repo: 'pixel-agents', path: 'server/src/fleet.ts', machines: ['danh1', 'danh4'], local: false },
+      { repo: 'pixel-agents', path: 'server/src/fleet.ts', machines: ['danh1', 'danh4'], local: false, level: 'file', detail: '' },
     ]);
   });
 
@@ -37,7 +37,7 @@ describe('fleet snapshot calculations', () => {
         [{ repo: 'C:/work/pixel-agents/.worktrees/local', dirtyFiles: ['server/src/fleet.ts'] }],
       ),
     ).toEqual([
-      { repo: 'pixel-agents', path: 'server/src/fleet.ts', machines: ['danh5'], local: true },
+      { repo: 'pixel-agents', path: 'server/src/fleet.ts', machines: ['danh5'], local: true, level: 'file', detail: '' },
     ]);
   });
 
@@ -51,6 +51,28 @@ describe('fleet snapshot calculations', () => {
         [],
       ),
     ).toEqual([]);
+  });
+
+  it('warns at line level only when changed ranges of two machines intersect', () => {
+    const withRanges = (id: string, ranges: [number, number][]): FleetHubMachine => ({
+      agent_id: id,
+      received_at: 1_000,
+      sessions: [],
+      repos: [{ path: '/data/home/api', branch: `cloud/${id}`, ahead: 1, behind: 0, dirty_files: [], changes: [{ path: 'src/a.ts', ranges }] }],
+    });
+    expect(computeFleetOverlaps([withRanges('danh', [[10, 20]]), withRanges('danh4', [[40, 50]])], [])).toEqual([]);
+    expect(computeFleetOverlaps([withRanges('danh', [[10, 20]]), withRanges('danh4', [[18, 25]])], [])).toEqual([
+      { repo: 'api', path: 'src/a.ts', machines: ['danh', 'danh4'], local: false, level: 'line', detail: 'danh: dòng 10–20 · danh4: dòng 18–25' },
+    ]);
+  });
+
+  it('falls back to a file-level warning when one side has no line data', () => {
+    const ranged: FleetHubMachine = {
+      agent_id: 'danh', received_at: 1_000, sessions: [],
+      repos: [{ path: '/data/home/api', branch: 'x', ahead: 1, behind: 0, dirty_files: [], changes: [{ path: 'src/a.ts', ranges: [[10, 20]] }] }],
+    };
+    const [warning] = computeFleetOverlaps([ranged, machine('danh4', '/data/home/api', ['src/a.ts'])], []);
+    expect(warning).toMatchObject({ machines: ['danh', 'danh4'], level: 'file' });
   });
 
   it('classifies only machine reports older than ten minutes as stale', () => {

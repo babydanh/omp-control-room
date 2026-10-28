@@ -18,27 +18,50 @@ export function classifyFleetMachineState(receivedAt: number, nowMs: number): Fl
   return nowMs - receivedAt > FLEET_STALE_AFTER_MS ? 'stale' : 'online';
 }
 
+type Ranges = readonly (readonly [number, number])[];
+interface Touch {
+  readonly machine: string;
+  /** Null when only the file is known (uncommitted new file, or an agent without line data). */
+  readonly ranges: Ranges | null;
+}
+
+function rangesIntersect(a: Ranges, b: Ranges): boolean {
+  return a.some(([s1, e1]) => b.some(([s2, e2]) => s1 <= e2 && s2 <= e1));
+}
+
+function formatRanges(ranges: Ranges): string {
+  return ranges.map(([s, e]) => (s === e ? `${s}` : `${s}–${e}`)).join(', ');
+}
+
 export function computeFleetOverlaps(
   machines: readonly FleetHubMachine[],
   localRepos: readonly FleetLocalRepo[],
 ): FleetOverlapWarning[] {
-  const entries = new Map<string, { repo: string; path: string; machines: Set<string>; local: boolean }>();
+  const entries = new Map<string, { repo: string; path: string; touches: Map<string, Touch>; local: boolean }>();
+  const touch = (repoName: string, file: string, machine: string, ranges: Ranges | null) => {
+    const path = normalizeRelativePath(file);
+    if (path === '') return;
+    const key = overlapKey(repoName, path);
+    let entry = entries.get(key);
+    if (entry === undefined) {
+      entry = { repo: repoName, path, touches: new Map(), local: false };
+      entries.set(key, entry);
+    }
+    const previous = entry.touches.get(machine);
+    // Line data wins over a bare file mention; two line lists for one machine are merged.
+    const merged = previous === undefined ? ranges
+      : previous.ranges === null ? ranges
+      : ranges === null ? previous.ranges
+      : [...previous.ranges, ...ranges];
+    entry.touches.set(machine, { machine, ranges: merged });
+  };
 
   for (const machine of machines) {
     for (const repo of machine.repos) {
       const repoName = repositoryName(repo.path);
       if (repoName === '') continue;
-      for (const file of repo.dirty_files) {
-        const normalizedFile = normalizeRelativePath(file);
-        if (normalizedFile === '') continue;
-        const key = overlapKey(repoName, normalizedFile);
-        let entry = entries.get(key);
-        if (entry === undefined) {
-          entry = { repo: repoName, path: normalizedFile, machines: new Set(), local: false };
-          entries.set(key, entry);
-        }
-        entry.machines.add(machine.agent_id);
-      }
+      for (const change of repo.changes ?? []) touch(repoName, change.path, machine.agent_id, change.ranges);
+      for (const file of repo.dirty_files) touch(repoName, file, machine.agent_id, null);
     }
   }
 
@@ -51,15 +74,36 @@ export function computeFleetOverlaps(
     }
   }
 
-  return [...entries.values()]
-    .filter((entry) => entry.machines.size >= 2 || (entry.machines.size > 0 && entry.local))
-    .map((entry) => ({
+  const warnings: FleetOverlapWarning[] = [];
+  for (const entry of entries.values()) {
+    const touches = [...entry.touches.values()];
+    const clashing = new Set<string>();
+    let lineLevel = true;
+    for (let i = 0; i < touches.length; i++) {
+      for (let j = i + 1; j < touches.length; j++) {
+        const a = touches[i], b = touches[j];
+        if (a.ranges !== null && b.ranges !== null && !rangesIntersect(a.ranges, b.ranges)) continue;
+        if (a.ranges === null || b.ranges === null) lineLevel = false;
+        clashing.add(a.machine).add(b.machine);
+      }
+    }
+    // The local machine only reports file names, so a local clash is file-level.
+    const withLocal = entry.local && touches.length > 0;
+    if (clashing.size === 0 && !withLocal) continue;
+    const involved = clashing.size > 0 ? touches.filter((t) => clashing.has(t.machine)) : touches;
+    warnings.push({
       repo: entry.repo,
       path: entry.path,
-      machines: [...entry.machines].sort(),
+      machines: involved.map((t) => t.machine).sort(),
       local: entry.local,
-    }))
-    .sort((a, b) => a.repo.localeCompare(b.repo) || a.path.localeCompare(b.path));
+      level: clashing.size > 0 && lineLevel ? 'line' : 'file',
+      detail: involved
+        .filter((t) => t.ranges !== null)
+        .map((t) => `${t.machine}: dòng ${formatRanges(t.ranges as Ranges)}`)
+        .join(' · '),
+    });
+  }
+  return warnings.sort((a, b) => a.repo.localeCompare(b.repo) || a.path.localeCompare(b.path));
 }
 
 export function buildFleetSnapshot(
@@ -92,6 +136,7 @@ export function buildFleetSnapshot(
           behind: repo.behind,
           dirtyCount: repo.dirty_files.length,
           ...(typeof repo.merged === 'boolean' ? { merged: repo.merged } : {}),
+          ...(typeof repo.staged === 'boolean' ? { staged: repo.staged } : {}),
         })),
         ...(typeof machine.disk_free_gb === 'number' ? { diskFreeGb: machine.disk_free_gb } : {}),
       }),

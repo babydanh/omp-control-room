@@ -63,8 +63,10 @@ export function FleetView() {
                   >
                     <p className="break-all font-mono text-text">{overlap.repo}/{overlap.path}</p>
                     <p className="mt-1 text-xs text-warning">
-                      Máy: {overlap.machines.join(', ')}{overlap.local ? ' · có phiên cục bộ' : ''}
+                      {overlap.level === 'line' ? 'Trùng dòng' : 'Trùng tệp'} · Máy: {overlap.machines.join(', ')}
+                      {overlap.local ? ' · có phiên cục bộ' : ''}
                     </p>
+                    {overlap.detail ? <p className="mt-1 break-all font-mono text-xs text-text-muted">{overlap.detail}</p> : null}
                   </li>
                 ))}
               </ul>
@@ -107,7 +109,7 @@ function MachineCard({ machine }: { machine: FleetMachineSnapshot }) {
               <span className="font-medium text-text">{repo.name}</span>
               <span className="break-all font-mono">{repo.branch}</span>
               <span>{repo.dirtyCount} tệp thay đổi</span>
-              {repo.merged === true && <span className="text-success">đã vào main</span>}
+              <span className={repo.merged === true ? 'text-success' : 'text-text-muted'}>{deliveryLabel(repo)}</span>
             </li>
           ))}
         </ul>
@@ -116,4 +118,12 @@ function MachineCard({ machine }: { machine: FleetMachineSnapshot }) {
       )}
     </article>
   );
+}
+
+/** Same three steps the local board shows: only on the branch, on staging, in main. */
+function deliveryLabel(repo: FleetMachineSnapshot['repos'][number]): string {
+  if (repo.merged === true) return 'đã vào main';
+  if (repo.staged === true) return 'đã lên staging';
+  if (repo.merged === false) return 'chỉ trên nhánh';
+  return '';
 }

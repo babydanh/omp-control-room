@@ -20,6 +20,9 @@ export interface FleetHubRepo {
   readonly behind: number;
   readonly dirty_files: readonly string[];
   readonly merged?: boolean;
+  readonly staged?: boolean;
+  /** Changed line ranges per file, in merge-base-with-main coordinates (approximate). */
+  readonly changes?: readonly { readonly path: string; readonly ranges: readonly (readonly [number, number])[] }[];
 }
 
 export interface FleetHubMachine {
