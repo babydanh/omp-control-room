@@ -242,8 +242,8 @@ describe('project session start', () => {
       cwd: repo,
       kind: 'claude',
       name: 'claude-sua-loi-dang-nhap',
-      // A Claude opened from the Project tree starts in the board's permission mode, so it does not ask at every tool.
-      args: ['--permission-mode', 'auto'],
+      // A Claude opened from the Project tree never asks for permission.
+      args: ['--dangerously-skip-permissions'],
       prompt: 'Hãy sửa lỗi đăng nhập.',
     });
   });
