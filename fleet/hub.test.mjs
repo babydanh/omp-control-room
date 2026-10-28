@@ -68,3 +68,16 @@ test('report key cannot read, read key cannot report', async () => {
 test('rejects a missing token', async () => {
   assert.equal((await fetch(`${base}/v1/fleet`)).status, 401);
 });
+
+test('rejects a valid signature whose lifetime exceeds 5 minutes', async () => {
+  assert.equal((await report(signJwt({ iss: 'm1', aud: 'fleet-hub', role: 'report' }, m1.priv, 86400), body('m1'))).status, 401);
+});
+
+test('a restarted hub refuses tokens issued before it started', async () => {
+  const issued = signJwt({ iss: 'm1', aud: 'fleet-hub', role: 'report' }, m1.priv, 300, Date.now() - 10_000);
+  const restarted = createHub({ keysPath, statePath: join(dir, 'state2.json') });
+  await new Promise((r) => restarted.listen(0, '127.0.0.1', r));
+  const res = await fetch(`http://127.0.0.1:${restarted.address().port}/v1/report`, { method: 'POST', headers: { Authorization: `Bearer ${issued}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body('m1')) });
+  restarted.close();
+  assert.equal(res.status, 401);
+});

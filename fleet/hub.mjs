@@ -8,7 +8,7 @@ import { verifyJwt } from './jwt.mjs';
 const MAX_BODY = 64 * 1024;
 const RATE_PER_MIN = 60;
 
-export function createHub({ keysPath, statePath, now = () => Date.now() }) {
+export function createHub({ keysPath, statePath, now = () => Date.now(), startedAt = now() }) {
   const seenJti = new Map();
   const hits = new Map();
   const reports = statePath && existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : {};
@@ -21,7 +21,7 @@ export function createHub({ keysPath, statePath, now = () => Date.now() }) {
   const auth = (req, role) => {
     const header = req.headers.authorization ?? '';
     if (!header.startsWith('Bearer ')) throw new Error('missing token');
-    return verifyJwt(header.slice(7), { keys: loadKeys(), audience: 'fleet-hub', role, seenJti, now: now() });
+    return verifyJwt(header.slice(7), { keys: loadKeys(), audience: 'fleet-hub', role, seenJti, now: now(), issuedAfter: startedAt });
   };
   const limited = (id) => {
     const minute = Math.floor(now() / 60000);

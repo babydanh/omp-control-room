@@ -15,7 +15,7 @@ export function signJwt(claims, privateKeyPem, ttlSeconds = 300, now = Date.now(
  * Verify a token against the key registered for its `iss`. Returns the claims or throws.
  * `keys` maps agent_id -> { pub: PEM, role }. `seenJti` is a Map jti -> expiry (ms) for replay checks.
  */
-export function verifyJwt(token, { keys, audience, role, seenJti, now = Date.now(), skewSeconds = 60 }) {
+export function verifyJwt(token, { keys, audience, role, seenJti, now = Date.now(), skewSeconds = 60, maxTtlSeconds = 300, issuedAfter = 0 }) {
   const parts = String(token ?? '').split('.');
   if (parts.length !== 3) throw new Error('malformed');
   const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
@@ -30,6 +30,10 @@ export function verifyJwt(token, { keys, audience, role, seenJti, now = Date.now
   if (key.role !== role || claims.role !== role) throw new Error('role');
   if (typeof claims.exp !== 'number' || claims.exp + skewSeconds < nowS) throw new Error('expired');
   if (typeof claims.iat !== 'number' || claims.iat - skewSeconds > nowS) throw new Error('future');
+  if (claims.exp - claims.iat > maxTtlSeconds) throw new Error('ttl');
+  // The replay cache lives in memory: a token issued before this hub process started may
+  // already have been used, so refuse it rather than accept a replay after a restart.
+  if (claims.iat < Math.floor(issuedAfter / 1000)) throw new Error('replay');
   if (!claims.jti || seenJti.has(claims.jti)) throw new Error('replay');
   for (const [jti, until] of seenJti) if (until < now) seenJti.delete(jti);
   seenJti.set(claims.jti, (claims.exp + skewSeconds) * 1000);
