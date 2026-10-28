@@ -109,7 +109,7 @@ function MachineCard({ machine }: { machine: FleetMachineSnapshot }) {
               <span className="font-medium text-text">{repo.name}</span>
               <span className="break-all font-mono">{repo.branch}</span>
               <span>{repo.dirtyCount} tệp thay đổi</span>
-              <span className={repo.merged === true ? 'text-success' : 'text-text-muted'}>{deliveryLabel(repo)}</span>
+              <span className={repo.merged === true && repo.dirtyCount === 0 ? 'text-success' : 'text-text-muted'}>{deliveryLabel(repo)}</span>
             </li>
           ))}
         </ul>
@@ -121,9 +121,9 @@ function MachineCard({ machine }: { machine: FleetMachineSnapshot }) {
 }
 
 /** Same three steps the local board shows: only on the branch, on staging, in main. */
+/** Status of the committed HEAD; uncommitted edits are called out so they are not read as delivered. */
 function deliveryLabel(repo: FleetMachineSnapshot['repos'][number]): string {
-  if (repo.merged === true) return 'đã vào main';
-  if (repo.staged === true) return 'đã lên staging';
-  if (repo.merged === false) return 'chỉ trên nhánh';
-  return '';
+  const step = repo.merged === true ? 'đã vào main' : repo.staged === true ? 'đã lên staging' : repo.merged === false ? 'chỉ trên nhánh' : '';
+  if (step === '' || repo.dirtyCount === 0) return step;
+  return `${step} (phần đã commit) · còn ${repo.dirtyCount} tệp chưa commit`;
 }

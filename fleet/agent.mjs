@@ -98,15 +98,35 @@ function diskFreeGb() {
   } catch { return null; }
 }
 
+/**
+ * Keep the report under the hub's 64 KB limit: drop per-file line ranges from the largest repos
+ * first (dirty_files stay, so overlaps fall back to file level) and flag what was cut.
+ */
+export function fitReport(report, limit = 60_000) {
+  const size = () => Buffer.byteLength(JSON.stringify(report));
+  const byChanges = [...report.repos].sort((a, b) => (b.changes?.length ?? 0) - (a.changes?.length ?? 0));
+  for (const repo of byChanges) {
+    if (size() <= limit) break;
+    if (repo.changes?.length) { repo.changes = []; repo.changes_truncated = true; }
+  }
+  for (const repo of report.repos) {
+    if (size() <= limit) break;
+    if (repo.dirty_files.length > 20) { repo.dirty_files = repo.dirty_files.slice(0, 20); repo.dirty_truncated = true; }
+  }
+  return report;
+}
+
+if (process.env.FLEET_ID) {
 const id = process.env.FLEET_ID;
 const token = signJwt({ iss: id, aud: 'fleet-hub', role: 'report' }, readFileSync(process.env.FLEET_KEY, 'utf8'));
 const res = await fetch(`${process.env.FLEET_HUB}/v1/report`, {
   method: 'POST',
   headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), repos: repos() }),
+  body: JSON.stringify(fitReport({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), repos: repos() })),
   signal: AbortSignal.timeout(15000),
 }).catch((e) => ({ status: 0, text: async () => e.message }));
 if (res.status !== 200) {
   console.error(`fleet-agent: hub ${res.status} ${await res.text()}`);
   process.exit(1);
+}
 }
