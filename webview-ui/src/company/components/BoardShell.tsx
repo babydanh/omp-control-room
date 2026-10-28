@@ -24,6 +24,9 @@ import {
 } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
+import { fleetStore } from '../fleet/fleetClient.js';
+import { useFleetState } from '../fleet/fleetStore.js';
+import { FleetView } from '../fleet/FleetView.js';
 import { folderIdentityOf, foldersWaitingForSnapshot, showsAllFolders } from '../folderIdentity.js';
 import { openPickedFolder, pickFolder } from '../folderPick.js';
 import { folderBasename, type FolderFocusInput } from '../folderView.js';
@@ -107,7 +110,7 @@ function browserStorage(): Storage | null {
   }
 }
 
-type ShellPage = 'board' | 'ledger' | 'usage' | 'storage' | 'skills' | 'mcp' | 'accounts' | 'changes';
+type ShellPage = 'board' | 'ledger' | 'cloud' | 'usage' | 'storage' | 'skills' | 'mcp' | 'accounts' | 'changes';
 
 /** Apple platforms show ⌘ in shortcut hints; elsewhere the key names stay. */
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
@@ -149,6 +152,7 @@ export function BoardShell({ client }: BoardShellProps) {
   const state = useCompanyState(client);
   useSessionLogBackfill(client, state);
   const ledger = useLedgerState(ledgerStore);
+  const fleet = useFleetState(fleetStore);
   const usageRouteOpen = useUsageRoute();
   const [activePage, setActivePage] = useState<ShellPage>(() => usageRouteOpen ? 'usage' : 'board');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -157,6 +161,7 @@ export function BoardShell({ client }: BoardShellProps) {
   );
   const ledgerShown = activePage === 'ledger' && ledger.privileged === true;
   const ledgerAvailable = ledger.privileged === true;
+  const fleetAvailable = fleet.privileged === true;
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
   // Why a session clicked in the tree opened nothing: it runs outside herdr, so there is no pane.
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
@@ -215,6 +220,10 @@ export function BoardShell({ client }: BoardShellProps) {
   }, [activePage, ledgerAvailable]);
 
   useEffect(() => {
+    if (!fleetAvailable && activePage === 'cloud') setActivePage('board');
+  }, [activePage, fleetAvailable]);
+
+  useEffect(() => {
     if (!mobileNavOpen || !mobileViewport) return undefined;
     function closeOnEscape(event: KeyboardEvent): void {
       if (matchShortcut('board.escape', event)) setMobileNavOpen(false);
@@ -229,7 +238,8 @@ export function BoardShell({ client }: BoardShellProps) {
     } else if (usageRouteOpen) {
       closeUsagePage();
     }
-    if (page !== 'board' && page !== 'usage' && !ledgerAvailable) return;
+    if (page === 'cloud' && !fleetAvailable) return;
+    if (page !== 'board' && page !== 'usage' && page !== 'cloud' && !ledgerAvailable) return;
     setActivePage(page);
     setMobileNavOpen(false);
     setOpened(null);
@@ -726,6 +736,9 @@ export function BoardShell({ client }: BoardShellProps) {
           { page: 'changes' as const, label: 'Thay đổi', icon: 'file-text' as const, group: 'Không gian làm việc' },
         ]
       : []),
+    ...(fleetAvailable
+      ? [{ page: 'cloud' as const, label: 'Cloud', icon: 'terminal' as const, group: 'Không gian làm việc' }]
+      : []),
     { page: 'usage', label: 'Sử dụng', icon: 'bar-chart', group: 'Không gian làm việc' },
     ...(ledgerAvailable
       ? [
@@ -1034,6 +1047,8 @@ export function BoardShell({ client }: BoardShellProps) {
       </TerminalPreviewProvider>
       </div>
       </>
+      ) : activePage === 'cloud' ? (
+        <FleetView />
       ) : activePage === 'changes' ? (
         <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} initialTab={changesTab} initialBranchA={compareBranchA} onClose={() => selectPage('board')} />
       ) : activePage === 'usage' ? (

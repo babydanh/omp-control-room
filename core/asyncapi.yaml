@@ -160,6 +160,9 @@ components:
         - $ref: '#/components/schemas/LedgerCoordinationMessage'
         - $ref: '#/components/schemas/LedgerToolUsageMessage'
         - $ref: '#/components/schemas/LedgerCommandResultMessage'
+        # Fleet (privileged; read-only remote machine inventory)
+        - $ref: '#/components/schemas/FleetSnapshotMessage'
+        - $ref: '#/components/schemas/FleetCommandResultMessage'
         # Project tree (privileged; project, checkout and session data)
         - $ref: '#/components/schemas/ProjectTreeSnapshotMessage'
         - $ref: '#/components/schemas/ProjectDiffMessage'
@@ -274,6 +277,8 @@ components:
         - $ref: '#/components/schemas/LedgerCoordinationRequestMessage'
         - $ref: '#/components/schemas/LedgerToolUsageRequestMessage'
         - $ref: '#/components/schemas/LedgerSendMessage'
+        # Fleet (privileged; read-only remote machine inventory)
+        - $ref: '#/components/schemas/FleetRequestMessage'
         # Project tree (privileged; tree CRUD, diffs, comments, settings and sessions)
         - $ref: '#/components/schemas/ProjectTreeRequestMessage'
         - $ref: '#/components/schemas/ProjectNodeCreateMessage'
@@ -6261,6 +6266,126 @@ components:
           maxItems: 20
           items:
             type: string
+
+
+    FleetRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: fleetRequest
+        requestId:
+          type: string
+          format: uuid
+
+    FleetSnapshotMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machines, overlaps]
+      properties:
+        type:
+          const: fleetSnapshot
+        requestId:
+          type: string
+          format: uuid
+        machines:
+          type: array
+          items:
+            $ref: '#/components/schemas/FleetMachineSnapshot'
+        overlaps:
+          type: array
+          items:
+            $ref: '#/components/schemas/FleetOverlapWarning'
+
+    FleetMachineSnapshot:
+      type: object
+      additionalProperties: false
+      required: [agentId, receivedAt, state, sessionCount, engines, repos]
+      properties:
+        agentId:
+          type: string
+          minLength: 1
+          maxLength: 128
+        receivedAt:
+          type: integer
+        state:
+          $ref: '#/components/schemas/FleetMachineState'
+        sessionCount:
+          type: integer
+          minimum: 0
+        engines:
+          type: array
+          items:
+            $ref: '#/components/schemas/FleetSessionEngine'
+        repos:
+          type: array
+          items:
+            $ref: '#/components/schemas/FleetRepoSnapshot'
+
+    FleetMachineState:
+      type: string
+      enum: [online, stale]
+
+    FleetSessionEngine:
+      type: string
+      enum: [claude, codex, omp]
+
+    FleetCommandResultCode:
+      type: string
+      enum: [forbidden, unavailable, failed]
+
+    FleetRepoSnapshot:
+      type: object
+      additionalProperties: false
+      required: [name, branch, ahead, behind, dirtyCount]
+      properties:
+        name:
+          type: string
+        branch:
+          type: string
+        ahead:
+          type: integer
+        behind:
+          type: integer
+        dirtyCount:
+          type: integer
+          minimum: 0
+
+    FleetOverlapWarning:
+      type: object
+      additionalProperties: false
+      required: [repo, path, machines, local]
+      properties:
+        repo:
+          type: string
+        path:
+          type: string
+        machines:
+          type: array
+          minItems: 1
+          items:
+            type: string
+        local:
+          type: boolean
+
+    FleetCommandResultMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, ok, code]
+      properties:
+        type:
+          const: fleetCommandResult
+        requestId:
+          type: string
+          format: uuid
+        ok:
+          type: boolean
+        code:
+          $ref: '#/components/schemas/FleetCommandResultCode'
+        reason:
+          type: string
+          description: Vietnamese refusal or failure reason when ok is false.
 
     LibrarySnapshotRequest:
       type: object

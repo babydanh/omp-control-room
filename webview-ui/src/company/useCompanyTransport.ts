@@ -1,9 +1,9 @@
 /**
  * useCompanyTransport: the board's one subscription to the server.
  *
- * Company, ledger and library traffic is routed to their respective client stores;
+ * Company, Cloud, ledger and library traffic is routed to their respective client stores;
  * everything else the server still sends has no reader on the board and is dropped.
- * A connect -- first mount or a reconnect -- asks for fresh company and ledger
+ * A connect -- first mount or a reconnect -- asks for fresh company, ledger and Cloud
  * snapshots, because changes made while the socket was down were never delivered.
  */
 
@@ -15,6 +15,7 @@ import { transport } from '../transport/index.js';
 import type { CompanyClient } from './companyClient.js';
 import { isCompanyServerMessage } from './companyMessages.js';
 import { PROJECT_TREE_REFRESH_MS } from './constants.js';
+import { fleetStore } from './fleet/fleetClient.js';
 import { ledgerStore } from './ledger/ledgerClient.js';
 import { libraryStore } from './library/libraryClient.js';
 import { projectStore } from './projects/projectClient.js';
@@ -23,6 +24,7 @@ export function useCompanyTransport(client: CompanyClient): void {
   useEffect(() => {
     const unsubscribe = transport.onMessage((message: ServerMessage) => {
       libraryStore.accept(message);
+      fleetStore.accept(message);
       ledgerStore.accept(message);
       projectStore.accept(message);
       if (isCompanyServerMessage(message)) client.accept(message);
@@ -30,10 +32,12 @@ export function useCompanyTransport(client: CompanyClient): void {
     client.connect();
     projectStore.requestTree();
     ledgerStore.connect();
+    fleetStore.connect();
     const unsubscribeState = transport.onStateChange((state) => {
       if (state === TRANSPORT_STATE_CONNECTED) {
         client.connect();
         projectStore.requestTree();
+        fleetStore.connect();
       }
     });
     // New sessions reach the ledger/herdr a few seconds after the start ack, so the tree is re-asked

@@ -53,6 +53,7 @@ import {
 } from '../../server/src/directories.js';
 import { collectDirectorySuggestions } from '../../server/src/directorySuggestions.js';
 import { setDirectoryNameResolver, setTerminalAdapter } from '../../server/src/fileWatcher.js';
+import { handleFleetMessage } from '../../server/src/fleet/handler.js';
 import type { LayoutWatcher } from '../../server/src/layoutPersistence.js';
 import {
   readLayoutFromFile,
@@ -569,6 +570,17 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
       // Cây git board requests; the embedded webview is privileged, like the company path.
       if (
         handleLedgerMessage(
+          message as Record<string, unknown>,
+          (reply) => {
+            this.webview?.postMessage(reply);
+          },
+          { ledger: this.ledger, privileged: true },
+        )
+      ) {
+        return;
+      }
+      if (
+        handleFleetMessage(
           message as Record<string, unknown>,
           (reply) => {
             this.webview?.postMessage(reply);

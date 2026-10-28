@@ -24,6 +24,7 @@ import {
   listDirectories,
 } from './directories.js';
 import { collectDirectorySuggestions } from './directorySuggestions.js';
+import { handleFleetMessage } from './fleet/handler.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
 import { hostDirectory } from './hostDirectory.js';
 import { readLayoutFromFile, writeLayoutToFile } from './layoutPersistence.js';
@@ -203,10 +204,19 @@ export function handleClientMessage(
     return;
   }
 
-  // Ledger requests are answered before the read-only gate below, so an unprivileged
-  // request gets a correlated `ledgerCommandResult` rather than a silent drop.
+  // Ledger and Fleet requests are answered before the read-only gate below, so unprivileged
+  // requests get correlated command results rather than a silent drop.
   if (
     handleLedgerMessage(msg, (message) => send(message as unknown as Record<string, unknown>), {
+      ledger: ctx.ledger ?? null,
+      privileged: ctx.privileged === true,
+    })
+  ) {
+    return;
+  }
+
+  if (
+    handleFleetMessage(msg, (message) => send(message as unknown as Record<string, unknown>), {
       ledger: ctx.ledger ?? null,
       privileged: ctx.privileged === true,
     })
