@@ -45,8 +45,9 @@ export function TerminalMirror({
   const [screen, setScreen] = useState<readonly ScreenLine[]>([]);
   const xtermRef = useRef<Terminal | null>(null);
   const lastSeqRef = useRef(0);
+  /** True after asking for a fresh screen, until a snapshot is painted. */
+  const awaitingSnapshotRef = useRef(false);
   const frames = terminal?.frames ?? NO_FRAMES;
-  const overflow = terminal?.overflow ?? false;
   const cols = terminal?.cols ?? MIRROR_DEFAULT_COLS;
   const termRows = terminal?.rows ?? MIRROR_DEFAULT_ROWS;
 
@@ -66,6 +67,7 @@ export function TerminalMirror({
     });
     xtermRef.current = xterm;
     lastSeqRef.current = 0;
+    awaitingSnapshotRef.current = false;
     return () => {
       xtermRef.current = null;
       xterm.dispose();
@@ -80,8 +82,15 @@ export function TerminalMirror({
     const xterm = xtermRef.current;
     if (!xterm) return;
     const batch = frameWrites(frames, lastSeqRef.current);
+    if (batch.missed) {
+      // A parked terminal that fell behind asks for a fresh screen, as the drawer does.
+      if (!awaitingSnapshotRef.current) client.attachTerminal(sessionId);
+      awaitingSnapshotRef.current = true;
+      return;
+    }
     if (batch.writes.length === 0) return;
     lastSeqRef.current = batch.lastSeq;
+    if (batch.sawSnapshot) awaitingSnapshotRef.current = false;
     for (const write of batch.writes) {
       if (write.reset) xterm.reset();
       xterm.write(write.bytes);
@@ -90,12 +99,7 @@ export function TerminalMirror({
     xterm.write('', () => {
       if (xtermRef.current === xterm) setScreen(tailScreen(recentRows(xterm, rows), rows));
     });
-  }, [frames, rows, runEpoch]);
-
-  // A parked terminal that fell behind asks for a fresh screen, as the drawer does.
-  useEffect(() => {
-    if (overflow) client.attachTerminal(sessionId);
-  }, [client, overflow, sessionId]);
+  }, [client, frames, rows, runEpoch, sessionId]);
 
   if (screen.length === 0) {
     return <p className="p-2 text-2xs text-text-muted">Đang chờ màn hình…</p>;

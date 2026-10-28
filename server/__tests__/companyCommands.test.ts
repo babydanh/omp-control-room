@@ -707,6 +707,34 @@ describe('company client commands', () => {
     expect(codes).toContain('terminal_input_too_large');
     expect(codes).toContain('forbidden');
   });
+
+  it('sends the replayed framebuffer right after the attach reply', async () => {
+    const sessionId = randomUUID();
+    const replay = { seq: 7, data: Buffer.from('\x1b[1mhistory\x1b[0m\r\n').toString('base64') };
+    const terminal: CompanyTerminalGateway = {
+      ...fakeTerminal(),
+      attach: async (_sessionId, _runEpoch, cols, rows, onLeaseGranted) => {
+        onLeaseGranted?.('lease-replay');
+        return { leaseId: 'lease-replay', cols: cols ?? 120, rows: rows ?? 32, replay };
+      },
+    };
+
+    handleCompanyCommand(
+      { type: 'terminalAttach', requestId: randomUUID(), sessionId, runEpoch: 3 },
+      send,
+      context({ services: { ...services, terminal } }),
+    );
+
+    await vi.waitFor(() => expect(replies('terminalSnapshot')).toHaveLength(1));
+    const types = outbox.map((message) => message.type);
+    expect(types.indexOf('terminalAttached')).toBeLessThan(types.indexOf('terminalSnapshot'));
+    expect(replies('terminalSnapshot')[0]).toStrictEqual({
+      type: 'terminalSnapshot',
+      sessionId,
+      runEpoch: 3,
+      ...replay,
+    });
+  });
   it('requires the current lease for terminal input, resize, and detach', async () => {
     const leaseId = randomUUID();
     const terminal = fakeTerminal(leaseId);

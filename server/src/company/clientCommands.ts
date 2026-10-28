@@ -87,6 +87,12 @@ export interface CompanyTerminalHandle {
   leaseId: string;
   cols: number;
   rows: number;
+  /**
+   * The run's screen and scrollback (base64), painted before any live frame so a
+   * fresh viewer can scroll back. Its seq is newer than every frame sent before the
+   * attach. Absent where the framebuffer is not readable.
+   */
+  replay?: { seq: number; data: string };
 }
 
 /**
@@ -1656,6 +1662,10 @@ async function terminalAttach(
     cols: handle.cols,
     rows: handle.rows,
   });
+  // Sent in the same turn as the attach reply: no live frame can arrive between them.
+  if (handle.replay) {
+    send({ type: 'terminalSnapshot', sessionId, runEpoch, ...handle.replay });
+  }
 }
 
 async function terminalInput(

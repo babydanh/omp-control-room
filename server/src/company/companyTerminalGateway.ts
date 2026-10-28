@@ -44,7 +44,6 @@ export interface RunnerTerminalGatewayOptions {
 
 interface ViewerLease {
   readonly leaseId: string;
-  seq: number;
 }
 
 /** The PTY helper session id a run owns; the same key `OmpRunner` builds. */
@@ -53,20 +52,21 @@ export function runnerPtySessionId(sessionId: string, runEpoch: number): string 
 }
 
 /**
- * Trim a serialized framebuffer from the front, because the tail is the part a
- * returning viewer needs and the scrollback head is the part it does not.
+ * Keep the newest part of a base64 framebuffer, because the tail is the part a
+ * returning viewer needs and the scrollback head is the part it does not. The
+ * cut lands on a line start so the replay never opens inside an escape sequence
+ * or a multi-byte character.
  */
-function boundFramebuffer(frame: string): { data: string; truncated: boolean } {
-  const bytes = Buffer.from(frame, 'utf8');
-  if (bytes.length <= MAX_SNAPSHOT_BYTES) return { data: frame, truncated: false };
-  return {
-    data: bytes.subarray(bytes.length - MAX_SNAPSHOT_BYTES).toString('utf8'),
-    truncated: true,
-  };
+function boundFramebuffer(base64: string): string {
+  const bytes = Buffer.from(base64, 'base64');
+  if (bytes.length <= MAX_SNAPSHOT_BYTES) return base64;
+  const tail = bytes.subarray(bytes.length - MAX_SNAPSHOT_BYTES);
+  return tail.subarray(tail.indexOf(0x0a) + 1).toString('base64');
 }
 
 export class RunnerTerminalGateway implements CompanyTerminalGateway {
   private readonly leases = new Map<string, ViewerLease>();
+  private readonly seqs = new Map<string, number>();
 
   constructor(private readonly options: RunnerTerminalGatewayOptions) {}
 
@@ -87,10 +87,15 @@ export class RunnerTerminalGateway implements CompanyTerminalGateway {
       // issued and is never applied twice by two racing viewers.
       await this.options.client.resize(key, resolvedCols, resolvedRows);
     }
-    const lease: ViewerLease = { leaseId: randomUUID(), seq: this.leases.get(key)?.seq ?? 0 };
+    // The framebuffer is read before the lease moves and gets its seq in the same
+    // step, so every frame the new viewer receives after it is newer than it.
+    const framebuffer = boundFramebuffer(await this.options.client.snapshot(key));
+    this.assertLive(sessionId, runEpoch);
+    const replay = { seq: this.nextSeq(sessionId, runEpoch), data: framebuffer };
+    const lease: ViewerLease = { leaseId: randomUUID() };
     this.leases.set(key, lease);
     onLeaseGranted?.(lease.leaseId);
-    return { leaseId: lease.leaseId, cols: resolvedCols, rows: resolvedRows };
+    return { leaseId: lease.leaseId, cols: resolvedCols, rows: resolvedRows, replay };
   }
 
   async write(sessionId: string, runEpoch: number, data: string, leaseId: string): Promise<void> {
@@ -140,22 +145,15 @@ export class RunnerTerminalGateway implements CompanyTerminalGateway {
     this.leases.delete(key);
   }
 
-  /** Bounded framebuffer for a fresh attach or a reconnect. */
-  async snapshot(
-    sessionId: string,
-    runEpoch: number,
-  ): Promise<{ data: string; truncated: boolean }> {
-    const key = runnerPtySessionId(sessionId, runEpoch);
-    this.assertLive(sessionId, runEpoch);
-    return boundFramebuffer(await this.options.client.snapshot(key));
-  }
-
-  /** Next output sequence for a run, so a client's frames stay ordered. */
+  /**
+   * Next output sequence for a run. It never restarts while the run lives, so a
+   * viewer that detached and attached again sees every later frame as newer than
+   * the ones it already holds.
+   */
   nextSeq(sessionId: string, runEpoch: number): number {
     const key = runnerPtySessionId(sessionId, runEpoch);
-    const lease = this.leases.get(key);
-    const next = (lease?.seq ?? 0) + 1;
-    if (lease) lease.seq = next;
+    const next = (this.seqs.get(key) ?? 0) + 1;
+    this.seqs.set(key, next);
     return next;
   }
 
@@ -166,7 +164,9 @@ export class RunnerTerminalGateway implements CompanyTerminalGateway {
 
   /** Forget every viewer; used when a run ends. Never signals the process. */
   forgetRun(sessionId: string, runEpoch: number): void {
-    this.leases.delete(runnerPtySessionId(sessionId, runEpoch));
+    const key = runnerPtySessionId(sessionId, runEpoch);
+    this.leases.delete(key);
+    this.seqs.delete(key);
   }
 
   private assertLive(sessionId: string, runEpoch: number): void {

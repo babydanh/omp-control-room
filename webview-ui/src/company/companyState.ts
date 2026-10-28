@@ -163,8 +163,6 @@ export interface TerminalView {
   rows: number | null;
   lastSeq: number;
   frames: TerminalFrame[];
-  /** Set when a consumer fell behind; the client asks for a fresh screen. */
-  overflow: boolean;
   closedReason: string | null;
 }
 
@@ -718,7 +716,6 @@ function newTerminalView(sessionId: string, runEpoch: number): TerminalView {
     rows: null,
     lastSeq: 0,
     frames: [],
-    overflow: false,
     closedReason: null,
   };
 }
@@ -761,7 +758,6 @@ function applyTerminalFrame(
     kind === 'snapshot'
       ? [{ seq: message.seq, kind, data: message.data }]
       : [...existing.frames, { seq: message.seq, kind, data: message.data }];
-  const overflow = frames.length > COMPANY_TERMINAL_FRAME_QUEUE_MAX;
   return {
     ...state,
     terminals: {
@@ -769,8 +765,10 @@ function applyTerminalFrame(
       [message.sessionId]: {
         ...existing,
         lastSeq: message.seq,
-        frames: overflow ? frames.slice(-COMPANY_TERMINAL_FRAME_QUEUE_MAX) : frames,
-        overflow,
+        frames:
+          frames.length > COMPANY_TERMINAL_FRAME_QUEUE_MAX
+            ? frames.slice(-COMPANY_TERMINAL_FRAME_QUEUE_MAX)
+            : frames,
       },
     },
   };
@@ -1279,7 +1277,6 @@ function reduceMessage(state: CompanyViewState, message: ServerMessage): Company
             cols: message.cols,
             rows: message.rows,
             frames: [],
-            overflow: false,
             closedReason: null,
           },
         },

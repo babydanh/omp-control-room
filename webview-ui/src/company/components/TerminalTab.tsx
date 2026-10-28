@@ -51,7 +51,7 @@ export function TerminalTab({ client, state, sessionId, jump }: TerminalTabProps
     },
     [client, sessionId, runEpoch],
   );
-  const onOverflow = useCallback(() => client.attachTerminal(sessionId), [client, sessionId]);
+  const onFellBehind = useCallback(() => client.attachTerminal(sessionId), [client, sessionId]);
   const onJumpMissed = useCallback((seq: number) => setMissedSeq(seq), []);
 
   if (session === undefined || !policy.attach) {
@@ -79,11 +79,10 @@ export function TerminalTab({ client, state, sessionId, jump }: TerminalTabProps
           attached={terminal?.attached ?? false}
           runEpoch={session.runEpoch}
           frames={terminal?.frames ?? []}
-          overflow={terminal?.overflow ?? false}
           closedReason={terminal?.closedReason ?? null}
           onInput={onInput}
           onResize={onResize}
-          onOverflow={onOverflow}
+          onFellBehind={onFellBehind}
           jump={jump}
           onJumpMissed={onJumpMissed}
         />

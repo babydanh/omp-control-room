@@ -528,10 +528,16 @@ export class CompanyFollowerProxy {
     ) {
       throw hostError('owner_protocol_error');
     }
+    const replay = value['replay'];
     const handle: CompanyTerminalHandle = {
       leaseId: value['leaseId'],
       cols: value['cols'],
       rows: value['rows'],
+      ...(isFrameObject(replay) &&
+      typeof replay['seq'] === 'number' &&
+      typeof replay['data'] === 'string'
+        ? { replay: { seq: replay['seq'], data: replay['data'] } }
+        : {}),
     };
     this.sessions.set(sessionKey(sessionId, runEpoch), handle.leaseId);
     onLeaseGranted?.(handle.leaseId);

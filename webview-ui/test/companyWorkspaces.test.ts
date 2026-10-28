@@ -42,7 +42,6 @@ function terminal(sessionId: string): TerminalView {
     rows: null,
     lastSeq: 0,
     frames: [],
-    overflow: false,
     closedReason: null,
   };
 }

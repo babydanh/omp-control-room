@@ -49,13 +49,12 @@ export interface TerminalConsoleProps {
   attached: boolean;
   /** Frames received for this session and epoch, in order. */
   frames: readonly TerminalFrame[];
-  /** Set when the client fell behind and needs a fresh screen. */
-  overflow: boolean;
   closedReason: string | null;
   /** Keep these stable (useCallback): the terminal is rebuilt when they change. */
   onInput: (data: string) => void;
   onResize: (cols: number, rows: number) => void;
-  onOverflow: () => void;
+  /** Output this view never painted was dropped; asks once for a fresh screen. */
+  onFellBehind: () => void;
   /** A command the Hoạt động tab asked to find; answered once per seq. */
   jump: TerminalJump | null;
   /** Called with the seq of a jump whose command is not in the buffer. */
@@ -67,11 +66,10 @@ export function TerminalConsole({
   runEpoch,
   attached,
   frames,
-  overflow,
   closedReason,
   onInput,
   onResize,
-  onOverflow,
+  onFellBehind,
   jump,
   onJumpMissed,
 }: TerminalConsoleProps) {
@@ -82,6 +80,8 @@ export function TerminalConsole({
   const aliveRef = useRef(true);
   /** True once a snapshot has been painted into the current xterm. */
   const writtenSnapshotRef = useRef(false);
+  /** True after asking for a fresh screen, until a snapshot is painted. */
+  const awaitingSnapshotRef = useRef(false);
   /** The jump request this xterm has already answered. */
   const handledJumpRef = useRef<number | null>(null);
 
@@ -89,6 +89,7 @@ export function TerminalConsole({
     aliveRef.current = true;
     lastSeqRef.current = 0;
     writtenSnapshotRef.current = false;
+    awaitingSnapshotRef.current = false;
     handledJumpRef.current = null;
     const container = containerRef.current;
     if (!container) return undefined;
@@ -138,13 +139,22 @@ export function TerminalConsole({
     const terminal = terminalRef.current;
     if (!terminal || !aliveRef.current) return;
     const batch = frameWrites(frames, lastSeqRef.current);
+    if (batch.missed) {
+      // Painting past a gap would garble the screen and its scrollback.
+      if (!awaitingSnapshotRef.current) onFellBehind();
+      awaitingSnapshotRef.current = true;
+      return;
+    }
     lastSeqRef.current = batch.lastSeq;
-    if (batch.sawSnapshot) writtenSnapshotRef.current = true;
+    if (batch.sawSnapshot) {
+      writtenSnapshotRef.current = true;
+      awaitingSnapshotRef.current = false;
+    }
     for (const write of batch.writes) {
       if (write.reset) terminal.reset();
       terminal.write(write.bytes);
     }
-  }, [frames]);
+  }, [frames, onFellBehind]);
 
   // A command the Hoạt động tab jumped to: once the snapshot is painted, find its line
   // in the buffer, select it and scroll there. A miss is reported, never guessed.
@@ -171,10 +181,6 @@ export function TerminalConsole({
       terminal.scrollToLine(row);
     });
   }, [frames, jump, onJumpMissed]);
-
-  useEffect(() => {
-    if (overflow && aliveRef.current) onOverflow();
-  }, [overflow, onOverflow]);
 
   return (
     <div className="flex h-full min-h-0 flex-col rounded-(--company-radius-md) bg-well p-3">

@@ -50,18 +50,21 @@ describe('frameWrites', () => {
     expect(result.sawSnapshot).toBe(false);
   });
 
-  it('advances lastSeq to the last written frame, skipping out-of-order seqs', () => {
-    const result = frameWrites(
-      [frame(3, 'data', 'a'), frame(2, 'data', 'b'), frame(5, 'data', 'c')],
-      1,
-    );
-    expect(result.writes.map((write) => decodeText(write.bytes))).toStrictEqual(['a', 'c']);
-    expect(result.lastSeq).toBe(5);
+  it('reports a gap instead of writing past output it never painted', () => {
+    const result = frameWrites([frame(3, 'data', 'a'), frame(4, 'data', 'b')], 1);
+    expect(result).toStrictEqual({ writes: [], lastSeq: 1, sawSnapshot: false, missed: true });
+  });
+
+  it('paints past a gap when the first newer frame is a snapshot', () => {
+    const result = frameWrites([frame(7, 'snapshot', 's'), frame(8, 'data', 'd')], 2);
+    expect(result.missed).toBe(false);
+    expect(result.writes.map((write) => write.reset)).toStrictEqual([true, false]);
+    expect(result.lastSeq).toBe(8);
   });
 
   it('writes nothing and keeps lastSeq when no frame is newer', () => {
     const result = frameWrites([frame(1, 'snapshot', 's')], 4);
-    expect(result).toStrictEqual({ writes: [], lastSeq: 4, sawSnapshot: false });
+    expect(result).toStrictEqual({ writes: [], lastSeq: 4, sawSnapshot: false, missed: false });
   });
 
   it('does not count a skipped snapshot toward sawSnapshot', () => {

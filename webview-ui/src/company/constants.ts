@@ -86,9 +86,9 @@ export const COMPANY_TERMINAL_DEFAULT_COLS = 120;
 export const COMPANY_TERMINAL_DEFAULT_ROWS = 32;
 
 /**
- * Frames buffered for a mounted terminal before the client asks the server for
- * a fresh screen. A consumer that falls this far behind is not going to catch
- * up frame by frame, and an unbounded queue is a memory leak with a scrollbar.
+ * Frames kept per terminal; the oldest fall off first. A view that painted them
+ * loses nothing; one that never did sees the gap and asks for a fresh screen. An
+ * unbounded queue is a memory leak with a scrollbar.
  */
 export const COMPANY_TERMINAL_FRAME_QUEUE_MAX = 512;
 
