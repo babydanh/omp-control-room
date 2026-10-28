@@ -55,6 +55,31 @@ describe('frameWrites', () => {
     expect(result).toStrictEqual({ writes: [], lastSeq: 1, sawSnapshot: false, missed: true });
   });
 
+  it('reports a gap in the middle of the newer frames', () => {
+    const result = frameWrites([frame(10, 'data', 'a'), frame(12, 'data', 'b')], 9);
+    expect(result).toStrictEqual({ writes: [], lastSeq: 9, sawSnapshot: false, missed: true });
+  });
+
+  it('paints when a snapshot after a gap replaces the screen', () => {
+    const result = frameWrites(
+      [
+        frame(10, 'data', 'a'),
+        frame(12, 'data', 'b'),
+        frame(13, 'snapshot', 's'),
+        frame(14, 'data', 'c'),
+      ],
+      9,
+    );
+    expect(result.missed).toBe(false);
+    expect(result.writes.map((write) => decodeText(write.bytes))).toStrictEqual([
+      'a',
+      'b',
+      's',
+      'c',
+    ]);
+    expect(result.lastSeq).toBe(14);
+  });
+
   it('paints past a gap when the first newer frame is a snapshot', () => {
     const result = frameWrites([frame(7, 'snapshot', 's'), frame(8, 'data', 'd')], 2);
     expect(result.missed).toBe(false);

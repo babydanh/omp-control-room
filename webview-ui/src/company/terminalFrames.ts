@@ -16,8 +16,9 @@ export interface FrameWrites {
   readonly lastSeq: number;
   readonly sawSnapshot: boolean;
   /**
-   * Output this view never painted was dropped: the first newer frame is neither
-   * the next one nor a snapshot. Nothing is written; the view needs a fresh screen.
+   * Output this view never painted was dropped: a newer frame skips past the one
+   * before it and no snapshot follows to replace the screen. Nothing is written;
+   * the view needs a fresh screen.
    */
   readonly missed: boolean;
 }
@@ -32,19 +33,20 @@ export function decodeFrameBytes(base64: string): Uint8Array {
  * not beyond the running sequence are skipped; a snapshot frame resets the screen.
  */
 export function frameWrites(frames: readonly TerminalFrame[], afterSeq: number): FrameWrites {
-  const first = frames.find((frame) => frame.seq > afterSeq);
-  if (first !== undefined && first.kind !== 'snapshot' && first.seq !== afterSeq + 1) {
-    return { writes: [], lastSeq: afterSeq, sawSnapshot: false, missed: true };
-  }
   const writes: FrameWrite[] = [];
   let lastSeq = afterSeq;
   let sawSnapshot = false;
+  let missed = false;
   for (const frame of frames) {
     if (frame.seq <= lastSeq) continue;
-    lastSeq = frame.seq;
     const reset = frame.kind === 'snapshot';
+    // A snapshot replaces whatever a gap before it lost; a gap after it is new loss.
+    if (reset) missed = false;
+    else if (frame.seq !== lastSeq + 1) missed = true;
+    lastSeq = frame.seq;
     if (reset) sawSnapshot = true;
     writes.push({ reset, bytes: decodeFrameBytes(frame.data) });
   }
-  return { writes, lastSeq, sawSnapshot, missed: false };
+  if (missed) return { writes: [], lastSeq: afterSeq, sawSnapshot: false, missed };
+  return { writes, lastSeq, sawSnapshot, missed };
 }
