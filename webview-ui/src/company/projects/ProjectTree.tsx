@@ -5,7 +5,7 @@ import type { AgentMenuRequest } from '../agentMenu.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
 import { projectMenuContext } from './projectNodeTargets.js';
-import type { ProjectStore } from './projectStore.js';
+import { type ProjectStore, useProjectState } from './projectStore.js';
 import {
   buildAgentTree,
   canMoveProjectNode,
@@ -113,6 +113,9 @@ export function ProjectTree(props: ProjectTreeProps) {
   // Ended sessions are history: the tree lists them only when asked for the unfinished ones.
   const tree = useMemo(() => buildAgentTree(unfinishedOnly ? nodes : nodes.filter((node) => !isEndedNode(node))), [nodes, unfinishedOnly]);
   const unfinishedCount = useMemo(() => new Set(nodes.filter(isUnfinishedNode).map((node) => node.sessionId ?? node.id)).size, [nodes]);
+  // A refused create, rename, move or delete says why; before this it failed without a word.
+  const { errors } = useProjectState(props.store);
+  const commandError = Object.entries(errors).find(([key, reason]) => key.startsWith('command:') && reason !== '')?.[1];
   const selectedRoots = selectedProjectId === null
     ? tree
     : tree.filter((branch) => branch.node.id === selectedProjectId);
@@ -161,6 +164,7 @@ export function ProjectTree(props: ProjectTreeProps) {
         <button type="button" aria-pressed={selectedProjectId === null} onClick={() => onSelectProject(null)} className="touch-target min-w-0 flex-1 rounded px-2 text-left text-sm text-text-secondary aria-pressed:bg-selected">Tất cả dự án</button>
         <button type="button" aria-label="Tạo project" title="Tạo project từ một thư mục (mở hộp chọn thư mục của Windows)" onClick={props.onCreateProject} className="touch-target rounded px-2 text-text-secondary">➕</button>
       </div>
+      {commandError !== undefined && <p role="alert" className="px-2 text-xs text-status-error">{commandError}</p>}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 text-xs text-text-muted">
         <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-28 flex-1 rounded bg-well px-1 py-1 text-sm text-text">
           <option value="all">Mọi công cụ</option>
@@ -251,10 +255,8 @@ interface ProjectTreeRowProps extends ProjectTreeProps {
 function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ...props }: ProjectTreeRowProps) {
   const { node, children } = branch;
   const isCollapsed = collapsed.has(node.id);
-  const menu = useAgentMenuGestures<HTMLButtonElement>(
-    useMemo(() => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node) }), [node, props.nodes]),
-    props.onMenu,
-  );
+  const menuSubject = useMemo(() => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node) }), [node, props.nodes]);
+  const menu = useAgentMenuGestures<HTMLButtonElement>(menuSubject, props.onMenu);
   const isSession = node.kind === 'session';
   const stateLabel = node.state === undefined ? undefined : (SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state);
   const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
@@ -368,6 +370,20 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
             </>
           )}
         </button>
+        {(node.kind === 'project' || node.kind === 'group' || node.kind === 'folder') && (
+          <button
+            type="button"
+            aria-label={`Thao tác với ${node.name}`}
+            title="Đổi tên, xoá… (hoặc chuột phải)"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              props.onMenu({ subject: menuSubject, anchor: { x: rect.left, y: rect.bottom }, returnFocus: event.currentTarget });
+            }}
+            className="touch-target shrink-0 rounded px-1.5 text-base text-text-muted hover:bg-hover hover:text-text"
+          >
+            ⋯
+          </button>
+        )}
         {node.kind === 'folder' && (
           <button
             type="button"

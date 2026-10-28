@@ -34,6 +34,37 @@ describe('project store tree snapshots', () => {
   });
 });
 
+describe('project store delete', () => {
+  const tree = (): ServerMessage => ({
+    type: 'projectTreeSnapshot',
+    requestId: 'tree',
+    nodes: [
+      { id: 'p1', kind: 'project', name: 'Một' },
+      { id: 'f1', kind: 'folder', name: 'thư mục', parentId: 'p1' },
+      { id: 'p2', kind: 'project', name: 'Hai' },
+    ],
+  }) as ServerMessage;
+  const deleted = (requestId: string, nodeId: string): ServerMessage =>
+    ({ type: 'projectCommandResult', requestId, command: 'delete', ok: true, nodeId }) as ServerMessage;
+
+  it('drops the node and its descendants as soon as the server confirms, before any tree snapshot', () => {
+    const store = createProjectStore({ send: () => undefined, newRequestId: () => 'd1' });
+    store.accept(tree());
+    store.deleteNode('p1');
+    store.accept(deleted('d1', 'p1'));
+    expect(store.getSnapshot().nodes.map((node) => node.id)).toEqual(['p2']);
+  });
+
+  it('keeps the node and shows the reason when the delete is refused', () => {
+    const store = createProjectStore({ send: () => undefined, newRequestId: () => 'd1' });
+    store.accept(tree());
+    store.deleteNode('p1');
+    store.accept({ type: 'projectCommandResult', requestId: 'd1', command: 'delete', ok: false, nodeId: 'p1', reason: 'Không thể xóa nút Project.' } as ServerMessage);
+    expect(store.getSnapshot().nodes).toHaveLength(3);
+    expect(store.getSnapshot().errors['command:delete:p1']).toBe('Không thể xóa nút Project.');
+  });
+});
+
 describe('project store branch comparison', () => {
   it('sends comparisons, replaces the latest identical request and stores the matching result', () => {
     const sent: ClientMessage[] = [];

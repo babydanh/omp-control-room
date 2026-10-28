@@ -94,6 +94,18 @@ export interface ProjectStore {
   requestBranchCompare: (input: { repo: string; branchA: string; branchB: string }) => string;
 }
 
+/** The nodes without `rootId` and everything below it. */
+function withoutSubtree(nodes: readonly ProjectTreeNode[], rootId: string): readonly ProjectTreeNode[] {
+  const gone = new Set([rootId]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const node of nodes) {
+      if (node.parentId !== undefined && gone.has(node.parentId) && !gone.has(node.id)) { gone.add(node.id); grew = true; }
+    }
+  }
+  return nodes.filter((node) => !gone.has(node.id));
+}
+
 export function isProjectServerMessage(message: ServerMessage): message is ProjectServerMessage {
   return message.type === 'projectTreeSnapshot' || message.type === 'projectDiff' || message.type === 'projectSettings' || message.type === 'projectCommandResult' || message.type === 'projectSessionStartResult' || message.type === 'projectMergePreviewResult' || message.type === 'projectBranchCompare' || message.type === 'projectImageSaved';
 }
@@ -138,7 +150,10 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     const pending = { ...state.pending }; delete pending[message.requestId]; latest.delete(key);
     const errors = { ...state.errors };
     if ('reason' in message && message.reason) errors[key] = message.reason; else delete errors[key];
-    if (message.type === 'projectDiff') commit({ ...state, diff: message, pending, errors });
+    // A confirmed delete leaves the tree at once: the quick snapshot that follows is ignored once a full tree is held.
+    if (message.type === 'projectCommandResult' && message.command === 'delete' && message.ok && message.nodeId !== undefined) {
+      commit({ ...state, nodes: withoutSubtree(state.nodes, message.nodeId), results: { ...state.results, [message.requestId]: message }, pending, errors });
+    } else if (message.type === 'projectDiff') commit({ ...state, diff: message, pending, errors });
     else if (message.type === 'projectSettings') commit({ ...state, settings: message, pending, errors });
     else commit({ ...state, results: { ...state.results, [message.requestId]: message }, pending, errors });
   }
