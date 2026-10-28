@@ -9,9 +9,11 @@ import {
   TERMINAL_SCROLLBACK_LINES,
   TERMINAL_THEME,
 } from '../../constants.js';
+import { copyText } from '../clipboard.js';
 import { findCommandLine } from '../commandLine.js';
 import type { TerminalFrame } from '../companyState.js';
 import { frameWrites } from '../terminalFrames.js';
+import { terminalClipboardKey } from '../terminalKeys.js';
 
 /**
  * TerminalConsole: the faithful view of one managed PTY.
@@ -110,6 +112,13 @@ export function TerminalConsole({
     terminalRef.current = terminal;
     fit.fit();
 
+    // Ctrl+C copies a selection (else it interrupts); Ctrl+V pastes. Returning false keeps xterm
+    // from also sending the key to the program.
+    terminal.attachCustomKeyEventHandler((event) => {
+      const action = terminalClipboardKey(event, terminal.hasSelection());
+      if (action === 'copy') void copyText(terminal.getSelection());
+      return action === null;
+    });
     const inputSubscription = terminal.onData((data) => {
       if (aliveRef.current) onInput(data);
     });
