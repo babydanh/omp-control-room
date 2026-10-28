@@ -69,6 +69,23 @@ export function HerdrPanel({ client, state, paneId, tab, onTabChange, starting =
   }, [client, paneId, status, live]);
   useHerdrScreenWatch(client, paneId, live);
 
+  // A paste with the screen in view and no field focused goes into the composer, which is how
+  // text reaches this agent; a paste inside any field is that field's own.
+  const draftText = state.prompt.text;
+  useEffect(() => {
+    if (tab !== 'screen') return undefined;
+    const onPaste = (event: ClipboardEvent) => {
+      if (event.target instanceof Element && event.target.closest('input, textarea, select, [contenteditable]') !== null) return;
+      const text = event.clipboardData?.getData('text/plain') ?? '';
+      if (text === '') return;
+      event.preventDefault();
+      client.setDraftText(draftText + text);
+      document.querySelector<HTMLTextAreaElement>('[data-testid="prompt-input"]')?.focus();
+    };
+    document.addEventListener('paste', onPaste);
+    return () => document.removeEventListener('paste', onPaste);
+  }, [client, tab, draftText]);
+
   const lastOutcome = lastRequest === null ? undefined : state.commandResults[lastRequest];
   const notice = localNotice ?? failureNotice(lastOutcome, 'Máy chủ từ chối lệnh này.');
 
