@@ -2,7 +2,7 @@
 // Run by a systemd timer. Env: FLEET_HUB (https URL), FLEET_ID, FLEET_KEY (private key PEM path),
 // FLEET_ROOT (default /data/home). Sends paths and branch names only; never file content.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, existsSync, readlinkSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, readlinkSync, statfsSync } from 'node:fs';
 import { join } from 'node:path';
 import { signJwt } from './jwt.mjs';
 
@@ -37,14 +37,25 @@ function repos() {
   }
   return roots.map((path) => {
     const counts = git(path, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD').split(/\s+/);
+    // Content-level check (catches squash merges): merging HEAD into origin/main changes nothing.
+    const mergedTree = git(path, 'merge-tree', '--write-tree', 'origin/main', 'HEAD').split('\n')[0];
+    const mainTree = git(path, 'rev-parse', 'origin/main^{tree}');
     return {
       path,
       branch: git(path, 'branch', '--show-current'),
       behind: Number(counts[0]) || 0,
       ahead: Number(counts[1]) || 0,
+      merged: Boolean(mainTree) && mergedTree === mainTree,
       dirty_files: git(path, 'status', '--porcelain').split('\n').filter(Boolean).map((l) => l.slice(3)).slice(0, 200),
     };
   });
+}
+
+function diskFreeGb() {
+  try {
+    const { bavail, bsize } = statfsSync(ROOT);
+    return Math.round((bavail * bsize) / 1e8) / 10;
+  } catch { return null; }
 }
 
 const id = process.env.FLEET_ID;
@@ -52,7 +63,7 @@ const token = signJwt({ iss: id, aud: 'fleet-hub', role: 'report' }, readFileSyn
 const res = await fetch(`${process.env.FLEET_HUB}/v1/report`, {
   method: 'POST',
   headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify({ agent_id: id, sessions: sessions(), repos: repos() }),
+  body: JSON.stringify({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), repos: repos() }),
   signal: AbortSignal.timeout(15000),
 }).catch((e) => ({ status: 0, text: async () => e.message }));
 if (res.status !== 200) {

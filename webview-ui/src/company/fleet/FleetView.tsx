@@ -91,7 +91,12 @@ function MachineCard({ machine }: { machine: FleetMachineSnapshot }) {
           {stateLabel}
         </span>
       </div>
-      <p className="text-xs text-text-muted">Lần cuối thấy: {lastSeen}</p>
+      <p className="text-xs text-text-muted">
+        Lần cuối thấy: {lastSeen}
+        {machine.diskFreeGb !== undefined && (
+          <span className={machine.diskFreeGb < 3 ? 'text-warning' : ''}> · đĩa trống {machine.diskFreeGb} GB</span>
+        )}
+      </p>
       <p className="text-sm text-text-secondary">
         {machine.sessionCount} phiên · {machine.engines.length > 0 ? machine.engines.join(', ') : 'không có engine'}
       </p>
@@ -102,6 +107,7 @@ function MachineCard({ machine }: { machine: FleetMachineSnapshot }) {
               <span className="font-medium text-text">{repo.name}</span>
               <span className="break-all font-mono">{repo.branch}</span>
               <span>{repo.dirtyCount} tệp thay đổi</span>
+              {repo.merged === true && <span className="text-success">đã vào main</span>}
             </li>
           ))}
         </ul>

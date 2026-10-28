@@ -61,6 +61,7 @@ export function createHub({ keysPath, statePath, now = () => Date.now(), started
         reports[claims.iss] = {
           agent_id: claims.iss,
           received_at: now(),
+          disk_free_gb: typeof body.disk_free_gb === 'number' ? body.disk_free_gb : null,
           sessions: Array.isArray(body.sessions) ? body.sessions.slice(0, 50) : [],
           repos: Array.isArray(body.repos) ? body.repos.slice(0, 20) : [],
         };

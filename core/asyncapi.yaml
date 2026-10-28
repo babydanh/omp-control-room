@@ -6322,6 +6322,9 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FleetRepoSnapshot'
+        diskFreeGb:
+          type: number
+          minimum: 0
 
     FleetMachineState:
       type: string
@@ -6351,6 +6354,8 @@ components:
         dirtyCount:
           type: integer
           minimum: 0
+        merged:
+          type: boolean
 
     FleetOverlapWarning:
       type: object

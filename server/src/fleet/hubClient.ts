@@ -19,6 +19,7 @@ export interface FleetHubRepo {
   readonly ahead: number;
   readonly behind: number;
   readonly dirty_files: readonly string[];
+  readonly merged?: boolean;
 }
 
 export interface FleetHubMachine {
@@ -26,6 +27,7 @@ export interface FleetHubMachine {
   readonly received_at: number;
   readonly sessions: readonly FleetHubSession[];
   readonly repos: readonly FleetHubRepo[];
+  readonly disk_free_gb?: number | null;
 }
 
 export interface FleetHubResponse {
