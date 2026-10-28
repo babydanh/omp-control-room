@@ -4,6 +4,7 @@ import { buildFleetSnapshot } from './fleetSnapshot.js';
 import { createFleetHubClient, type FleetHubClient, FleetUnavailableError } from './hubClient.js';
 
 const FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
+const LEDGER_WAIT_MS = 5000;
 const defaultFleetHubClient = createFleetHubClient();
 
 export interface FleetCommandContext {
@@ -26,7 +27,9 @@ export function handleFleetMessage(
   }
 
   const fleet = context.fleet ?? defaultFleetHubClient;
-  const localView = context.ledger?.getView().catch(() => null) ?? Promise.resolve(null);
+  // A cold ledger view can take over a minute; show the machines without local overlaps rather than wait.
+  const ledgerView = context.ledger?.getView().catch(() => null) ?? Promise.resolve(null);
+  const localView = Promise.race([ledgerView, new Promise<null>((resolve) => setTimeout(resolve, LEDGER_WAIT_MS, null))]);
   Promise.all([fleet.fetchFleet(), localView])
     .then(([response, view]) => send(buildFleetSnapshot(requestId, response, view)))
     .catch((error: unknown) => {
