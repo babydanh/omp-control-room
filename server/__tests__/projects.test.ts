@@ -275,6 +275,36 @@ describe('buildProjectTreeSnapshot', () => {
     expect(sessions.find((node) => node.id === 'herdr:w1:p3')?.transcriptId).toBe('5320e2e5-e5ac-4fe5-94b2-ce1e84d6ed51');
     expect(read).toEqual(['C:/s/2026-10-27T08-04-52-332Z_01a17c64-05ec-7096-9639-6d082d87aec8.jsonl']);
   });
+
+  it('keeps a session in a worktree beside its folder in the quick tree, under the folder of its main repo', async () => {
+    const root = await fs.realpath(await makeTempDir());
+    const repo = path.join(root, 'repo');
+    const worktree = path.join(root, 'repo.worktrees', 'feature');
+    const elsewhere = path.join(root, 'elsewhere');
+    await fs.mkdir(path.join(repo, '.git', 'worktrees', 'feature'), { recursive: true });
+    await fs.mkdir(worktree, { recursive: true });
+    await fs.mkdir(elsewhere);
+    await fs.writeFile(path.join(worktree, '.git'), `gitdir: ${path.join(repo, '.git', 'worktrees', 'feature')}\n`);
+    const store = new ProjectStore({ filePath: path.join(root, 'projects.json'), recentFolders: () => [] });
+    const project = await store.createProject('Test');
+    await store.addFolder(project.id, repo);
+
+    const snapshot = await buildProjectTreeSnapshot(store, {
+      ledger: openLedgerSource(path.join(root, 'missing.db'), () => {
+        throw new Error('no database');
+      }),
+      git: { run: async () => processResult() },
+      sessionsOnly: true,
+      herdrSessions: () => [
+        { id: 'w1:p1', cwd: worktree, status: 'sleeping', title: 'Ngủ trong worktree' },
+        { id: 'w1:p2', cwd: elsewhere, status: 'idle', title: 'Ngoài thư mục' },
+      ],
+    });
+
+    const folderNode = snapshot.nodes.find((node) => node.kind === 'folder');
+    const sessions = snapshot.nodes.filter((node) => node.kind === 'session');
+    expect(sessions.map((node) => [node.id, node.parentId])).toEqual([['herdr:w1:p1', folderNode?.id]]);
+  });
 });
 
 describe('parentSessions', () => {

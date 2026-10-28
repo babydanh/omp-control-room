@@ -327,7 +327,8 @@ function ledgerStatus(row: SessionRow): string {
 /**
  * Sessions working in `checkout`, and the recently ended ones {@link withRecentlyEnded} kept
  * (state `ended`, with `stoppedAt`). A cwd inside a nested checkout (a `.worktrees/<name>`
- * under the main one) belongs to that deeper checkout only.
+ * under the main one) belongs to that deeper checkout only. `placed` (the quick tree's
+ * {@link placeWorktrees}) puts a linked worktree's cwd at its main repo.
  */
 function sessionsForCheckout(
   checkout: string,
@@ -335,9 +336,11 @@ function sessionsForCheckout(
   ledgerRows: readonly TitledSessionRow[],
   agents: readonly AgentState[],
   herdrSessions: readonly HerdrProjectSession[],
+  placed?: ReadonlyMap<string, string>,
 ): ProjectSessionSnapshot[] {
   const owns = (cwd: string): boolean =>
-    pathContains(checkout, cwd) && !nestedCheckouts.some((nested) => pathContains(nested, cwd));
+    pathContains(checkout, placed?.get(canonicalKey(cwd)) ?? cwd) &&
+    !nestedCheckouts.some((nested) => pathContains(nested, cwd));
   const sessions: ProjectSessionSnapshot[] = [];
   for (const row of ledgerRows) {
     if (row.cwd === null || !owns(row.cwd)) continue;
@@ -527,36 +530,66 @@ async function mapLimit<T, R>(items: readonly T[], limit: number, task: (item: T
 }
 
 /**
- * The main repos behind `paths`: a linked worktree (`.git` file pointing at
- * `<main>/.git/worktrees/<name>`) is replaced by its main repo, so each repo is
- * scanned once; scanning every worktree as its own repo re-read all sibling
- * worktrees each time (quadratic). Other `.git` files (submodules point into
- * `.git/modules/...`) are repos of their own and stay.
+ * The main repo behind `candidate`: a linked worktree (`.git` file pointing at
+ * `<main>/.git/worktrees/<name>`) gives its main repo. Any other path stands for
+ * itself; other `.git` files (submodules point into `.git/modules/...`) are repos
+ * of their own.
+ */
+async function mainRepoOf(candidate: string): Promise<string> {
+  try {
+    const dotGit = path.join(candidate, '.git');
+    if (!(await fs.stat(dotGit)).isFile()) return candidate;
+    const match = /^gitdir:\s*(.+)$/m.exec(await fs.readFile(dotGit, 'utf8'));
+    const adminDir = match?.[1] === undefined ? undefined : path.resolve(candidate, match[1].trim());
+    const worktreesDir = adminDir === undefined ? undefined : path.dirname(adminDir);
+    if (
+      worktreesDir !== undefined &&
+      path.basename(worktreesDir) === 'worktrees' &&
+      path.basename(path.dirname(worktreesDir)) === '.git'
+    ) {
+      return path.dirname(path.dirname(worktreesDir));
+    }
+  } catch {
+    // No or unreadable .git: the path stands for itself.
+  }
+  return candidate;
+}
+
+/**
+ * The main repos behind `paths`, each once: scanning every worktree as its own
+ * repo re-read all sibling worktrees each time (quadratic).
  */
 async function mainRepos(paths: readonly string[]): Promise<string[]> {
   const mains = new Map<string, string>();
   for (const candidate of paths) {
-    let main = candidate;
-    try {
-      const dotGit = path.join(candidate, '.git');
-      if ((await fs.stat(dotGit)).isFile()) {
-        const match = /^gitdir:\s*(.+)$/m.exec(await fs.readFile(dotGit, 'utf8'));
-        const adminDir = match?.[1] === undefined ? undefined : path.resolve(candidate, match[1].trim());
-        const worktreesDir = adminDir === undefined ? undefined : path.dirname(adminDir);
-        if (
-          worktreesDir !== undefined &&
-          path.basename(worktreesDir) === 'worktrees' &&
-          path.basename(path.dirname(worktreesDir)) === '.git'
-        ) {
-          main = path.dirname(path.dirname(worktreesDir));
-        }
-      }
-    } catch {
-      // Unreadable .git: keep the path; readRepo decides whether it is a repo.
-    }
+    const main = await mainRepoOf(candidate);
     mains.set(canonicalKey(main), main);
   }
   return [...mains.values()];
+}
+
+/** Session cwd (canonical key) → its main repo; only linked worktrees are kept. Stable, so read once per cwd. */
+const worktreeMains = new Map<string, string | null>();
+
+/**
+ * Where the quick tree places each cwd that is a linked worktree: at its main repo. Without the
+ * git scan, a worktree beside its folder (`<repo>.worktrees/<name>`) would belong to no folder,
+ * and its sessions (a sleeping one to wake above all) would vanish from the sidebar.
+ */
+async function placeWorktrees(cwds: readonly string[]): Promise<ReadonlyMap<string, string>> {
+  const unread = [...new Set(cwds.map(canonicalKey))].filter((key) => !worktreeMains.has(key));
+  const byKey = new Map(cwds.map((cwd) => [canonicalKey(cwd), cwd]));
+  await mapLimit(unread, CHANGED_FILES_CONCURRENCY, async (key) => {
+    const cwd = byKey.get(key) ?? key;
+    const main = await mainRepoOf(cwd);
+    worktreeMains.set(key, main === cwd ? null : main);
+  });
+  const placed = new Map<string, string>();
+  for (const key of byKey.keys()) {
+    const main = worktreeMains.get(key);
+    if (main !== undefined && main !== null) placed.set(key, main);
+  }
+  return placed;
 }
 
 function overlapForCheckout(
@@ -635,6 +668,8 @@ async function appendNodes(
   ledgerRows: readonly TitledSessionRow[],
   agents: readonly AgentState[],
   herdrSessions: readonly HerdrProjectSession[],
+  /** The quick tree's linked-worktree cwds placed at their main repo; undefined in the full tree. */
+  placed: ReadonlyMap<string, string> | undefined,
   overlapScans: readonly LedgerOverlapScan[],
   pendingCheckouts: ReadonlySet<string>,
   aggregates: Map<string, NodeAggregate>,
@@ -644,7 +679,7 @@ async function appendNodes(
     if (node.type === 'group') {
       output.push({ id: node.id, parentId, kind: 'group', name: node.name });
       await appendNodes(
-        node.children, node.id, options, ledgerRows, agents, herdrSessions,
+        node.children, node.id, options, ledgerRows, agents, herdrSessions, placed,
         overlapScans, pendingCheckouts, aggregates, output,
       );
       continue;
@@ -652,7 +687,7 @@ async function appendNodes(
 
     output.push({ id: node.id, parentId, kind: 'folder', name: node.name, path: node.path });
     if (options.sessionsOnly === true) {
-      pushSessions(output, node.id, sessionsForCheckout(node.path, [], ledgerRows, agents, herdrSessions));
+      pushSessions(output, node.id, sessionsForCheckout(node.path, [], ledgerRows, agents, herdrSessions, placed));
       continue;
     }
     const listed = options.listRepos === undefined
@@ -835,6 +870,13 @@ export async function buildProjectTreeSnapshot(
   const overlapScans = options.sessionsOnly === true ? [] : await (options.overlapScans?.() ?? Promise.resolve([]));
   const agents = [...(options.agents ?? [])];
   const herdrSessions = await withPaneFacts(linked.panes, options.sessionFacts);
+  const placed = options.sessionsOnly === true
+    ? await placeWorktrees([
+      ...ledgerRows.flatMap((row) => (row.cwd === null ? [] : [row.cwd])),
+      ...agents.map((agent) => agent.projectDir),
+      ...herdrSessions.map((session) => session.cwd),
+    ])
+    : undefined;
   const nodes: ProjectTreeNode[] = [];
   const aggregates = new Map<string, NodeAggregate>();
   for (const project of state.projects) {
@@ -842,7 +884,7 @@ export async function buildProjectTreeSnapshot(
       id: project.id, kind: 'project', name: project.name, color: project.color,
     });
     await appendNodes(
-      project.children, project.id, options, ledgerRows, agents, herdrSessions,
+      project.children, project.id, options, ledgerRows, agents, herdrSessions, placed,
       overlapScans, pendingCheckouts, aggregates, nodes,
     );
   }
