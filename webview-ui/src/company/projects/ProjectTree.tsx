@@ -4,7 +4,7 @@ import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
-import { projectMenuContext } from './projectNodeTargets.js';
+import { ancestorOf, projectMenuContext } from './projectNodeTargets.js';
 import { type ProjectStore, useProjectState } from './projectStore.js';
 import {
   buildAgentTree,
@@ -214,13 +214,13 @@ function RecentlyStopped({ nodes, onOpenStopped }: Pick<ProjectTreeProps, 'nodes
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>Vừa ngủ / tắt
       </button>
-      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} now={now} onOpenStopped={onOpenStopped} />)}
+      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} folder={ancestorOf(nodes, node, 'folder')?.name} now={now} onOpenStopped={onOpenStopped} />)}
     </section>
   );
 }
 
 /** One "Vừa ngủ / tắt" row with its session code; the pointer shows its card, a click opens its details. */
-function RecentStoppedRow({ node, now, onOpenStopped }: Pick<ProjectTreeProps, 'onOpenStopped'> & { node: ProjectTreeNode; now: number }) {
+function RecentStoppedRow({ node, folder, now, onOpenStopped }: Pick<ProjectTreeProps, 'onOpenStopped'> & { node: ProjectTreeNode; folder: string | undefined; now: number }) {
   const hover = useSessionHover(true);
   const label = stoppedLabel(node, now);
   const code = sessionCode(node);
@@ -234,7 +234,11 @@ function RecentStoppedRow({ node, now, onOpenStopped }: Pick<ProjectTreeProps, '
         className="touch-target flex min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-hover"
       >
         <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" />
-        <span className="min-w-0 flex-1 truncate text-text">{sessionDisplayName(node)}</span>
+        <span className="min-w-0 flex-1 leading-snug">
+          <span className="block truncate text-text">{sessionDisplayName(node)}</span>
+          {/* A stopped session leaves its folder in the tree: name the folder here so it can be found. */}
+          {folder !== undefined && <span className="block truncate text-2xs text-text-muted" data-testid="recent-stopped-folder">📁 {folder}</span>}
+        </span>
         {code !== null && <span className="shrink-0 font-mono text-2xs text-text-muted" title={`Mã phiên ${code.full}`}>#{code.short}</span>}
         <UnfinishedMark node={node} count />
         <span className="shrink-0 text-2xs text-text-muted">{label}</span>
