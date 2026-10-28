@@ -2,7 +2,7 @@
 // Run by a systemd timer. Env: FLEET_HUB (https URL), FLEET_ID, FLEET_KEY (private key PEM path),
 // FLEET_ROOT (default /data/home). Sends paths and branch names only; never file content.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, existsSync, readlinkSync, statfsSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, readlinkSync, statfsSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { signJwt } from './jwt.mjs';
 
@@ -28,6 +28,14 @@ function sessions() {
   return out;
 }
 
+
+// Refresh origin/main at most every 5 minutes so "merged" follows GitHub without fetching every 30 s.
+function refreshMain(repoRoots) {
+  const stamp = join(process.env.HOME ?? '/tmp', '.fleet', 'last-fetch');
+  try { if (Date.now() - statSync(stamp).mtimeMs < 300_000) return; } catch { /* first run */ }
+  for (const root of repoRoots) git(root, 'fetch', '-q', 'origin', 'main');
+  writeFileSync(stamp, '');
+}
 function repos() {
   const roots = [];
   for (const name of readdirSync(ROOT)) {
@@ -35,6 +43,7 @@ function repos() {
     if (existsSync(join(dir, '.git'))) roots.push(dir);
     if (name.endsWith('.worktrees')) for (const wt of readdirSync(dir)) roots.push(join(dir, wt));
   }
+  refreshMain(roots.filter((p) => existsSync(join(p, '.git')) && statSync(join(p, '.git')).isDirectory()));
   return roots.map((path) => {
     const counts = git(path, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD').split(/\s+/);
     // Content-level check (catches squash merges): merging HEAD into origin/main changes nothing.
