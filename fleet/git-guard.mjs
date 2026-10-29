@@ -751,6 +751,30 @@ function refreshRisk(report, repo, worktree, errorText = '') {
   }
 }
 
+// The backup ref is about to move. If the new head does not contain the old one (rebase, reset,
+// amend), the old head may have no other ref: keep it under <ref>--<sha12> first. Returns null when
+// it is safe to overwrite, otherwise the reason (the caller must then leave the backup ref alone).
+function archiveRewrittenBackup(repoPath, cwd, ref, head) {
+  let previous = gitText(repoPath, 'rev-parse', '--verify', '--quiet', ref);
+  if (!previous) {
+    const remote = runGit(cwd, ['ls-remote', 'origin', ref], BACKUP_TIMEOUT_MS);
+    if (remote.status !== 0) return 'không đọc được ref sao lưu trên origin';
+    previous = remote.stdout.trim().split(/\s+/)[0] ?? '';
+  }
+  if (!previous || previous === head) return null;
+  const local = () => runGit(repoPath, ['cat-file', '-e', `${previous}^{commit}`]).status === 0;
+  // Made by another clone: bring the old commit here so it can be kept and compared.
+  if (!local() && runGit(cwd, ['fetch', '--no-tags', 'origin', ref], BACKUP_TIMEOUT_MS).status !== 0) {
+    return 'không tải được bản sao lưu cũ';
+  }
+  if (!local()) return 'bản sao lưu cũ không có trên máy';
+  if (runGit(repoPath, ['merge-base', '--is-ancestor', previous, head]).status === 0) return null;
+  const archive = `${ref}--${previous.slice(0, 12)}`;
+  runGit(repoPath, ['update-ref', archive, previous]);
+  const pushed = runGit(cwd, ['push', '--no-verify', 'origin', `${previous}:${archive}`], BACKUP_TIMEOUT_MS);
+  return pushed.status === 0 ? null : 'push bản cũ bị từ chối';
+}
+
 /** Push unpushed worktree heads only to refs/backup/<machine>/<branch>, never to branch refs. */
 export function backup(report, { dryRun = false } = {}) {
   if (!report || typeof report !== 'object' || !Array.isArray(report.repos)) throw new TypeError('backup expects a scan report');
@@ -768,6 +792,12 @@ export function backup(report, { dryRun = false } = {}) {
       }
       if (dryRun) continue;
       const cwd = existsSync(worktree.path) ? worktree.path : repo.repo;
+      const kept = archiveRewrittenBackup(repo.repo, cwd, ref, worktree.head);
+      if (kept !== null) {
+        worktree.backedUp = false;
+        refreshRisk(report, repo, worktree, `không cất được bản sao lưu cũ: ${kept}`);
+        continue;
+      }
       const pushed = runGit(cwd, ['push', '--no-verify', 'origin', `+${worktree.head}:${ref}`], BACKUP_TIMEOUT_MS);
       if (pushed.status === 0) {
         worktree.backedUp = true;

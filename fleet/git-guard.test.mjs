@@ -114,6 +114,26 @@ test('prune keeps a deleted detached worktree until its only commit is backed up
   assert.doesNotMatch(git(f.main, 'worktree', 'list', '--porcelain'), new RegExp(head), 'reachable from a backup ref: metadata pruned');
 });
 
+test('backup after a rewrite keeps the old head under an archive ref', async (t) => {
+  const f = fixture(t);
+  restoreHome(t, f.temp);
+  backup(await reportFor(f.scanRoot), { dryRun: false });
+  const oldHead = git(f.worktree, 'rev-parse', 'HEAD');
+  git(f.worktree, 'commit', '--amend', '-m', 'rewritten work');
+  const newHead = git(f.worktree, 'rev-parse', 'HEAD');
+  backup(await reportFor(f.scanRoot), { dryRun: false });
+  assert.equal(gitDir(f.origin, 'rev-parse', 'refs/backup/test-machine/feat/guard'), newHead);
+  assert.equal(gitDir(f.origin, 'rev-parse', `refs/backup/test-machine/feat/guard--${oldHead.slice(0, 12)}`), oldHead);
+  assert.equal(git(f.main, 'rev-parse', `refs/backup/test-machine/feat/guard--${oldHead.slice(0, 12)}`), oldHead);
+  // A normal new commit on top is a fast-forward: no extra archive ref.
+  writeFileSync(join(f.worktree, 'more.txt'), 'more\n');
+  git(f.worktree, 'add', 'more.txt');
+  git(f.worktree, 'commit', '-m', 'more work');
+  backup(await reportFor(f.scanRoot), { dryRun: false });
+  const archives = gitDir(f.origin, 'for-each-ref', '--format=%(refname)', 'refs/backup/test-machine/').split('\n');
+  assert.equal(archives.length, 2);
+});
+
 test('scan recognizes a squash-merged topic by comparing merge trees', async (t) => {
   const f = fixture(t);
   restoreHome(t, f.temp);
