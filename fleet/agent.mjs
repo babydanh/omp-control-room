@@ -2,11 +2,16 @@
 // Run by a systemd timer. Env: FLEET_HUB (https URL), FLEET_ID, FLEET_KEY (private key PEM path),
 // FLEET_ROOT (default /data/home). Sends paths and branch names only; never file content.
 import { execFileSync } from 'node:child_process';
-import { readFileSync, readdirSync, existsSync, readlinkSync, statfsSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, readdirSync, existsSync, readlinkSync, statfsSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { signJwt } from './jwt.mjs';
+import { backup, scan } from './git-guard.mjs';
 
 const ROOT = process.env.FLEET_ROOT ?? '/data/home';
+
+const GUARD_BACKUP_INTERVAL_MS = 30 * 60 * 1000;
+const GUARD_BACKUP_STAMP = join(homedir(), '.cache', 'git-guard', 'last-backup');
 const ENGINES = { claude: /(^|\/)claude$/, codex: /(^|\/)codex$/, omp: /(^|\/)omp$/ };
 
 const git = (cwd, ...args) => {
@@ -201,17 +206,97 @@ export function fitReport(report, limit = 60_000) {
   return report;
 }
 
-if (process.env.FLEET_ID) {
-const id = process.env.FLEET_ID;
-const token = signJwt({ iss: id, aud: 'fleet-hub', role: 'report' }, readFileSync(process.env.FLEET_KEY, 'utf8'));
-const res = await fetch(`${process.env.FLEET_HUB}/v1/report`, {
-  method: 'POST',
-  headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify(fitReport({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), tmux: tmuxSessions(), lavish: lavishSessions(), viec: readTaskBook(join(process.env.HOME ?? ROOT, '.cloud-viec')), repos: repos() })),
-  signal: AbortSignal.timeout(15000),
-}).catch((e) => ({ status: 0, text: async () => e.message }));
-if (res.status !== 200) {
-  console.error(`fleet-agent: hub ${res.status} ${await res.text()}`);
-  process.exit(1);
+const GUARD_REPORT_LIMIT = 14_000;
+
+/** Keep only bounded git-risk and worktree metadata for the board. */
+export function summarizeGuard(guard) {
+  const text = (value, max = 500) => String(value ?? '').slice(0, max);
+  const number = (value) => Number.isFinite(value) ? value : 0;
+  let worktreesRemaining = 100;
+  const worktreeSummary = (worktree) => ({
+    path: text(worktree.path),
+    branch: worktree.branch === null ? null : text(worktree.branch, 256),
+    head: text(worktree.head, 64),
+    unpushed: number(worktree.unpushed),
+    unpushedSubjects: (worktree.unpushedSubjects ?? []).slice(0, 5).map((subject) => text(subject, 200)),
+    backedUp: worktree.backedUp === true,
+    dirty: number(worktree.dirty),
+    dirtyOldestMinutes: Number.isFinite(worktree.dirtyOldestMinutes) ? worktree.dirtyOldestMinutes : null,
+    op: ['rebase', 'merge', 'cherry-pick', 'bisect'].includes(worktree.op) ? worktree.op : null,
+    mergedToMain: worktree.mergedToMain === true,
+    idleDays: number(worktree.idleDays),
+    prunable: worktree.prunable === true,
+  });
+  const summary = {
+    machine: text(guard.machine, 100),
+    scannedAt: text(guard.scannedAt, 40),
+    repos: (guard.repos ?? []).slice(0, 30).map((repo) => {
+      const worktrees = (repo.worktrees ?? []).slice(0, worktreesRemaining).map(worktreeSummary);
+      worktreesRemaining -= worktrees.length;
+      return { repo: text(repo.repo), worktrees };
+    }),
+    risks: (guard.risks ?? []).slice(0, 100).map((risk) => ({
+      level: risk.level === 'red' ? 'red' : 'yellow',
+      kind: text(risk.kind, 32),
+      repo: text(risk.repo),
+      path: text(risk.path),
+      detail: text(risk.detail, 300),
+    })),
+  };
+  const size = () => Buffer.byteLength(JSON.stringify(summary));
+  while (size() > GUARD_REPORT_LIMIT) {
+    if (summary.risks.length) summary.risks.pop();
+    else {
+      const repo = summary.repos.at(-1);
+      if (repo?.worktrees.length) repo.worktrees.pop();
+      else if (summary.repos.length) summary.repos.pop();
+      else break;
+    }
+  }
+  return summary;
 }
+
+export function shouldBackupGuard(lastBackupAt, now = Date.now()) {
+  return !Number.isFinite(lastBackupAt) || now - lastBackupAt >= GUARD_BACKUP_INTERVAL_MS;
+}
+
+function lastBackupTime() {
+  try { return statSync(GUARD_BACKUP_STAMP).mtimeMs; } catch { return NaN; }
+}
+
+function recordBackupAttempt() {
+  try {
+    mkdirSync(dirname(GUARD_BACKUP_STAMP), { recursive: true });
+    writeFileSync(GUARD_BACKUP_STAMP, `${Date.now()}\\n`, { mode: 0o600 });
+  } catch { /* a missing local stamp only causes a later retry */ }
+}
+
+if (process.env.FLEET_ID) {
+  const id = process.env.FLEET_ID;
+  const guardReport = scan({ roots: [ROOT], machine: id });
+  const token = signJwt({ iss: id, aud: 'fleet-hub', role: 'report' }, readFileSync(process.env.FLEET_KEY, 'utf8'));
+  const res = await fetch(`${process.env.FLEET_HUB}/v1/report`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(fitReport({
+      agent_id: id,
+      disk_free_gb: diskFreeGb(),
+      sessions: sessions(),
+      tmux: tmuxSessions(),
+      lavish: lavishSessions(),
+      viec: readTaskBook(join(process.env.HOME ?? ROOT, '.cloud-viec')),
+      repos: repos(),
+      guard: summarizeGuard(guardReport),
+    })),
+    signal: AbortSignal.timeout(15000),
+  }).catch((e) => ({ status: 0, text: async () => e.message }));
+  if (process.env.GIT_GUARD_BACKUP !== '0' && shouldBackupGuard(lastBackupTime())) {
+    try { backup(guardReport); }
+    catch (error) { console.error(`fleet-agent: git guard backup failed: ${error.message}`); }
+    recordBackupAttempt();
+  }
+  if (res.status !== 200) {
+    console.error(`fleet-agent: hub ${res.status} ${await res.text()}`);
+    process.exitCode = 1;
+  }
 }

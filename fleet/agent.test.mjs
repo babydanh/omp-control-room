@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fitReport, parseLavish, parseTmux, readTaskBook } from './agent.mjs';
+import { fitReport, parseLavish, parseTmux, readTaskBook, shouldBackupGuard, summarizeGuard } from './agent.mjs';
 
 test('a huge diff is cut to fit the hub limit, keeping the file list', () => {
   const changes = Array.from({ length: 200 }, (_, i) => ({ path: `src/very/long/path/to/file-${i}.ts`, ranges: Array.from({ length: 20 }, (_, j) => [j * 10 + 1, j * 10 + 5]) }));
@@ -17,6 +17,42 @@ test('a huge diff is cut to fit the hub limit, keeping the file list', () => {
 test('a small report is left untouched', () => {
   const report = { agent_id: 'danh', sessions: [], repos: [{ path: '/x', branch: 'b', dirty_files: ['a.ts'], changes: [{ path: 'a.ts', ranges: [[1, 2]] }] }] };
   assert.deepEqual(fitReport(structuredClone(report)), report);
+});
+
+test('a compact guard summary keeps risks and bounded worktree metadata', () => {
+  const guard = {
+    machine: 'm1',
+    scannedAt: '2026-10-29T00:00:00.000Z',
+    repos: [{ repo: '/repo', stashes: 2, worktrees: [{
+      path: '/repo/wt', branch: 'feat/a', head: 'abc', unpushed: 1,
+      unpushedSubjects: ['work'], backedUp: false, dirty: 0, dirtyOldestMinutes: null,
+      op: null, mergedToMain: false, idleDays: 3, prunable: false,
+    }] }],
+    risks: [{ level: 'red', kind: 'unpushed', repo: '/repo', path: '/repo/wt', detail: 'not backed up' }],
+  };
+  const summary = summarizeGuard(guard);
+  assert.equal(summary.machine, 'm1');
+  assert.equal(summary.repos[0].worktrees[0].head, 'abc');
+  assert.equal(summary.repos[0].worktrees[0].unpushedSubjects[0], 'work');
+  assert.equal(summary.risks[0].kind, 'unpushed');
+  assert.equal('stashes' in summary.repos[0], false);
+});
+
+test('guard reports are size-bounded and backup interval is thirty minutes', () => {
+  const worktree = {
+    path: '/repo/wt', branch: 'feat/a', head: 'a'.repeat(40), unpushed: 1,
+    unpushedSubjects: ['work'], backedUp: false, dirty: 0, dirtyOldestMinutes: null,
+    op: null, mergedToMain: false, idleDays: 3, prunable: false,
+  };
+  const large = {
+    machine: 'm1', scannedAt: '2026-10-29T00:00:00.000Z',
+    repos: Array.from({ length: 30 }, (_, i) => ({ repo: `/repo/${i}`, worktrees: Array.from({ length: 100 }, () => worktree) })),
+    risks: Array.from({ length: 100 }, () => ({ level: 'red', kind: 'unpushed', repo: '/repo', path: '/repo/wt', detail: 'x'.repeat(300) })),
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(summarizeGuard(large))) <= 14_000);
+  assert.equal(shouldBackupGuard(1_000, 1_000 + 30 * 60 * 1000 - 1), false);
+  assert.equal(shouldBackupGuard(1_000, 1_000 + 30 * 60 * 1000), true);
+  assert.equal(shouldBackupGuard(Number.NaN, 1_000), true);
 });
 
 test('many repos with long dirty paths still end under the limit', () => {

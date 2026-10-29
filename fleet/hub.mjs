@@ -8,6 +8,76 @@ import { verifyJwt } from './jwt.mjs';
 const MAX_BODY = 64 * 1024;
 const RATE_PER_MIN = 60;
 
+const GUARD_KINDS = new Set(['unpushed', 'dirty', 'stash', 'op', 'prunable', 'detached']);
+const GUARD_OPS = new Set(['rebase', 'merge', 'cherry-pick', 'bisect']);
+const MAX_GUARD_BYTES = 16 * 1024;
+
+function isRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function normalizeGuard(value) {
+  if (!isRecord(value) || typeof value.machine !== 'string' || typeof value.scannedAt !== 'string'
+      || !Number.isFinite(Date.parse(value.scannedAt)) || !Array.isArray(value.repos) || !Array.isArray(value.risks)) return null;
+  const boundedText = (text, max) => text.slice(0, max);
+  let worktreesRemaining = 100;
+  const repos = [];
+  for (const repo of value.repos.slice(0, 20)) {
+    if (!isRecord(repo) || typeof repo.repo !== 'string' || !Array.isArray(repo.worktrees)) return null;
+    const worktrees = [];
+    for (const item of repo.worktrees.slice(0, worktreesRemaining)) {
+      if (!isRecord(item) || typeof item.path !== 'string' || !(item.branch === null || typeof item.branch === 'string')
+          || typeof item.head !== 'string' || !Number.isFinite(item.unpushed) || item.unpushed < 0
+          || !Array.isArray(item.unpushedSubjects) || item.unpushedSubjects.length > 5
+          || !item.unpushedSubjects.every((subject) => typeof subject === 'string')
+          || typeof item.backedUp !== 'boolean' || !Number.isFinite(item.dirty) || item.dirty < 0
+          || !(item.dirtyOldestMinutes === null || (Number.isFinite(item.dirtyOldestMinutes) && item.dirtyOldestMinutes >= 0))
+          || !(item.op === null || GUARD_OPS.has(item.op)) || typeof item.mergedToMain !== 'boolean'
+          || !Number.isFinite(item.idleDays) || item.idleDays < 0 || typeof item.prunable !== 'boolean') return null;
+      worktrees.push({
+        path: boundedText(item.path, 500),
+        branch: item.branch === null ? null : boundedText(item.branch, 256),
+        head: boundedText(item.head, 64),
+        unpushed: item.unpushed,
+        unpushedSubjects: item.unpushedSubjects.slice(0, 5).map((subject) => boundedText(subject, 200)),
+        backedUp: item.backedUp,
+        dirty: item.dirty,
+        dirtyOldestMinutes: item.dirtyOldestMinutes,
+        op: item.op,
+        mergedToMain: item.mergedToMain,
+        idleDays: item.idleDays,
+        prunable: item.prunable,
+      });
+    }
+    worktreesRemaining -= worktrees.length;
+    repos.push({ repo: boundedText(repo.repo, 500), worktrees });
+  }
+  const risks = [];
+  for (const risk of value.risks.slice(0, 100)) {
+    if (!isRecord(risk) || !['red', 'yellow'].includes(risk.level) || !GUARD_KINDS.has(risk.kind)
+        || typeof risk.repo !== 'string' || typeof risk.path !== 'string' || typeof risk.detail !== 'string') return null;
+    risks.push({
+      level: risk.level,
+      kind: risk.kind,
+      repo: boundedText(risk.repo, 500),
+      path: boundedText(risk.path, 500),
+      detail: boundedText(risk.detail, 300),
+    });
+  }
+  const guard = { machine: boundedText(value.machine, 100), scannedAt: boundedText(value.scannedAt, 40), repos, risks };
+  const size = () => Buffer.byteLength(JSON.stringify(guard));
+  while (size() > MAX_GUARD_BYTES) {
+    if (guard.risks.length) guard.risks.pop();
+    else {
+      const repo = guard.repos.at(-1);
+      if (repo?.worktrees.length) repo.worktrees.pop();
+      else if (guard.repos.length) guard.repos.pop();
+      else break;
+    }
+  }
+  return guard;
+}
+
 export function createHub({ keysPath, statePath, now = () => Date.now(), startedAt = now() }) {
   const seenJti = new Map();
   const hits = new Map();
@@ -67,6 +137,7 @@ export function createHub({ keysPath, statePath, now = () => Date.now(), started
           lavish: Array.isArray(body.lavish) ? body.lavish.slice(0, 20) : [],
           viec: Array.isArray(body.viec) ? body.viec.slice(0, 30) : [],
           repos: Array.isArray(body.repos) ? body.repos.slice(0, 20) : [],
+          guard: normalizeGuard(body.guard),
         };
         persist();
         send(res, 200, { ok: true });

@@ -34,6 +34,48 @@ test('a machine reports and the board reads it', async () => {
   assert.deepEqual(machines.find((m) => m.agent_id === 'm1').repos[0].dirty_files, ['a.ts']);
 });
 
+test('stores a validated git guard report for the board', async () => {
+  const guard = {
+    machine: 'm1',
+    scannedAt: '2026-10-29T12:00:00.000Z',
+    repos: [{ repo: '/repo', worktrees: [{
+      path: '/repo/wt', branch: 'feat/a', head: 'a'.repeat(40), unpushed: 1,
+      unpushedSubjects: ['work'], backedUp: false, dirty: 0, dirtyOldestMinutes: null,
+      op: null, mergedToMain: false, idleDays: 3, prunable: false,
+    }] }],
+    risks: [{ level: 'red', kind: 'unpushed', repo: '/repo', path: '/repo/wt', detail: 'not backed up' }],
+  };
+  assert.equal((await report(tok('m1', 'report', m1.priv), { ...body('m1'), guard })).status, 200);
+  const { machines } = await (await read(tok('board', 'read', board.priv))).json();
+  assert.deepEqual(machines.find((machine) => machine.agent_id === 'm1').guard, guard);
+});
+
+test('drops a git guard with invalid field types', async () => {
+  assert.equal((await report(tok('m1', 'report', m1.priv), { ...body('m1'), guard: {
+    machine: 4, scannedAt: 'not a date', repos: [], risks: [],
+  } })).status, 200);
+  const { machines } = await (await read(tok('board', 'read', board.priv))).json();
+  assert.equal(machines.find((machine) => machine.agent_id === 'm1').guard, null);
+});
+
+test('caps git guard payloads before storing them', async () => {
+  const guard = {
+    machine: 'm1', scannedAt: '2026-10-29T12:00:00.000Z',
+    repos: [{ repo: 'r'.repeat(100), worktrees: Array.from({ length: 70 }, () => ({
+      path: 'p'.repeat(100), branch: 'b'.repeat(100), head: 'a'.repeat(40), unpushed: 1,
+      unpushedSubjects: [], backedUp: false, dirty: 0, dirtyOldestMinutes: null,
+      op: null, mergedToMain: false, idleDays: 3, prunable: false,
+    })) }],
+    risks: Array.from({ length: 70 }, () => ({
+      level: 'yellow', kind: 'dirty', repo: 'r'.repeat(100), path: 'p'.repeat(100), detail: 'd'.repeat(100),
+    })),
+  };
+  assert.equal((await report(tok('m1', 'report', m1.priv), { ...body('m1'), guard })).status, 200);
+  const { machines } = await (await read(tok('board', 'read', board.priv))).json();
+  const saved = machines.find((machine) => machine.agent_id === 'm1').guard;
+  assert.ok(Buffer.byteLength(JSON.stringify(saved)) <= 16 * 1024);
+});
+
 test('rejects a token signed by a key not registered for the issuer', async () => {
   assert.equal((await report(tok('m1', 'report', stranger.priv), body('m1'))).status, 401);
 });
