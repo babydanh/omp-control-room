@@ -194,11 +194,23 @@ function safeRefSegment(value, { allowSlash = false } = {}) {
   return cleaned.replace(/^\/+|\/+$/g, '') || 'unknown';
 }
 
-function backupRef(machine, branch) {
+// Detached heads have no branch name: back them up under detached-<sha> so they stay reachable.
+function backupRef(machine, branch, head) {
   const machinePart = safeRefSegment(machine);
-  const branchPart = safeRefSegment(branch, { allowSlash: true });
+  const branchPart = branch ? safeRefSegment(branch, { allowSlash: true }) : `detached-${String(head).slice(0, 12)}`;
   const ref = `refs/backup/${machinePart}/${branchPart}`;
   return ref.startsWith('refs/backup/') ? ref : null;
+}
+
+// A prunable entry may hold the only pointer to its HEAD (detached work). Its metadata is only
+// dropped when the commit is reachable from some ref (branch, remote-tracking or backup).
+function headReachable(repoPath, head) {
+  if (!head) return true;
+  try {
+    return gitText(repoPath, 'for-each-ref', '--count=1', '--contains', head, '--format=%(refname)') !== '';
+  } catch {
+    return false;
+  }
 }
 
 function worktreeEntries(text) {
@@ -371,8 +383,8 @@ async function isMergedToMain(cwd, head, headTree, origin, originMainSha, target
 }
 
 function cachedBackup(entries, origin, machine, branch, head) {
-  if (!origin || !branch || !head) return false;
-  const ref = backupRef(machine, branch);
+  if (!origin || !head) return false;
+  const ref = backupRef(machine, branch, head);
   return Boolean(ref && entries[cacheKey(origin, ref)] === head);
 }
 function sanitizedOrigin(origin) {
@@ -595,7 +607,8 @@ export function prune(
         continue;
       }
       if (worktree.prunable) {
-        pruneMetadata = true;
+        if (worktree.branch === null && !headReachable(repo.repo, worktree.head)) protectedPrunable = true;
+        else pruneMetadata = true;
         continue;
       }
       if (worktree.op !== null && worktree.op !== undefined) {
@@ -746,8 +759,8 @@ export function backup(report, { dryRun = false } = {}) {
   for (const repo of report.repos) {
     if (!repo.origin) continue;
     for (const worktree of repo.worktrees ?? []) {
-      if (worktree.unpushed <= 0 || worktree.branch === null || !worktree.branch || !worktree.head) continue;
-      const ref = backupRef(report.machine, worktree.branch);
+      if (worktree.unpushed <= 0 || !worktree.head) continue;
+      const ref = backupRef(report.machine, worktree.branch, worktree.head);
       if (!ref || !ref.startsWith('refs/backup/')) {
         worktree.backedUp = false;
         refreshRisk(report, repo, worktree, 'tên ref không hợp lệ');
@@ -758,6 +771,8 @@ export function backup(report, { dryRun = false } = {}) {
       const pushed = runGit(cwd, ['push', '--no-verify', 'origin', `+${worktree.head}:${ref}`], BACKUP_TIMEOUT_MS);
       if (pushed.status === 0) {
         worktree.backedUp = true;
+        // Same ref locally: the commit stays reachable here too (gc, worktree prune) without a fetch.
+        runGit(repo.repo, ['update-ref', ref, worktree.head]);
         entries[cacheKey(repo.origin, ref)] = worktree.head;
         cacheChanged = true;
         refreshRisk(report, repo, worktree);

@@ -92,6 +92,28 @@ test('backup pushes only the backup ref and cached scan reports the worktree as 
   assert.ok(rescanned.risks.some((risk) => risk.kind === 'unpushed' && risk.level === 'yellow'));
 });
 
+test('prune keeps a deleted detached worktree until its only commit is backed up', async (t) => {
+  const f = fixture(t);
+  restoreHome(t, f.temp);
+  const detached = join(f.scanRoot, 'worktrees', 'detached');
+  git(f.main, 'worktree', 'add', '--detach', detached);
+  writeFileSync(join(detached, 'lone.txt'), 'only here\n');
+  git(detached, 'add', 'lone.txt');
+  git(detached, 'commit', '-m', 'detached work');
+  const head = git(detached, 'rev-parse', 'HEAD');
+  rmSync(detached, { recursive: true, force: true });
+  const before = await reportFor(f.scanRoot);
+  const lone = before.repos.flatMap((repo) => repo.worktrees).find((worktree) => worktree.head === head);
+  assert.equal(lone.prunable, true);
+  prune(before);
+  assert.match(git(f.main, 'worktree', 'list', '--porcelain'), new RegExp(head), 'metadata kept: it is the only pointer to the commit');
+  const backedUp = backup(await reportFor(f.scanRoot), { dryRun: false });
+  assert.equal(gitDir(f.origin, 'rev-parse', `refs/backup/test-machine/detached-${head.slice(0, 12)}`), head);
+  git(f.main, 'fetch', 'origin', '+refs/backup/*:refs/backup/*');
+  prune(backedUp);
+  assert.doesNotMatch(git(f.main, 'worktree', 'list', '--porcelain'), new RegExp(head), 'reachable from a backup ref: metadata pruned');
+});
+
 test('scan recognizes a squash-merged topic by comparing merge trees', async (t) => {
   const f = fixture(t);
   restoreHome(t, f.temp);
