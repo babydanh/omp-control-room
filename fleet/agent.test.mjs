@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fitReport, parseLavish, parseTmux } from './agent.mjs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fitReport, parseLavish, parseTmux, readTaskBook } from './agent.mjs';
 
 test('a huge diff is cut to fit the hub limit, keeping the file list', () => {
   const changes = Array.from({ length: 200 }, (_, i) => ({ path: `src/very/long/path/to/file-${i}.ts`, ranges: Array.from({ length: 20 }, (_, j) => [j * 10 + 1, j * 10 + 5]) }));
@@ -40,4 +43,13 @@ test('lavish state keeps open sessions with hex keys, drops ended ones and junk'
   } });
   assert.deepEqual(parseLavish(state), [{ key: 'b702b4f8df032645', file: '/data/home/wt/x/.lavish/plan.html' }]);
   assert.deepEqual(parseLavish('not json'), []);
+});
+
+test('task book: valid entries only, missing folder means no tasks', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'viec-'));
+  writeFileSync(join(dir, 'xep-san.json'), JSON.stringify({ slug: 'xep-san', status: 'dang-lam', branch: 'cloud/danh-xep-san', kind: 'all', session: 'secret-ish' }));
+  writeFileSync(join(dir, 'bad.json'), '{not json');
+  writeFileSync(join(dir, 'evil.json'), JSON.stringify({ slug: '../x', status: 'dang-lam' }));
+  assert.deepEqual(readTaskBook(dir), [{ slug: 'xep-san', status: 'dang-lam', branch: 'cloud/danh-xep-san', kind: 'all' }]);
+  assert.deepEqual(readTaskBook(join(dir, 'khong-co')), []);
 });

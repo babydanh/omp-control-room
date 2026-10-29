@@ -65,6 +65,7 @@ export function createHub({ keysPath, statePath, now = () => Date.now(), started
           sessions: Array.isArray(body.sessions) ? body.sessions.slice(0, 50) : [],
           tmux: Array.isArray(body.tmux) ? body.tmux.slice(0, 30) : [],
           lavish: Array.isArray(body.lavish) ? body.lavish.slice(0, 20) : [],
+          viec: Array.isArray(body.viec) ? body.viec.slice(0, 30) : [],
           repos: Array.isArray(body.repos) ? body.repos.slice(0, 20) : [],
         };
         persist();

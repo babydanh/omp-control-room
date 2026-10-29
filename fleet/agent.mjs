@@ -63,6 +63,20 @@ function tmuxSessions() {
   return parseTmux(text, Math.floor(Date.now() / 1000), branchOf);
 }
 
+/** Task book written by cloud-giao (~/.cloud-viec/*.json): name, status, branch. The Botkeep watch bot reads it. */
+export function readTaskBook(dir) {
+  let names = [];
+  try { names = readdirSync(dir).filter((n) => n.endsWith('.json')); } catch { return []; }
+  return names.flatMap((n) => {
+    try {
+      const v = JSON.parse(readFileSync(join(dir, n), 'utf8'));
+      return /^[a-z0-9][a-z0-9-]{0,39}$/.test(v.slug) && /^(dang-lam|xong)$/.test(v.status)
+        ? [{ slug: v.slug, status: v.status, branch: String(v.branch ?? ''), kind: String(v.kind ?? '') }]
+        : [];
+    } catch { return []; }
+  }).slice(0, 30);
+}
+
 /** Open Lavish review sessions (key + artifact path) from lavish-axi's state file; never the artifact itself. */
 export function parseLavish(stateText) {
   let sessions;
@@ -193,7 +207,7 @@ const token = signJwt({ iss: id, aud: 'fleet-hub', role: 'report' }, readFileSyn
 const res = await fetch(`${process.env.FLEET_HUB}/v1/report`, {
   method: 'POST',
   headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify(fitReport({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), tmux: tmuxSessions(), lavish: lavishSessions(), repos: repos() })),
+  body: JSON.stringify(fitReport({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), tmux: tmuxSessions(), lavish: lavishSessions(), viec: readTaskBook(join(process.env.HOME ?? ROOT, '.cloud-viec')), repos: repos() })),
   signal: AbortSignal.timeout(15000),
 }).catch((e) => ({ status: 0, text: async () => e.message }));
 if (res.status !== 200) {
