@@ -41,6 +41,7 @@ export function FleetView() {
           />
         )}
         <ActionStatus fleet={fleet} />
+        {fleet.diff !== null && <DiffPanel diff={fleet.diff} />}
         {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
           <TaskForm machines={fleet.snapshot.machines.map((machine) => machine.agentId)} busy={fleet.action !== null} />
         )}
@@ -93,7 +94,12 @@ export function FleetView() {
 
 function ActionStatus({ fleet }: { fleet: FleetState }) {
   if (fleet.action !== null) {
-    const what = fleet.action.kind === 'terminal' ? 'Đang mở terminal' : 'Đang tạo worktree và mở Claude';
+    const what = {
+      terminal: 'Đang mở terminal',
+      task: 'Đang tạo worktree và mở Claude',
+      lavish: 'Đang nối cổng tới Lavish',
+      diff: 'Đang đọc thay đổi',
+    }[fleet.action.kind];
     return (
       <p role="status" className="text-sm text-text-muted">
         {what} trên {fleet.action.machine} ({fleet.action.session})… máy đang ngủ thì mất 1–2 phút.
@@ -248,14 +254,42 @@ function MachineCard({ machine, busy }: { machine: FleetMachineSnapshot; busy: b
           ))}
         </ul>
       )}
+      {(machine.lavishSessions ?? []).length > 0 && (
+        <ul className="space-y-1 border-t border-hairline pt-2">
+          {(machine.lavishSessions ?? []).map((session) => (
+            <li key={session.key} className="flex flex-wrap items-center gap-x-2 text-xs text-text-secondary">
+              <span className="font-medium text-text">Lavish</span>
+              <span className="break-all font-mono">{shortPath(session.file)}</span>
+              <button
+                type="button"
+                disabled={busy}
+                className="company-btn company-btn-sm company-btn-ghost ml-auto"
+                onClick={() => fleetStore.openLavish(machine.agentId, session.key, openPendingTab())}
+              >
+                Mở Lavish
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {machine.repos.length > 0 ? (
         <ul className="space-y-1 border-t border-hairline pt-2">
           {machine.repos.map((repo, index) => (
-            <li key={`${repo.name}-${repo.branch}-${index}`} className="flex flex-wrap gap-x-2 text-xs text-text-secondary">
+            <li key={`${repo.name}-${repo.branch}-${index}`} className="flex flex-wrap items-center gap-x-2 text-xs text-text-secondary">
               <span className="font-medium text-text">{repo.name}</span>
               <span className="break-all font-mono">{repo.branch}</span>
               <span>{repo.dirtyCount} tệp thay đổi</span>
               <span className={repo.merged === true && repo.dirtyCount === 0 ? 'text-success' : 'text-text-muted'}>{deliveryLabel(repo)}</span>
+              {repo.path ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  className="company-btn company-btn-sm company-btn-ghost ml-auto"
+                  onClick={() => repo.path && fleetStore.requestDiff(machine.agentId, repo.path)}
+                >
+                  Xem thay đổi
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -263,6 +297,52 @@ function MachineCard({ machine, busy }: { machine: FleetMachineSnapshot; busy: b
         <p className="border-t border-hairline pt-2 text-xs text-text-muted">Chưa có repository được báo cáo.</p>
       )}
     </article>
+  );
+}
+
+/** `/data/home/wt/backend-x/.lavish/plan.html` -> `backend-x/.lavish/plan.html`. */
+function shortPath(file: string): string {
+  return file.replace(/^\/data\/home\/(wt\/)?/, '');
+}
+
+/** A blank tab opened inside the click (so it is not blocked as a popup), pointed at Lavish once the port is forwarded. */
+function openPendingTab() {
+  const tab = window.open('about:blank', '_blank');
+  if (!tab) return null;
+  tab.opener = null;
+  tab.document.title = 'Đang nối tới Lavish…';
+  tab.document.body.textContent = 'Đang nối cổng tới máy cloud (máy ngủ thì mất 1–2 phút)…';
+  return { navigate: (url: string) => tab.location.replace(url), close: () => tab.close() };
+}
+
+function diffLineClass(line: string): string {
+  if (line.startsWith('###')) return 'font-semibold text-text';
+  if (line.startsWith('+') && !line.startsWith('+++')) return 'text-success';
+  if (line.startsWith('-') && !line.startsWith('---')) return 'text-warning';
+  if (line.startsWith('@@')) return 'text-accent';
+  return 'text-text-secondary';
+}
+
+function DiffPanel({ diff }: { diff: NonNullable<FleetState['diff']> }) {
+  return (
+    <section className="flex max-h-[70vh] flex-col rounded border border-hairline bg-well">
+      <header className="flex items-center justify-between gap-2 border-b border-hairline px-3 py-2">
+        <span className="break-all font-mono text-sm text-text">
+          {diff.machine} · {diff.path}
+        </span>
+        {diff.truncated ? <span className="text-xs text-warning">Đã cắt bớt (quá 300 KB)</span> : null}
+        <button type="button" className="company-btn company-btn-sm company-btn-ghost" onClick={() => fleetStore.closeDiff()}>
+          Đóng
+        </button>
+      </header>
+      <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-5">
+        {diff.text.split('\n').map((line, index) => (
+          <div key={index} className={diffLineClass(line)}>
+            {line || ' '}
+          </div>
+        ))}
+      </pre>
+    </section>
   );
 }
 

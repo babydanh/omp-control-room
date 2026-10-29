@@ -165,6 +165,8 @@ components:
         - $ref: '#/components/schemas/FleetCommandResultMessage'
         - $ref: '#/components/schemas/FleetTerminalOpenedMessage'
         - $ref: '#/components/schemas/FleetTaskCreatedMessage'
+        - $ref: '#/components/schemas/FleetLavishOpenedMessage'
+        - $ref: '#/components/schemas/FleetDiffMessage'
         # Project tree (privileged; project, checkout and session data)
         - $ref: '#/components/schemas/ProjectTreeSnapshotMessage'
         - $ref: '#/components/schemas/ProjectDiffMessage'
@@ -283,6 +285,8 @@ components:
         - $ref: '#/components/schemas/FleetRequestMessage'
         - $ref: '#/components/schemas/FleetTerminalOpenMessage'
         - $ref: '#/components/schemas/FleetTaskCreateMessage'
+        - $ref: '#/components/schemas/FleetLavishOpenMessage'
+        - $ref: '#/components/schemas/FleetDiffRequestMessage'
         # Project tree (privileged; tree CRUD, diffs, comments, settings and sessions)
         - $ref: '#/components/schemas/ProjectTreeRequestMessage'
         - $ref: '#/components/schemas/ProjectNodeCreateMessage'
@@ -6372,6 +6376,87 @@ components:
         branch:
           type: string
 
+    FleetLavishSession:
+      type: object
+      additionalProperties: false
+      required: [key, file]
+      description: An open Lavish review session on a cloud machine (served on the machine's loopback only).
+      properties:
+        key:
+          type: string
+          pattern: '^[a-f0-9]{8,64}$'
+        file:
+          type: string
+
+    FleetLavishOpenMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, key]
+      description: Forward a local port to the machine's Lavish server and return the session URL (privileged).
+      properties:
+        type:
+          const: fleetLavishOpen
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+        key:
+          type: string
+          pattern: '^[a-f0-9]{8,64}$'
+
+    FleetLavishOpenedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, url]
+      properties:
+        type:
+          const: fleetLavishOpened
+        requestId:
+          type: string
+          format: uuid
+        url:
+          type: string
+          description: http://127.0.0.1:<local port>/session/<key>
+
+    FleetDiffRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, path]
+      description: Read git status and diff of one repository a machine reported (privileged, read-only).
+      properties:
+        type:
+          const: fleetDiffRequest
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+        path:
+          type: string
+          maxLength: 300
+
+    FleetDiffMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, path, text, truncated]
+      properties:
+        type:
+          const: fleetDiff
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+        path:
+          type: string
+        text:
+          type: string
+        truncated:
+          type: boolean
+
     FleetSnapshotMessage:
       type: object
       additionalProperties: false
@@ -6417,6 +6502,11 @@ components:
             $ref: '#/components/schemas/FleetRepoSnapshot'
         diskFreeGb:
           type: number
+          minimum: 0
+        lavishSessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FleetLavishSession'
         tmuxSessions:
           type: array
           items:
@@ -6439,6 +6529,9 @@ components:
       additionalProperties: false
       required: [name, branch, ahead, behind, dirtyCount]
       properties:
+        path:
+          type: string
+          description: Absolute path on the machine; the key for a diff request.
         name:
           type: string
         branch:

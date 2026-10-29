@@ -6,6 +6,7 @@ import {
   FLEET_REASON_COMMAND_FAILED,
   FLEET_REASON_NO_MACHINE,
   FLEET_REASON_NO_TERMINAL,
+  FLEET_REASON_NOT_REPORTED,
   FLEET_REASON_READ_ONLY,
   FLEET_REASON_UNAVAILABLE,
 } from './constants.js';
@@ -25,7 +26,7 @@ export interface FleetCommandContext {
   readonly privileged: boolean;
 }
 
-const FLEET_TYPES = new Set(['fleetRequest', 'fleetTerminalOpen', 'fleetTaskCreate']);
+const FLEET_TYPES = new Set(['fleetRequest', 'fleetTerminalOpen', 'fleetTaskCreate', 'fleetLavishOpen', 'fleetDiffRequest']);
 
 export function handleFleetMessage(
   msg: Record<string, unknown>,
@@ -48,6 +49,19 @@ export function handleFleetMessage(
     createTask(msg, requestId, send, context);
     return true;
   }
+  if (msg.type === 'fleetLavishOpen') {
+    const machine = typeof msg.machine === 'string' ? msg.machine : '';
+    const key = typeof msg.key === 'string' ? msg.key : '';
+    cloudOf(context)
+      .openLavish(machine, key)
+      .then((url) => send({ type: 'fleetLavishOpened', requestId, url }))
+      .catch((error: unknown) => send(failure(requestId, error)));
+    return true;
+  }
+  if (msg.type === 'fleetDiffRequest') {
+    readDiff(msg, requestId, send, context);
+    return true;
+  }
 
   const fleet = context.fleet ?? defaultFleetHubClient;
   // A cold ledger view can take over a minute; show the machines without local overlaps rather than wait.
@@ -63,7 +77,14 @@ export function handleFleetMessage(
 }
 
 function cloudOf(context: FleetCommandContext): CloudControl {
-  return context.cloud ?? (defaultCloudControl ??= new CloudControl());
+  if (context.cloud) return context.cloud;
+  if (defaultCloudControl === null) {
+    const created = new CloudControl();
+    // Port-forwards are child processes: close them with the board (a forced kill cannot run this).
+    process.once('exit', () => created.dispose());
+    defaultCloudControl = created;
+  }
+  return defaultCloudControl;
 }
 
 function openTerminal(
@@ -97,6 +118,32 @@ function createTask(
   cloudOf(context)
     .createTask(machine, msg.repo, slug, prompt)
     .then((session) => send({ type: 'fleetTaskCreated', requestId, machine, session }))
+    .catch((error: unknown) => send(failure(requestId, error)));
+}
+
+/** Only a path the machine itself reported to the hub may be read: the board never browses arbitrary folders. */
+function readDiff(
+  msg: Record<string, unknown>,
+  requestId: string,
+  send: (message: ServerMessage) => void,
+  context: FleetCommandContext,
+): void {
+  const machine = typeof msg.machine === 'string' ? msg.machine : '';
+  const path = typeof msg.path === 'string' ? msg.path : '';
+  const fleet = context.fleet ?? defaultFleetHubClient;
+  fleet
+    .fetchFleet()
+    .then(async (response) => {
+      const reported = response.machines.some(
+        (entry) => entry.agent_id === machine && entry.repos.some((repo) => repo.path === path),
+      );
+      if (!reported) {
+        send(commandResult(requestId, 'failed', FLEET_REASON_NOT_REPORTED));
+        return;
+      }
+      const diff = await cloudOf(context).readDiff(machine, path);
+      send({ type: 'fleetDiff', requestId, machine, path, text: diff.text, truncated: diff.truncated });
+    })
     .catch((error: unknown) => send(failure(requestId, error)));
 }
 

@@ -4,6 +4,10 @@ import { TRANSPORT_DISCONNECTED_ERROR } from '../../../../core/src/messageDelive
 import type {
   ClientMessage,
   FleetCommandResultMessage,
+  FleetDiffMessage,
+  FleetDiffRequestMessage,
+  FleetLavishOpenedMessage,
+  FleetLavishOpenMessage,
   FleetRequestMessage,
   FleetSnapshotMessage,
   FleetTaskCreatedMessage,
@@ -18,7 +22,9 @@ export type FleetServerMessage =
   | FleetSnapshotMessage
   | FleetCommandResultMessage
   | FleetTerminalOpenedMessage
-  | FleetTaskCreatedMessage;
+  | FleetTaskCreatedMessage
+  | FleetLavishOpenedMessage
+  | FleetDiffMessage;
 
 /** A cloud tmux session the board is showing in its terminal panel. */
 export interface FleetTerminal {
@@ -30,7 +36,7 @@ export interface FleetTerminal {
 /** One in-flight action (open a terminal / create a task); only the latest one is tracked. */
 export interface FleetAction {
   readonly requestId: string;
-  readonly kind: 'terminal' | 'task';
+  readonly kind: 'terminal' | 'task' | 'lavish' | 'diff';
   readonly machine: string;
   readonly session: string;
 }
@@ -48,6 +54,8 @@ export interface FleetState {
   readonly terminal: FleetTerminal | null;
   /** Set when a task was created: the machine/session to open next. */
   readonly createdTask: { readonly machine: string; readonly session: string } | null;
+  /** The last diff the user asked for, shown until closed. */
+  readonly diff: Omit<FleetDiffMessage, 'type' | 'requestId'> | null;
 }
 
 export interface FleetStoreOptions {
@@ -64,6 +72,21 @@ export interface FleetStore {
   openTerminal: (machine: string, session: string) => void;
   closeTerminal: () => void;
   createTask: (task: Omit<FleetTaskCreateMessage, 'type' | 'requestId'>) => void;
+  /** Opens the session in a new browser tab once the board has forwarded a local port to the machine. */
+  /** `tab` is opened by the click handler itself (a tab opened later, after the network round trip, is blocked as a popup). */
+  openLavish: (machine: string, key: string, tab?: PendingTab | null) => void;
+  requestDiff: (machine: string, path: string) => void;
+  closeDiff: () => void;
+}
+
+export interface PendingTab {
+  navigate(url: string): void;
+  close(): void;
+}
+
+export interface FleetStoreEnvironment {
+  /** Opens a URL in a new tab; injected so tests do not need a window. */
+  readonly openUrl?: (url: string) => void;
 }
 
 const NO_CONNECTION_REASON = 'Chưa kết nối tới máy chủ, yêu cầu chưa được gửi.';
@@ -81,6 +104,7 @@ export function createInitialFleetState(): FleetState {
     actionError: null,
     terminal: null,
     createdTask: null,
+    diff: null,
   };
 }
 
@@ -89,12 +113,23 @@ export function isFleetServerMessage(message: ServerMessage): message is FleetSe
     message.type === 'fleetSnapshot' ||
     message.type === 'fleetCommandResult' ||
     message.type === 'fleetTerminalOpened' ||
-    message.type === 'fleetTaskCreated'
+    message.type === 'fleetTaskCreated' ||
+    message.type === 'fleetLavishOpened' ||
+    message.type === 'fleetDiff'
   );
 }
 
-export function createFleetStore(options: FleetStoreOptions): FleetStore {
+export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironment): FleetStore {
   const newRequestId = options.newRequestId ?? defaultRequestId;
+  const openUrl = options.openUrl ?? ((url: string) => window.open(url, '_blank', 'noopener'));
+  let pendingTab: PendingTab | null = null;
+  const settleTab = (url: string | null): void => {
+    const tab = pendingTab;
+    pendingTab = null;
+    if (url === null) tab?.close();
+    else if (tab) tab.navigate(url);
+    else openUrl(url);
+  };
   const send = options.send;
   let state = createInitialFleetState();
   const listeners = new Set<() => void>();
@@ -119,7 +154,7 @@ export function createFleetStore(options: FleetStoreOptions): FleetStore {
     }
   }
 
-  function act(request: FleetTerminalOpenMessage | FleetTaskCreateMessage, kind: FleetAction['kind'], session: string): void {
+  function act(request: FleetTerminalOpenMessage | FleetTaskCreateMessage | FleetLavishOpenMessage | FleetDiffRequestMessage, kind: FleetAction['kind'], session: string): void {
     // One action at a time: a double click must not create two cloud tasks.
     if (state.action !== null) return;
     commit({ ...state, action: { requestId: request.requestId, kind, machine: request.machine, session }, actionError: null, createdTask: null });
@@ -127,6 +162,7 @@ export function createFleetStore(options: FleetStoreOptions): FleetStore {
       send(request);
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error);
+      if (kind === 'lavish') settleTab(null);
       commit({ ...state, action: null, actionError: detail === TRANSPORT_DISCONNECTED_ERROR ? NO_CONNECTION_REASON : SEND_FAILED_REASON });
     }
   }
@@ -136,9 +172,15 @@ export function createFleetStore(options: FleetStoreOptions): FleetStore {
     if (action === null || message.requestId !== action.requestId) return false;
     if (message.type === 'fleetTerminalOpened') {
       commit({ ...state, action: null, terminal: { machine: action.machine, session: action.session, terminalId: message.terminalId } });
+    } else if (message.type === 'fleetLavishOpened') {
+      commit({ ...state, action: null });
+      settleTab(message.url);
+    } else if (message.type === 'fleetDiff') {
+      commit({ ...state, action: null, diff: { machine: message.machine, path: message.path, text: message.text, truncated: message.truncated } });
     } else if (message.type === 'fleetTaskCreated') {
       commit({ ...state, action: null, createdTask: { machine: message.machine, session: message.session } });
     } else if (message.type === 'fleetCommandResult') {
+      if (action.kind === 'lavish') settleTab(null);
       commit({ ...state, action: null, actionError: message.reason ?? SEND_FAILED_REASON });
     }
     return true;
@@ -198,6 +240,18 @@ export function createFleetStore(options: FleetStoreOptions): FleetStore {
     createTask: (task) => {
       act({ type: 'fleetTaskCreate', requestId: newRequestId(), ...task }, 'task', task.slug);
     },
+    openLavish: (machine, key, tab) => {
+      if (state.action !== null) {
+        tab?.close();
+        return;
+      }
+      pendingTab = tab ?? null;
+      act({ type: 'fleetLavishOpen', requestId: newRequestId(), machine, key }, 'lavish', key);
+    },
+    requestDiff: (machine, path) => {
+      act({ type: 'fleetDiffRequest', requestId: newRequestId(), machine, path }, 'diff', path);
+    },
+    closeDiff: () => commit({ ...state, diff: null }),
   };
 }
 

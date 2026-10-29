@@ -15,6 +15,8 @@ export interface FleetHubSession {
 
 export interface FleetHubRepo {
   readonly path: string;
+  /** Main checkout folder name, reported for worktrees too; older agents omit it. */
+  readonly repo?: string;
   readonly branch: string;
   readonly ahead: number;
   readonly behind: number;
@@ -40,6 +42,7 @@ export interface FleetHubMachine {
   readonly repos: readonly FleetHubRepo[];
   readonly disk_free_gb?: number | null;
   readonly tmux?: readonly FleetHubTmux[];
+  readonly lavish?: readonly { readonly key: string; readonly file: string }[];
 }
 
 export interface FleetHubResponse {

@@ -4,8 +4,8 @@ import type {
   FleetSnapshotMessage,
   LedgerView,
 } from '../../../core/src/messages.js';
-import { FLEET_SESSION_NAME, FLEET_STALE_AFTER_MS } from './constants.js';
-import type { FleetHubMachine, FleetHubResponse } from './hubClient.js';
+import { FLEET_LAVISH_KEY, FLEET_SESSION_NAME, FLEET_STALE_AFTER_MS } from './constants.js';
+import type { FleetHubMachine, FleetHubRepo, FleetHubResponse } from './hubClient.js';
 
 export type FleetMachineState = FleetMachineSnapshot['state'];
 
@@ -58,7 +58,7 @@ export function computeFleetOverlaps(
 
   for (const machine of machines) {
     for (const repo of machine.repos) {
-      const repoName = repositoryName(repo.path);
+      const repoName = hubRepoName(repo);
       if (repoName === '') continue;
       for (const change of repo.changes ?? []) touch(repoName, change.path, machine.agent_id, change.ranges);
       for (const file of repo.dirty_files) touch(repoName, file, machine.agent_id, null);
@@ -130,7 +130,8 @@ export function buildFleetSnapshot(
         sessionCount: machine.sessions.length,
         engines: [...new Set(machine.sessions.map((session) => session.engine))].sort(),
         repos: machine.repos.map((repo) => ({
-          name: repositoryName(repo.path),
+          path: repo.path,
+          name: hubRepoName(repo),
           branch: repo.branch,
           ahead: repo.ahead,
           behind: repo.behind,
@@ -139,6 +140,9 @@ export function buildFleetSnapshot(
           ...(typeof repo.staged === 'boolean' ? { staged: repo.staged } : {}),
         })),
         ...(typeof machine.disk_free_gb === 'number' ? { diskFreeGb: machine.disk_free_gb } : {}),
+        lavishSessions: (machine.lavish ?? [])
+          .filter((session) => typeof session.key === 'string' && FLEET_LAVISH_KEY.test(session.key) && typeof session.file === 'string')
+          .map((session) => ({ key: session.key, file: session.file })),
         tmuxSessions: (machine.tmux ?? [])
           .filter((session) => typeof session.name === 'string' && FLEET_SESSION_NAME.test(session.name))
           .map((session) => ({
@@ -152,6 +156,10 @@ export function buildFleetSnapshot(
     ),
     overlaps: computeFleetOverlaps(response.machines, localRepos),
   };
+}
+
+function hubRepoName(repo: FleetHubRepo): string {
+  return typeof repo.repo === 'string' && repo.repo !== '' ? repo.repo : repositoryName(repo.path);
 }
 
 function repositoryName(path: string): string {

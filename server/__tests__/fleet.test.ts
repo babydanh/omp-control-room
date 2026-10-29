@@ -135,6 +135,7 @@ describe('cloud tmux sessions in the snapshot', () => {
 
 function fakeCloud(machines: Record<string, string[]>) {
   const calls: { args: readonly string[]; home: string; input?: string }[] = [];
+  const forwards: { machine: string; remotePort: number; home: string; stopped: boolean }[] = [];
   const deps: CloudControlDeps = {
     launcher: { file: 'node', args: ['instabox.mjs'] },
     now: () => 0,
@@ -142,11 +143,17 @@ function fakeCloud(machines: Record<string, string[]>) {
     run: async (args, home, input) => {
       calls.push({ args, home, input });
       if (args[0] === 'ls') return { code: 0, stdout: JSON.stringify(machines[home].map((name) => ({ name }))), stderr: '' };
-      if (args[0] === 'exec') return { code: 0, stdout: `OK ${args[7]} /wt cloud/x\n`, stderr: '' };
+      if (args[0] === 'exec' && args.includes('cloud-giao')) return { code: 0, stdout: `OK ${args[7]} /wt cloud/x\n`, stderr: '' };
+      if (args[0] === 'exec') return { code: 0, stdout: '### git status\n## cloud/danh-x\n M src/a.ts\n', stderr: '' };
       return { code: 0, stdout: '', stderr: '' };
     },
+    forward: async (machine, remotePort, home) => {
+      const record = { machine, remotePort, home, stopped: false };
+      forwards.push(record);
+      return { localPort: 40000 + forwards.length, alive: () => !record.stopped, stop: () => { record.stopped = true; } };
+    },
   };
-  return { cloud: new CloudControl(deps), calls };
+  return { cloud: new CloudControl(deps), calls, forwards };
 }
 
 describe('cloud control', () => {
@@ -198,5 +205,44 @@ describe('cloud control', () => {
     expect(await cloud.openTerminal(pty, 'danh', 'khac')).not.toBe(first);
     expect(create).toHaveBeenCalledTimes(2);
     expect(create.mock.calls[0][0]).toMatchObject({ env: { XDG_CONFIG_HOME: '/a' } });
+  });
+
+  it('opens Lavish through one forward per machine to the loopback port, and rejects non-hex keys', async () => {
+    const { cloud, forwards } = fakeCloud({ '/a': ['danh'] });
+    expect(await cloud.openLavish('danh', 'b702b4f8df032645')).toBe('http://127.0.0.1:40001/session/b702b4f8df032645');
+    expect(await cloud.openLavish('danh', 'aaaaaaaa11')).toBe('http://127.0.0.1:40001/session/aaaaaaaa11');
+    expect(forwards).toEqual([{ machine: 'danh', remotePort: 4800, home: '/a', stopped: false }]);
+    await expect(cloud.openLavish('danh', '../../etc')).rejects.toMatchObject({ code: 'bad_input' });
+    cloud.dispose();
+    expect(forwards[0].stopped).toBe(true);
+  });
+
+  it('reads a diff only for a repository path the machine reported', async () => {
+    const { cloud, calls } = fakeCloud({ '/a': ['danh'] });
+    const fleet: FleetHubClient = {
+      fetchFleet: async () => ({
+        now: 1_000,
+        machines: [{ ...machine('danh', '/data/home/wt/backend-x', []) }],
+      }),
+    };
+    const ask = async (path: string) => {
+      const sent: ServerMessage[] = [];
+      handleFleetMessage({ type: 'fleetDiffRequest', requestId: 'r', machine: 'danh', path }, (m) => sent.push(m), {
+        cloud,
+        fleet,
+        ledger: null,
+        privileged: true,
+      });
+      await vi.waitFor(() => expect(sent).toHaveLength(1));
+      return sent[0];
+    };
+    expect(await ask('/data/home/.ssh')).toMatchObject({ type: 'fleetCommandResult', code: 'failed' });
+    expect(calls.filter((call) => call.args[0] === 'exec')).toEqual([]);
+    expect(await ask('/data/home/wt/backend-x')).toMatchObject({
+      type: 'fleetDiff',
+      path: '/data/home/wt/backend-x',
+      truncated: false,
+      text: expect.stringContaining('M src/a.ts'),
+    });
   });
 });

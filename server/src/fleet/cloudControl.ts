@@ -14,17 +14,24 @@
  * patterns allow no quoting or shell metacharacters.
  */
 
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
+import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
 import type { PtySessionManager } from '../terminal/ptySessionManager.js';
 import {
   FLEET_ACCOUNT_CACHE_MS,
+  FLEET_DIFF_MAX_BYTES,
+  FLEET_FORWARD_IDLE_MS,
+  FLEET_FORWARD_READY_MS,
   FLEET_INSTABOX_TIMEOUT_MS,
+  FLEET_LAVISH_KEY,
+  FLEET_LAVISH_REMOTE_PORT,
   FLEET_MACHINE_NAME,
   FLEET_PROMPT_MAX,
+  FLEET_REPO_PATH,
   FLEET_SESSION_NAME,
   FLEET_TASK_REPOS,
   FLEET_TASK_SLUG,
@@ -55,6 +62,14 @@ export interface CloudControlDeps {
   /** The executable and leading args that start the InstaBox CLI. */
   readonly launcher: { readonly file: string; readonly args: readonly string[] };
   now(): number;
+  /** Start `instabox port-forward <machine> <local>:<remote>`; resolves once the local port accepts connections. */
+  forward(machine: string, remotePort: number, configHome: string): Promise<PortForward>;
+}
+
+export interface PortForward {
+  readonly localPort: number;
+  readonly alive: () => boolean;
+  stop(): void;
 }
 
 export function isTaskRepo(value: unknown): value is FleetTaskRepo {
@@ -64,6 +79,7 @@ export function isTaskRepo(value: unknown): value is FleetTaskRepo {
 export class CloudControl {
   #accounts: { readonly at: number; readonly byMachine: Map<string, string> } | null = null;
   readonly #terminalIds = new Map<string, number>();
+  readonly #forwards = new Map<string, { forward: PortForward; idle: NodeJS.Timeout }>();
   #nextTerminalId = FLEET_TERMINAL_ID_BASE;
 
   constructor(private readonly deps: CloudControlDeps = defaultDeps()) {}
@@ -121,6 +137,65 @@ export class CloudControl {
       throw new CloudControlError('failed', said ?? `cloud-giao exit ${result.code}`);
     }
     return slug;
+  }
+
+  /**
+   * A local URL for one Lavish session on `machine`. One port-forward per machine, reused while alive and
+   * closed after {@link FLEET_FORWARD_IDLE_MS} without a new open; Lavish itself stays on the machine's loopback.
+   */
+  async openLavish(machine: string, key: string): Promise<string> {
+    if (!FLEET_MACHINE_NAME.test(machine) || !FLEET_LAVISH_KEY.test(key)) {
+      throw new CloudControlError('bad_input', 'invalid lavish session');
+    }
+    let entry = this.#forwards.get(machine);
+    if (!entry || !entry.forward.alive()) {
+      const home = await this.#wake(machine);
+      const forward = await this.deps.forward(machine, FLEET_LAVISH_REMOTE_PORT, home);
+      entry = { forward, idle: setTimeout(() => undefined, 0) };
+      this.#forwards.set(machine, entry);
+    }
+    clearTimeout(entry.idle);
+    const current = entry;
+    current.idle = setTimeout(() => {
+      current.forward.stop();
+      if (this.#forwards.get(machine) === current) this.#forwards.delete(machine);
+    }, FLEET_FORWARD_IDLE_MS);
+    current.idle.unref?.();
+    return `http://127.0.0.1:${current.forward.localPort}/session/${key}`;
+  }
+
+  /** Close every port-forward (board shutdown). */
+  dispose(): void {
+    for (const { forward, idle } of this.#forwards.values()) {
+      clearTimeout(idle);
+      forward.stop();
+    }
+    this.#forwards.clear();
+  }
+
+  /**
+   * Read-only git view of one repository on `machine`: status, commits and diffstat against origin/main, and the
+   * uncommitted diff. The caller has already checked that the machine reported this path.
+   */
+  async readDiff(machine: string, repoPath: string): Promise<{ text: string; truncated: boolean }> {
+    if (!FLEET_MACHINE_NAME.test(machine) || !FLEET_REPO_PATH.test(repoPath)) {
+      throw new CloudControlError('bad_input', 'invalid repository path');
+    }
+    const home = await this.#wake(machine);
+    const script = [
+      `cd '${repoPath}' || exit 3`,
+      'echo "### git status"; git status --short --branch',
+      'echo; echo "### Commit tren nhanh, chua co tren origin/main"; git log --oneline origin/main..HEAD | head -50',
+      'git diff --stat origin/main...HEAD | tail -40',
+      'echo; echo "### Thay doi chua commit"; git diff HEAD --stat; echo; git diff HEAD',
+    ].join('; ');
+    const result = await this.deps.run(
+      ['exec', machine, '--timeout', '120', '--', `{ ${script}; } 2>&1 | head -c ${FLEET_DIFF_MAX_BYTES + 1}`],
+      home,
+    );
+    if (result.code !== 0) throw new CloudControlError('failed', result.stdout.trim().split('\n').pop() ?? 'git failed');
+    const truncated = Buffer.byteLength(result.stdout) > FLEET_DIFF_MAX_BYTES;
+    return { text: truncated ? result.stdout.slice(0, FLEET_DIFF_MAX_BYTES) : result.stdout, truncated };
   }
 
   /** The account home owning `machine`, after asking InstaBox to start/wake it (both no-ops when running). */
@@ -183,6 +258,27 @@ function defaultDeps(): CloudControlDeps {
         ...names.filter((entry) => entry.isDirectory()).map((entry) => path.join(extra, entry.name)),
       ];
     },
+    async forward(machine, remotePort, configHome) {
+      const localPort = await freePort();
+      const child = spawn(
+        launcher.file,
+        [...launcher.args, 'port-forward', machine, `${localPort}:${remotePort}`],
+        { env: { ...process.env, XDG_CONFIG_HOME: configHome }, stdio: 'ignore', windowsHide: true },
+      );
+      let exited = false;
+      child.on('exit', () => {
+        exited = true;
+      });
+      const deadline = Date.now() + FLEET_FORWARD_READY_MS;
+      while (!(await accepts(localPort))) {
+        if (exited || Date.now() > deadline) {
+          child.kill();
+          throw new CloudControlError('failed', 'port-forward did not start');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      return { localPort, alive: () => !exited, stop: () => child.kill() };
+    },
     run(args, configHome, input) {
       return new Promise((resolve) => {
         const child = execFile(
@@ -204,4 +300,27 @@ function defaultDeps(): CloudControlDeps {
       });
     },
   };
+}
+
+function freePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address !== null ? address.port : 0;
+      server.close(() => resolve(port));
+    });
+  });
+}
+
+function accepts(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: '127.0.0.1', port });
+    socket.once('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.once('error', () => resolve(false));
+  });
 }

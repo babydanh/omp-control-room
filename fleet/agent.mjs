@@ -3,7 +3,7 @@
 // FLEET_ROOT (default /data/home). Sends paths and branch names only; never file content.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync, readlinkSync, statfsSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { signJwt } from './jwt.mjs';
 
 const ROOT = process.env.FLEET_ROOT ?? '/data/home';
@@ -54,6 +54,21 @@ function tmuxSessions() {
   return parseTmux(text, Math.floor(Date.now() / 1000), (cwd) => git(cwd, 'branch', '--show-current'));
 }
 
+/** Open Lavish review sessions (key + artifact path) from lavish-axi's state file; never the artifact itself. */
+export function parseLavish(stateText) {
+  let sessions;
+  try { sessions = JSON.parse(stateText).sessions; } catch { return []; }
+  if (!sessions || typeof sessions !== 'object') return [];
+  return Object.values(sessions)
+    .filter((s) => s && /^[a-f0-9]{8,64}$/.test(String(s.key)) && typeof s.file === 'string' && !/^(ended|closed)$/.test(String(s.status)))
+    .map((s) => ({ key: s.key, file: s.file }))
+    .slice(0, 20);
+}
+
+function lavishSessions() {
+  try { return parseLavish(readFileSync(join(process.env.HOME ?? ROOT, '.lavish-axi', 'state.json'), 'utf8')); } catch { return []; }
+}
+
 
 // Refresh origin/main and origin/staging at most every 5 minutes, not every 30 s report.
 function refreshRemotes(repoRoots) {
@@ -99,13 +114,17 @@ function repos() {
   for (const name of readdirSync(ROOT)) {
     const dir = join(ROOT, name);
     if (existsSync(join(dir, '.git'))) roots.push(dir);
-    if (name.endsWith('.worktrees')) for (const wt of readdirSync(dir)) roots.push(join(dir, wt));
+    // `wt/` holds the worktrees cloud-giao creates; `*.worktrees/` the ones made by hand.
+    if (name === 'wt' || name.endsWith('.worktrees')) for (const wt of readdirSync(dir)) roots.push(join(dir, wt));
   }
   refreshRemotes(roots.filter((p) => existsSync(join(p, '.git')) && statSync(join(p, '.git')).isDirectory()));
   return roots.map((path) => {
     const counts = git(path, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD').split(/\s+/);
+    // The main checkout's folder name, also for worktrees (wt/backend-xep-san -> HethongBackendApi_...).
+    const common = git(path, 'rev-parse', '--path-format=absolute', '--git-common-dir');
     return {
       path,
+      repo: common ? basename(dirname(common)) : basename(path),
       branch: git(path, 'branch', '--show-current'),
       behind: Number(counts[0]) || 0,
       ahead: Number(counts[1]) || 0,
@@ -155,7 +174,7 @@ const token = signJwt({ iss: id, aud: 'fleet-hub', role: 'report' }, readFileSyn
 const res = await fetch(`${process.env.FLEET_HUB}/v1/report`, {
   method: 'POST',
   headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify(fitReport({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), tmux: tmuxSessions(), repos: repos() })),
+  body: JSON.stringify(fitReport({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), tmux: tmuxSessions(), lavish: lavishSessions(), repos: repos() })),
   signal: AbortSignal.timeout(15000),
 }).catch((e) => ({ status: 0, text: async () => e.message }));
 if (res.status !== 200) {
