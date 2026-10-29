@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 
 import type { FleetMachineSnapshot } from '../../../../core/src/messages.js';
-import { CloudTerminal } from './CloudTerminal.js';
 import { MAX_SESSIONS_PER_MACHINE, pickMachine, projectMachines, randomSuffix, slugFromPrompt } from './cloudTaskPick.js';
+import { CloudTerminal } from './CloudTerminal.js';
 import { fleetStore } from './fleetClient.js';
 import { type FleetState, useFleetState } from './fleetStore.js';
 

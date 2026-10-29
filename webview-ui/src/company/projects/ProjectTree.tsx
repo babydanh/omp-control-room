@@ -2,7 +2,7 @@ import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
-import { CloudSessionsSection, type CloudSessionsProps } from '../fleet/CloudSessionsSection.js';
+import { type CloudSessionsProps,CloudSessionsSection } from '../fleet/CloudSessionsSection.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
 import { projectMenuContext } from './projectNodeTargets.js';
