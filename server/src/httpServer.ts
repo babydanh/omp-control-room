@@ -6,7 +6,13 @@ import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 
-import { type AgentFolder, type AgentSessionRow, registerAgentRoutes, sessionRows } from './agentApi/agentApi.js';
+import type { GitGuardReport } from '../../core/src/messages.js';
+import {
+  type AgentFolder,
+  type AgentSessionRow,
+  registerAgentRoutes,
+  sessionRows,
+} from './agentApi/agentApi.js';
 import type { AgentRuntime } from './agentRuntime.js';
 import type { AgentStateStore } from './agentStateStore.js';
 import {
@@ -31,6 +37,7 @@ import {
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
+import { getFleetGuardRiskCounts } from './fleet/handler.js';
 import { transcriptFile } from './herdr/agentReply.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
 import type { LedgerService } from './ledger/ledgerService.js';
@@ -91,6 +98,7 @@ export interface HttpServerOptions {
   workspaces?: CompanyWorkspaceControl | null;
   /** Ledger board service. Live snapshots reach privileged sockets only; absent or null = no ledger. */
   ledger?: LedgerService | null;
+  getLocalGuard?: () => GitGuardReport | null;
   /** PTY terminals for standalone-launched agents. Absent = terminal feature off
    *  (VS Code embedded mode, where the editor owns terminals). */
   ptyManager?: PtySessionManager;
@@ -159,6 +167,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     token: options.token,
     sessions: () => agentSessions(options),
     folders: () => agentFolders(options),
+    guardRiskCounts: () => getFleetGuardRiskCounts(options.getLocalGuard),
   });
   registerVoiceRoutes(app, { token: options.token });
 
@@ -448,6 +457,7 @@ function registerWebSocketRoute(
             herdr: options.herdr ?? null,
             browserReaper: options.browserReaper ?? null,
             usage: options.usage ?? null,
+            getLocalGuard: options.getLocalGuard,
             ptyManager: options.ptyManager,
             projects: {
               ...options.projects,

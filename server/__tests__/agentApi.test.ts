@@ -39,12 +39,16 @@ function folder(
   };
 }
 
-async function app(folders: AgentFolder[]) {
+async function app(
+  folders: AgentFolder[],
+  guardRiskCounts?: { readonly red: number; readonly yellow: number },
+) {
   const server = Fastify();
   registerAgentRoutes(server, {
     token: TOKEN,
     sessions: async () => [{ folder: 'D:/p', agent: 'omp', state: 'working', title: 'Sửa API', cwd: 'D:/p/api.worktrees/x', paneId: 'wA:p2' }],
     folders: () => folders,
+    ...(guardRiskCounts === undefined ? {} : { guardRiskCounts: async () => guardRiskCounts }),
   });
   await server.ready();
   return server;
@@ -87,6 +91,14 @@ describe('agent API', () => {
     const server = await app([folder('D:/p', [], [], [handoff])]);
     const answer = (await server.inject({ method: 'GET', url: '/api/agent/status', headers: AUTH })).json();
     expect(answer.cloudIssues).toEqual([{ ...handoff, folder: 'D:/p' }]);
+  });
+
+  it('includes global Git guard counts in status when available', async () => {
+    const server = await app([], { red: 2, yellow: 4 });
+    const answer = (
+      await server.inject({ method: 'GET', url: '/api/agent/status', headers: AUTH })
+    ).json();
+    expect(answer.guardRiskCounts).toEqual({ red: 2, yellow: 4 });
   });
 
   it('writes a report onto #n, preferring the caller own item when two folders share the number', async () => {
@@ -164,16 +176,20 @@ describe('board CLI', () => {
       caller: {},
       sessions: [],
       workItems: [],
-      cloudIssues: [{
-        issue: 42,
-        title: '[Handoff] Sửa API',
-        url: 'https://github.com/babydanh/agent-orchestrator/issues/42',
-        createdAt: '2026-10-21T08:00:00Z',
-        state: 'finished',
-        repo: 'D:/p/api',
-        folder: 'D:/p',
-      }],
+      cloudIssues: [
+        {
+          issue: 42,
+          title: '[Handoff] Sửa API',
+          url: 'https://github.com/babydanh/agent-orchestrator/issues/42',
+          createdAt: '2026-10-21T08:00:00Z',
+          state: 'finished',
+          repo: 'D:/p/api',
+          folder: 'D:/p',
+        },
+      ],
+      guardRiskCounts: { red: 1, yellow: 2 },
     });
+    expect(formatStatus(answer)).toContain('Rủi ro mất code: 1 đỏ · 2 vàng.');
     expect(formatStatus(answer)).toContain('Issue [Handoff] ngoài board (1)');
     expect(formatStatus(answer)).toContain('https://github.com/babydanh/agent-orchestrator/issues/42');
   });

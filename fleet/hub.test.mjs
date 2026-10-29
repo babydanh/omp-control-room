@@ -1,9 +1,10 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { test } from 'node:test';
+
 import { createHub } from './hub.mjs';
 import { signJwt } from './jwt.mjs';
 
@@ -38,12 +39,33 @@ test('stores a validated git guard report for the board', async () => {
   const guard = {
     machine: 'm1',
     scannedAt: '2026-10-29T12:00:00.000Z',
-    repos: [{ repo: '/repo', worktrees: [{
-      path: '/repo/wt', branch: 'feat/a', head: 'a'.repeat(40), unpushed: 1,
-      unpushedSubjects: ['work'], backedUp: false, dirty: 0, dirtyOldestMinutes: null,
-      op: null, mergedToMain: false, idleDays: 3, prunable: false,
-    }] }],
-    risks: [{ level: 'red', kind: 'unpushed', repo: '/repo', path: '/repo/wt', detail: 'not backed up' }],
+    repos: [
+      {
+        repo: '/repo',
+        worktrees: [
+          {
+            path: '/repo/wt',
+            branch: 'feat/a',
+            head: 'a'.repeat(40),
+            unpushed: 1,
+            unpushedSubjects: ['work'],
+            backedUp: false,
+            dirty: 0,
+            dirtyKnown: true,
+            dirtyOldestMinutes: null,
+            ignored: 2,
+            op: null,
+            mergedToMain: false,
+            idleDays: 3,
+            prunable: false,
+            idleMinutes: 4321,
+          },
+        ],
+      },
+    ],
+    risks: [
+      { level: 'red', kind: 'unpushed', repo: '/repo', path: '/repo/wt', detail: 'not backed up' },
+    ],
   };
   assert.equal((await report(tok('m1', 'report', m1.priv), { ...body('m1'), guard })).status, 200);
   const { machines } = await (await read(tok('board', 'read', board.priv))).json();

@@ -1,4 +1,4 @@
-import type { LedgerView, ServerMessage } from '../../../core/src/messages.js';
+import type { GitGuardReport, LedgerView, ServerMessage } from '../../../core/src/messages.js';
 import type { PtySessionManager } from '../terminal/ptySessionManager.js';
 import { CloudControl, CloudControlError } from './cloudControl.js';
 import {
@@ -23,10 +23,34 @@ export interface FleetCommandContext {
   readonly cloud?: CloudControl;
   readonly ledger: { getView: () => Promise<LedgerView> } | null;
   readonly ptyManager?: PtySessionManager | null;
+  readonly getLocalGuard?: () => GitGuardReport | null;
   readonly privileged: boolean;
 }
 
-const FLEET_TYPES = new Set(['fleetRequest', 'fleetTerminalOpen', 'fleetTaskCreate', 'fleetLavishOpen', 'fleetDiffRequest']);
+export async function getFleetGuardRiskCounts(localGuard?: () => GitGuardReport | null) {
+  const reports: (GitGuardReport | null)[] = [localGuard?.() ?? null];
+  try {
+    const fleet = await defaultFleetHubClient.fetchFleet();
+    reports.push(...fleet.machines.map((machine) => machine.guard ?? null));
+  } catch {
+    // A local board status remains useful when the cloud hub is offline or unconfigured.
+  }
+  return reports.reduce(
+    (counts, report) => {
+      for (const risk of report?.risks ?? []) counts[risk.level] += 1;
+      return counts;
+    },
+    { red: 0, yellow: 0 },
+  );
+}
+
+const FLEET_TYPES = new Set([
+  'fleetRequest',
+  'fleetTerminalOpen',
+  'fleetTaskCreate',
+  'fleetLavishOpen',
+  'fleetDiffRequest',
+]);
 
 export function handleFleetMessage(
   msg: Record<string, unknown>,
@@ -68,10 +92,27 @@ export function handleFleetMessage(
   const ledgerView = context.ledger?.getView().catch(() => null) ?? Promise.resolve(null);
   const localView = Promise.race([ledgerView, new Promise<null>((resolve) => setTimeout(resolve, LEDGER_WAIT_MS, null))]);
   Promise.all([fleet.fetchFleet(), localView])
-    .then(([response, view]) => send(buildFleetSnapshot(requestId, response, view)))
-    .catch((error: unknown) => {
+    .then(([response, view]) =>
+      send(buildFleetSnapshot(requestId, response, view, context.getLocalGuard?.() ?? null)),
+    )
+    .catch(async (error: unknown) => {
       const unavailable = error instanceof FleetUnavailableError;
-      send(commandResult(requestId, unavailable ? 'unavailable' : 'failed', unavailable ? FLEET_REASON_UNAVAILABLE : FLEET_REASON_COMMAND_FAILED));
+      const localGuard = context.getLocalGuard?.() ?? null;
+      if (localGuard !== null) {
+        const view = await localView;
+        send({
+          ...buildFleetSnapshot(requestId, { now: Date.now(), machines: [] }, view, localGuard),
+          hubError: unavailable ? FLEET_REASON_UNAVAILABLE : FLEET_REASON_COMMAND_FAILED,
+        });
+        return;
+      }
+      send(
+        commandResult(
+          requestId,
+          unavailable ? 'unavailable' : 'failed',
+          unavailable ? FLEET_REASON_UNAVAILABLE : FLEET_REASON_COMMAND_FAILED,
+        ),
+      );
     });
   return true;
 }

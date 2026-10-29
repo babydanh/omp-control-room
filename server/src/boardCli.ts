@@ -124,6 +124,7 @@ export interface StatusAnswer {
   /** Finished items whose branch has not reached origin/main; empty from a board that does not tell. */
   readonly undelivered: readonly CliItem[];
   readonly cloudIssues: readonly CliCloudIssue[];
+  readonly guardRiskCounts?: { readonly red: number; readonly yellow: number };
 }
 export interface CliCloudIssue {
   readonly issue: number;
@@ -300,13 +301,30 @@ function readList<T>(value: unknown, field: string, read: (entry: unknown) => T)
 
 export function readStatusAnswer(value: unknown): StatusAnswer {
   const you = isRecord(value) && value['you'] !== undefined ? readSession(value['you']) : undefined;
+  const counts =
+    isRecord(value) && isRecord(value['guardRiskCounts']) ? value['guardRiskCounts'] : undefined;
+  const guardRiskCounts =
+    counts !== undefined &&
+    Number.isInteger(counts['red']) &&
+    (counts['red'] as number) >= 0 &&
+    Number.isInteger(counts['yellow']) &&
+    (counts['yellow'] as number) >= 0
+      ? { red: counts['red'] as number, yellow: counts['yellow'] as number }
+      : undefined;
   return {
     caller: readCaller(value),
     ...(you === undefined ? {} : { you }),
     sessions: readList(value, 'sessions', readSession),
     workItems: readList(value, 'workItems', readItem),
-    undelivered: isRecord(value) && Array.isArray(value['undelivered']) ? value['undelivered'].map(readItem) : [],
-    cloudIssues: isRecord(value) && Array.isArray(value['cloudIssues']) ? value['cloudIssues'].map(readCloudIssue) : [],
+    undelivered:
+      isRecord(value) && Array.isArray(value['undelivered'])
+        ? value['undelivered'].map(readItem)
+        : [],
+    cloudIssues:
+      isRecord(value) && Array.isArray(value['cloudIssues'])
+        ? value['cloudIssues'].map(readCloudIssue)
+        : [],
+    ...(guardRiskCounts === undefined ? {} : { guardRiskCounts }),
   };
 }
 
@@ -353,7 +371,15 @@ function callerText(caller: CliCaller): string {
 }
 
 export function formatStatus(answer: StatusAnswer): string {
-  const lines = [`Bạn: ${callerText(answer.caller)}${answer.you ? ` · ${answer.you.agent} "${clip(answer.you.title, 60)}"` : ''}`, ''];
+  const lines = [
+    `Bạn: ${callerText(answer.caller)}${answer.you ? ` · ${answer.you.agent} "${clip(answer.you.title, 60)}"` : ''}`,
+    '',
+  ];
+  if (answer.guardRiskCounts !== undefined) {
+    lines.push(
+      `Rủi ro mất code: ${answer.guardRiskCounts.red} đỏ · ${answer.guardRiskCounts.yellow} vàng.`,
+    );
+  }
   const cut = answer.sessions.filter((session) => session.interrupted !== undefined).length;
   lines.push(`Phiên đang chạy (${answer.sessions.length}${cut === 0 ? '' : `, ${cut} bị ngắt giữa chừng`}):`);
   lines.push(...(answer.sessions.length === 0 ? ['  (không có)'] : answer.sessions.map(sessionLine)));

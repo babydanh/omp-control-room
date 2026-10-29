@@ -2,16 +2,28 @@
 // Run by a systemd timer. Env: FLEET_HUB (https URL), FLEET_ID, FLEET_KEY (private key PEM path),
 // FLEET_ROOT (default /data/home). Sends paths and branch names only; never file content.
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, existsSync, readlinkSync, statfsSync, statSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  statfsSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+
+import { backup, prune, scan } from './git-guard.mjs';
 import { signJwt } from './jwt.mjs';
-import { backup, scan } from './git-guard.mjs';
 
 const ROOT = process.env.FLEET_ROOT ?? '/data/home';
 
 const GUARD_BACKUP_INTERVAL_MS = 30 * 60 * 1000;
 const GUARD_BACKUP_STAMP = join(homedir(), '.cache', 'git-guard', 'last-backup');
+const GUARD_PRUNE_INTERVAL_MS = 6 * 60 * 60 * 1000;
+const GUARD_PRUNE_STAMP = join(homedir(), '.cache', 'git-guard', 'last-prune');
 const ENGINES = { claude: /(^|\/)claude$/, codex: /(^|\/)codex$/, omp: /(^|\/)omp$/ };
 
 const git = (cwd, ...args) => {
@@ -34,20 +46,26 @@ function sessions() {
 }
 
 /**
- * tmux sessions on this machine: name, attached, idle time, the active pane's command and branch.
+ * tmux sessions on this machine: name, attached, idle time, active pane command, branch, and working directory.
  * Metadata only: screen content never leaves the machine (the board attaches over SSH on demand).
  */
 export function parseTmux(text, nowSec, branchOf = () => '') {
-  return text.split('\n').filter(Boolean).map((line) => {
-    const [name, attached, activity, cwd, command] = line.split('\t');
-    return {
-      name,
-      attached: Number(attached) > 0,
-      idle_seconds: Math.max(0, nowSec - Number(activity || nowSec)),
-      command: command ?? '',
-      branch: cwd ? branchOf(cwd) : '',
-    };
-  }).filter((s) => s.name).slice(0, 30);
+  return text
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const [name, attached, activity, cwd, command] = line.split('\t');
+      return {
+        name,
+        cwd: cwd ?? '',
+        attached: Number(attached) > 0,
+        idle_seconds: Math.max(0, nowSec - Number(activity || nowSec)),
+        command: command ?? '',
+        branch: cwd ? branchOf(cwd) : '',
+      };
+    })
+    .filter((s) => s.name)
+    .slice(0, 30);
 }
 
 function tmuxSessions() {
@@ -221,10 +239,15 @@ export function summarizeGuard(guard) {
     unpushedSubjects: (worktree.unpushedSubjects ?? []).slice(0, 5).map((subject) => text(subject, 200)),
     backedUp: worktree.backedUp === true,
     dirty: number(worktree.dirty),
-    dirtyOldestMinutes: Number.isFinite(worktree.dirtyOldestMinutes) ? worktree.dirtyOldestMinutes : null,
+    dirtyKnown: worktree.dirtyKnown === true,
+    ignored: number(worktree.ignored),
+    dirtyOldestMinutes: Number.isFinite(worktree.dirtyOldestMinutes)
+      ? worktree.dirtyOldestMinutes
+      : null,
     op: ['rebase', 'merge', 'cherry-pick', 'bisect'].includes(worktree.op) ? worktree.op : null,
     mergedToMain: worktree.mergedToMain === true,
     idleDays: number(worktree.idleDays),
+    idleMinutes: number(worktree.idleMinutes),
     prunable: worktree.prunable === true,
   });
   const summary = {
@@ -260,6 +283,31 @@ export function shouldBackupGuard(lastBackupAt, now = Date.now()) {
   return !Number.isFinite(lastBackupAt) || now - lastBackupAt >= GUARD_BACKUP_INTERVAL_MS;
 }
 
+export function shouldPruneGuard(
+  lastPruneAt,
+  now = Date.now(),
+  enabled = process.env.GIT_GUARD_PRUNE !== '0',
+) {
+  return enabled && (!Number.isFinite(lastPruneAt) || now - lastPruneAt >= GUARD_PRUNE_INTERVAL_MS);
+}
+
+function lastPruneTime() {
+  try {
+    return statSync(GUARD_PRUNE_STAMP).mtimeMs;
+  } catch {
+    return NaN;
+  }
+}
+
+function recordPruneAttempt() {
+  try {
+    mkdirSync(dirname(GUARD_PRUNE_STAMP), { recursive: true });
+    writeFileSync(GUARD_PRUNE_STAMP, `${Date.now()}\n`, { mode: 0o600 });
+  } catch {
+    /* a missing local stamp only causes a later retry */
+  }
+}
+
 function lastBackupTime() {
   try { return statSync(GUARD_BACKUP_STAMP).mtimeMs; } catch { return NaN; }
 }
@@ -273,27 +321,58 @@ function recordBackupAttempt() {
 
 if (process.env.FLEET_ID) {
   const id = process.env.FLEET_ID;
-  const guardReport = scan({ roots: [ROOT], machine: id });
-  const token = signJwt({ iss: id, aud: 'fleet-hub', role: 'report' }, readFileSync(process.env.FLEET_KEY, 'utf8'));
+  const sessionRows = sessions();
+  const tmux = tmuxSessions();
+  const taskBook = readTaskBook(join(process.env.HOME ?? ROOT, '.cloud-viec'));
+  const repoRows = repos();
+  const guardReport = await scan({ roots: [ROOT], machine: id });
+  const token = signJwt(
+    { iss: id, aud: 'fleet-hub', role: 'report' },
+    readFileSync(process.env.FLEET_KEY, 'utf8'),
+  );
   const res = await fetch(`${process.env.FLEET_HUB}/v1/report`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(fitReport({
-      agent_id: id,
-      disk_free_gb: diskFreeGb(),
-      sessions: sessions(),
-      tmux: tmuxSessions(),
-      lavish: lavishSessions(),
-      viec: readTaskBook(join(process.env.HOME ?? ROOT, '.cloud-viec')),
-      repos: repos(),
-      guard: summarizeGuard(guardReport),
-    })),
+    body: JSON.stringify(
+      fitReport({
+        agent_id: id,
+        disk_free_gb: diskFreeGb(),
+        sessions: sessionRows,
+        tmux,
+        lavish: lavishSessions(),
+        viec: taskBook,
+        repos: repoRows,
+        guard: summarizeGuard(guardReport),
+      }),
+    ),
     signal: AbortSignal.timeout(15000),
   }).catch((e) => ({ status: 0, text: async () => e.message }));
   if (process.env.GIT_GUARD_BACKUP !== '0' && shouldBackupGuard(lastBackupTime())) {
     try { backup(guardReport); }
     catch (error) { console.error(`fleet-agent: git guard backup failed: ${error.message}`); }
     recordBackupAttempt();
+  }
+  if (shouldPruneGuard(lastPruneTime())) {
+    try {
+      const result = prune(guardReport, {
+        activePaths: [
+          ...sessionRows.map((session) => session.cwd),
+          ...tmux.map((session) => session.cwd),
+        ].filter(Boolean),
+        activeBranches: [
+          ...tmux.map((session) => session.branch),
+          ...taskBook.filter((task) => task.status === 'dang-lam').map((task) => task.branch),
+        ].filter(Boolean),
+        activeTaskSlugs: taskBook
+          .filter((task) => task.status === 'dang-lam')
+          .map((task) => task.slug),
+      });
+      if (result.removed > 0)
+        console.log(`fleet-agent: git guard removed ${result.removed} worktree(s)`);
+    } catch (error) {
+      console.error(`fleet-agent: git guard prune failed: ${error.message}`);
+    }
+    recordPruneAttempt();
   }
   if (res.status !== 200) {
     console.error(`fleet-agent: hub ${res.status} ${await res.text()}`);

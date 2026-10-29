@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import type { FleetMachineSnapshot } from '../../../../core/src/messages.js';
 import { MAX_SESSIONS_PER_MACHINE, pickMachine, projectMachines, randomSuffix, slugFromPrompt } from './cloudTaskPick.js';
@@ -6,16 +6,8 @@ import { CloudTerminal } from './CloudTerminal.js';
 import { fleetStore } from './fleetClient.js';
 import { type FleetState, useFleetState } from './fleetStore.js';
 
-const REFRESH_INTERVAL_MS = 15_000;
-
 export function FleetView() {
   const fleet = useFleetState(fleetStore);
-
-  useEffect(() => {
-    fleetStore.requestFleet();
-    const timer = window.setInterval(() => fleetStore.requestFleet(), REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, []);
 
   return (
     <div className="company-shell-page flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -46,6 +38,14 @@ export function FleetView() {
         {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
           <TaskForm machines={fleet.snapshot.machines} busy={fleet.action !== null} />
         )}
+        {fleet.snapshot?.hubError && (
+          <p
+            role="alert"
+            className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning"
+          >
+            Hub không khả dụng: {fleet.snapshot.hubError}
+          </p>
+        )}
         {fleet.error !== null && (
           <p role="alert" className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
             {fleet.error}
@@ -54,9 +54,11 @@ export function FleetView() {
         {fleet.snapshot === null && fleet.latestRequestId !== null && (
           <p role="status" className="text-sm text-text-muted">Đang tải danh sách máy Cloud…</p>
         )}
-        {fleet.snapshot?.machines.length === 0 && fleet.error === null && (
-          <p className="text-sm text-text-muted">Hub chưa báo cáo máy nào.</p>
-        )}
+        {fleet.snapshot?.machines.length === 0 &&
+          fleet.error === null &&
+          fleet.snapshot?.hubError === undefined && (
+            <p className="text-sm text-text-muted">Hub chưa báo cáo máy nào.</p>
+          )}
         {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
           <div className="grid gap-3 md:grid-cols-2">
             {fleet.snapshot.machines.map((machine) => (

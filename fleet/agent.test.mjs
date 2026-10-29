@@ -1,9 +1,18 @@
-import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fitReport, parseLavish, parseTmux, readTaskBook, shouldBackupGuard, summarizeGuard } from './agent.mjs';
+import { test } from 'node:test';
+
+import {
+  fitReport,
+  parseLavish,
+  parseTmux,
+  readTaskBook,
+  shouldBackupGuard,
+  shouldPruneGuard,
+  summarizeGuard,
+} from './agent.mjs';
 
 test('a huge diff is cut to fit the hub limit, keeping the file list', () => {
   const changes = Array.from({ length: 200 }, (_, i) => ({ path: `src/very/long/path/to/file-${i}.ts`, ranges: Array.from({ length: 20 }, (_, j) => [j * 10 + 1, j * 10 + 5]) }));
@@ -23,17 +32,42 @@ test('a compact guard summary keeps risks and bounded worktree metadata', () => 
   const guard = {
     machine: 'm1',
     scannedAt: '2026-10-29T00:00:00.000Z',
-    repos: [{ repo: '/repo', stashes: 2, worktrees: [{
-      path: '/repo/wt', branch: 'feat/a', head: 'abc', unpushed: 1,
-      unpushedSubjects: ['work'], backedUp: false, dirty: 0, dirtyOldestMinutes: null,
-      op: null, mergedToMain: false, idleDays: 3, prunable: false,
-    }] }],
-    risks: [{ level: 'red', kind: 'unpushed', repo: '/repo', path: '/repo/wt', detail: 'not backed up' }],
+    repos: [
+      {
+        repo: '/repo',
+        stashes: 2,
+        worktrees: [
+          {
+            path: '/repo/wt',
+            branch: 'feat/a',
+            head: 'abc',
+            unpushed: 1,
+            unpushedSubjects: ['work'],
+            backedUp: false,
+            dirty: 0,
+            dirtyKnown: true,
+            dirtyOldestMinutes: null,
+            op: null,
+            mergedToMain: false,
+            idleDays: 3,
+            prunable: false,
+            idleMinutes: 4321,
+            ignored: 2,
+          },
+        ],
+      },
+    ],
+    risks: [
+      { level: 'red', kind: 'unpushed', repo: '/repo', path: '/repo/wt', detail: 'not backed up' },
+    ],
   };
   const summary = summarizeGuard(guard);
   assert.equal(summary.machine, 'm1');
   assert.equal(summary.repos[0].worktrees[0].head, 'abc');
   assert.equal(summary.repos[0].worktrees[0].unpushedSubjects[0], 'work');
+  assert.equal(summary.repos[0].worktrees[0].idleMinutes, 4321);
+  assert.equal(summary.repos[0].worktrees[0].ignored, 2);
+  assert.equal(summary.repos[0].worktrees[0].dirtyKnown, true);
   assert.equal(summary.risks[0].kind, 'unpushed');
   assert.equal('stashes' in summary.repos[0], false);
 });
@@ -64,10 +98,20 @@ test('many repos with long dirty paths still end under the limit', () => {
 
 test('tmux lines become name, attached, idle time and branch; empty output means no sessions', () => {
   const text = 'xep-san\t1\t900\t/data/home/wt/backend-xep-san\tclaude\nnhap\t0\t1000\t\tbash\n';
-  assert.deepEqual(parseTmux(text, 1000, (cwd) => (cwd.includes('xep-san') ? 'cloud/danh-xep-san' : '')), [
-    { name: 'xep-san', attached: true, idle_seconds: 100, command: 'claude', branch: 'cloud/danh-xep-san' },
-    { name: 'nhap', attached: false, idle_seconds: 0, command: 'bash', branch: '' },
-  ]);
+  assert.deepEqual(
+    parseTmux(text, 1000, (cwd) => (cwd.includes('xep-san') ? 'cloud/danh-xep-san' : '')),
+    [
+      {
+        name: 'xep-san',
+        cwd: '/data/home/wt/backend-xep-san',
+        attached: true,
+        idle_seconds: 100,
+        command: 'claude',
+        branch: 'cloud/danh-xep-san',
+      },
+      { name: 'nhap', cwd: '', attached: false, idle_seconds: 0, command: 'bash', branch: '' },
+    ],
+  );
   assert.deepEqual(parseTmux('', 1000), []);
 });
 
@@ -88,4 +132,11 @@ test('task book: valid entries only, missing folder means no tasks', () => {
   writeFileSync(join(dir, 'evil.json'), JSON.stringify({ slug: '../x', status: 'dang-lam' }));
   assert.deepEqual(readTaskBook(dir), [{ slug: 'xep-san', status: 'dang-lam', branch: 'cloud/danh-xep-san', kind: 'all' }]);
   assert.deepEqual(readTaskBook(join(dir, 'khong-co')), []);
+});
+
+test('cloud guard pruning is enabled by default every six hours', () => {
+  assert.equal(shouldPruneGuard(1_000, 1_000 + 6 * 60 * 60 * 1000 - 1), false);
+  assert.equal(shouldPruneGuard(1_000, 1_000 + 6 * 60 * 60 * 1000), true);
+  assert.equal(shouldPruneGuard(Number.NaN, 1_000), true);
+  assert.equal(shouldPruneGuard(Number.NaN, 1_000, false), false);
 });

@@ -27,6 +27,7 @@ import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
 import { fleetStore } from '../fleet/fleetClient.js';
 import { useFleetState } from '../fleet/fleetStore.js';
 import { FleetView } from '../fleet/FleetView.js';
+import { GuardView } from '../fleet/GuardView.js';
 import { folderIdentityOf, foldersWaitingForSnapshot, showsAllFolders } from '../folderIdentity.js';
 import { openPickedFolder, pickFolder } from '../folderPick.js';
 import { folderBasename, type FolderFocusInput } from '../folderView.js';
@@ -110,7 +111,18 @@ function browserStorage(): Storage | null {
   }
 }
 
-type ShellPage = 'board' | 'ledger' | 'cloud' | 'usage' | 'storage' | 'skills' | 'mcp' | 'accounts' | 'changes';
+type ShellPage =
+  | 'board'
+  | 'ledger'
+  | 'cloud'
+  | 'guard'
+  | 'usage'
+  | 'storage'
+  | 'skills'
+  | 'mcp'
+  | 'accounts'
+  | 'changes';
+const FLEET_REFRESH_INTERVAL_MS = 15_000;
 
 /** Apple platforms show ⌘ in shortcut hints; elsewhere the key names stay. */
 const IS_MAC = /Mac|iPhone|iPad|iPod/.test(navigator.platform);
@@ -163,6 +175,10 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledgerShown = activePage === 'ledger' && ledger.privileged === true;
   const ledgerAvailable = ledger.privileged === true;
   const fleetAvailable = fleet.privileged === true;
+  const redGuardCount = [
+    ...(fleet.snapshot?.localGuard?.risks ?? []),
+    ...(fleet.snapshot?.machines.flatMap((machine) => machine.guard?.risks ?? []) ?? []),
+  ].filter((risk) => risk.level === 'red').length;
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
   // Why a session clicked in the tree opened nothing: it runs outside herdr, so there is no pane.
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
@@ -221,7 +237,18 @@ export function BoardShell({ client }: BoardShellProps) {
   }, [activePage, ledgerAvailable]);
 
   useEffect(() => {
-    if (!fleetAvailable && activePage === 'cloud') setActivePage('board');
+    if (!fleetAvailable) return undefined;
+    const refresh = () => {
+      void fleetStore.requestFleet();
+    };
+    refresh();
+    const timer = window.setInterval(refresh, FLEET_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [fleetAvailable]);
+
+  useEffect(() => {
+    if (!fleetAvailable && (activePage === 'cloud' || activePage === 'guard'))
+      setActivePage('board');
   }, [activePage, fleetAvailable]);
 
   useEffect(() => {
@@ -239,8 +266,15 @@ export function BoardShell({ client }: BoardShellProps) {
     } else if (usageRouteOpen) {
       closeUsagePage();
     }
-    if (page === 'cloud' && !fleetAvailable) return;
-    if (page !== 'board' && page !== 'usage' && page !== 'cloud' && !ledgerAvailable) return;
+    if ((page === 'cloud' || page === 'guard') && !fleetAvailable) return;
+    if (
+      page !== 'board' &&
+      page !== 'usage' &&
+      page !== 'cloud' &&
+      page !== 'guard' &&
+      !ledgerAvailable
+    )
+      return;
     setActivePage(page);
     setMobileNavOpen(false);
     setOpened(null);
@@ -738,7 +772,20 @@ export function BoardShell({ client }: BoardShellProps) {
         ]
       : []),
     ...(fleetAvailable
-      ? [{ page: 'cloud' as const, label: 'Cloud', icon: 'terminal' as const, group: 'Không gian làm việc' }]
+      ? [
+          {
+            page: 'cloud' as const,
+            label: 'Cloud',
+            icon: 'terminal' as const,
+            group: 'Không gian làm việc',
+          },
+          {
+            page: 'guard' as const,
+            label: 'Rủi ro mất code',
+            icon: 'alert-triangle' as const,
+            group: 'Không gian làm việc',
+          },
+        ]
       : []),
     { page: 'usage', label: 'Sử dụng', icon: 'bar-chart', group: 'Không gian làm việc' },
     ...(ledgerAvailable
@@ -772,6 +819,14 @@ export function BoardShell({ client }: BoardShellProps) {
           >
             <Icon name={item.icon} className="shrink-0" />
             <span className="truncate">{item.label}</span>
+            {item.page === 'guard' && redGuardCount > 0 && (
+              <span
+                aria-label={`${redGuardCount} rủi ro đỏ`}
+                className="ml-auto min-w-5 rounded-full bg-danger/12 px-1.5 text-center text-2xs text-danger"
+              >
+                {redGuardCount}
+              </span>
+            )}
           </button>
         </div>
       );
@@ -819,6 +874,14 @@ export function BoardShell({ client }: BoardShellProps) {
           <Icon name="menu" />
         </button>
         <span className="font-medium">Agent Board</span>
+        {redGuardCount > 0 && (
+          <span
+            aria-label={`${redGuardCount} rủi ro đỏ`}
+            className="rounded-full bg-danger/12 px-1.5 text-2xs text-danger"
+          >
+            {redGuardCount}
+          </span>
+        )}
         <span className="min-w-0 flex-1 truncate text-right text-sm text-text-secondary">
           {navItems.find((item) => item.page === activePage)?.label ?? 'Bảng việc'}
         </span>
@@ -828,6 +891,14 @@ export function BoardShell({ client }: BoardShellProps) {
         aria-label="Điều hướng"
       >
         <span className="shrink-0 font-semibold tracking-tight">Agent Board</span>
+        {redGuardCount > 0 && (
+          <span
+            aria-label={`${redGuardCount} rủi ro đỏ`}
+            className="rounded-full bg-danger/12 px-1.5 text-2xs text-danger"
+          >
+            {redGuardCount}
+          </span>
+        )}
         <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto" aria-label="Trang">
           {navItems.map((item) => (
             <button
@@ -839,6 +910,14 @@ export function BoardShell({ client }: BoardShellProps) {
             >
               <Icon name={item.icon} className="shrink-0" />
               <span className="whitespace-nowrap">{item.label}</span>
+              {item.page === 'guard' && redGuardCount > 0 && (
+                <span
+                  aria-label={`${redGuardCount} rủi ro đỏ`}
+                  className="rounded-full bg-danger/12 px-1.5 text-2xs text-danger"
+                >
+                  {redGuardCount}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -1071,6 +1150,8 @@ export function BoardShell({ client }: BoardShellProps) {
       </>
       ) : activePage === 'cloud' ? (
         <FleetView />
+      ) : activePage === 'guard' ? (
+        <GuardView />
       ) : activePage === 'changes' ? (
         <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} initialTab={changesTab} initialBranchA={compareBranchA} onClose={() => selectPage('board')} />
       ) : activePage === 'usage' ? (

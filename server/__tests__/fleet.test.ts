@@ -1,9 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ServerMessage } from '../../core/src/messages.js';
+import type { GitGuardReport, ServerMessage } from '../../core/src/messages.js';
 import { CloudControl, type CloudControlDeps } from '../src/fleet/cloudControl.js';
-import { FLEET_REASON_BAD_INPUT, FLEET_REASON_READ_ONLY, FLEET_STALE_AFTER_MS } from '../src/fleet/constants.js';
-import { buildFleetSnapshot, classifyFleetMachineState, computeFleetOverlaps } from '../src/fleet/fleetSnapshot.js';
+import {
+  FLEET_REASON_BAD_INPUT,
+  FLEET_REASON_COMMAND_FAILED,
+  FLEET_REASON_READ_ONLY,
+  FLEET_STALE_AFTER_MS,
+} from '../src/fleet/constants.js';
+import {
+  buildFleetSnapshot,
+  classifyFleetMachineState,
+  computeFleetOverlaps,
+} from '../src/fleet/fleetSnapshot.js';
 import { handleFleetMessage } from '../src/fleet/handler.js';
 import type { FleetHubClient, FleetHubMachine } from '../src/fleet/hubClient.js';
 import type { PtySessionManager } from '../src/terminal/ptySessionManager.js';
@@ -107,6 +116,33 @@ describe('handleFleetMessage', () => {
     ]);
     expect(fleet.fetchFleet).not.toHaveBeenCalled();
   });
+
+  it('keeps the local guard visible when the cloud hub is unavailable', async () => {
+    const sent: ServerMessage[] = [];
+    const guard: GitGuardReport = {
+      machine: 'local',
+      scannedAt: new Date(1_000).toISOString(),
+      repos: [],
+      risks: [],
+    };
+    const fleet: FleetHubClient = {
+      fetchFleet: vi.fn(async () => {
+        throw new Error('offline');
+      }),
+    };
+    handleFleetMessage(
+      { type: 'fleetRequest', requestId: 'request-2' },
+      (message) => sent.push(message),
+      { fleet, ledger: null, getLocalGuard: () => guard, privileged: true },
+    );
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      type: 'fleetSnapshot',
+      localGuard: guard,
+      machines: [],
+      hubError: FLEET_REASON_COMMAND_FAILED,
+    });
+  });
 });
 
 describe('cloud tmux sessions in the snapshot', () => {
@@ -119,7 +155,14 @@ describe('cloud tmux sessions in the snapshot', () => {
           {
             ...machine('danh', '/data/home/Backend', []),
             tmux: [
-              { name: 'xep-san', attached: true, idle_seconds: 90.7, command: 'claude', branch: 'cloud/danh-xep-san' },
+              {
+                name: 'xep-san',
+                attached: true,
+                idle_seconds: 90.7,
+                command: 'claude',
+                branch: 'cloud/danh-xep-san',
+                cwd: '/data/home/Backend/wt',
+              },
               { name: 'x;rm -rf ~', attached: false, idle_seconds: 1 },
             ],
           },
@@ -130,6 +173,7 @@ describe('cloud tmux sessions in the snapshot', () => {
     expect(snapshot.machines[0].tmuxSessions).toEqual([
       { name: 'xep-san', attached: true, idleSeconds: 90, command: 'claude', branch: 'cloud/danh-xep-san' },
     ]);
+    expect(snapshot.machines[0].activePaths).toEqual(['/data/home/Backend/wt']);
   });
 });
 

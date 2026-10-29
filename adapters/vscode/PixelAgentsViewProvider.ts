@@ -326,6 +326,7 @@ export class PixelAgentsViewProvider implements vscode.WebviewViewProvider {
       .start({
         store: this.store,
         embedded: true,
+        gitGuardScriptPath: path.join(this.context.extensionPath, 'fleet', 'git-guard.mjs'),
         getCompany: () => this.companyServices,
         isCompanyExecutionAllowed: () => vscode.workspace.isTrusted && !this.companyDisposed,
       })

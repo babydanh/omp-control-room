@@ -490,6 +490,7 @@ async function main(): Promise<void> {
       store,
       runtime,
       embedded: false,
+      gitGuardScriptPath: path.join(packageRoot, 'fleet', 'git-guard.mjs'),
       host: args.host,
       port: args.port,
       staticDir,

@@ -56,6 +56,7 @@ export interface AgentApiDeps {
   readonly token: string;
   sessions(): Promise<AgentSessionRow[]>;
   folders(): AgentFolder[];
+  guardRiskCounts?: () => Promise<{ readonly red: number; readonly yellow: number }>;
 }
 
 function pathKey(value: string): string {
@@ -134,44 +135,73 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentApiDeps): v
     },
   };
 
-  app.get<{ Querystring: Record<string, unknown> }>(`${AGENT_API_PREFIX}/status`, guard, async (request) => {
-    const caller = callerOf(request.query);
-    const sessions = await deps.sessions();
-    const you = sessions.find((session) => session.paneId !== undefined && session.paneId === caller.paneId)
-      ?? sessions.find((session) => caller.cwd !== undefined && pathKey(session.cwd) === pathKey(caller.cwd));
-    const snapshots = deps.folders().map((folder) => ({ folder, snapshot: folder.service.snapshot() }));
-    const items = snapshots.flatMap(({ folder, snapshot }) => snapshot.items.map((item) => ({ ...item, folder: folder.path })));
-    return {
-      caller,
-      ...(you === undefined ? {} : { you }),
-      sessions,
-      workItems: items.filter((item) => OPEN.has(item.status)),
-      // Finished work whose branch has not reached origin/main yet: what is still missing to ship.
-      undelivered: items.filter((item) => item.status === 'done' && item.delivery !== undefined && item.delivery.stage !== 'main'),
-      cloudIssues: snapshots.flatMap(({ folder, snapshot }) =>
-        (snapshot.cloudIssues ?? []).map((issue) => ({ ...issue, folder: folder.path })),
-      ),
-    };
-  });
+  app.get<{ Querystring: Record<string, unknown> }>(
+    `${AGENT_API_PREFIX}/status`,
+    guard,
+    async (request) => {
+      const caller = callerOf(request.query);
+      const sessions = await deps.sessions();
+      const you =
+        sessions.find(
+          (session) => session.paneId !== undefined && session.paneId === caller.paneId,
+        ) ??
+        sessions.find(
+          (session) => caller.cwd !== undefined && pathKey(session.cwd) === pathKey(caller.cwd),
+        );
+      const snapshots = deps
+        .folders()
+        .map((folder) => ({ folder, snapshot: folder.service.snapshot() }));
+      const guardRiskCounts = await deps.guardRiskCounts?.();
+      const items = snapshots.flatMap(({ folder, snapshot }) =>
+        snapshot.items.map((item) => ({ ...item, folder: folder.path })),
+      );
+      return {
+        caller,
+        ...(you === undefined ? {} : { you }),
+        sessions,
+        workItems: items.filter((item) => OPEN.has(item.status)),
+        // Finished work whose branch has not reached origin/main yet: what is still missing to ship.
+        undelivered: items.filter(
+          (item) =>
+            item.status === 'done' && item.delivery !== undefined && item.delivery.stage !== 'main',
+        ),
+        cloudIssues: snapshots.flatMap(({ folder, snapshot }) =>
+          (snapshot.cloudIssues ?? []).map((issue) => ({ ...issue, folder: folder.path })),
+        ),
+        ...(guardRiskCounts === undefined ? {} : { guardRiskCounts }),
+      };
+    },
+  );
 
-  app.get<{ Querystring: Record<string, unknown> }>(`${AGENT_API_PREFIX}/task`, guard, async (request) => {
-    const caller = callerOf(request.query);
-    return { caller, items: itemsFor(caller, allItems(deps.folders())) };
-  });
+  app.get<{ Querystring: Record<string, unknown> }>(
+    `${AGENT_API_PREFIX}/task`,
+    guard,
+    async (request) => {
+      const caller = callerOf(request.query);
+      return { caller, items: itemsFor(caller, allItems(deps.folders())) };
+    },
+  );
 
-  app.post<{ Body: Record<string, unknown> }>(`${AGENT_API_PREFIX}/report`, guard, async (request, reply) => {
-    const body = request.body ?? {};
-    const caller = callerOf(body);
-    const ref = typeof body['item'] === 'string' ? body['item'] : '';
-    const text = typeof body['text'] === 'string' ? body['text'].trim() : '';
-    if (ref === '' || text === '') return reply.code(400).send({ error: 'Cần số việc và nội dung báo cáo.' });
-    if (text.length > AGENT_NOTE_MAX_CHARS) return reply.code(400).send({ error: `Báo cáo dài quá ${AGENT_NOTE_MAX_CHARS} ký tự.` });
-    const folders = deps.folders();
-    const found = findItem(ref, caller, allItems(folders));
-    if (!found.ok) return reply.code(404).send({ error: found.reason });
-    const folder = folders.find((entry) => entry.path === found.item.folder);
-    if (folder === undefined) return reply.code(404).send({ error: `Không có việc ${ref} trên bảng.` });
-    await folder.service.note({ requestId: randomUUID(), id: found.item.id, text });
-    return { ok: true, item: found.item.sequence, folder: found.item.folder };
-  });
+  app.post<{ Body: Record<string, unknown> }>(
+    `${AGENT_API_PREFIX}/report`,
+    guard,
+    async (request, reply) => {
+      const body = request.body ?? {};
+      const caller = callerOf(body);
+      const ref = typeof body['item'] === 'string' ? body['item'] : '';
+      const text = typeof body['text'] === 'string' ? body['text'].trim() : '';
+      if (ref === '' || text === '')
+        return reply.code(400).send({ error: 'Cần số việc và nội dung báo cáo.' });
+      if (text.length > AGENT_NOTE_MAX_CHARS)
+        return reply.code(400).send({ error: `Báo cáo dài quá ${AGENT_NOTE_MAX_CHARS} ký tự.` });
+      const folders = deps.folders();
+      const found = findItem(ref, caller, allItems(folders));
+      if (!found.ok) return reply.code(404).send({ error: found.reason });
+      const folder = folders.find((entry) => entry.path === found.item.folder);
+      if (folder === undefined)
+        return reply.code(404).send({ error: `Không có việc ${ref} trên bảng.` });
+      await folder.service.note({ requestId: randomUUID(), id: found.item.id, text });
+      return { ok: true, item: found.item.sequence, folder: found.item.folder };
+    },
+  );
 }

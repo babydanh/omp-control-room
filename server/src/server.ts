@@ -20,6 +20,7 @@ import {
   SERVER_REGISTRY_PROTOCOL_VERSION,
   SERVERS_DIR,
 } from './constants.js';
+import { LocalGuardScanner } from './fleet/localGuard.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
 import { createHttpServer } from './httpServer.js';
 import type { LedgerService } from './ledger/ledgerService.js';
@@ -59,7 +60,7 @@ export class PixelAgentsServer {
   private ownsServer = false;
   private callback: HookEventCallback | null = null;
   private stopPromise: Promise<void> | null = null;
-
+  private localGuard: LocalGuardScanner | null = null;
   /** Register a callback for incoming hook events from any provider. */
   onHookEvent(callback: HookEventCallback): void {
     this.callback = callback;
@@ -85,6 +86,9 @@ export class PixelAgentsServer {
     workspaces?: CompanyWorkspaceControl | null;
     /** Cây git board service; absent or null when the ledger is not wired. */
     ledger?: LedgerService | null;
+    /** Bundled local git-guard entry point and optional roots override. */
+    gitGuardScriptPath?: string;
+    gitGuardRoots?: readonly string[];
     herdr?: HerdrLink | null;
     /** Browser reaper control; absent when this process runs none. */
     browserReaper?: BrowserReaperControl | null;
@@ -157,7 +161,10 @@ export class PixelAgentsServer {
       ? crypto.randomUUID()
       : loadOrCreateStandaloneToken({ rotate: options?.rotateToken ?? false });
     const store = options?.store;
-
+    const localGuard =
+      options?.gitGuardScriptPath === undefined
+        ? null
+        : new LocalGuardScanner(options.gitGuardScriptPath, options.gitGuardRoots);
     const { app, port } = await createHttpServer({
       embedded,
       host,
@@ -180,9 +187,12 @@ export class PixelAgentsServer {
       usage: options?.usage,
       ptyManager: options?.ptyManager,
       projects: options?.projects,
+      getLocalGuard: () => localGuard?.snapshot() ?? null,
       allowedHosts: standalone?.allowedHosts,
     });
 
+    this.localGuard = localGuard;
+    this.localGuard?.start();
     this.app = app;
     this.config = {
       port,
@@ -211,6 +221,8 @@ export class PixelAgentsServer {
   /** Stop the server and clean up its discovery records (only if we own them). */
   stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
+    this.localGuard?.stop();
+    this.localGuard = null;
     const closing = this.app?.close();
     this.app = null;
     if (this.ownsServer) {

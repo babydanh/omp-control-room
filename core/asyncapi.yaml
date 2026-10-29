@@ -6476,6 +6476,23 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FleetOverlapWarning'
+        hubError:
+          type: string
+          maxLength: 300
+        localGuard:
+          $ref: '#/components/schemas/GitGuardReport'
+        localActiveBranches:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 256
+        localActivePaths:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 500
 
     FleetMachineSnapshot:
       type: object
@@ -6512,6 +6529,142 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FleetTmuxSession'
+        guard:
+          $ref: '#/components/schemas/GitGuardReport'
+        activeBranches:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 256
+        activePaths:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 500
+        activeTaskSlugs:
+          type: array
+          maxItems: 30
+          items:
+            type: string
+            maxLength: 40
+
+    GitGuardRiskLevel:
+      type: string
+      enum: [red, yellow]
+
+    GitGuardRiskKind:
+      type: string
+      enum: [unpushed, dirty, stash, op, prunable, detached]
+
+    GitGuardRisk:
+      type: object
+      additionalProperties: false
+      required: [level, kind, repo, path, detail]
+      properties:
+        level:
+          $ref: '#/components/schemas/GitGuardRiskLevel'
+        kind:
+          $ref: '#/components/schemas/GitGuardRiskKind'
+        repo:
+          type: string
+          maxLength: 500
+        path:
+          type: string
+          maxLength: 500
+        detail:
+          type: string
+          maxLength: 300
+
+    GitGuardWorktree:
+      type: object
+      additionalProperties: false
+      required: [path, branch, head, unpushed, unpushedSubjects, backedUp, dirty, dirtyOldestMinutes, op, mergedToMain, idleDays, prunable]
+      properties:
+        path:
+          type: string
+          maxLength: 500
+        branch:
+          type: [string, 'null']
+          maxLength: 256
+        head:
+          type: string
+          maxLength: 64
+        unpushed:
+          type: integer
+          minimum: 0
+        unpushedSubjects:
+          type: array
+          maxItems: 5
+          items:
+            type: string
+            maxLength: 200
+        backedUp:
+          type: boolean
+        dirty:
+          type: integer
+          minimum: 0
+        ignored:
+          type: integer
+          minimum: 0
+        dirtyKnown:
+          type: boolean
+        dirtyOldestMinutes:
+          type: [integer, 'null']
+          minimum: 0
+        op:
+          type: [string, 'null']
+        mergedToMain:
+          type: boolean
+        idleDays:
+          type: integer
+          minimum: 0
+        idleMinutes:
+          type: integer
+          minimum: 0
+        prunable:
+          type: boolean
+
+    GitGuardRepo:
+      type: object
+      additionalProperties: false
+      required: [repo, worktrees]
+      properties:
+        repo:
+          type: string
+          maxLength: 500
+        worktrees:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/GitGuardWorktree'
+        stashes:
+          type: integer
+          minimum: 0
+
+    GitGuardReport:
+      type: object
+      additionalProperties: false
+      required: [machine, scannedAt, repos, risks]
+      properties:
+        machine:
+          type: string
+          maxLength: 100
+        scannedAt:
+          type: string
+          format: date-time
+          maxLength: 40
+        repos:
+          type: array
+          maxItems: 20
+          items:
+            $ref: '#/components/schemas/GitGuardRepo'
+        risks:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/GitGuardRisk'
 
     FleetMachineState:
       type: string

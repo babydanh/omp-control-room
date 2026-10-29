@@ -1,4 +1,5 @@
 import type { StateAdapter } from '../../core/src/adapter.js';
+import type { GitGuardReport } from '../../core/src/messages.js';
 import type { HookProvider } from '../../core/src/provider.js';
 import { resendAgentActivity } from './agentActivityResend.js';
 import { buildAgentDiagnostics } from './agentDiagnostics.js';
@@ -113,6 +114,7 @@ export interface ClientMessageContext {
   ptyManager?: PtySessionManager;
   /** Ledger board service for this process; null or absent when the ledger is not wired. */
   ledger?: LedgerService | null;
+  getLocalGuard?: () => GitGuardReport | null;
   /** Project persistence and checkout discovery; request privilege is supplied per socket. */
   projects?: Omit<ProjectCommandContext, 'privileged' | 'agents' | 'herdrSessions'>;
 }
@@ -219,6 +221,7 @@ export function handleClientMessage(
     handleFleetMessage(msg, (message) => send(message as unknown as Record<string, unknown>), {
       ledger: ctx.ledger ?? null,
       ptyManager: ctx.ptyManager ?? null,
+      getLocalGuard: ctx.getLocalGuard,
       privileged: ctx.privileged === true,
     })
   ) {

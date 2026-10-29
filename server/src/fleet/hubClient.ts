@@ -1,6 +1,7 @@
 import { createPrivateKey, randomUUID, sign } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
+import type { GitGuardReport } from '../../../core/src/messages.js';
 import { type FleetConfig, readFleetConfig } from './config.js';
 import { FLEET_CACHE_MS, FLEET_FETCH_TIMEOUT_MS } from './constants.js';
 
@@ -29,10 +30,16 @@ export interface FleetHubRepo {
 
 export interface FleetHubTmux {
   readonly name: string;
+  readonly cwd?: string;
   readonly attached: boolean;
   readonly idle_seconds: number;
   readonly command?: string;
   readonly branch?: string;
+}
+export interface FleetHubTask {
+  readonly slug: string;
+  readonly status: 'dang-lam' | 'xong';
+  readonly branch: string;
 }
 
 export interface FleetHubMachine {
@@ -43,6 +50,8 @@ export interface FleetHubMachine {
   readonly disk_free_gb?: number | null;
   readonly tmux?: readonly FleetHubTmux[];
   readonly lavish?: readonly { readonly key: string; readonly file: string }[];
+  readonly viec?: readonly FleetHubTask[];
+  readonly guard?: GitGuardReport | null;
 }
 
 export interface FleetHubResponse {

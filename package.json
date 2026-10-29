@@ -34,6 +34,7 @@
   "files": [
     "CHANGELOG.md",
     "LICENSE",
+    "fleet/git-guard.mjs",
     "dist/cli.js",
     "dist/company-pty-host.js",
     "dist/company-omp-bridge.mjs",

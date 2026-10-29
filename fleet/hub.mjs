@@ -1,8 +1,9 @@
 // fleet-hub: cloud machines POST signed reports; the board GETs the fleet. Read-only view, no code content.
 // Env: FLEET_KEYS (path to keys.json: { agent_id: { pub: PEM, role: "report"|"read" } }),
 //      FLEET_STATE (path to persisted latest reports), PORT (default 18430), HOST (default 127.0.0.1).
-import { createServer } from 'node:http';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+
 import { verifyJwt } from './jwt.mjs';
 
 const MAX_BODY = 64 * 1024;
@@ -26,14 +27,36 @@ function normalizeGuard(value) {
     if (!isRecord(repo) || typeof repo.repo !== 'string' || !Array.isArray(repo.worktrees)) return null;
     const worktrees = [];
     for (const item of repo.worktrees.slice(0, worktreesRemaining)) {
-      if (!isRecord(item) || typeof item.path !== 'string' || !(item.branch === null || typeof item.branch === 'string')
-          || typeof item.head !== 'string' || !Number.isFinite(item.unpushed) || item.unpushed < 0
-          || !Array.isArray(item.unpushedSubjects) || item.unpushedSubjects.length > 5
-          || !item.unpushedSubjects.every((subject) => typeof subject === 'string')
-          || typeof item.backedUp !== 'boolean' || !Number.isFinite(item.dirty) || item.dirty < 0
-          || !(item.dirtyOldestMinutes === null || (Number.isFinite(item.dirtyOldestMinutes) && item.dirtyOldestMinutes >= 0))
-          || !(item.op === null || GUARD_OPS.has(item.op)) || typeof item.mergedToMain !== 'boolean'
-          || !Number.isFinite(item.idleDays) || item.idleDays < 0 || typeof item.prunable !== 'boolean') return null;
+      if (
+        !isRecord(item) ||
+        typeof item.path !== 'string' ||
+        !(item.branch === null || typeof item.branch === 'string') ||
+        typeof item.head !== 'string' ||
+        !Number.isFinite(item.unpushed) ||
+        item.unpushed < 0 ||
+        !Array.isArray(item.unpushedSubjects) ||
+        item.unpushedSubjects.length > 5 ||
+        !item.unpushedSubjects.every((subject) => typeof subject === 'string') ||
+        typeof item.backedUp !== 'boolean' ||
+        !Number.isFinite(item.dirty) ||
+        item.dirty < 0 ||
+        !(item.ignored === undefined || (Number.isFinite(item.ignored) && item.ignored >= 0)) ||
+        !(item.dirtyKnown === undefined || typeof item.dirtyKnown === 'boolean') ||
+        !(
+          item.dirtyOldestMinutes === null ||
+          (Number.isFinite(item.dirtyOldestMinutes) && item.dirtyOldestMinutes >= 0)
+        ) ||
+        !(
+          item.idleMinutes === undefined ||
+          (Number.isFinite(item.idleMinutes) && item.idleMinutes >= 0)
+        ) ||
+        !(item.op === null || GUARD_OPS.has(item.op)) ||
+        typeof item.mergedToMain !== 'boolean' ||
+        !Number.isFinite(item.idleDays) ||
+        item.idleDays < 0 ||
+        typeof item.prunable !== 'boolean'
+      )
+        return null;
       worktrees.push({
         path: boundedText(item.path, 500),
         branch: item.branch === null ? null : boundedText(item.branch, 256),
@@ -42,10 +65,13 @@ function normalizeGuard(value) {
         unpushedSubjects: item.unpushedSubjects.slice(0, 5).map((subject) => boundedText(subject, 200)),
         backedUp: item.backedUp,
         dirty: item.dirty,
+        ...(Number.isFinite(item.ignored) ? { ignored: item.ignored } : {}),
+        ...(typeof item.dirtyKnown === 'boolean' ? { dirtyKnown: item.dirtyKnown } : {}),
         dirtyOldestMinutes: item.dirtyOldestMinutes,
         op: item.op,
         mergedToMain: item.mergedToMain,
         idleDays: item.idleDays,
+        ...(Number.isFinite(item.idleMinutes) ? { idleMinutes: item.idleMinutes } : {}),
         prunable: item.prunable,
       });
     }

@@ -2,6 +2,7 @@ import type {
   FleetMachineSnapshot,
   FleetOverlapWarning,
   FleetSnapshotMessage,
+  GitGuardReport,
   LedgerView,
 } from '../../../core/src/messages.js';
 import { FLEET_LAVISH_KEY, FLEET_SESSION_NAME, FLEET_STALE_AFTER_MS } from './constants.js';
@@ -110,7 +111,17 @@ export function buildFleetSnapshot(
   requestId: string,
   response: FleetHubResponse,
   localView: LedgerView | null,
+  localGuard: GitGuardReport | null = null,
 ): FleetSnapshotMessage {
+  const localActiveSessions = localView?.sessions.filter((session) => session.open) ?? [];
+  const localActiveBranches = [
+    ...new Set(
+      localActiveSessions
+        .map((session) => session.branch)
+        .filter((branch): branch is string => Boolean(branch)),
+    ),
+  ];
+  const localActivePaths = localActiveSessions.map((session) => session.cwd).filter(Boolean);
   const localRepos =
     localView?.repos.flatMap((repo) =>
       repo.worktrees.map((worktree) => ({
@@ -122,8 +133,23 @@ export function buildFleetSnapshot(
   return {
     type: 'fleetSnapshot',
     requestId,
-    machines: response.machines.map(
-      (machine): FleetMachineSnapshot => ({
+    machines: response.machines.map((machine): FleetMachineSnapshot => {
+      const activeTasks = machine.viec?.filter((task) => task.status === 'dang-lam') ?? [];
+      const activeBranches = [
+        ...new Set(
+          [
+            ...machine.sessions.map((session) => session.branch),
+            ...(machine.tmux ?? []).map((session) => session.branch ?? ''),
+            ...activeTasks.map((task) => task.branch),
+          ].filter(Boolean),
+        ),
+      ];
+      const activePaths = [
+        ...machine.sessions.map((session) => session.cwd),
+        ...(machine.tmux ?? []).map((session) => session.cwd ?? ''),
+      ].filter(Boolean);
+      const activeTaskSlugs = activeTasks.map((task) => task.slug);
+      return {
         agentId: machine.agent_id,
         receivedAt: machine.received_at,
         state: classifyFleetMachineState(machine.received_at, response.now),
@@ -141,20 +167,40 @@ export function buildFleetSnapshot(
         })),
         ...(typeof machine.disk_free_gb === 'number' ? { diskFreeGb: machine.disk_free_gb } : {}),
         lavishSessions: (machine.lavish ?? [])
-          .filter((session) => typeof session.key === 'string' && FLEET_LAVISH_KEY.test(session.key) && typeof session.file === 'string')
+          .filter(
+            (session) =>
+              typeof session.key === 'string' &&
+              FLEET_LAVISH_KEY.test(session.key) &&
+              typeof session.file === 'string',
+          )
           .map((session) => ({ key: session.key, file: session.file })),
         tmuxSessions: (machine.tmux ?? [])
-          .filter((session) => typeof session.name === 'string' && FLEET_SESSION_NAME.test(session.name))
+          .filter(
+            (session) => typeof session.name === 'string' && FLEET_SESSION_NAME.test(session.name),
+          )
           .map((session) => ({
             name: session.name,
             attached: session.attached === true,
-            idleSeconds: Number.isFinite(session.idle_seconds) ? Math.max(0, Math.floor(session.idle_seconds)) : 0,
-            ...(typeof session.command === 'string' && session.command ? { command: session.command } : {}),
-            ...(typeof session.branch === 'string' && session.branch ? { branch: session.branch } : {}),
+            idleSeconds: Number.isFinite(session.idle_seconds)
+              ? Math.max(0, Math.floor(session.idle_seconds))
+              : 0,
+            ...(typeof session.command === 'string' && session.command
+              ? { command: session.command }
+              : {}),
+            ...(typeof session.branch === 'string' && session.branch
+              ? { branch: session.branch }
+              : {}),
           })),
-      }),
-    ),
+        ...(machine.guard ? { guard: machine.guard } : {}),
+        ...(activeBranches.length ? { activeBranches } : {}),
+        ...(activePaths.length ? { activePaths } : {}),
+        ...(activeTaskSlugs.length ? { activeTaskSlugs } : {}),
+      };
+    }),
     overlaps: computeFleetOverlaps(response.machines, localRepos),
+    ...(localGuard ? { localGuard } : {}),
+    ...(localActiveBranches.length ? { localActiveBranches } : {}),
+    ...(localActivePaths.length ? { localActivePaths } : {}),
   };
 }
 
