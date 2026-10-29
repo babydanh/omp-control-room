@@ -51,7 +51,16 @@ function tmuxSessions() {
     text = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}\t#{session_attached}\t#{session_activity}\t#{pane_current_path}\t#{pane_current_command}'],
       { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
   } catch { return []; }   // no tmux server = no sessions
-  return parseTmux(text, Math.floor(Date.now() / 1000), (cwd) => git(cwd, 'branch', '--show-current'));
+  // An all-repo task runs in wt/<task>/ (not a repo itself): take the branch of its first child worktree.
+  const branchOf = (cwd) => {
+    const own = git(cwd, 'branch', '--show-current');
+    if (own || !cwd.startsWith(join(ROOT, 'wt'))) return own;
+    try {
+      const child = readdirSync(cwd).find((name) => existsSync(join(cwd, name, '.git')));
+      return child ? git(join(cwd, child), 'branch', '--show-current') : '';
+    } catch { return ''; }
+  };
+  return parseTmux(text, Math.floor(Date.now() / 1000), branchOf);
 }
 
 /** Open Lavish review sessions (key + artifact path) from lavish-axi's state file; never the artifact itself. */
