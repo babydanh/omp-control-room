@@ -37,7 +37,7 @@ import {
   WS_CLOSE_FORBIDDEN_ORIGIN,
   WS_CLOSE_UNAUTHORIZED,
 } from './constants.js';
-import { getFleetGuardRiskCounts } from './fleet/handler.js';
+import { getFleetBranchCollisionStatus, getFleetGuardRiskCounts } from './fleet/handler.js';
 import { transcriptFile } from './herdr/agentReply.js';
 import type { HerdrLink } from './herdr/herdrLink.js';
 import type { LedgerService } from './ledger/ledgerService.js';
@@ -168,6 +168,7 @@ export async function createHttpServer(options: HttpServerOptions): Promise<Http
     sessions: () => agentSessions(options),
     folders: () => agentFolders(options),
     guardRiskCounts: () => getFleetGuardRiskCounts(options.getLocalGuard),
+    branchCollisions: () => getFleetBranchCollisionStatus(options.ledger ?? null),
   });
   registerVoiceRoutes(app, { token: options.token });
 

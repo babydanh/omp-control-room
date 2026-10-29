@@ -135,7 +135,8 @@ describe('handleFleetMessage', () => {
       (message) => sent.push(message),
       { fleet, ledger: null, getLocalGuard: () => guard, privileged: true },
     );
-    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    // The snapshot comes first; the branch analysis may follow as a second update.
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThanOrEqual(1));
     expect(sent[0]).toMatchObject({
       type: 'fleetSnapshot',
       localGuard: guard,
@@ -171,7 +172,7 @@ describe('cloud tmux sessions in the snapshot', () => {
       null,
     );
     expect(snapshot.machines[0].tmuxSessions).toEqual([
-      { name: 'xep-san', attached: true, idleSeconds: 90, command: 'claude', branch: 'cloud/danh-xep-san' },
+      { name: 'xep-san', attached: true, idleSeconds: 90, command: 'claude', branch: 'cloud/danh-xep-san', cwd: '/data/home/Backend/wt' },
     ]);
     expect(snapshot.machines[0].activePaths).toEqual(['/data/home/Backend/wt']);
   });

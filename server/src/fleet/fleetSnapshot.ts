@@ -190,6 +190,9 @@ export function buildFleetSnapshot(
             ...(typeof session.branch === 'string' && session.branch
               ? { branch: session.branch }
               : {}),
+            ...(typeof session.cwd === 'string' && session.cwd
+              ? { cwd: session.cwd }
+              : {}),
           })),
         ...(machine.guard ? { guard: machine.guard } : {}),
         ...(activeBranches.length ? { activeBranches } : {}),

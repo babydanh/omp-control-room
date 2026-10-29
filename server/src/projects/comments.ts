@@ -4,8 +4,8 @@ import type { LedgerService } from '../ledger/ledgerService.js';
 import { LibraryUserError } from '../library/libraryError.js';
 import type { ProjectModuleDeps } from './services.js';
 
-const MAX_COMMENT_LENGTH = 4_000;
-const MAX_SNIPPET_LENGTH = 1_200;
+export const PROJECT_COMMENT_MAX_LENGTH = 4_000;
+export const PROJECT_COMMENT_SNIPPET_MAX_LENGTH = 1_200;
 
 export interface ProjectCommentServices {
   sendToBoardSession(sessionId: string, text: string): Promise<void>;
@@ -31,11 +31,11 @@ export async function sendProjectComment(
   deps: ProjectModuleDeps<ProjectCommentServices>,
 ): Promise<void> {
   const content = request.content.trim();
-  const snippet = request.snippet.slice(0, MAX_SNIPPET_LENGTH);
+  const snippet = request.snippet.slice(0, PROJECT_COMMENT_SNIPPET_MAX_LENGTH);
   if (!Number.isSafeInteger(request.line) || request.line < 1 || request.file.trim() === '' || content === '') {
     throw new LibraryUserError('Nội dung nhận xét không hợp lệ.');
   }
-  if (content.length > MAX_COMMENT_LENGTH || snippet.trim().length > MAX_SNIPPET_LENGTH) {
+  if (content.length > PROJECT_COMMENT_MAX_LENGTH || snippet.trim().length > PROJECT_COMMENT_SNIPPET_MAX_LENGTH) {
     throw new LibraryUserError('Nhận xét quá dài.');
   }
 
@@ -51,12 +51,16 @@ export async function sendProjectComment(
     throw new LibraryUserError('Phiên nhận xét không còn gắn với worktree này.');
   }
 
-  const text = `[Nhận xét trên diff] ${request.file}:${request.line}\n${snippet}\nNhận xét: ${content}`;
+  const text = formatProjectComment(request.file, request.line, snippet, content);
   if (recipient.agentKind === 'board' || recipient.engine === 'board') {
     await deps.services.sendToBoardSession(request.receivingSessionId, text);
   } else {
     await deps.services.sendToLedgerSession(request.receivingSessionId, text);
   }
+}
+
+export function formatProjectComment(file: string, line: number, snippet: string, content: string): string {
+  return `[Nhận xét trên diff] ${file}:${line}\n${snippet}\nNhận xét: ${content}`;
 }
 
 function isEnded(node: ProjectTreeNode): boolean {

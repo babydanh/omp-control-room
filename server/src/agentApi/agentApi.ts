@@ -57,6 +57,7 @@ export interface AgentApiDeps {
   sessions(): Promise<AgentSessionRow[]>;
   folders(): AgentFolder[];
   guardRiskCounts?: () => Promise<{ readonly red: number; readonly yellow: number }>;
+  readonly branchCollisions?: () => Promise<{ readonly pairs: number; readonly conflicts: number; readonly pending: boolean }>;
 }
 
 function pathKey(value: string): string {
@@ -151,7 +152,10 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentApiDeps): v
       const snapshots = deps
         .folders()
         .map((folder) => ({ folder, snapshot: folder.service.snapshot() }));
-      const guardRiskCounts = await deps.guardRiskCounts?.();
+      const [guardRiskCounts, branchCollisions] = await Promise.all([
+        deps.guardRiskCounts?.(),
+        deps.branchCollisions?.(),
+      ]);
       const items = snapshots.flatMap(({ folder, snapshot }) =>
         snapshot.items.map((item) => ({ ...item, folder: folder.path })),
       );
@@ -169,6 +173,7 @@ export function registerAgentRoutes(app: FastifyInstance, deps: AgentApiDeps): v
           (snapshot.cloudIssues ?? []).map((issue) => ({ ...issue, folder: folder.path })),
         ),
         ...(guardRiskCounts === undefined ? {} : { guardRiskCounts }),
+        ...(branchCollisions === undefined ? {} : { branchCollisions }),
       };
     },
   );

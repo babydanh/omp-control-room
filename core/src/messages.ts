@@ -192,6 +192,7 @@ export type ClientMessage =
   | FleetTaskCreateMessage
   | FleetLavishOpenMessage
   | FleetDiffRequestMessage
+  | FleetCloudCommentSendMessage
   | ProjectTreeRequestMessage
   | ProjectNodeCreateMessage
   | ProjectNodeUpdateMessage
@@ -2241,6 +2242,9 @@ export interface FleetSnapshotMessage {
   localGuard?: GitGuardReport;
   localActiveBranches?: string[];
   localActivePaths?: string[];
+  localBranches?: FleetLocalBranchSnapshot[];
+  branchAnalyses?: FleetBranchAnalysis[];
+  branchAnalysisPending?: boolean;
 }
 
 export interface FleetMachineSnapshot {
@@ -2272,6 +2276,47 @@ export interface FleetRepoSnapshot {
   dirtyCount: number;
   merged?: boolean;
   staged?: boolean;
+  pullRequest?: FleetPullRequest;
+}
+
+export interface FleetLocalBranchSnapshot {
+  repo: string;
+  checkout: string;
+  branch: string;
+  ahead: number;
+  behind: number;
+  sessionIds: string[];
+  pullRequest?: FleetPullRequest;
+}
+
+export interface FleetBranchAnalysis {
+  id: string;
+  repo: string;
+  branch: string;
+  checkout?: string;
+  machine?: string;
+  path?: string;
+  changedFileCount: number;
+  modules: { name: string; count: number }[];
+  changedFiles: string[];
+  overlaps: FleetBranchOverlap[];
+  suggestion: string;
+}
+
+export interface FleetBranchOverlap {
+  branch: string;
+  files: string[];
+  mergeClean: boolean | null;
+}
+
+export interface FleetPullRequest {
+  number: number;
+  state: 'open' | 'merged' | 'closed';
+  isDraft: boolean;
+  reviewDecision: string | null;
+  url: string;
+  ci: 'green' | 'red' | 'running' | 'none';
+  failedChecks: string[];
 }
 
 export interface FleetLavishSession {
@@ -2285,6 +2330,7 @@ export interface FleetTmuxSession {
   idleSeconds: number;
   command?: string;
   branch?: string;
+  cwd?: string;
 }
 
 export interface GitGuardReport {
@@ -2349,7 +2395,7 @@ export interface FleetCommandResultMessage {
   reason?: string;
 }
 
-export type FleetCommandResultCode = 'forbidden' | 'unavailable' | 'failed';
+export type FleetCommandResultCode = 'forbidden' | 'unavailable' | 'failed' | 'success';
 
 export interface FleetTerminalOpenedMessage {
   type: 'fleetTerminalOpened';
@@ -3451,6 +3497,19 @@ export interface FleetDiffRequestMessage {
   requestId: string;
   machine: string;
   path: string;
+}
+
+export interface FleetCloudCommentSendMessage {
+  type: 'fleetCloudCommentSend';
+  requestId: string;
+  machine: string;
+  path: string;
+  session: string;
+  branch: string;
+  file: string;
+  line: number;
+  snippet: string;
+  content: string;
 }
 
 export interface ProjectTreeRequestMessage {

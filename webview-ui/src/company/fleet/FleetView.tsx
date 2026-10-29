@@ -1,13 +1,16 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
-import type { FleetMachineSnapshot } from '../../../../core/src/messages.js';
+import type { FleetBranchAnalysis, FleetLocalBranchSnapshot, FleetMachineSnapshot, FleetPullRequest } from '../../../../core/src/messages.js';
 import { MAX_SESSIONS_PER_MACHINE, pickMachine, projectMachines, randomSuffix, slugFromPrompt } from './cloudTaskPick.js';
 import { CloudTerminal } from './CloudTerminal.js';
 import { fleetStore } from './fleetClient.js';
+import { createFleetDiffCommentSelector, type FleetDiffCommentSelection } from './fleetDiffComment.js';
 import { type FleetState, useFleetState } from './fleetStore.js';
 
 export function FleetView() {
   const fleet = useFleetState(fleetStore);
+  const localBranches = fleet.snapshot?.localBranches ?? [];
+  const branchAnalyses = fleet.snapshot?.branchAnalyses ?? [];
 
   return (
     <div className="company-shell-page flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -34,7 +37,37 @@ export function FleetView() {
           />
         )}
         <ActionStatus fleet={fleet} />
-        {fleet.diff !== null && <DiffPanel diff={fleet.diff} />}
+        {fleet.snapshot?.branchAnalysisPending && (
+          <p role="status" className="text-xs text-text-muted">Đang phân tích nhánh trong nền…</p>
+        )}
+        {localBranches.length > 0 && (
+          <section aria-labelledby="fleet-local-branches-title" className="space-y-2">
+            <h2 id="fleet-local-branches-title" className="text-sm font-semibold text-text">Nhánh cục bộ</h2>
+            <ul className="space-y-2">
+              {localBranches.map((branch) => {
+                const analysis = branchAnalyses.find(
+                  (candidate) => candidate.checkout === branch.checkout && candidate.branch === branch.branch,
+                );
+                return (
+                  <LocalBranchRow
+                    key={`${branch.checkout}\0${branch.branch}`}
+                    branch={branch}
+                    analysis={analysis}
+                    busy={fleet.action !== null}
+                  />
+                );
+              })}
+            </ul>
+          </section>
+        )}
+        {fleet.diff !== null && (
+          <DiffPanel
+            key={`${fleet.diff.machine}\0${fleet.diff.path}`}
+            diff={fleet.diff}
+            snapshot={fleet.snapshot}
+            busy={fleet.action !== null}
+          />
+        )}
         {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
           <TaskForm machines={fleet.snapshot.machines} busy={fleet.action !== null} />
         )}
@@ -62,7 +95,12 @@ export function FleetView() {
         {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
           <div className="grid gap-3 md:grid-cols-2">
             {fleet.snapshot.machines.map((machine) => (
-              <MachineCard key={machine.agentId} machine={machine} busy={fleet.action !== null} />
+              <MachineCard
+                key={machine.agentId}
+                machine={machine}
+                analyses={branchAnalyses}
+                busy={fleet.action !== null}
+              />
             ))}
           </div>
         )}
@@ -95,6 +133,71 @@ export function FleetView() {
   );
 }
 
+function LocalBranchRow({
+  branch,
+  analysis,
+  busy,
+}: {
+  branch: FleetLocalBranchSnapshot;
+  analysis?: FleetBranchAnalysis;
+  busy: boolean;
+}) {
+  const pullRequest = branch.pullRequest;
+  const sessionId = branch.sessionIds[0];
+  return (
+    <li className="flex flex-wrap items-center gap-2 rounded border border-hairline bg-well px-3 py-2 text-xs">
+      <span className="font-medium text-text">{branch.repo}</span>
+      <span className="break-all font-mono">{branch.branch}</span>
+      <span className="break-all text-text-muted">{branch.checkout}</span>
+      <BranchStatusBadges {...branch} />
+      {pullRequest?.ci === 'red' && sessionId !== undefined && (
+        <button
+          type="button"
+          disabled={busy}
+          className="company-btn company-btn-sm company-btn-ghost ml-auto"
+          onClick={() => fleetStore.sendLocalCiFailureComment(branch.checkout, sessionId, pullRequest)}
+        >
+          Gửi lỗi CI cho agent
+        </button>
+      )}
+      {analysis !== undefined ? <BranchAnalysisDetails analysis={analysis} /> : null}
+    </li>
+  );
+}
+function BranchAnalysisDetails({ analysis }: { analysis: FleetBranchAnalysis }) {
+  return (
+    <div className="basis-full space-y-1 rounded bg-panel/60 px-2 py-1.5 text-xs text-text-muted">
+      <p>
+        So với origin/main: {analysis.changedFileCount} tệp
+        {analysis.modules.length > 0
+          ? ` · module chính: ${analysis.modules.map((module) => `${module.name} (${module.count})`).join(', ')}`
+          : ''}
+      </p>
+      {analysis.changedFiles.length > 0 ? (
+        <p className="break-all font-mono">Tệp: {analysis.changedFiles.slice(0, 5).join(', ')}</p>
+      ) : null}
+      {analysis.overlaps.length === 0 ? (
+        <p>Không có nhánh khác đang chạm cùng tệp.</p>
+      ) : (
+        <ul className="space-y-0.5">
+          {analysis.overlaps.map((overlap) => (
+            <li key={overlap.branch}>
+              Trùng với {overlap.branch}: {overlap.files.join(', ')} ·{' '}
+              {overlap.mergeClean === false
+                ? 'xung đột thật (merge-tree)'
+                : overlap.mergeClean === true
+                  ? 'merge-tree sạch'
+                  : 'chưa xác minh được (thay đổi chưa commit hoặc thiếu ref)'}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="font-medium text-text">Đề xuất: {analysis.suggestion}</p>
+    </div>
+  );
+}
+
+
 function ActionStatus({ fleet }: { fleet: FleetState }) {
   if (fleet.action !== null) {
     const what = {
@@ -102,6 +205,7 @@ function ActionStatus({ fleet }: { fleet: FleetState }) {
       task: 'Đang tạo worktree và mở Claude',
       lavish: 'Đang nối cổng tới Lavish',
       diff: 'Đang đọc thay đổi',
+      comment: 'Đang gửi tin tới phiên',
     }[fleet.action.kind];
     return (
       <p role="status" className="text-sm text-text-muted">
@@ -237,7 +341,56 @@ function formatIdle(seconds: number): string {
   return `rảnh ${Math.floor(seconds / 3600)} giờ`;
 }
 
-function MachineCard({ machine, busy }: { machine: FleetMachineSnapshot; busy: boolean }) {
+const FLEET_PR_STATE_LABEL: Record<FleetPullRequest['state'], string> = {
+  open: 'Mở',
+  merged: 'Đã gộp',
+  closed: 'Đóng',
+};
+
+const FLEET_CI_LABEL: Record<FleetPullRequest['ci'], string> = {
+  green: 'CI xanh',
+  red: 'CI đỏ',
+  running: 'CI đang chạy',
+  none: '',
+};
+
+
+function BranchStatusBadges({
+  branch,
+  ahead,
+  behind,
+  pullRequest,
+}: Pick<FleetLocalBranchSnapshot, 'branch' | 'ahead' | 'behind' | 'pullRequest'>) {
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      <span className="rounded-full bg-panel px-1.5 py-0.5 text-text-muted" title="Số commit hơn/kém origin">
+        origin +{ahead} / −{behind}
+      </span>
+      {pullRequest && (
+        <a
+          className="rounded-full border border-hairline px-1.5 py-0.5 text-text hover:text-accent"
+          href={pullRequest.url}
+          target="_blank"
+          rel="noreferrer"
+          title={`${branch} · ${pullRequest.url}`}
+        >
+          PR #{pullRequest.number} · {pullRequest.isDraft ? 'Nháp' : FLEET_PR_STATE_LABEL[pullRequest.state]}
+          {pullRequest.ci === 'none' ? null : ` · ${FLEET_CI_LABEL[pullRequest.ci]}`}
+        </a>
+      )}
+    </span>
+  );
+}
+
+function MachineCard({
+  machine,
+  analyses,
+  busy,
+}: {
+  machine: FleetMachineSnapshot;
+  analyses: readonly FleetBranchAnalysis[];
+  busy: boolean;
+}) {
   const lastSeen = new Intl.DateTimeFormat('vi-VN', {
     dateStyle: 'short',
     timeStyle: 'short',
@@ -301,24 +454,63 @@ function MachineCard({ machine, busy }: { machine: FleetMachineSnapshot; busy: b
       )}
       {machine.repos.length > 0 ? (
         <ul className="space-y-1 border-t border-hairline pt-2">
-          {machine.repos.map((repo, index) => (
-            <li key={`${repo.name}-${repo.branch}-${index}`} className="flex flex-wrap items-center gap-x-2 text-xs text-text-secondary">
-              <span className="font-medium text-text">{repo.name}</span>
-              <span className="break-all font-mono">{repo.branch}</span>
-              <span>{repo.dirtyCount} tệp thay đổi</span>
-              <span className={repo.merged === true && repo.dirtyCount === 0 ? 'text-success' : 'text-text-muted'}>{deliveryLabel(repo)}</span>
-              {repo.path ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  className="company-btn company-btn-sm company-btn-ghost ml-auto"
-                  onClick={() => repo.path && fleetStore.requestDiff(machine.agentId, repo.path)}
-                >
-                  Xem thay đổi
-                </button>
-              ) : null}
-            </li>
-          ))}
+          {machine.repos.map((repo, index) => {
+            const path = repo.path;
+            const pullRequest = repo.pullRequest;
+            const analysis = analyses.find(
+              (candidate) =>
+                candidate.machine === machine.agentId &&
+                candidate.path === path &&
+                candidate.branch === repo.branch,
+            );
+            const ciSession = path === undefined
+              ? undefined
+              : (machine.tmuxSessions ?? []).find(
+                  (session) =>
+                    session.branch === repo.branch &&
+                    typeof session.cwd === 'string' &&
+                    (session.cwd === path || session.cwd.startsWith(`${path}/`)),
+                );
+            return (
+              <li key={`${repo.name}-${repo.branch}-${index}`} className="flex flex-wrap items-center gap-x-2 text-xs text-text-secondary">
+                <span className="font-medium text-text">{repo.name}</span>
+                <span className="break-all font-mono">{repo.branch}</span>
+                <BranchStatusBadges {...repo} />
+                <span>{repo.dirtyCount} tệp thay đổi</span>
+                <span className={repo.merged === true && repo.dirtyCount === 0 ? 'text-success' : 'text-text-muted'}>{deliveryLabel(repo)}</span>
+                {pullRequest?.ci === 'red' && machine.state === 'online' && ciSession !== undefined && path !== undefined && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="company-btn company-btn-sm company-btn-ghost"
+                    onClick={() => fleetStore.sendCloudComment({
+                      machine: machine.agentId,
+                      path,
+                      session: ciSession.name,
+                      branch: repo.branch,
+                      file: `CI / PR #${pullRequest.number}`,
+                      line: 1,
+                      snippet: pullRequest.failedChecks.join('\n').slice(0, 1200),
+                      content: `CI đỏ · PR #${pullRequest.number} · ${pullRequest.url}. Hãy xử lý lỗi CI; không tự gộp.`,
+                    })}
+                  >
+                    Gửi lỗi CI cho agent
+                  </button>
+                )}
+                {analysis !== undefined ? <BranchAnalysisDetails analysis={analysis} /> : null}
+                {path ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className="company-btn company-btn-sm company-btn-ghost ml-auto"
+                    onClick={() => fleetStore.requestDiff(machine.agentId, path)}
+                  >
+                    Xem thay đổi
+                  </button>
+                ) : null}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="border-t border-hairline pt-2 text-xs text-text-muted">Chưa có repository được báo cáo.</p>
@@ -353,9 +545,66 @@ function diffLineClass(line: string): string {
 /** Rendering is one element per line: cap it so a huge diff cannot freeze the board. */
 const DIFF_MAX_LINES = 4000;
 
-function DiffPanel({ diff }: { diff: NonNullable<FleetState['diff']> }) {
+function DiffPanel({
+  diff,
+  snapshot,
+  busy,
+}: {
+  diff: NonNullable<FleetState['diff']>;
+  snapshot: FleetState['snapshot'];
+  busy: boolean;
+}) {
   const lines = diff.text.split('\n');
   const shown = lines.slice(0, DIFF_MAX_LINES);
+  const selector = useMemo(() => createFleetDiffCommentSelector(diff.text), [diff.text]);
+  const [selection, setSelection] = useState<FleetDiffCommentSelection | null>(null);
+  const [selectedRange, setSelectedRange] = useState<{ readonly start: number; readonly end: number } | null>(null);
+  const [anchor, setAnchor] = useState<number | null>(null);
+  const [content, setContent] = useState('');
+  const machine = snapshot?.machines.find((item) => item.agentId === diff.machine);
+  const repo = machine?.repos.find((item) => item.path === diff.path);
+  const commentSession =
+    machine === undefined || repo === undefined
+      ? undefined
+      : (machine.tmuxSessions ?? []).find(
+          (session) =>
+            session.branch === repo.branch &&
+            typeof session.cwd === 'string' &&
+            (session.cwd === diff.path || session.cwd.startsWith(`${diff.path}/`)),
+        );
+  const canComment =
+    machine?.state === 'online' &&
+    repo !== undefined &&
+    commentSession !== undefined &&
+    selection !== null &&
+    content.trim() !== '' &&
+    !busy;
+
+  function selectLine(index: number, shift: boolean): void {
+    const start = shift && anchor !== null ? anchor : index;
+    const next = selector.select(start, index);
+    if (next === null) return;
+    setAnchor(start);
+    setSelection(next);
+    setSelectedRange({ start: Math.min(start, index), end: Math.max(start, index) });
+  }
+
+  function sendComment(): void {
+    if (!canComment || machine === undefined || repo?.path === undefined || commentSession === undefined || selection === null) {
+      return;
+    }
+    fleetStore.sendCloudComment({
+      machine: machine.agentId,
+      path: repo.path,
+      session: commentSession.name,
+      branch: repo.branch,
+      file: selection.file,
+      line: selection.line,
+      snippet: selection.snippet,
+      content,
+    });
+  }
+
   return (
     <section className="flex max-h-[70vh] flex-col rounded border border-hairline bg-well">
       <header className="flex items-center justify-between gap-2 border-b border-hairline px-3 py-2">
@@ -368,15 +617,52 @@ function DiffPanel({ diff }: { diff: NonNullable<FleetState['diff']> }) {
         </button>
       </header>
       <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-5">
-        {shown.map((line, index) => (
-          <div key={index} className={diffLineClass(line)}>
-            {line || ' '}
-          </div>
-        ))}
+        {shown.map((line, index) => {
+          const canSelect = selector.select(index) !== null;
+          const selected = selectedRange !== null && index >= selectedRange.start && index <= selectedRange.end;
+          return (
+            <button
+              key={index}
+              type="button"
+              disabled={!canSelect}
+              aria-pressed={selected}
+              onClick={(event) => selectLine(index, event.shiftKey)}
+              className={`block w-full bg-transparent text-left font-mono text-xs leading-5 ${diffLineClass(line)} ${
+                canSelect ? 'cursor-pointer hover:bg-accent/10' : 'cursor-default'
+              } ${selected ? 'bg-accent/15' : ''}`}
+            >
+              {line || ' '}
+            </button>
+          );
+        })}
         {lines.length > shown.length ? (
           <div className="text-warning">… còn {lines.length - shown.length} dòng. Xem đủ bằng git diff trong terminal.</div>
         ) : null}
       </pre>
+      <div className="space-y-2 border-t border-hairline p-3">
+        <p className="text-xs text-text-muted">
+          {selection === null
+            ? 'Chọn dòng trong diff; Shift+click để chọn một đoạn trong cùng tệp.'
+            : `Đang nhận xét ${selection.file}:${selection.line}. Shift+click để mở rộng đoạn.`}
+        </p>
+        <textarea
+          aria-label="Bình luận về diff"
+          rows={3}
+          maxLength={4_000}
+          value={content}
+          onChange={(event) => setContent(event.currentTarget.value)}
+          className="company-input w-full resize-y text-sm"
+          placeholder="Viết bình luận gửi tới phiên cloud…"
+        />
+        {machine?.state === 'online' && commentSession === undefined ? (
+          <p className="text-xs text-warning">Không có phiên tmux đang mở trên nhánh này để nhận bình luận.</p>
+        ) : null}
+        <div className="flex justify-end">
+          <button type="button" disabled={!canComment} onClick={sendComment} className="company-btn company-btn-sm company-btn-primary">
+            Gửi bình luận
+          </button>
+        </div>
+      </div>
     </section>
   );
 }

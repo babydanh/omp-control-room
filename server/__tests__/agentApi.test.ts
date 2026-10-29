@@ -188,8 +188,10 @@ describe('board CLI', () => {
         },
       ],
       guardRiskCounts: { red: 1, yellow: 2 },
+      branchCollisions: { pairs: 3, conflicts: 1, pending: false },
     });
     expect(formatStatus(answer)).toContain('Rủi ro mất code: 1 đỏ · 2 vàng.');
+    expect(formatStatus(answer)).toContain('Nhánh đụng nhau: 3 cặp chạm tệp · 1 xung đột thật.');
     expect(formatStatus(answer)).toContain('Issue [Handoff] ngoài board (1)');
     expect(formatStatus(answer)).toContain('https://github.com/babydanh/agent-orchestrator/issues/42');
   });

@@ -125,6 +125,7 @@ export interface StatusAnswer {
   readonly undelivered: readonly CliItem[];
   readonly cloudIssues: readonly CliCloudIssue[];
   readonly guardRiskCounts?: { readonly red: number; readonly yellow: number };
+  readonly branchCollisions?: { readonly pairs: number; readonly conflicts: number; readonly pending: boolean };
 }
 export interface CliCloudIssue {
   readonly issue: number;
@@ -311,6 +312,21 @@ export function readStatusAnswer(value: unknown): StatusAnswer {
     (counts['yellow'] as number) >= 0
       ? { red: counts['red'] as number, yellow: counts['yellow'] as number }
       : undefined;
+  const collisionValue =
+    isRecord(value) && isRecord(value['branchCollisions']) ? value['branchCollisions'] : undefined;
+  const branchCollisions =
+    collisionValue !== undefined &&
+    Number.isInteger(collisionValue['pairs']) &&
+    (collisionValue['pairs'] as number) >= 0 &&
+    Number.isInteger(collisionValue['conflicts']) &&
+    (collisionValue['conflicts'] as number) >= 0 &&
+    typeof collisionValue['pending'] === 'boolean'
+      ? {
+          pairs: collisionValue['pairs'] as number,
+          conflicts: collisionValue['conflicts'] as number,
+          pending: collisionValue['pending'],
+        }
+      : undefined;
   return {
     caller: readCaller(value),
     ...(you === undefined ? {} : { you }),
@@ -325,6 +341,7 @@ export function readStatusAnswer(value: unknown): StatusAnswer {
         ? value['cloudIssues'].map(readCloudIssue)
         : [],
     ...(guardRiskCounts === undefined ? {} : { guardRiskCounts }),
+    ...(branchCollisions === undefined ? {} : { branchCollisions }),
   };
 }
 
@@ -378,6 +395,14 @@ export function formatStatus(answer: StatusAnswer): string {
   if (answer.guardRiskCounts !== undefined) {
     lines.push(
       `Rủi ro mất code: ${answer.guardRiskCounts.red} đỏ · ${answer.guardRiskCounts.yellow} vàng.`,
+    );
+  }
+  if (answer.branchCollisions !== undefined) {
+    const { pairs, conflicts, pending } = answer.branchCollisions;
+    lines.push(
+      pending
+        ? `Nhánh đụng nhau: đang phân tích (${pairs} cặp gần nhất · ${conflicts} xung đột thật).`
+        : `Nhánh đụng nhau: ${pairs} cặp chạm tệp · ${conflicts} xung đột thật.`,
     );
   }
   const cut = answer.sessions.filter((session) => session.interrupted !== undefined).length;

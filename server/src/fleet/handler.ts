@@ -1,5 +1,9 @@
-import type { GitGuardReport, LedgerView, ServerMessage } from '../../../core/src/messages.js';
+import type { FleetSnapshotMessage, GitGuardReport, LedgerView, ServerMessage } from '../../../core/src/messages.js';
+import { createGitRunner, type GitRunner } from '../ledger/git.js';
+import { runProcess } from '../ledger/processRunner.js';
 import type { PtySessionManager } from '../terminal/ptySessionManager.js';
+import { createFleetBranchAnalysisService, type FleetBranchAnalysisSnapshot } from './branchAnalysis.js';
+import { createFleetPullRequestLookup, type FleetPullRequestLookup } from './branchPullRequests.js';
 import { CloudControl, CloudControlError } from './cloudControl.js';
 import {
   FLEET_REASON_BAD_INPUT,
@@ -9,19 +13,26 @@ import {
   FLEET_REASON_NOT_REPORTED,
   FLEET_REASON_READ_ONLY,
   FLEET_REASON_UNAVAILABLE,
+  FLEET_STALE_AFTER_MS,
 } from './constants.js';
+import { collectFleetBranchPullRequests } from './fleetBranchStatus.js';
 import { buildFleetSnapshot } from './fleetSnapshot.js';
-import { createFleetHubClient, type FleetHubClient, FleetUnavailableError } from './hubClient.js';
+import { createFleetHubClient, type FleetHubClient, type FleetHubResponse, FleetUnavailableError } from './hubClient.js';
 
 const FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
 const LEDGER_WAIT_MS = 5000;
 const defaultFleetHubClient = createFleetHubClient();
+const defaultPullRequestGit = createGitRunner(runProcess);
+const defaultPullRequests = createFleetPullRequestLookup();
+const defaultBranchAnalysis = createFleetBranchAnalysisService();
 let defaultCloudControl: CloudControl | null = null;
 
 export interface FleetCommandContext {
   readonly fleet?: FleetHubClient;
   readonly cloud?: CloudControl;
   readonly ledger: { getView: () => Promise<LedgerView> } | null;
+  readonly git?: GitRunner;
+  readonly pullRequests?: FleetPullRequestLookup;
   readonly ptyManager?: PtySessionManager | null;
   readonly getLocalGuard?: () => GitGuardReport | null;
   readonly privileged: boolean;
@@ -44,12 +55,27 @@ export async function getFleetGuardRiskCounts(localGuard?: () => GitGuardReport 
   );
 }
 
+export async function getFleetBranchCollisionStatus(
+  ledger: FleetCommandContext['ledger'],
+): Promise<FleetBranchAnalysisSnapshot> {
+  const localRead = ledger?.getView().catch(() => null) ?? Promise.resolve(null);
+  const localView = Promise.race([localRead, new Promise<null>((resolve) => setTimeout(resolve, LEDGER_WAIT_MS, null))]);
+  const fleetRead = defaultFleetHubClient.fetchFleet().catch(() => ({ now: Date.now(), machines: [] }));
+  const [view, response] = await Promise.all([localView, fleetRead]);
+  defaultBranchAnalysis.schedule(view, response, {
+    git: defaultPullRequestGit,
+    cloud: cloudOf({ ledger: null, privileged: true }),
+  });
+  return defaultBranchAnalysis.getSnapshot();
+}
+
 const FLEET_TYPES = new Set([
   'fleetRequest',
   'fleetTerminalOpen',
   'fleetTaskCreate',
   'fleetLavishOpen',
   'fleetDiffRequest',
+  'fleetCloudCommentSend',
 ]);
 
 export function handleFleetMessage(
@@ -86,22 +112,29 @@ export function handleFleetMessage(
     readDiff(msg, requestId, send, context);
     return true;
   }
+  if (msg.type === 'fleetCloudCommentSend') {
+    sendCloudComment(msg, requestId, send, context);
+    return true;
+  }
 
   const fleet = context.fleet ?? defaultFleetHubClient;
   // A cold ledger view can take over a minute; show the machines without local overlaps rather than wait.
   const ledgerView = context.ledger?.getView().catch(() => null) ?? Promise.resolve(null);
   const localView = Promise.race([ledgerView, new Promise<null>((resolve) => setTimeout(resolve, LEDGER_WAIT_MS, null))]);
   Promise.all([fleet.fetchFleet(), localView])
-    .then(([response, view]) =>
-      send(buildFleetSnapshot(requestId, response, view, context.getLocalGuard?.() ?? null)),
-    )
+    .then(async ([response, view]) => {
+      const snapshot = await snapshotWithPullRequests(requestId, response, view, context.getLocalGuard?.() ?? null, context);
+      send(startBranchAnalysis(snapshot, view, response, context, send));
+    })
     .catch(async (error: unknown) => {
+      const view = await localView;
       const unavailable = error instanceof FleetUnavailableError;
       const localGuard = context.getLocalGuard?.() ?? null;
       if (localGuard !== null) {
-        const view = await localView;
+        const response = { now: Date.now(), machines: [] };
+        const snapshot = await snapshotWithPullRequests(requestId, response, view, localGuard, context);
         send({
-          ...buildFleetSnapshot(requestId, { now: Date.now(), machines: [] }, view, localGuard),
+          ...startBranchAnalysis(snapshot, view, response, context, send),
           hubError: unavailable ? FLEET_REASON_UNAVAILABLE : FLEET_REASON_COMMAND_FAILED,
         });
         return;
@@ -115,6 +148,62 @@ export function handleFleetMessage(
       );
     });
   return true;
+}
+
+async function snapshotWithPullRequests(
+  requestId: string,
+  response: FleetHubResponse,
+  localView: LedgerView | null,
+  localGuard: GitGuardReport | null,
+  context: FleetCommandContext,
+): Promise<FleetSnapshotMessage> {
+  const snapshot = buildFleetSnapshot(requestId, response, localView, localGuard);
+  try {
+    const status = await collectFleetBranchPullRequests(localView, response, {
+      git: context.git ?? defaultPullRequestGit,
+      pullRequests: context.pullRequests ?? defaultPullRequests,
+    });
+    const cloudPullRequests = new Map(
+      status.cloudBranches.map((branch) => [`${branch.machine}\0${branch.path}\0${branch.branch}`, branch.pullRequest]),
+    );
+    return {
+      ...snapshot,
+      localBranches: status.localBranches,
+      machines: snapshot.machines.map((machine) => ({
+        ...machine,
+        repos: machine.repos.map((repo) => {
+          const pullRequest = cloudPullRequests.get(`${machine.agentId}\0${repo.path ?? ''}\0${repo.branch}`);
+          return pullRequest === undefined ? repo : { ...repo, pullRequest };
+        }),
+      })),
+    };
+  } catch {
+    return snapshot;
+  }
+}
+
+function startBranchAnalysis(
+  snapshot: FleetSnapshotMessage,
+  localView: LedgerView | null,
+  response: FleetHubResponse,
+  context: FleetCommandContext,
+  send: (message: ServerMessage) => void,
+): FleetSnapshotMessage {
+  const attach = (): FleetSnapshotMessage => {
+    const analysis = defaultBranchAnalysis.getSnapshot();
+    return {
+      ...snapshot,
+      branchAnalyses: analysis.analyses,
+      branchAnalysisPending: analysis.pending,
+    };
+  };
+  defaultBranchAnalysis.schedule(
+    localView,
+    response,
+    { git: context.git ?? defaultPullRequestGit, cloud: cloudOf(context) },
+    () => send(attach()),
+  );
+  return attach();
 }
 
 function cloudOf(context: FleetCommandContext): CloudControl {
@@ -184,6 +273,58 @@ function readDiff(
       }
       const diff = await cloudOf(context).readDiff(machine, path);
       send({ type: 'fleetDiff', requestId, machine, path, text: diff.text, truncated: diff.truncated });
+    })
+    .catch((error: unknown) => send(failure(requestId, error)));
+}
+
+function sendCloudComment(
+  msg: Record<string, unknown>,
+  requestId: string,
+  send: (message: ServerMessage) => void,
+  context: FleetCommandContext,
+): void {
+  const machine = typeof msg.machine === 'string' ? msg.machine : '';
+  const path = typeof msg.path === 'string' ? msg.path : '';
+  const branch = typeof msg.branch === 'string' ? msg.branch : '';
+  const session = typeof msg.session === 'string' ? msg.session : '';
+  if (
+    machine === '' ||
+    path === '' ||
+    branch === '' ||
+    session === '' ||
+    typeof msg.file !== 'string' ||
+    typeof msg.line !== 'number' ||
+    typeof msg.snippet !== 'string' ||
+    typeof msg.content !== 'string'
+  ) {
+    send(commandResult(requestId, 'failed', FLEET_REASON_BAD_INPUT));
+    return;
+  }
+  const fleet = context.fleet ?? defaultFleetHubClient;
+  fleet
+    .fetchFleet()
+    .then(async (response) => {
+      const report = response.machines.find((entry) => entry.agent_id === machine);
+      const fresh = report !== undefined && response.now - report.received_at <= FLEET_STALE_AFTER_MS;
+      const repo = report?.repos.find((entry) => entry.path === path && entry.branch === branch);
+      const reportedSession = report?.tmux?.find(
+        (entry) =>
+          entry.name === session &&
+          entry.branch === branch &&
+          typeof entry.cwd === 'string' &&
+          (entry.cwd === path || entry.cwd.startsWith(`${path}/`)),
+      );
+      if (!fresh || repo === undefined || reportedSession === undefined) {
+        send(commandResult(requestId, 'failed', FLEET_REASON_NOT_REPORTED));
+        return;
+      }
+      await cloudOf(context).sendDiffComment(machine, session, {
+        file: msg.file as string,
+        line: msg.line as number,
+        snippet: msg.snippet as string,
+        content: msg.content as string,
+      });
+      send({ type: 'fleetCommandResult', requestId, ok: true, code: 'success' });
     })
     .catch((error: unknown) => send(failure(requestId, error)));
 }

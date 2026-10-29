@@ -1,6 +1,7 @@
-import typescriptEslint from 'typescript-eslint';
 import eslintConfigPrettier from 'eslint-config-prettier';
 import simpleImportSort from 'eslint-plugin-simple-import-sort';
+import typescriptEslint from 'typescript-eslint';
+
 import pixelAgentsPlugin from './eslint-rules/pixel-agents-rules.mjs';
 
 export default [

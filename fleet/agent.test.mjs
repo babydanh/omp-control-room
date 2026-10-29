@@ -140,3 +140,4 @@ test('cloud guard pruning is enabled by default every six hours', () => {
   assert.equal(shouldPruneGuard(Number.NaN, 1_000), true);
   assert.equal(shouldPruneGuard(Number.NaN, 1_000, false), false);
 });
+

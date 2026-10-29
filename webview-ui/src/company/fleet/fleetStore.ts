@@ -3,17 +3,20 @@ import { useSyncExternalStore } from 'react';
 import { TRANSPORT_DISCONNECTED_ERROR } from '../../../../core/src/messageDelivery.js';
 import type {
   ClientMessage,
+  FleetCloudCommentSendMessage,
   FleetCommandResultMessage,
   FleetDiffMessage,
   FleetDiffRequestMessage,
   FleetLavishOpenedMessage,
   FleetLavishOpenMessage,
+  FleetPullRequest,
   FleetRequestMessage,
   FleetSnapshotMessage,
   FleetTaskCreatedMessage,
   FleetTaskCreateMessage,
   FleetTerminalOpenedMessage,
   FleetTerminalOpenMessage,
+  ProjectCommentMessage,
   ServerMessage,
 } from '../../../../core/src/messages.js';
 import { newRequestId as defaultRequestId } from '../companyMessages.js';
@@ -36,7 +39,7 @@ export interface FleetTerminal {
 /** One in-flight action (open a terminal / create a task); only the latest one is tracked. */
 export interface FleetAction {
   readonly requestId: string;
-  readonly kind: 'terminal' | 'task' | 'lavish' | 'diff';
+  readonly kind: 'terminal' | 'task' | 'lavish' | 'diff' | 'comment';
   readonly machine: string;
   readonly session: string;
 }
@@ -76,6 +79,8 @@ export interface FleetStore {
   /** `tab` is opened by the click handler itself (a tab opened later, after the network round trip, is blocked as a popup). */
   openLavish: (machine: string, key: string, tab?: PendingTab | null) => void;
   requestDiff: (machine: string, path: string) => void;
+  sendCloudComment: (comment: Omit<FleetCloudCommentSendMessage, 'type' | 'requestId'>) => void;
+  sendLocalCiFailureComment: (checkout: string, receivingSessionId: string, pr: FleetPullRequest) => void;
   closeDiff: () => void;
 }
 
@@ -154,7 +159,11 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
     }
   }
 
-  function act(request: FleetTerminalOpenMessage | FleetTaskCreateMessage | FleetLavishOpenMessage | FleetDiffRequestMessage, kind: FleetAction['kind'], session: string): void {
+  function act(
+    request: FleetTerminalOpenMessage | FleetTaskCreateMessage | FleetLavishOpenMessage | FleetDiffRequestMessage | FleetCloudCommentSendMessage,
+    kind: FleetAction['kind'],
+    session: string,
+  ): void {
     // One action at a time: a double click must not create two cloud tasks.
     if (state.action !== null) return;
     commit({ ...state, action: { requestId: request.requestId, kind, machine: request.machine, session }, actionError: null, createdTask: null });
@@ -181,7 +190,7 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
       commit({ ...state, action: null, createdTask: { machine: message.machine, session: message.session } });
     } else if (message.type === 'fleetCommandResult') {
       if (action.kind === 'lavish') settleTab(null);
-      commit({ ...state, action: null, actionError: message.reason ?? SEND_FAILED_REASON });
+      commit({ ...state, action: null, actionError: message.ok ? null : message.reason ?? SEND_FAILED_REASON });
     }
     return true;
   }
@@ -195,7 +204,11 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
     accept: (message) => {
       if (!isFleetServerMessage(message)) return;
       if (acceptAction(message)) return;
-      if (message.requestId !== state.latestRequestId) return;
+      const isSnapshotUpdate =
+        message.type === 'fleetSnapshot' &&
+        state.latestRequestId === null &&
+        message.requestId === state.snapshot?.requestId;
+      if (message.requestId !== state.latestRequestId && !isSnapshotUpdate) return;
       if (message.type === 'fleetSnapshot') {
         commit({
           ...state,
@@ -250,6 +263,27 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
     },
     requestDiff: (machine, path) => {
       act({ type: 'fleetDiffRequest', requestId: newRequestId(), machine, path }, 'diff', path);
+    },
+    sendCloudComment: (comment) => {
+      act({ type: 'fleetCloudCommentSend', requestId: newRequestId(), ...comment }, 'comment', comment.session);
+    },
+    sendLocalCiFailureComment: (checkout, receivingSessionId, pr) => {
+      if (state.action !== null) return;
+      try {
+        send({
+          type: 'projectComment',
+          requestId: newRequestId(),
+          checkout,
+          receivingSessionId,
+          file: `CI / PR #${pr.number}`,
+          line: 1,
+          snippet: pr.failedChecks.join('\n').slice(0, 1200),
+          content: `CI đỏ · PR #${pr.number} · ${pr.url}. Hãy xử lý lỗi CI; không tự gộp.`,
+        } satisfies ProjectCommentMessage);
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        commit({ ...state, actionError: detail === TRANSPORT_DISCONNECTED_ERROR ? NO_CONNECTION_REASON : SEND_FAILED_REASON });
+      }
     },
     closeDiff: () => commit({ ...state, diff: null }),
   };

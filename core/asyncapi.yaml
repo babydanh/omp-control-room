@@ -287,6 +287,7 @@ components:
         - $ref: '#/components/schemas/FleetTaskCreateMessage'
         - $ref: '#/components/schemas/FleetLavishOpenMessage'
         - $ref: '#/components/schemas/FleetDiffRequestMessage'
+        - $ref: '#/components/schemas/FleetCloudCommentSendMessage'
         # Project tree (privileged; tree CRUD, diffs, comments, settings and sessions)
         - $ref: '#/components/schemas/ProjectTreeRequestMessage'
         - $ref: '#/components/schemas/ProjectNodeCreateMessage'
@@ -6376,6 +6377,8 @@ components:
           type: string
         branch:
           type: string
+        cwd:
+          type: string
 
     FleetLavishSession:
       type: object
@@ -6439,6 +6442,44 @@ components:
           type: string
           maxLength: 300
 
+    FleetCloudCommentSendMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, path, session, branch, file, line, snippet, content]
+      description: Send an anchored diff comment to a reported tmux session on the cloud machine.
+      properties:
+        type:
+          const: fleetCloudCommentSend
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+        path:
+          type: string
+          maxLength: 300
+        session:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+        branch:
+          type: string
+          maxLength: 255
+        file:
+          type: string
+          minLength: 1
+          maxLength: 500
+        line:
+          type: integer
+          minimum: 1
+        snippet:
+          type: string
+          maxLength: 1200
+        content:
+          type: string
+          minLength: 1
+          maxLength: 4000
+
     FleetDiffMessage:
       type: object
       additionalProperties: false
@@ -6493,6 +6534,18 @@ components:
           items:
             type: string
             maxLength: 500
+        localBranches:
+          type: array
+          maxItems: 100
+          items:
+            $ref: '#/components/schemas/FleetLocalBranchSnapshot'
+        branchAnalyses:
+          type: array
+          maxItems: 24
+          items:
+            $ref: '#/components/schemas/FleetBranchAnalysis'
+        branchAnalysisPending:
+          type: boolean
 
     FleetMachineSnapshot:
       type: object
@@ -6676,8 +6729,135 @@ components:
 
     FleetCommandResultCode:
       type: string
-      enum: [forbidden, unavailable, failed]
+      enum: [forbidden, unavailable, failed, success]
 
+
+    FleetPullRequest:
+      type: object
+      additionalProperties: false
+      required: [number, state, isDraft, reviewDecision, url, ci, failedChecks]
+      properties:
+        number:
+          type: integer
+          minimum: 1
+        state:
+          type: string
+          enum: [open, merged, closed]
+        isDraft:
+          type: boolean
+        reviewDecision:
+          type: [string, 'null']
+          enum: [APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, null]
+        url:
+          type: string
+          format: uri
+        ci:
+          type: string
+          enum: [green, red, running, none]
+        failedChecks:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 160
+
+    FleetLocalBranchSnapshot:
+      type: object
+      additionalProperties: false
+      required: [repo, checkout, branch, ahead, behind, sessionIds]
+      properties:
+        repo:
+          type: string
+        checkout:
+          type: string
+        branch:
+          type: string
+          maxLength: 255
+        ahead:
+          type: integer
+          minimum: 0
+        behind:
+          type: integer
+          minimum: 0
+        sessionIds:
+          type: array
+          maxItems: 50
+          items:
+            type: string
+            maxLength: 256
+        pullRequest:
+          $ref: '#/components/schemas/FleetPullRequest'
+    FleetBranchAnalysis:
+      type: object
+      additionalProperties: false
+      required: [id, repo, branch, changedFileCount, modules, changedFiles, overlaps, suggestion]
+      properties:
+        id:
+          type: string
+          maxLength: 600
+        repo:
+          type: string
+          maxLength: 300
+        branch:
+          type: string
+          maxLength: 255
+        checkout:
+          type: string
+          maxLength: 500
+        machine:
+          type: string
+          maxLength: 128
+        path:
+          type: string
+          maxLength: 500
+        changedFileCount:
+          type: integer
+          minimum: 0
+        modules:
+          type: array
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required: [name, count]
+            properties:
+              name:
+                type: string
+                maxLength: 120
+              count:
+                type: integer
+                minimum: 1
+        changedFiles:
+          type: array
+          maxItems: 40
+          items:
+            type: string
+            maxLength: 500
+        overlaps:
+          type: array
+          maxItems: 12
+          items:
+            $ref: '#/components/schemas/FleetBranchOverlap'
+        suggestion:
+          type: string
+          maxLength: 300
+
+    FleetBranchOverlap:
+      type: object
+      additionalProperties: false
+      required: [branch, files, mergeClean]
+      properties:
+        branch:
+          type: string
+          maxLength: 255
+        files:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 500
+        mergeClean:
+          type: [boolean, 'null']
     FleetRepoSnapshot:
       type: object
       additionalProperties: false
@@ -6701,6 +6881,8 @@ components:
           type: boolean
         staged:
           type: boolean
+        pullRequest:
+          $ref: '#/components/schemas/FleetPullRequest'
 
     FleetOverlapWarning:
       type: object

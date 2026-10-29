@@ -156,6 +156,29 @@ function changedRanges(path) {
   return [...files].slice(0, 200).map(([file, ranges]) => ({ path: file, ranges }));
 }
 
+export function repoFromOrigin(origin) {
+  const text = String(origin ?? '').trim();
+  const scp = /^(?:[^@/:]+@)?([^/:]+):([^/]+)\/([^/]+?)(?:\.git)?$/.exec(text);
+  let host = scp?.[1] ?? '';
+  let owner = scp?.[2] ?? '';
+  let repository = scp?.[3] ?? '';
+  if (scp === null) {
+    try {
+      const url = new URL(text);
+      if (url.protocol !== 'https:' && url.protocol !== 'ssh:') return '';
+      const [urlOwner, urlRepository, extra] = url.pathname.replace(/^\/+/, '').split('/');
+      if (urlOwner === undefined || urlRepository === undefined || extra !== undefined) return '';
+      host = url.host;
+      owner = urlOwner;
+      repository = urlRepository.replace(/\.git$/, '');
+    } catch {
+      return '';
+    }
+  }
+  if (!/^[A-Za-z0-9.-]+$/.test(host) || !/^[A-Za-z0-9_.-]+$/.test(owner) || !/^[A-Za-z0-9_.-]+$/.test(repository)) return '';
+  return host.toLowerCase() === 'github.com' ? `${owner}/${repository}` : `${host}/${owner}/${repository}`;
+}
+
 function repos() {
   const roots = [];
   for (const name of readdirSync(ROOT)) {
@@ -175,13 +198,18 @@ function repos() {
   }
   refreshRemotes(roots.filter((p) => existsSync(join(p, '.git')) && statSync(join(p, '.git')).isDirectory()));
   return roots.map((path) => {
-    const counts = git(path, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD').split(/\s+/);
+    const github_repo = repoFromOrigin(git(path, 'remote', 'get-url', 'origin'));
+    const head = git(path, 'rev-parse', 'HEAD');
+    const origin_main = git(path, 'rev-parse', 'origin/main');
     // The main checkout's folder name, also for worktrees (wt/backend-xep-san -> HethongBackendApi_...).
     const common = git(path, 'rev-parse', '--path-format=absolute', '--git-common-dir');
     return {
       path,
       repo: common ? basename(dirname(common)) : basename(path),
       branch: git(path, 'branch', '--show-current'),
+      ...(github_repo === '' ? {} : { github_repo }),
+      ...(head === '' ? {} : { head }),
+      ...(origin_main === '' ? {} : { origin_main }),
       behind: Number(counts[0]) || 0,
       ahead: Number(counts[1]) || 0,
       merged: contentIn(path, 'origin/main'),

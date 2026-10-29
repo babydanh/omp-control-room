@@ -30,8 +30,8 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { createOmpBridge } from '../server/src/company/ompBridge.js';
 import type { OmpBridgeRpcRequest } from '../server/src/company/ompBridge.js';
+import { createOmpBridge } from '../server/src/company/ompBridge.js';
 
 const BRIDGE_BUNDLE = path.resolve('dist/company-omp-bridge.mjs');
 const SESSION_ID = 'smoke-session';

@@ -15,11 +15,19 @@
  */
 
 import { execFile, spawn, spawnSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readdir } from 'node:fs/promises';
 import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import type { GitRunner } from '../ledger/git.js';
+import type { ProcessResult } from '../ledger/processRunner.js';
+import {
+  formatProjectComment,
+  PROJECT_COMMENT_MAX_LENGTH,
+  PROJECT_COMMENT_SNIPPET_MAX_LENGTH,
+} from '../projects/comments.js';
 import type { PtySessionManager } from '../terminal/ptySessionManager.js';
 import {
   FLEET_ACCOUNT_CACHE_MS,
@@ -193,7 +201,7 @@ export class CloudControl {
       // New files are not in `git diff HEAD`: show the first ones (text only, each cut) as additions.
       'echo; echo "### File moi chua commit"',
       `git ls-files --others --exclude-standard | head -${FLEET_DIFF_NEW_FILES} | while IFS= read -r f; do ` +
-        `echo "+++ $f"; if grep -Iq . "$f" 2>/dev/null; then head -c ${FLEET_DIFF_NEW_FILE_BYTES} "$f" | sed 's/^/+/'; echo; ` +
+        `echo "### File mới: $f"; if grep -Iq . "$f" 2>/dev/null; then head -c ${FLEET_DIFF_NEW_FILE_BYTES} "$f" | sed 's/^/+/'; echo; ` +
         'else echo "(file nhi phan hoac rong)"; fi; done',
     ].join('; ');
     const result = await this.deps.run(
@@ -203,6 +211,97 @@ export class CloudControl {
     if (result.code !== 0) throw new CloudControlError('failed', result.stdout.trim().split('\n').pop() ?? 'git failed');
     const truncated = Buffer.byteLength(result.stdout) > FLEET_DIFF_MAX_BYTES;
     return { text: truncated ? result.stdout.slice(0, FLEET_DIFF_MAX_BYTES) : result.stdout, truncated };
+  }
+
+  /** Build a GitRunner pinned to one reported cloud account; engine calls run with argv-only git commands. */
+  async gitRunner(machine: string): Promise<GitRunner> {
+    if (!FLEET_MACHINE_NAME.test(machine)) throw new CloudControlError('bad_input', 'invalid machine');
+    const home = await this.#wake(machine);
+    return {
+      run: async (cwd, args, options) => {
+        if (
+          !FLEET_REPO_PATH.test(cwd) ||
+          args.length === 0 ||
+          args.length > 128 ||
+          args.some((argument) => argument.includes('\0')) ||
+          !Number.isFinite(options.timeoutMs) ||
+          options.timeoutMs <= 0 ||
+          !Number.isSafeInteger(options.maxBytes) ||
+          options.maxBytes <= 0
+        ) {
+          return { ok: false, code: 1, stdout: '', stderr: 'invalid remote git request', timedOut: false, truncated: false };
+        }
+        const command = `git --no-optional-locks -C ${shellQuote(cwd)} ${args.map(shellQuote).join(' ')}`;
+        if (Buffer.byteLength(command) > 32_768) {
+          return { ok: false, code: 1, stdout: '', stderr: 'remote git request too large', timedOut: false, truncated: false };
+        }
+        try {
+          const result = await this.deps.run(
+            ['exec', machine, '--timeout', String(Math.max(1, Math.ceil(options.timeoutMs / 1_000))), '--', command],
+            home,
+          );
+          const output = Buffer.from(result.stdout, 'utf8');
+          const truncated = output.length > options.maxBytes;
+          const stdout = truncated ? output.subarray(0, options.maxBytes).toString('utf8') : result.stdout;
+          const timedOut = result.code === 124;
+          return {
+            ok: options.okCodes.includes(result.code) && !timedOut,
+            code: result.code,
+            stdout,
+            stderr: result.stderr.slice(0, 4_096),
+            timedOut,
+            truncated,
+          } satisfies ProcessResult;
+        } catch (error) {
+          return {
+            ok: false,
+            code: null,
+            stdout: '',
+            stderr: error instanceof Error ? error.message.slice(0, 4_096) : 'remote git failed',
+            timedOut: false,
+            truncated: false,
+          };
+        }
+      },
+    };
+  }
+
+  /** Send an anchored comment through the reported tmux session; only the fixed tmux script reaches the shell. */
+  async sendDiffComment(
+    machine: string,
+    session: string,
+    comment: { readonly file: string; readonly line: number; readonly snippet: string; readonly content: string },
+  ): Promise<void> {
+    const content = comment.content.trim();
+    if (
+      !FLEET_MACHINE_NAME.test(machine) ||
+      !FLEET_SESSION_NAME.test(session) ||
+      comment.file.trim() === '' ||
+      comment.file.length > 500 ||
+      !Number.isSafeInteger(comment.line) ||
+      comment.line < 1 ||
+      comment.snippet.length > PROJECT_COMMENT_SNIPPET_MAX_LENGTH ||
+      content === '' ||
+      content.length > PROJECT_COMMENT_MAX_LENGTH
+    ) {
+      throw new CloudControlError('bad_input', 'invalid diff comment');
+    }
+    const text = formatProjectComment(comment.file, comment.line, comment.snippet, content);
+    const home = await this.#wake(machine);
+    const buffer = `board-${randomUUID()}`;
+    const script =
+      `tmux load-buffer -b '${buffer}' - && ` +
+      `{ tmux paste-buffer -b '${buffer}' -t '${session}'; status=$?; ` +
+      `tmux delete-buffer -b '${buffer}'; test "$status" -eq 0; } && ` +
+      `tmux send-keys -t '${session}' Enter`;
+    const result = await this.deps.run(
+      ['exec', machine, '--timeout', '30', '--stdin', '--', script],
+      home,
+      text,
+    );
+    if (result.code !== 0) {
+      throw new CloudControlError('failed', result.stdout.trim().split('\n').pop() ?? 'tmux comment failed');
+    }
   }
 
   /** The account home owning `machine`, after asking InstaBox to start/wake it (both no-ops when running). */
@@ -246,6 +345,9 @@ export function machineNames(json: string): string[] {
   } catch {
     return [];
   }
+}
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }
 
 function defaultLauncher(): { file: string; args: string[] } {

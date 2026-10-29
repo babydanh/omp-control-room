@@ -18,12 +18,16 @@ export interface FleetHubRepo {
   readonly path: string;
   /** Main checkout folder name, reported for worktrees too; older agents omit it. */
   readonly repo?: string;
+  /** Safe HOST/OWNER/REPO parsed from origin; the raw remote URL is never reported. */
+  readonly github_repo?: string;
   readonly branch: string;
   readonly ahead: number;
   readonly behind: number;
   readonly dirty_files: readonly string[];
   readonly merged?: boolean;
   readonly staged?: boolean;
+  readonly head?: string;
+  readonly origin_main?: string;
   /** Changed line ranges per file, in merge-base-with-main coordinates (approximate). */
   readonly changes?: readonly { readonly path: string; readonly ranges: readonly (readonly [number, number])[] }[];
 }
