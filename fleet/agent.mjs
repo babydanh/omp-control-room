@@ -198,6 +198,7 @@ function repos() {
   }
   refreshRemotes(roots.filter((p) => existsSync(join(p, '.git')) && statSync(join(p, '.git')).isDirectory()));
   return roots.map((path) => {
+    const counts = git(path, 'rev-list', '--left-right', '--count', '@{upstream}...HEAD').split(/\s+/);
     const github_repo = repoFromOrigin(git(path, 'remote', 'get-url', 'origin'));
     const head = git(path, 'rev-parse', 'HEAD');
     const origin_main = git(path, 'rev-parse', 'origin/main');
