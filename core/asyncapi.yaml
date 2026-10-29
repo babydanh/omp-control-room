@@ -6324,7 +6324,7 @@ components:
       type: object
       additionalProperties: false
       required: [type, requestId, machine, repo, slug, prompt]
-      description: Create a worktree on a cloud machine and start Claude in a tmux session (privileged).
+      description: Create a worktree on a cloud machine and start Claude (default) or omp in a tmux session (privileged).
       properties:
         type:
           const: fleetTaskCreate
@@ -6345,6 +6345,10 @@ components:
           type: string
           minLength: 1
           maxLength: 20000
+        engine:
+          type: string
+          enum: [claude, omp]
+          description: The agent to start. Absent means claude. omp needs a machine whose cloud-giao knows `--engine`; an older one refuses.
 
     FleetTaskCreatedMessage:
       type: object

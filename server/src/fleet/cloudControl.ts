@@ -43,12 +43,14 @@ import {
   FLEET_PROMPT_MAX,
   FLEET_REPO_PATH,
   FLEET_SESSION_NAME,
+  FLEET_TASK_ENGINES,
   FLEET_TASK_REPOS,
   FLEET_TASK_SLUG,
   FLEET_TERMINAL_ID_BASE,
 } from './constants.js';
 
 export type FleetTaskRepo = (typeof FLEET_TASK_REPOS)[number];
+export type FleetTaskEngine = (typeof FLEET_TASK_ENGINES)[number];
 
 export class CloudControlError extends Error {
   constructor(
@@ -84,6 +86,10 @@ export interface PortForward {
 
 export function isTaskRepo(value: unknown): value is FleetTaskRepo {
   return typeof value === 'string' && (FLEET_TASK_REPOS as readonly string[]).includes(value);
+}
+
+export function isTaskEngine(value: unknown): value is FleetTaskEngine {
+  return typeof value === 'string' && (FLEET_TASK_ENGINES as readonly string[]).includes(value);
 }
 
 export class CloudControl {
@@ -126,10 +132,11 @@ export class CloudControl {
     return terminalId;
   }
 
-  async createTask(machine: string, repo: unknown, slug: string, prompt: string): Promise<string> {
+  async createTask(machine: string, repo: unknown, slug: string, prompt: string, engine: unknown = 'claude'): Promise<string> {
     if (
       !FLEET_MACHINE_NAME.test(machine) ||
       !isTaskRepo(repo) ||
+      !isTaskEngine(engine) ||
       !FLEET_TASK_SLUG.test(slug) ||
       prompt.trim() === '' ||
       prompt.length > FLEET_PROMPT_MAX
@@ -137,13 +144,19 @@ export class CloudControl {
       throw new CloudControlError('bad_input', 'invalid task');
     }
     const home = await this.#wake(machine);
+    // Claude keeps the old argv. omp is an explicit flag: a cloud-giao that predates it refuses with code 2
+    // instead of quietly starting Claude.
+    const engineArgs = engine === 'claude' ? [] : ['--engine', engine];
     const result = await this.deps.run(
-      ['exec', machine, '--timeout', '300', '--stdin', '--', 'cloud-giao', repo, slug, machine],
+      ['exec', machine, '--timeout', '300', '--stdin', '--', 'cloud-giao', ...engineArgs, repo, slug, machine],
       home,
       prompt,
     );
     if (result.code !== 0 || !/^OK /m.test(result.stdout)) {
       const said = `${result.stdout}\n${result.stderr}`.trim().split('\n').filter(Boolean).pop();
+      if (engine !== 'claude' && result.code === 2 && said?.startsWith('Repo phai la')) {
+        throw new CloudControlError('failed', `Máy ${machine} chưa hỗ trợ ${engine}: cloud-giao còn bản cũ, cài lại bằng fleet/install-agent.sh`);
+      }
       throw new CloudControlError('failed', said ?? `cloud-giao exit ${result.code}`);
     }
     return slug;

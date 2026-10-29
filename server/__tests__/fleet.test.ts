@@ -240,6 +240,38 @@ describe('cloud control', () => {
     });
   });
 
+  it('asks cloud-giao for omp with an explicit --engine flag, and keeps the claude argv unchanged', async () => {
+    const { cloud, calls } = fakeCloud({ '/b': ['danh3'] });
+    await cloud.createTask('danh3', 'all', 'xep-san', 'Lam trang xep san', 'omp');
+    expect(calls.find((call) => call.args[0] === 'exec')?.args).toEqual([
+      'exec', 'danh3', '--timeout', '300', '--stdin', '--', 'cloud-giao', '--engine', 'omp', 'all', 'xep-san', 'danh3',
+    ]);
+    await cloud.createTask('danh3', 'all', 'viec-hai', 'Lam tiep', 'claude');
+    expect(calls.filter((call) => call.args[0] === 'exec').at(-1)?.args).toEqual([
+      'exec', 'danh3', '--timeout', '300', '--stdin', '--', 'cloud-giao', 'all', 'viec-hai', 'danh3',
+    ]);
+  });
+
+  it('rejects an unknown engine before running anything', async () => {
+    const { cloud, calls } = fakeCloud({ '/a': ['danh'] });
+    await expect(cloud.createTask('danh', 'web', 'xep-san', 'x', 'codex' as never)).rejects.toMatchObject({ code: 'bad_input' });
+    expect(calls).toEqual([]);
+  });
+
+  it('tells the user a machine whose cloud-giao is too old cannot start omp, instead of a vague usage line', async () => {
+    const deps: CloudControlDeps = {
+      launcher: { file: 'node', args: ['instabox.mjs'] },
+      now: () => 0,
+      listConfigHomes: async () => ['/a'],
+      run: async (args) =>
+        args[0] === 'ls'
+          ? { code: 0, stdout: JSON.stringify([{ name: 'danh' }]), stderr: '' }
+          : { code: 2, stdout: 'Repo phai la backend, web, app hoac all', stderr: '' },
+      forward: async () => ({ localPort: 1, alive: () => true, stop: () => undefined }),
+    };
+    await expect(new CloudControl(deps).createTask('danh', 'web', 'xep-san', 'x', 'omp')).rejects.toThrow(/chưa hỗ trợ omp/);
+  });
+
   it('reuses the live terminal for the same machine and session', async () => {
     const { cloud } = fakeCloud({ '/a': ['danh'] });
     const live = new Set<number>();

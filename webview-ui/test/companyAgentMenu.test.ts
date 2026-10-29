@@ -171,6 +171,17 @@ describe('herdr project session menu', () => {
     state,
   });
 
+  it('offers a Claude and an omp cloud session next to the local ones, only when the cloud page exists', () => {
+    const folder: ProjectTreeNode = { id: 'f', kind: 'folder', name: 'f', path: 'V:/f' };
+    const labels = (cloud: boolean) =>
+      projectNodeMenuItems(folder, { hasCheckout: false, folderCount: 1, cloud }).map((item) => item.label);
+    expect(labels(false).some((label) => label.includes('cloud'))).toBe(false);
+    expect(labels(true).filter((label) => label.includes('cloud'))).toEqual(['Phiên mới · Claude cloud', 'Phiên mới · omp cloud']);
+    const items = projectNodeMenuItems(folder, { hasCheckout: false, folderCount: 1, cloud: true });
+    expect(items.find((item) => item.label === 'Phiên mới · omp cloud')?.action).toEqual({ kind: 'projectNodeAction', action: 'newCloudOmp' });
+    expect(items.find((item) => item.label === 'Phiên mới · Claude cloud')?.action).toEqual({ kind: 'projectNodeAction', action: 'newCloudClaude' });
+  });
+
   it('offers pane deletion for sleeping and awake herdr sessions only', () => {
     for (const state of ['sleeping', 'idle']) {
       const items = projectNodeMenuItems(node('herdr', state));

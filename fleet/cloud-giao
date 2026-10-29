@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# cloud-giao [--engine claude|omp] <backend|web|app|all> <ten-viec> <may>   (lời giao việc đọc từ stdin)
+# Một repo: worktree /data/home/wt/<repo>-<ten-viec>.
+# all: ba worktree /data/home/wt/<ten-viec>/{backend,web,app}, cùng nhánh, MỘT agent chạy ở thư mục cha để làm trọn
+#      tính năng trên cả ba repo (mỗi repo commit/push/PR riêng).
+# Nhánh: cloud/<may>-<ten-viec> từ origin/main. Agent chạy trong tmux phiên <ten-viec>.
+# --engine: claude (mặc định, đúng như bản cũ) hoặc omp. Bản cũ không biết cờ này và từ chối với mã 2, nên Board
+#           không bao giờ âm thầm chạy Claude khi người dùng chọn omp.
+# Board gọi qua `instabox exec`; in "OK <phien> <thu-muc> <nhanh>" khi xong, dòng cuối là lý do khi lỗi.
+set -euo pipefail
+declare -A REPOS=([backend]=HethongBackendApi_QuanlyGiaiDau [web]=HethongFrontEndWeb_QLgiaidau [app]=HethongFrontEndApp_QLgiaidau)
+engine=claude
+if [ "${1:-}" = "--engine" ]; then engine="${2:-}"; shift; shift 2>/dev/null || true; fi
+case "$engine" in
+  claude|omp) ;;
+  *) echo "Engine phai la claude hoac omp"; exit 2 ;;
+esac
+kind="${1:-}"; slug="${2:-}"; may="${3:-}"
+case "$kind" in
+  backend|web|app) parts=("$kind") ;;
+  all) parts=(backend web app) ;;
+  *) echo "Repo phai la backend, web, app hoac all"; exit 2 ;;
+esac
+[[ $slug =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || { echo "Ten viec chi gom chu thuong, so, gach noi"; exit 2; }
+[[ $may =~ ^[a-z0-9][a-z0-9-]{0,39}$ ]] || { echo "Ten may khong hop le"; exit 2; }
+for c in tmux git "$engine" node; do
+  command -v "$c" >/dev/null || { echo "May thieu lenh $c (chay lai dong-bo-cloud.ps1 cho may nay)"; exit 6; }
+done
+for p in "${parts[@]}"; do
+  [ -d "/data/home/${REPOS[$p]}/.git" ] || { echo "May chua clone ${REPOS[$p]} (chay nap-github-token.ps1)"; exit 4; }
+done
+# Tối đa 3 việc mỗi máy (board cũng tự chọn máy chưa đủ; chốt ở đây cho cả lần giao không qua board).
+running=$( { tmux list-sessions 2>/dev/null || true; } | wc -l)   # chưa có phiên nào: tmux báo lỗi, đếm là 0
+[ "$running" -lt "${CLOUD_MAX_VIEC:-3}" ] || { echo "May da du ${CLOUD_MAX_VIEC:-3} viec dang chay, chon may khac hoac doi mot viec xong"; exit 8; }
+tmux has-session -t "=$slug" 2>/dev/null && { echo "Da co phien tmux $slug tren may nay"; exit 3; }
+branch="cloud/$may-$slug"
+if [ "$kind" = all ]; then cwd="/data/home/wt/$slug"; else cwd="/data/home/wt/$kind-$slug"; fi
+[ -e "$cwd" ] && { echo "Da co thu muc $cwd"; exit 3; }
+
+mkdir -p "$HOME/.cache/cloud-giao" && chmod 700 "$HOME/.cache/cloud-giao"
+prompt=$(mktemp "$HOME/.cache/cloud-giao/$slug.XXXXXX")   # riêng mỗi lần giao: hai lần giao trùng tên không xoá file của nhau
+# Board giới hạn 20.000 ký tự; UTF-8 tối đa 4 byte/ký tự. Quá giới hạn thì báo lỗi, không cắt ngầm.
+head -c 80001 > "$prompt"
+[ -s "$prompt" ] || { rm -f "$prompt"; echo "Thieu noi dung viec"; exit 2; }
+[ "$(wc -c < "$prompt")" -le 80000 ] || { rm -f "$prompt"; echo "Noi dung viec qua dai"; exit 2; }
+
+made=()
+undo() { for w in "${made[@]}"; do git -C "$(git -C "$w" rev-parse --path-format=absolute --git-common-dir)/.." worktree remove "$w" 2>/dev/null; done; rm -f "$prompt"; }
+for p in "${parts[@]}"; do
+  root="/data/home/${REPOS[$p]}"
+  if [ "$kind" = all ]; then wt="$cwd/$p"; else wt="$cwd"; fi
+  git -C "$root" fetch -q origin main || { undo; echo "Khong fetch duoc origin/main cua ${REPOS[$p]}"; exit 5; }
+  mkdir -p "$(dirname "$wt")"
+  git -C "$root" worktree add -q -b "$branch" "$wt" origin/main 2>/dev/null \
+    || { undo; echo "Khong tao duoc worktree ${REPOS[$p]} (nhanh $branch da co?)"; exit 5; }
+  made+=("$wt")
+  # Chép sẵn cache kiểm kiểu của bản main (nếu có): tsc chỉ kiểm lại file khác.
+  [ -d "$root/.tsc-cache" ] && cp -r "$root/.tsc-cache" "$wt/.tsc-cache" 2>/dev/null || true
+done
+
+if [ "$kind" = all ]; then
+  cat > "$cwd/CLOUD-VIEC.md" <<EOF
+# Việc $slug (máy $may, nhánh $branch)
+Ba repo trong thư mục này, cùng nhánh \`$branch\`:
+- backend/ : ${REPOS[backend]}
+- web/     : ${REPOS[web]}
+- app/     : ${REPOS[app]}
+Mỗi repo commit, push và tạo PR riêng. Đổi API thì làm Backend trước (hợp đồng API), rồi Web/App.
+Xong việc (đã push và tạo PR đủ các repo cần) thì chạy: cloud-xong $slug
+EOF
+fi
+
+# Máy chạy không người: bỏ màn chọn giao diện lần đầu và câu hỏi "tin thư mục này?" cho đúng thư mục vừa tạo.
+# Chỉ sửa khi đọc được file cũ (hoặc chưa có file); file hỏng thì để nguyên, Claude sẽ tự hỏi trên terminal. Chỉ cho Claude.
+if [ "$engine" = claude ]; then
+WT="$cwd" node -e '
+const fs = require("fs"), p = process.env.HOME + "/.claude.json";
+let c = {};
+if (fs.existsSync(p)) { try { c = JSON.parse(fs.readFileSync(p, "utf8")); } catch { process.exit(0); } }
+c.hasCompletedOnboarding = true; c.theme ??= "dark";
+c.projects ??= {}; c.projects[process.env.WT] = { ...(c.projects[process.env.WT] ?? {}), hasTrustDialogAccepted: true };
+fs.writeFileSync(p + ".tmp", JSON.stringify(c, null, 2), { mode: 0o600 }); fs.renameSync(p + ".tmp", p);'
+fi
+
+# Sổ việc: mã phiên Claude cố định (chạy tiếp đúng cuộc hội thoại sau khi máy khởi động lại) + trạng thái.
+# Bot giữ máy (Botkeep) chỉ đánh thức máy / mở lại phiên cho việc "dang-lam". Phiên omp tự đặt mã của nó, nên
+# ở đây `session` để trống và `engine` ghi "omp": cloud-tiep và bot phải đọc `engine` trước khi mở lại.
+session=$(cat /proc/sys/kernel/random/uuid)
+mkdir -p "$HOME/.cloud-viec" && chmod 700 "$HOME/.cloud-viec"
+SLUG="$slug" CWD="$cwd" SESSION="$session" BRANCH="$branch" MAY="$may" KIND="$kind" ENGINE="$engine" node -e '
+const e = process.env, f = `${e.HOME}/.cloud-viec/${e.SLUG}.json`;
+require("fs").writeFileSync(f, JSON.stringify({ slug: e.SLUG, cwd: e.CWD, session: e.ENGINE === "claude" ? e.SESSION : null, engine: e.ENGINE,
+  branch: e.BRANCH, may: e.MAY, kind: e.KIND, status: "dang-lam", createdAt: new Date().toISOString() }, null, 2), { mode: 0o600 });'
+printf '\n\n(Khi xong viec: da push va tao PR, hoac viec khong can sua code, thi chay ngay lenh: cloud-xong %s)\n' "$slug" >> "$prompt"
+
+# Đọc lời giao vào biến rồi xoá file ngay, không để bản chữ nằm lại trên đĩa.
+tmux new-session -d -s "$slug" -c "$cwd" -x 200 -y 50 -e "CLOUD_GIAO_PROMPT=$prompt" -e "CLOUD_SESSION=$session" -e "CLOUD_ENGINE=$engine" \
+  'bash -lc '\''p="$(cat "$CLOUD_GIAO_PROMPT")"; rm -f "$CLOUD_GIAO_PROMPT"; if [ "$CLOUD_ENGINE" = omp ]; then omp "$p"; else claude --session-id "$CLOUD_SESSION" "$p"; fi; exec bash -l'\'''
+echo "OK $slug $cwd $branch"

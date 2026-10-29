@@ -246,7 +246,7 @@ function createTask(
   const slug = typeof msg.slug === 'string' ? msg.slug : '';
   const prompt = typeof msg.prompt === 'string' ? msg.prompt : '';
   cloudOf(context)
-    .createTask(machine, msg.repo, slug, prompt)
+    .createTask(machine, msg.repo, slug, prompt, msg.engine)
     .then((session) => send({ type: 'fleetTaskCreated', requestId, machine, session }))
     .catch((error: unknown) => send(failure(requestId, error)));
 }

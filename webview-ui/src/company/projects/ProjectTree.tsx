@@ -256,7 +256,10 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   const { node, children } = branch;
   const isCollapsed = collapsed.has(node.id);
   const menu = useAgentMenuGestures<HTMLButtonElement>(
-    useMemo(() => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node) }), [node, props.nodes]),
+    useMemo(
+      () => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node, props.cloud !== undefined) }),
+      [node, props.nodes, props.cloud],
+    ),
     props.onMenu,
   );
   const isSession = node.kind === 'session';

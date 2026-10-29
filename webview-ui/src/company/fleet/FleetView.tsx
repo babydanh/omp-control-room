@@ -1,13 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
-import type { FleetBranchAnalysis, FleetLocalBranchSnapshot, FleetMachineSnapshot, FleetPullRequest } from '../../../../core/src/messages.js';
+import type { FleetBranchAnalysis, FleetLocalBranchSnapshot, FleetMachineSnapshot, FleetPullRequest, FleetTaskCreateMessage } from '../../../../core/src/messages.js';
 import { MAX_SESSIONS_PER_MACHINE, pickMachine, projectMachines, randomSuffix, slugFromPrompt } from './cloudTaskPick.js';
 import { CloudTerminal } from './CloudTerminal.js';
 import { fleetStore } from './fleetClient.js';
 import { createFleetDiffCommentSelector, type FleetDiffCommentSelection } from './fleetDiffComment.js';
 import { type FleetState, useFleetState } from './fleetStore.js';
 
-export function FleetView() {
+type TaskEngine = NonNullable<FleetTaskCreateMessage['engine']>;
+/** "Phiên mới · Claude/omp cloud" from a right-click menu: which agent the request box should start with. */
+export interface CloudRequest {
+  readonly engine: TaskEngine;
+  readonly token: number;
+}
+
+export function FleetView({ request = null }: { request?: CloudRequest | null }) {
   const fleet = useFleetState(fleetStore);
   const localBranches = fleet.snapshot?.localBranches ?? [];
   const branchAnalyses = fleet.snapshot?.branchAnalyses ?? [];
@@ -69,7 +76,7 @@ export function FleetView() {
           />
         )}
         {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
-          <TaskForm machines={fleet.snapshot.machines} busy={fleet.action !== null} />
+          <TaskForm machines={fleet.snapshot.machines} busy={fleet.action !== null} request={request} />
         )}
         {fleet.snapshot?.hubError && (
           <p
@@ -247,7 +254,13 @@ const TASK_REPOS = [
  * "Tạo Claude cloud": type the request, press the button. By default the board picks the least busy project
  * machine (below 3 agents), all three repositories, and a task name made from the request; "Tùy chọn" overrides.
  */
-function TaskForm({ machines, busy }: { machines: readonly FleetMachineSnapshot[]; busy: boolean }) {
+function TaskForm({ machines, busy, request }: { machines: readonly FleetMachineSnapshot[]; busy: boolean; request: CloudRequest | null }) {
+  const [engine, setEngine] = useState<TaskEngine>('claude');
+  // A new right-click request chooses the agent again, even when the same one was chosen before.
+  useEffect(() => {
+    if (request !== null) setEngine(request.engine);
+  }, [request]);
+  const agentName = engine === 'omp' ? 'omp' : 'Claude';
   const [machine, setMachine] = useState(AUTO);
   const [repo, setRepo] = useState<(typeof TASK_REPOS)[number]['value']>('all');
   const [slug, setSlug] = useState('');
@@ -265,13 +278,13 @@ function TaskForm({ machines, busy }: { machines: readonly FleetMachineSnapshot[
       onSubmit={(event) => {
         event.preventDefault();
         if (!ready || target === null) return;
-        fleetStore.createTask({ machine: target, repo, slug: slug || slugFromPrompt(prompt, randomSuffix()), prompt });
+        fleetStore.createTask({ machine: target, repo, slug: slug || slugFromPrompt(prompt, randomSuffix()), prompt, engine });
         setPrompt('');
         setSlug('');
       }}
     >
       <label className="block text-sm font-semibold text-text">
-        Tạo Claude cloud
+        Tạo {agentName} cloud
         <textarea
           className="mt-1 w-full rounded border border-hairline bg-transparent p-2 text-sm font-normal"
           rows={3}
@@ -290,12 +303,23 @@ function TaskForm({ machines, busy }: { machines: readonly FleetMachineSnapshot[
             : `Sẽ chạy trên ${target}${load ? ` (đang có ${load.sessions}/${MAX_SESSIONS_PER_MACHINE} việc)` : ''} · ${TASK_REPOS.find((item) => item.value === repo)?.label ?? repo}`}
         </p>
         <button type="submit" disabled={!ready} className="company-btn company-btn-md company-btn-primary">
-          Tạo Claude cloud
+          Tạo {agentName} cloud
         </button>
       </div>
       <details className="text-xs text-text-muted">
-        <summary className="cursor-pointer">Tùy chọn (máy, repo, tên việc)</summary>
-        <div className="mt-2 grid gap-2 md:grid-cols-3">
+        <summary className="cursor-pointer">Tùy chọn (agent, máy, repo, tên việc)</summary>
+        <div className="mt-2 grid gap-2 md:grid-cols-4">
+          <label>
+            Agent
+            <select
+              className="mt-1 w-full rounded border border-hairline bg-transparent p-1 text-sm"
+              value={engine}
+              onChange={(event) => setEngine(event.target.value === 'omp' ? 'omp' : 'claude')}
+            >
+              <option value="claude">Claude</option>
+              <option value="omp">omp</option>
+            </select>
+          </label>
           <label>
             Máy
             <select className="mt-1 w-full rounded border border-hairline bg-transparent p-1 text-sm" value={machine} onChange={(event) => setMachine(event.target.value)}>

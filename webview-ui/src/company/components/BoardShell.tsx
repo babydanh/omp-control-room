@@ -26,7 +26,7 @@ import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPr
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
 import { fleetStore } from '../fleet/fleetClient.js';
 import { useFleetState } from '../fleet/fleetStore.js';
-import { FleetView } from '../fleet/FleetView.js';
+import { type CloudRequest, FleetView } from '../fleet/FleetView.js';
 import { GuardView } from '../fleet/GuardView.js';
 import { folderIdentityOf, foldersWaitingForSnapshot, showsAllFolders } from '../folderIdentity.js';
 import { openPickedFolder, pickFolder } from '../folderPick.js';
@@ -50,6 +50,7 @@ import { projectStore } from '../projects/projectClient.js';
 import {
   ancestorOf,
   checkoutPathFor,
+  cloudEngineForAction,
   engineForAction,
   paneCheckouts,
   type ProjectSessionEngine,
@@ -156,6 +157,7 @@ export function BoardShell({ client }: BoardShellProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [projectSettingsNode, setProjectSettingsNode] = useState<string | null>(null);
   const [newSessionNode, setNewSessionNode] = useState<{ nodeId: string; engine?: ProjectSessionEngine } | null>(null);
+  const [cloudRequest, setCloudRequest] = useState<CloudRequest | null>(null);
   /** The "Vừa ngủ / tắt" session whose details are open, to be woken from there. */
   const [stoppedNode, setStoppedNode] = useState<ProjectTreeNode | null>(null);
   const [selectedCheckoutId, setSelectedCheckoutId] = useState('');
@@ -542,6 +544,14 @@ export function BoardShell({ client }: BoardShellProps) {
     if (action === 'openSession') {
       const folderPath = ancestorOf(projects.nodes, node, 'folder')?.path;
       openProjectSession(node, folderPath === undefined ? {} : { folderPath });
+      return;
+    }
+    const cloudEngine = cloudEngineForAction(action);
+    if (cloudEngine !== undefined) {
+      selectPage('cloud');
+      setCloudRequest({ engine: cloudEngine, token: Date.now() });
+      // The Cloud page mounts on the next render: focus its request box then.
+      window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('#tao-claude-cloud textarea')?.focus(), 50);
       return;
     }
     if (action === 'newSession' || action === 'newSessionOmp' || action === 'newSessionClaude' || action === 'newSessionAgy') {
@@ -1149,7 +1159,7 @@ export function BoardShell({ client }: BoardShellProps) {
       </div>
       </>
       ) : activePage === 'cloud' ? (
-        <FleetView />
+        <FleetView request={cloudRequest} />
       ) : activePage === 'guard' ? (
         <GuardView />
       ) : activePage === 'changes' ? (

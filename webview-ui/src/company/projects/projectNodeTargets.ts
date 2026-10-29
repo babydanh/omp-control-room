@@ -117,11 +117,19 @@ export function foldersUnder(nodes: readonly ProjectTreeNode[], node: ProjectTre
 }
 
 /** What the right-click menu of `node` can offer. */
-export function projectMenuContext(nodes: readonly ProjectTreeNode[], node: ProjectTreeNode): ProjectNodeMenuContext {
+export function projectMenuContext(nodes: readonly ProjectTreeNode[], node: ProjectTreeNode, cloud = false): ProjectNodeMenuContext {
   return {
     hasCheckout: checkoutPathFor(nodes, node) !== null,
     folderCount: foldersUnder(nodes, node).length,
+    ...(cloud ? { cloud } : {}),
   };
+}
+
+/** Agent a "cloud session" menu action starts; undefined for every other action. */
+export function cloudEngineForAction(action: ProjectNodeAction): 'claude' | 'omp' | undefined {
+  if (action === 'newCloudClaude') return 'claude';
+  if (action === 'newCloudOmp') return 'omp';
+  return undefined;
 }
 
 /** Engine preselected by a "new session" menu action; undefined lets the dialog decide. */

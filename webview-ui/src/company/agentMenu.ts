@@ -29,6 +29,9 @@ export type ProjectNodeAction =
   | 'newSessionOmp'
   | 'newSessionClaude'
   | 'newSessionAgy'
+  /** "Phiên mới · Claude/omp cloud": the board opens the Cloud page's request box with that agent chosen. */
+  | 'newCloudClaude'
+  | 'newCloudOmp'
   | 'addFolder'
   /** "Duyệt…" in the add-folder form: the board opens Windows' dialog and adds the folder chosen. */
   | 'addFolderBrowse'
@@ -56,6 +59,8 @@ export interface ProjectNodeMenuContext {
   readonly hasCheckout: boolean;
   /** Folders under a Project or group: zero hides "Phiên mới". */
   readonly folderCount: number;
+  /** This connection may see the fleet: the cloud session entries show. */
+  readonly cloud?: boolean;
 }
 
 /** A drawer header that opened the menu: whether the drawer is currently maximized. */
@@ -820,6 +825,12 @@ export function projectNodeMenuItems(
     add('new-omp', 'Phiên mới · omp', 'plus', 'newSessionOmp', startsGroup),
     add('new-claude', 'Phiên mới · Claude', 'plus', 'newSessionClaude'),
     add('new-agy', 'Phiên mới · agy', 'plus', 'newSessionAgy'),
+    ...(context.cloud
+      ? [
+          add('new-claude-cloud', 'Phiên mới · Claude cloud', 'plus', 'newCloudClaude'),
+          add('new-omp-cloud', 'Phiên mới · omp cloud', 'plus', 'newCloudOmp'),
+        ]
+      : []),
   ];
   const changes = (startsGroup: boolean): AgentMenuItem[] =>
     context.hasCheckout ? [add('changes', 'Xem thay đổi', 'file-text', 'changes', startsGroup)] : [];

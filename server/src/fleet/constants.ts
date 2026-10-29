@@ -12,6 +12,8 @@ export const FLEET_MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const FLEET_SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const FLEET_TASK_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const FLEET_TASK_REPOS = ['backend', 'web', 'app', 'all'] as const;
+/** The agent a cloud task starts; claude is the default and keeps the old cloud-giao argv. */
+export const FLEET_TASK_ENGINES = ['claude', 'omp'] as const;
 export const FLEET_PROMPT_MAX = 20_000;
 /** Board-side PTY ids for cloud terminals: far above local agent ids so the two never collide. */
 export const FLEET_TERMINAL_ID_BASE = 900_000_000;
