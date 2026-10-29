@@ -51,7 +51,6 @@ const SESSION_STATE_LABEL: Readonly<Record<string, string>> = {
   blocked: 'chờ bạn',
   idle: 'rảnh',
   sleeping: 'ngủ',
-  ended: 'tắt',
   ended: 'đã tắt',
 };
 const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>> = {
