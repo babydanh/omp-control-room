@@ -10,13 +10,15 @@ export interface CloudSessionsProps {
   readonly refresh: () => void;
   readonly onOpenTerminal: (machine: string, session: string) => void;
   readonly onOpenDiff: (machine: string, path: string) => void;
+  /** Opens the "Tạo Claude cloud" box (Cloud page, request field focused). */
+  readonly onCreate: () => void;
 }
 
 /**
  * Sidebar section listing the agents running in tmux on cloud machines, next to the local sessions:
  * a click opens the session's terminal, the repo chips open the diff of the worktrees on its branch.
  */
-export function CloudSessionsSection({ machines, refresh, onOpenTerminal, onOpenDiff }: CloudSessionsProps) {
+export function CloudSessionsSection({ machines, refresh, onOpenTerminal, onOpenDiff, onCreate }: CloudSessionsProps) {
   const [open, setOpen] = useState(true);
   useEffect(() => {
     const timer = window.setInterval(refresh, REFRESH_MS);
@@ -31,18 +33,27 @@ export function CloudSessionsSection({ machines, refresh, onOpenTerminal, onOpen
       repos: session.branch ? machine.repos.filter((repo) => repo.branch === session.branch && repo.path) : [],
     })),
   );
-  if (rows.length === 0) return null;
 
   return (
     <section aria-label="Cloud" className="flex flex-col">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen(!open)}
-        className="touch-target flex items-center gap-1 rounded px-2 text-left text-xs font-semibold text-text-muted hover:bg-hover"
-      >
-        <span aria-hidden="true">{open ? '▾' : '▸'}</span>Cloud ({rows.length})
-      </button>
+      <div className="flex items-center">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen(!open)}
+          className="touch-target flex min-w-0 flex-1 items-center gap-1 rounded px-2 text-left text-xs font-semibold text-text-muted hover:bg-hover"
+        >
+          <span aria-hidden="true">{open ? '▾' : '▸'}</span>Cloud ({rows.length})
+        </button>
+        <button
+          type="button"
+          onClick={onCreate}
+          title="Tạo Claude cloud: gõ việc, board tự chọn máy rảnh"
+          className="touch-target shrink-0 rounded px-2 text-xs text-text-secondary hover:bg-hover"
+        >
+          + Tạo Claude cloud
+        </button>
+      </div>
       {open &&
         rows.map(({ machine, session, repos }) => (
           <div key={`${machine.agentId}/${session.name}`} className="flex min-w-0 items-center gap-1 px-2 text-xs">

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import type { FleetMachineSnapshot } from '../../../../core/src/messages.js';
 import { CloudTerminal } from './CloudTerminal.js';
+import { MAX_SESSIONS_PER_MACHINE, pickMachine, projectMachines, randomSuffix, slugFromPrompt } from './cloudTaskPick.js';
 import { fleetStore } from './fleetClient.js';
 import { type FleetState, useFleetState } from './fleetStore.js';
 
@@ -43,7 +44,7 @@ export function FleetView() {
         <ActionStatus fleet={fleet} />
         {fleet.diff !== null && <DiffPanel diff={fleet.diff} />}
         {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
-          <TaskForm machines={fleet.snapshot.machines.map((machine) => machine.agentId)} busy={fleet.action !== null} />
+          <TaskForm machines={fleet.snapshot.machines} busy={fleet.action !== null} />
         )}
         {fleet.error !== null && (
           <p role="alert" className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
@@ -127,84 +128,104 @@ function ActionStatus({ fleet }: { fleet: FleetState }) {
   return null;
 }
 
+const AUTO = '';
+
 const TASK_REPOS = [
-  { value: 'backend', label: 'Backend' },
-  { value: 'web', label: 'Web' },
-  { value: 'app', label: 'App' },
   { value: 'all', label: 'Cả 3 repo (một agent làm trọn tính năng)' },
+  { value: 'backend', label: 'Chỉ Backend' },
+  { value: 'web', label: 'Chỉ Web' },
+  { value: 'app', label: 'Chỉ App' },
 ] as const;
 
-function TaskForm({ machines, busy }: { machines: string[]; busy: boolean }) {
-  const [machine, setMachine] = useState(machines[0] ?? '');
-  const [repo, setRepo] = useState<(typeof TASK_REPOS)[number]['value']>('backend');
+/**
+ * "Tạo Claude cloud": type the request, press the button. By default the board picks the least busy project
+ * machine (below 3 agents), all three repositories, and a task name made from the request; "Tùy chọn" overrides.
+ */
+function TaskForm({ machines, busy }: { machines: readonly FleetMachineSnapshot[]; busy: boolean }) {
+  const [machine, setMachine] = useState(AUTO);
+  const [repo, setRepo] = useState<(typeof TASK_REPOS)[number]['value']>('all');
   const [slug, setSlug] = useState('');
   const [prompt, setPrompt] = useState('');
-  const slugOk = /^[a-z0-9][a-z0-9-]{0,39}$/.test(slug);
-  const ready = !busy && machines.includes(machine) && slugOk && prompt.trim() !== '';
+  const candidates = projectMachines(machines);
+  const target = machine === AUTO ? pickMachine(machines) : machine;
+  const slugOk = slug === '' || /^[a-z0-9][a-z0-9-]{0,39}$/.test(slug);
+  const ready = !busy && target !== null && slugOk && prompt.trim() !== '';
+  const load = candidates.find((pick) => pick.machine === target);
 
   return (
-    <details className="rounded border border-hairline bg-well p-3">
-      <summary className="cursor-pointer text-sm font-semibold text-text">Giao việc cloud</summary>
-      <form
-        className="mt-3 grid gap-2 md:grid-cols-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          if (!ready) return;
-          fleetStore.createTask({ machine, repo, slug, prompt });
-          setPrompt('');
-        }}
-      >
-        <label className="text-xs text-text-muted">
-          Máy
-          <select className="mt-1 w-full rounded border border-hairline bg-transparent p-1 text-sm" value={machine} onChange={(event) => setMachine(event.target.value)}>
-            {machines.map((name) => (
-              <option key={name} value={name}>{name}</option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-text-muted">
-          Repo
-          <select
-            className="mt-1 w-full rounded border border-hairline bg-transparent p-1 text-sm"
-            value={repo}
-            onChange={(event) => setRepo(TASK_REPOS.find((item) => item.value === event.target.value)?.value ?? 'backend')}
-          >
-            {TASK_REPOS.map((item) => (
-              <option key={item.value} value={item.value}>{item.label}</option>
-            ))}
-          </select>
-        </label>
-        <label className="text-xs text-text-muted">
-          Tên việc (chữ thường, số, gạch nối)
-          <input
-            className="mt-1 w-full rounded border border-hairline bg-transparent p-1 font-mono text-sm"
-            value={slug}
-            maxLength={40}
-            placeholder="xep-san"
-            onChange={(event) => setSlug(event.target.value.toLowerCase())}
-          />
-        </label>
-        <label className="text-xs text-text-muted md:col-span-3">
-          Việc cần làm (gửi cho Claude)
-          <textarea
-            className="mt-1 w-full rounded border border-hairline bg-transparent p-2 text-sm"
-            rows={4}
-            maxLength={20000}
-            value={prompt}
-            onChange={(event) => setPrompt(event.target.value)}
-          />
-        </label>
-        <p className="text-xs text-text-muted md:col-span-2">
-          {repo === 'all'
-            ? 'Tạo 3 worktree (backend, web, app) cùng nhánh '
-            : 'Tạo worktree nhánh '}
-          <span className="font-mono">cloud/{machine}-{slug || '<tên>'}</span> từ origin/main, rồi mở Claude trong tmux.
+    <form
+      id="tao-claude-cloud"
+      className="space-y-2 rounded border border-hairline bg-well p-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!ready || target === null) return;
+        fleetStore.createTask({ machine: target, repo, slug: slug || slugFromPrompt(prompt, randomSuffix()), prompt });
+        setPrompt('');
+        setSlug('');
+      }}
+    >
+      <label className="block text-sm font-semibold text-text">
+        Tạo Claude cloud
+        <textarea
+          className="mt-1 w-full rounded border border-hairline bg-transparent p-2 text-sm font-normal"
+          rows={3}
+          maxLength={20000}
+          placeholder="Gõ việc cần làm, ví dụ: Sửa lỗi xếp sân đôi khi đổi giờ thi đấu"
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+        />
+      </label>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="min-w-0 flex-1 text-xs text-text-muted">
+          {target === null
+            ? candidates.length === 0
+              ? 'Chưa có máy nào đủ 3 repo đồ án.'
+              : `Cả ${candidates.length} máy đều đã chạy đủ ${MAX_SESSIONS_PER_MACHINE} việc. Đợi một việc xong hoặc chọn máy trong Tùy chọn.`
+            : `Sẽ chạy trên ${target}${load ? ` (đang có ${load.sessions}/${MAX_SESSIONS_PER_MACHINE} việc)` : ''} · ${TASK_REPOS.find((item) => item.value === repo)?.label ?? repo}`}
         </p>
-        <button type="submit" disabled={!ready} className="company-btn company-btn-md company-btn-primary justify-self-end">
-          Giao việc
+        <button type="submit" disabled={!ready} className="company-btn company-btn-md company-btn-primary">
+          Tạo Claude cloud
         </button>
-      </form>
-    </details>
+      </div>
+      <details className="text-xs text-text-muted">
+        <summary className="cursor-pointer">Tùy chọn (máy, repo, tên việc)</summary>
+        <div className="mt-2 grid gap-2 md:grid-cols-3">
+          <label>
+            Máy
+            <select className="mt-1 w-full rounded border border-hairline bg-transparent p-1 text-sm" value={machine} onChange={(event) => setMachine(event.target.value)}>
+              <option value={AUTO}>Tự chọn máy rảnh nhất</option>
+              {candidates.map((pick) => (
+                <option key={pick.machine} value={pick.machine}>
+                  {pick.machine} ({pick.sessions}/{MAX_SESSIONS_PER_MACHINE} việc)
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Repo
+            <select
+              className="mt-1 w-full rounded border border-hairline bg-transparent p-1 text-sm"
+              value={repo}
+              onChange={(event) => setRepo(TASK_REPOS.find((item) => item.value === event.target.value)?.value ?? 'all')}
+            >
+              {TASK_REPOS.map((item) => (
+                <option key={item.value} value={item.value}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Tên việc (để trống: tự đặt từ nội dung)
+            <input
+              className="mt-1 w-full rounded border border-hairline bg-transparent p-1 font-mono text-sm"
+              value={slug}
+              maxLength={40}
+              placeholder="sua-xep-san-ab12"
+              onChange={(event) => setSlug(event.target.value.toLowerCase())}
+            />
+          </label>
+        </div>
+      </details>
+    </form>
   );
 }
 

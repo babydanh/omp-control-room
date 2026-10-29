@@ -967,6 +967,11 @@ export function BoardShell({ client }: BoardShellProps) {
                           fleetStore.requestDiff(machine, path);
                           selectPage('cloud');
                         },
+                        onCreate: () => {
+                          selectPage('cloud');
+                          // The Cloud page mounts on the next render: focus its request box then.
+                          window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('#tao-claude-cloud textarea')?.focus(), 50);
+                        },
                       },
                     }
                   : {}),
