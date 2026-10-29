@@ -4,7 +4,7 @@ import type {
   FleetSnapshotMessage,
   LedgerView,
 } from '../../../core/src/messages.js';
-import { FLEET_STALE_AFTER_MS } from './constants.js';
+import { FLEET_SESSION_NAME, FLEET_STALE_AFTER_MS } from './constants.js';
 import type { FleetHubMachine, FleetHubResponse } from './hubClient.js';
 
 export type FleetMachineState = FleetMachineSnapshot['state'];
@@ -139,6 +139,15 @@ export function buildFleetSnapshot(
           ...(typeof repo.staged === 'boolean' ? { staged: repo.staged } : {}),
         })),
         ...(typeof machine.disk_free_gb === 'number' ? { diskFreeGb: machine.disk_free_gb } : {}),
+        tmuxSessions: (machine.tmux ?? [])
+          .filter((session) => typeof session.name === 'string' && FLEET_SESSION_NAME.test(session.name))
+          .map((session) => ({
+            name: session.name,
+            attached: session.attached === true,
+            idleSeconds: Number.isFinite(session.idle_seconds) ? Math.max(0, Math.floor(session.idle_seconds)) : 0,
+            ...(typeof session.command === 'string' && session.command ? { command: session.command } : {}),
+            ...(typeof session.branch === 'string' && session.branch ? { branch: session.branch } : {}),
+          })),
       }),
     ),
     overlaps: computeFleetOverlaps(response.machines, localRepos),

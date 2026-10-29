@@ -28,6 +28,32 @@ function sessions() {
   return out;
 }
 
+/**
+ * tmux sessions on this machine: name, attached, idle time, the active pane's command and branch.
+ * Metadata only: screen content never leaves the machine (the board attaches over SSH on demand).
+ */
+export function parseTmux(text, nowSec, branchOf = () => '') {
+  return text.split('\n').filter(Boolean).map((line) => {
+    const [name, attached, activity, cwd, command] = line.split('\t');
+    return {
+      name,
+      attached: Number(attached) > 0,
+      idle_seconds: Math.max(0, nowSec - Number(activity || nowSec)),
+      command: command ?? '',
+      branch: cwd ? branchOf(cwd) : '',
+    };
+  }).filter((s) => s.name).slice(0, 30);
+}
+
+function tmuxSessions() {
+  let text = '';
+  try {
+    text = execFileSync('tmux', ['list-sessions', '-F', '#{session_name}\t#{session_attached}\t#{session_activity}\t#{pane_current_path}\t#{pane_current_command}'],
+      { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch { return []; }   // no tmux server = no sessions
+  return parseTmux(text, Math.floor(Date.now() / 1000), (cwd) => git(cwd, 'branch', '--show-current'));
+}
+
 
 // Refresh origin/main and origin/staging at most every 5 minutes, not every 30 s report.
 function refreshRemotes(repoRoots) {
@@ -129,7 +155,7 @@ const token = signJwt({ iss: id, aud: 'fleet-hub', role: 'report' }, readFileSyn
 const res = await fetch(`${process.env.FLEET_HUB}/v1/report`, {
   method: 'POST',
   headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-  body: JSON.stringify(fitReport({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), repos: repos() })),
+  body: JSON.stringify(fitReport({ agent_id: id, disk_free_gb: diskFreeGb(), sessions: sessions(), tmux: tmuxSessions(), repos: repos() })),
   signal: AbortSignal.timeout(15000),
 }).catch((e) => ({ status: 0, text: async () => e.message }));
 if (res.status !== 200) {

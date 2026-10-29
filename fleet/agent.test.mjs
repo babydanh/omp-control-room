@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fitReport } from './agent.mjs';
+import { fitReport, parseTmux } from './agent.mjs';
 
 test('a huge diff is cut to fit the hub limit, keeping the file list', () => {
   const changes = Array.from({ length: 200 }, (_, i) => ({ path: `src/very/long/path/to/file-${i}.ts`, ranges: Array.from({ length: 20 }, (_, j) => [j * 10 + 1, j * 10 + 5]) }));
@@ -21,4 +21,13 @@ test('many repos with long dirty paths still end under the limit', () => {
   const repos = Array.from({ length: 20 }, (_, r) => ({ path: `/data/home/${long}-${r}`, branch: long, dirty_files: Array.from({ length: 200 }, (_, i) => `${long}/${i}.ts`), changes: [] }));
   const report = fitReport({ agent_id: 'danh', sessions: [], repos });
   assert.ok(Buffer.byteLength(JSON.stringify(report)) <= 60_000);
+});
+
+test('tmux lines become name, attached, idle time and branch; empty output means no sessions', () => {
+  const text = 'xep-san\t1\t900\t/data/home/wt/backend-xep-san\tclaude\nnhap\t0\t1000\t\tbash\n';
+  assert.deepEqual(parseTmux(text, 1000, (cwd) => (cwd.includes('xep-san') ? 'cloud/danh-xep-san' : '')), [
+    { name: 'xep-san', attached: true, idle_seconds: 100, command: 'claude', branch: 'cloud/danh-xep-san' },
+    { name: 'nhap', attached: false, idle_seconds: 0, command: 'bash', branch: '' },
+  ]);
+  assert.deepEqual(parseTmux('', 1000), []);
 });

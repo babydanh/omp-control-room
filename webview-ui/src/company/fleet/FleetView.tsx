@@ -1,8 +1,9 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 
 import type { FleetMachineSnapshot } from '../../../../core/src/messages.js';
+import { CloudTerminal } from './CloudTerminal.js';
 import { fleetStore } from './fleetClient.js';
-import { useFleetState } from './fleetStore.js';
+import { type FleetState, useFleetState } from './fleetStore.js';
 
 const REFRESH_INTERVAL_MS = 15_000;
 
@@ -31,6 +32,18 @@ export function FleetView() {
         </button>
       </header>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+        {fleet.terminal !== null && (
+          <CloudTerminal
+            key={fleet.terminal.terminalId}
+            terminalId={fleet.terminal.terminalId}
+            label={`${fleet.terminal.machine} · ${fleet.terminal.session}`}
+            onClose={() => fleetStore.closeTerminal()}
+          />
+        )}
+        <ActionStatus fleet={fleet} />
+        {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
+          <TaskForm machines={fleet.snapshot.machines.map((machine) => machine.agentId)} busy={fleet.action !== null} />
+        )}
         {fleet.error !== null && (
           <p role="alert" className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
             {fleet.error}
@@ -45,7 +58,7 @@ export function FleetView() {
         {fleet.snapshot !== null && fleet.snapshot.machines.length > 0 && (
           <div className="grid gap-3 md:grid-cols-2">
             {fleet.snapshot.machines.map((machine) => (
-              <MachineCard key={machine.agentId} machine={machine} />
+              <MachineCard key={machine.agentId} machine={machine} busy={fleet.action !== null} />
             ))}
           </div>
         )}
@@ -78,7 +91,120 @@ export function FleetView() {
   );
 }
 
-function MachineCard({ machine }: { machine: FleetMachineSnapshot }) {
+function ActionStatus({ fleet }: { fleet: FleetState }) {
+  if (fleet.action !== null) {
+    const what = fleet.action.kind === 'terminal' ? 'Đang mở terminal' : 'Đang tạo worktree và mở Claude';
+    return (
+      <p role="status" className="text-sm text-text-muted">
+        {what} trên {fleet.action.machine} ({fleet.action.session})… máy đang ngủ thì mất 1–2 phút.
+      </p>
+    );
+  }
+  if (fleet.actionError !== null) {
+    return (
+      <p role="alert" className="rounded border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-warning">
+        {fleet.actionError}
+      </p>
+    );
+  }
+  if (fleet.createdTask !== null) {
+    const { machine, session } = fleet.createdTask;
+    return (
+      <p className="flex flex-wrap items-center gap-2 rounded border border-hairline px-3 py-2 text-sm">
+        Đã giao việc: Claude đang chạy trong phiên <span className="font-mono">{session}</span> trên {machine}.
+        <button type="button" className="company-btn company-btn-sm company-btn-ghost" onClick={() => fleetStore.openTerminal(machine, session)}>
+          Mở terminal
+        </button>
+      </p>
+    );
+  }
+  return null;
+}
+
+const TASK_REPOS = [
+  { value: 'backend', label: 'Backend' },
+  { value: 'web', label: 'Web' },
+  { value: 'app', label: 'App' },
+] as const;
+
+function TaskForm({ machines, busy }: { machines: string[]; busy: boolean }) {
+  const [machine, setMachine] = useState(machines[0] ?? '');
+  const [repo, setRepo] = useState<(typeof TASK_REPOS)[number]['value']>('backend');
+  const [slug, setSlug] = useState('');
+  const [prompt, setPrompt] = useState('');
+  const slugOk = /^[a-z0-9][a-z0-9-]{0,39}$/.test(slug);
+  const ready = !busy && machines.includes(machine) && slugOk && prompt.trim() !== '';
+
+  return (
+    <details className="rounded border border-hairline bg-well p-3">
+      <summary className="cursor-pointer text-sm font-semibold text-text">Giao việc cloud</summary>
+      <form
+        className="mt-3 grid gap-2 md:grid-cols-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (!ready) return;
+          fleetStore.createTask({ machine, repo, slug, prompt });
+          setPrompt('');
+        }}
+      >
+        <label className="text-xs text-text-muted">
+          Máy
+          <select className="mt-1 w-full rounded border border-hairline bg-transparent p-1 text-sm" value={machine} onChange={(event) => setMachine(event.target.value)}>
+            {machines.map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-text-muted">
+          Repo
+          <select
+            className="mt-1 w-full rounded border border-hairline bg-transparent p-1 text-sm"
+            value={repo}
+            onChange={(event) => setRepo(TASK_REPOS.find((item) => item.value === event.target.value)?.value ?? 'backend')}
+          >
+            {TASK_REPOS.map((item) => (
+              <option key={item.value} value={item.value}>{item.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="text-xs text-text-muted">
+          Tên việc (chữ thường, số, gạch nối)
+          <input
+            className="mt-1 w-full rounded border border-hairline bg-transparent p-1 font-mono text-sm"
+            value={slug}
+            maxLength={40}
+            placeholder="xep-san"
+            onChange={(event) => setSlug(event.target.value.toLowerCase())}
+          />
+        </label>
+        <label className="text-xs text-text-muted md:col-span-3">
+          Việc cần làm (gửi cho Claude)
+          <textarea
+            className="mt-1 w-full rounded border border-hairline bg-transparent p-2 text-sm"
+            rows={4}
+            maxLength={20000}
+            value={prompt}
+            onChange={(event) => setPrompt(event.target.value)}
+          />
+        </label>
+        <p className="text-xs text-text-muted md:col-span-2">
+          Tạo worktree nhánh <span className="font-mono">cloud/{machine}-{slug || '<tên>'}</span> từ origin/main, rồi mở Claude trong tmux.
+        </p>
+        <button type="submit" disabled={!ready} className="company-btn company-btn-md company-btn-primary justify-self-end">
+          Giao việc
+        </button>
+      </form>
+    </details>
+  );
+}
+
+function formatIdle(seconds: number): string {
+  if (seconds < 60) return 'vừa hoạt động';
+  if (seconds < 3600) return `rảnh ${Math.floor(seconds / 60)} phút`;
+  return `rảnh ${Math.floor(seconds / 3600)} giờ`;
+}
+
+function MachineCard({ machine, busy }: { machine: FleetMachineSnapshot; busy: boolean }) {
   const lastSeen = new Intl.DateTimeFormat('vi-VN', {
     dateStyle: 'short',
     timeStyle: 'short',
@@ -102,6 +228,26 @@ function MachineCard({ machine }: { machine: FleetMachineSnapshot }) {
       <p className="text-sm text-text-secondary">
         {machine.sessionCount} phiên · {machine.engines.length > 0 ? machine.engines.join(', ') : 'không có engine'}
       </p>
+      {(machine.tmuxSessions ?? []).length > 0 && (
+        <ul className="space-y-1 border-t border-hairline pt-2">
+          {(machine.tmuxSessions ?? []).map((session) => (
+            <li key={session.name} className="flex flex-wrap items-center gap-x-2 text-xs text-text-secondary">
+              <span className="font-mono font-medium text-text">{session.name}</span>
+              {session.command ? <span>{session.command}</span> : null}
+              {session.branch ? <span className="break-all font-mono">{session.branch}</span> : null}
+              <span className="text-text-muted">{formatIdle(session.idleSeconds)}{session.attached ? ' · có người đang xem' : ''}</span>
+              <button
+                type="button"
+                disabled={busy}
+                className="company-btn company-btn-sm company-btn-ghost ml-auto"
+                onClick={() => fleetStore.openTerminal(machine.agentId, session.name)}
+              >
+                Mở terminal
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {machine.repos.length > 0 ? (
         <ul className="space-y-1 border-t border-hairline pt-2">
           {machine.repos.map((repo, index) => (

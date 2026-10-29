@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { ServerMessage } from '../../core/src/messages.js';
-import { FLEET_REASON_READ_ONLY, FLEET_STALE_AFTER_MS } from '../src/fleet/constants.js';
-import { classifyFleetMachineState, computeFleetOverlaps } from '../src/fleet/fleetSnapshot.js';
+import { CloudControl, type CloudControlDeps } from '../src/fleet/cloudControl.js';
+import { FLEET_REASON_BAD_INPUT, FLEET_REASON_READ_ONLY, FLEET_STALE_AFTER_MS } from '../src/fleet/constants.js';
+import { buildFleetSnapshot, classifyFleetMachineState, computeFleetOverlaps } from '../src/fleet/fleetSnapshot.js';
 import { handleFleetMessage } from '../src/fleet/handler.js';
 import type { FleetHubClient, FleetHubMachine } from '../src/fleet/hubClient.js';
+import type { PtySessionManager } from '../src/terminal/ptySessionManager.js';
 
 function machine(agent_id: string, path: string, dirty_files: string[]): FleetHubMachine {
   return {
@@ -104,5 +106,97 @@ describe('handleFleetMessage', () => {
       },
     ]);
     expect(fleet.fetchFleet).not.toHaveBeenCalled();
+  });
+});
+
+describe('cloud tmux sessions in the snapshot', () => {
+  it('passes valid session names through and drops names that could reach a shell', () => {
+    const snapshot = buildFleetSnapshot(
+      'r',
+      {
+        now: 1_000,
+        machines: [
+          {
+            ...machine('danh', '/data/home/Backend', []),
+            tmux: [
+              { name: 'xep-san', attached: true, idle_seconds: 90.7, command: 'claude', branch: 'cloud/danh-xep-san' },
+              { name: 'x;rm -rf ~', attached: false, idle_seconds: 1 },
+            ],
+          },
+        ],
+      },
+      null,
+    );
+    expect(snapshot.machines[0].tmuxSessions).toEqual([
+      { name: 'xep-san', attached: true, idleSeconds: 90, command: 'claude', branch: 'cloud/danh-xep-san' },
+    ]);
+  });
+});
+
+function fakeCloud(machines: Record<string, string[]>) {
+  const calls: { args: readonly string[]; home: string; input?: string }[] = [];
+  const deps: CloudControlDeps = {
+    launcher: { file: 'node', args: ['instabox.mjs'] },
+    now: () => 0,
+    listConfigHomes: async () => Object.keys(machines),
+    run: async (args, home, input) => {
+      calls.push({ args, home, input });
+      if (args[0] === 'ls') return { code: 0, stdout: JSON.stringify(machines[home].map((name) => ({ name }))), stderr: '' };
+      if (args[0] === 'exec') return { code: 0, stdout: `OK ${args[7]} /wt cloud/x\n`, stderr: '' };
+      return { code: 0, stdout: '', stderr: '' };
+    },
+  };
+  return { cloud: new CloudControl(deps), calls };
+}
+
+describe('cloud control', () => {
+  it('refuses terminal and task commands from unprivileged connections', () => {
+    const { cloud, calls } = fakeCloud({ '/a': ['danh'] });
+    for (const type of ['fleetTerminalOpen', 'fleetTaskCreate']) {
+      const sent: ServerMessage[] = [];
+      handleFleetMessage({ type, requestId: 'r', machine: 'danh', session: 's' }, (m) => sent.push(m), {
+        cloud,
+        ledger: null,
+        privileged: false,
+      });
+      expect(sent).toEqual([expect.objectContaining({ code: 'forbidden' })]);
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it('rejects a slug with shell characters before running anything', async () => {
+    const { cloud, calls } = fakeCloud({ '/a': ['danh'] });
+    const sent: ServerMessage[] = [];
+    handleFleetMessage(
+      { type: 'fleetTaskCreate', requestId: 'r', machine: 'danh', repo: 'backend', slug: 'a;reboot', prompt: 'x' },
+      (m) => sent.push(m),
+      { cloud, ledger: null, privileged: true },
+    );
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({ type: 'fleetCommandResult', code: 'failed', reason: FLEET_REASON_BAD_INPUT });
+    expect(calls).toEqual([]);
+  });
+
+  it('runs cloud-giao under the account that owns the machine, with the prompt on stdin', async () => {
+    const { cloud, calls } = fakeCloud({ '/a': ['danh'], '/b': ['danh3'] });
+    await expect(cloud.createTask('danh3', 'web', 'xep-san', 'Lam trang xep san')).resolves.toBe('xep-san');
+    const exec = calls.find((call) => call.args[0] === 'exec');
+    expect(exec).toEqual({
+      args: ['exec', 'danh3', '--timeout', '300', '--stdin', '--', 'cloud-giao', 'web', 'xep-san', 'danh3'],
+      home: '/b',
+      input: 'Lam trang xep san',
+    });
+  });
+
+  it('reuses the live terminal for the same machine and session', async () => {
+    const { cloud } = fakeCloud({ '/a': ['danh'] });
+    const live = new Set<number>();
+    const create = vi.fn((options: { agentId: number }) => live.add(options.agentId));
+    const pty = { create, has: (id: number) => live.has(id) } as unknown as PtySessionManager;
+    const first = await cloud.openTerminal(pty, 'danh', 'xep-san');
+    expect(await cloud.openTerminal(pty, 'danh', 'xep-san')).toBe(first);
+    expect(await cloud.openTerminal(pty, 'danh', 'khac')).not.toBe(first);
+    expect(create).toHaveBeenCalledTimes(2);
+    expect(create.mock.calls[0][0]).toMatchObject({ env: { XDG_CONFIG_HOME: '/a' } });
   });
 });

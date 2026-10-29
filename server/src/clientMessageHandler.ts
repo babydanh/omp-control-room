@@ -218,6 +218,7 @@ export function handleClientMessage(
   if (
     handleFleetMessage(msg, (message) => send(message as unknown as Record<string, unknown>), {
       ledger: ctx.ledger ?? null,
+      ptyManager: ctx.ptyManager ?? null,
       privileged: ctx.privileged === true,
     })
   ) {

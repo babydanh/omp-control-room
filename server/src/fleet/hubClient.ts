@@ -25,12 +25,21 @@ export interface FleetHubRepo {
   readonly changes?: readonly { readonly path: string; readonly ranges: readonly (readonly [number, number])[] }[];
 }
 
+export interface FleetHubTmux {
+  readonly name: string;
+  readonly attached: boolean;
+  readonly idle_seconds: number;
+  readonly command?: string;
+  readonly branch?: string;
+}
+
 export interface FleetHubMachine {
   readonly agent_id: string;
   readonly received_at: number;
   readonly sessions: readonly FleetHubSession[];
   readonly repos: readonly FleetHubRepo[];
   readonly disk_free_gb?: number | null;
+  readonly tmux?: readonly FleetHubTmux[];
 }
 
 export interface FleetHubResponse {

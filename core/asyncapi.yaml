@@ -163,6 +163,8 @@ components:
         # Fleet (privileged; read-only remote machine inventory)
         - $ref: '#/components/schemas/FleetSnapshotMessage'
         - $ref: '#/components/schemas/FleetCommandResultMessage'
+        - $ref: '#/components/schemas/FleetTerminalOpenedMessage'
+        - $ref: '#/components/schemas/FleetTaskCreatedMessage'
         # Project tree (privileged; project, checkout and session data)
         - $ref: '#/components/schemas/ProjectTreeSnapshotMessage'
         - $ref: '#/components/schemas/ProjectDiffMessage'
@@ -279,6 +281,8 @@ components:
         - $ref: '#/components/schemas/LedgerSendMessage'
         # Fleet (privileged; read-only remote machine inventory)
         - $ref: '#/components/schemas/FleetRequestMessage'
+        - $ref: '#/components/schemas/FleetTerminalOpenMessage'
+        - $ref: '#/components/schemas/FleetTaskCreateMessage'
         # Project tree (privileged; tree CRUD, diffs, comments, settings and sessions)
         - $ref: '#/components/schemas/ProjectTreeRequestMessage'
         - $ref: '#/components/schemas/ProjectNodeCreateMessage'
@@ -6278,6 +6282,95 @@ components:
         requestId:
           type: string
           format: uuid
+    FleetTerminalOpenMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, session]
+      description: Attach a board terminal to one tmux session on one cloud machine (privileged).
+      properties:
+        type:
+          const: fleetTerminalOpen
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+        session:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+
+    FleetTerminalOpenedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, terminalId]
+      properties:
+        type:
+          const: fleetTerminalOpened
+        requestId:
+          type: string
+          format: uuid
+        terminalId:
+          type: integer
+          minimum: 1
+          description: Id for the existing `/terminal/:agentId` socket.
+
+    FleetTaskCreateMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, repo, slug, prompt]
+      description: Create a worktree on a cloud machine and start Claude in a tmux session (privileged).
+      properties:
+        type:
+          const: fleetTaskCreate
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+        repo:
+          type: string
+          enum: [backend, web, app]
+        slug:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+        prompt:
+          type: string
+          minLength: 1
+          maxLength: 20000
+
+    FleetTaskCreatedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, session]
+      properties:
+        type:
+          const: fleetTaskCreated
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+        session:
+          type: string
+
+    FleetTmuxSession:
+      type: object
+      additionalProperties: false
+      required: [name, attached, idleSeconds]
+      properties:
+        name:
+          type: string
+        attached:
+          type: boolean
+        idleSeconds:
+          type: integer
+          minimum: 0
+        command:
+          type: string
+        branch:
+          type: string
 
     FleetSnapshotMessage:
       type: object
@@ -6324,7 +6417,10 @@ components:
             $ref: '#/components/schemas/FleetRepoSnapshot'
         diskFreeGb:
           type: number
-          minimum: 0
+        tmuxSessions:
+          type: array
+          items:
+            $ref: '#/components/schemas/FleetTmuxSession'
 
     FleetMachineState:
       type: string
