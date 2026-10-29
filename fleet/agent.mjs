@@ -66,7 +66,8 @@ export function parseLavish(stateText) {
 }
 
 function lavishSessions() {
-  try { return parseLavish(readFileSync(join(process.env.HOME ?? ROOT, '.lavish-axi', 'state.json'), 'utf8')); } catch { return []; }
+  // lavish-axi keeps a session "open" after its file is gone (worktree removed): list only artifacts that still exist.
+  try { return parseLavish(readFileSync(join(process.env.HOME ?? ROOT, '.lavish-axi', 'state.json'), 'utf8')).filter((s) => existsSync(s.file)); } catch { return []; }
 }
 
 
