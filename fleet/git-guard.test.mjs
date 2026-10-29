@@ -109,7 +109,7 @@ test('prune keeps a deleted detached worktree until its only commit is backed up
   assert.match(git(f.main, 'worktree', 'list', '--porcelain'), new RegExp(head), 'metadata kept: it is the only pointer to the commit');
   const backedUp = backup(await reportFor(f.scanRoot), { dryRun: false });
   assert.equal(gitDir(f.origin, 'rev-parse', `refs/backup/test-machine/detached-${head.slice(0, 12)}`), head);
-  git(f.main, 'fetch', 'origin', '+refs/backup/*:refs/backup/*');
+  assert.equal(git(f.main, 'rev-parse', `refs/backup/test-machine/detached-${head.slice(0, 12)}`), head, 'backup ref also written locally');
   prune(backedUp);
   assert.doesNotMatch(git(f.main, 'worktree', 'list', '--porcelain'), new RegExp(head), 'reachable from a backup ref: metadata pruned');
 });
