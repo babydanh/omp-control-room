@@ -6335,7 +6335,8 @@ components:
           pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
         repo:
           type: string
-          enum: [backend, web, app]
+          enum: [backend, web, app, all]
+          description: all = one worktree per repository under one task folder, one agent for the whole feature.
         slug:
           type: string
           pattern: '^[a-z0-9][a-z0-9-]{0,39}$'

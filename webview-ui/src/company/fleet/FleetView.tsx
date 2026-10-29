@@ -131,6 +131,7 @@ const TASK_REPOS = [
   { value: 'backend', label: 'Backend' },
   { value: 'web', label: 'Web' },
   { value: 'app', label: 'App' },
+  { value: 'all', label: 'Cả 3 repo (một agent làm trọn tính năng)' },
 ] as const;
 
 function TaskForm({ machines, busy }: { machines: string[]; busy: boolean }) {
@@ -194,7 +195,10 @@ function TaskForm({ machines, busy }: { machines: string[]; busy: boolean }) {
           />
         </label>
         <p className="text-xs text-text-muted md:col-span-2">
-          Tạo worktree nhánh <span className="font-mono">cloud/{machine}-{slug || '<tên>'}</span> từ origin/main, rồi mở Claude trong tmux.
+          {repo === 'all'
+            ? 'Tạo 3 worktree (backend, web, app) cùng nhánh '
+            : 'Tạo worktree nhánh '}
+          <span className="font-mono">cloud/{machine}-{slug || '<tên>'}</span> từ origin/main, rồi mở Claude trong tmux.
         </p>
         <button type="submit" disabled={!ready} className="company-btn company-btn-md company-btn-primary justify-self-end">
           Giao việc
@@ -323,7 +327,12 @@ function diffLineClass(line: string): string {
   return 'text-text-secondary';
 }
 
+/** Rendering is one element per line: cap it so a huge diff cannot freeze the board. */
+const DIFF_MAX_LINES = 4000;
+
 function DiffPanel({ diff }: { diff: NonNullable<FleetState['diff']> }) {
+  const lines = diff.text.split('\n');
+  const shown = lines.slice(0, DIFF_MAX_LINES);
   return (
     <section className="flex max-h-[70vh] flex-col rounded border border-hairline bg-well">
       <header className="flex items-center justify-between gap-2 border-b border-hairline px-3 py-2">
@@ -336,11 +345,14 @@ function DiffPanel({ diff }: { diff: NonNullable<FleetState['diff']> }) {
         </button>
       </header>
       <pre className="min-h-0 flex-1 overflow-auto p-3 font-mono text-xs leading-5">
-        {diff.text.split('\n').map((line, index) => (
+        {shown.map((line, index) => (
           <div key={index} className={diffLineClass(line)}>
             {line || ' '}
           </div>
         ))}
+        {lines.length > shown.length ? (
+          <div className="text-warning">… còn {lines.length - shown.length} dòng. Xem đủ bằng git diff trong terminal.</div>
+        ) : null}
       </pre>
     </section>
   );

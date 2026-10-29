@@ -16,7 +16,8 @@ Description=fleet-agent report
 Type=oneshot
 User=$(id -un)
 Environment=FLEET_ID=$ID FLEET_HUB=$HUB FLEET_KEY=$DIR/key.pem FLEET_ROOT=/data/home
-ExecStart=$(command -v node) $DIR/agent.mjs
+# Login shell: loads /etc/profile.d (InstaBox secrets, e.g. GH_TOKEN for git fetch); systemd alone does not.
+ExecStart=/bin/bash -lc "exec $(command -v node) $DIR/agent.mjs"
 EOF
 sudo tee /etc/systemd/system/fleet-agent.timer >/dev/null <<EOF
 [Unit]

@@ -11,7 +11,7 @@ export const FLEET_REASON_COMMAND_FAILED = 'Không thể tải dữ liệu Cloud
 export const FLEET_MACHINE_NAME = /^[a-z0-9][a-z0-9-]{0,39}$/;
 export const FLEET_SESSION_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 export const FLEET_TASK_SLUG = /^[a-z0-9][a-z0-9-]{0,39}$/;
-export const FLEET_TASK_REPOS = ['backend', 'web', 'app'] as const;
+export const FLEET_TASK_REPOS = ['backend', 'web', 'app', 'all'] as const;
 export const FLEET_PROMPT_MAX = 20_000;
 /** Board-side PTY ids for cloud terminals: far above local agent ids so the two never collide. */
 export const FLEET_TERMINAL_ID_BASE = 900_000_000;
@@ -33,4 +33,7 @@ export const FLEET_FORWARD_IDLE_MS = 30 * 60_000;
 /** Only repositories under the cloud home, plain path characters (the path reaches a remote shell, single-quoted). */
 export const FLEET_REPO_PATH = /^\/data\/home\/(?!.*\.\.)[A-Za-z0-9._/-]{1,250}$/;
 export const FLEET_DIFF_MAX_BYTES = 300_000;
+/** Untracked (new) files shown with their content in a diff: at most this many, each cut at this many bytes. */
+export const FLEET_DIFF_NEW_FILES = 20;
+export const FLEET_DIFF_NEW_FILE_BYTES = 20_000;
 export const FLEET_REASON_NOT_REPORTED = 'Máy này chưa báo repository đó cho hub (đợi 30 giây rồi thử lại).';

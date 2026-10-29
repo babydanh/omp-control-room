@@ -14,7 +14,7 @@
  * patterns allow no quoting or shell metacharacters.
  */
 
-import { execFile, spawn } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import * as net from 'node:net';
 import * as os from 'node:os';
@@ -24,6 +24,8 @@ import type { PtySessionManager } from '../terminal/ptySessionManager.js';
 import {
   FLEET_ACCOUNT_CACHE_MS,
   FLEET_DIFF_MAX_BYTES,
+  FLEET_DIFF_NEW_FILE_BYTES,
+  FLEET_DIFF_NEW_FILES,
   FLEET_FORWARD_IDLE_MS,
   FLEET_FORWARD_READY_MS,
   FLEET_INSTABOX_TIMEOUT_MS,
@@ -188,6 +190,11 @@ export class CloudControl {
       'echo; echo "### Commit tren nhanh, chua co tren origin/main"; git log --oneline origin/main..HEAD | head -50',
       'git diff --stat origin/main...HEAD | tail -40',
       'echo; echo "### Thay doi chua commit"; git diff HEAD --stat; echo; git diff HEAD',
+      // New files are not in `git diff HEAD`: show the first ones (text only, each cut) as additions.
+      'echo; echo "### File moi chua commit"',
+      `git ls-files --others --exclude-standard | head -${FLEET_DIFF_NEW_FILES} | while IFS= read -r f; do ` +
+        `echo "+++ $f"; if grep -Iq . "$f" 2>/dev/null; then head -c ${FLEET_DIFF_NEW_FILE_BYTES} "$f" | sed 's/^/+/'; echo; ` +
+        'else echo "(file nhi phan hoac rong)"; fi; done',
     ].join('; ');
     const result = await this.deps.run(
       ['exec', machine, '--timeout', '120', '--', `{ ${script}; } 2>&1 | head -c ${FLEET_DIFF_MAX_BYTES + 1}`],
@@ -265,11 +272,29 @@ function defaultDeps(): CloudControlDeps {
     },
     async forward(machine, remotePort, configHome) {
       const localPort = await freePort();
+      // The CLI spawns `ssh` itself: stopping must end the whole tree, or ssh keeps the port open.
       const child = spawn(
         launcher.file,
         [...launcher.args, 'port-forward', machine, `${localPort}:${remotePort}`],
-        { env: { ...process.env, XDG_CONFIG_HOME: configHome }, stdio: 'ignore', windowsHide: true },
+        {
+          env: { ...process.env, XDG_CONFIG_HOME: configHome },
+          stdio: 'ignore',
+          windowsHide: true,
+          detached: process.platform !== 'win32',
+        },
       );
+      const stopTree = (): void => {
+        if (exited || child.pid === undefined) return;
+        if (process.platform === 'win32') {
+          spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+        } else {
+          try {
+            process.kill(-child.pid, 'SIGTERM');
+          } catch {
+            child.kill();
+          }
+        }
+      };
       let exited = false;
       child.on('exit', () => {
         exited = true;
@@ -277,12 +302,12 @@ function defaultDeps(): CloudControlDeps {
       const deadline = Date.now() + FLEET_FORWARD_READY_MS;
       while (!(await accepts(localPort))) {
         if (exited || Date.now() > deadline) {
-          child.kill();
+          stopTree();
           throw new CloudControlError('failed', 'port-forward did not start');
         }
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      return { localPort, alive: () => !exited, stop: () => child.kill() };
+      return { localPort, alive: () => !exited, stop: stopTree };
     },
     run(args, configHome, input) {
       const started = Date.now();

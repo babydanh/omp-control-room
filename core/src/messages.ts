@@ -3386,7 +3386,7 @@ export interface FleetTaskCreateMessage {
   prompt: string;
 }
 
-export type AnonymousSchema_1862 = 'backend' | 'web' | 'app';
+export type AnonymousSchema_1862 = 'backend' | 'web' | 'app' | 'all';
 
 export interface FleetLavishOpenMessage {
   type: 'fleetLavishOpen';

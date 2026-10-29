@@ -114,8 +114,17 @@ function repos() {
   for (const name of readdirSync(ROOT)) {
     const dir = join(ROOT, name);
     if (existsSync(join(dir, '.git'))) roots.push(dir);
-    // `wt/` holds the worktrees cloud-giao creates; `*.worktrees/` the ones made by hand.
-    if (name === 'wt' || name.endsWith('.worktrees')) for (const wt of readdirSync(dir)) roots.push(join(dir, wt));
+    // `wt/` holds the worktrees cloud-giao creates (wt/<repo>-<task>, or wt/<task>/<repo> for an all-repo task);
+    // `*.worktrees/` the ones made by hand.
+    if (name === 'wt' || name.endsWith('.worktrees')) {
+      for (const entry of readdirSync(dir)) {
+        const path = join(dir, entry);
+        if (existsSync(join(path, '.git'))) roots.push(path);
+        else if (name === 'wt' && statSync(path).isDirectory()) {
+          for (const inner of readdirSync(path)) if (existsSync(join(path, inner, '.git'))) roots.push(join(path, inner));
+        }
+      }
+    }
   }
   refreshRemotes(roots.filter((p) => existsSync(join(p, '.git')) && statSync(join(p, '.git')).isDirectory()));
   return roots.map((path) => {
