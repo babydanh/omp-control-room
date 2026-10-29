@@ -201,8 +201,11 @@ export class CloudControl {
   /** The account home owning `machine`, after asking InstaBox to start/wake it (both no-ops when running). */
   async #wake(machine: string): Promise<string> {
     const home = await this.#accountFor(machine);
-    await this.deps.run(['start', machine], home).catch(() => undefined);
-    await this.deps.run(['wake', machine], home).catch(() => undefined);
+    // Both are no-ops on a running machine; `start` covers a suspended one, `wake` an auto-paused one.
+    await Promise.all([
+      this.deps.run(['start', machine], home).catch(() => undefined),
+      this.deps.run(['wake', machine], home).catch(() => undefined),
+    ]);
     return home;
   }
 
@@ -210,12 +213,14 @@ export class CloudControl {
     const fresh = this.#accounts && this.deps.now() - this.#accounts.at < FLEET_ACCOUNT_CACHE_MS;
     if (!fresh || !this.#accounts?.byMachine.has(machine)) {
       const byMachine = new Map<string, string>();
-      for (const home of await this.deps.listConfigHomes()) {
-        const listed = await this.deps.run(['ls', '--json'], home).catch(() => null);
-        for (const name of machineNames(listed?.stdout ?? '')) {
+      // One `ls` per signed-in account, in parallel (each takes 3-5 s); the first account listing a name owns it.
+      const homes = await this.deps.listConfigHomes();
+      const listings = await Promise.all(homes.map((home) => this.deps.run(['ls', '--json'], home).catch(() => null)));
+      homes.forEach((home, index) => {
+        for (const name of machineNames(listings[index]?.stdout ?? '')) {
           if (!byMachine.has(name)) byMachine.set(name, home);
         }
-      }
+      });
       this.#accounts = { at: this.deps.now(), byMachine };
     }
     const home = this.#accounts?.byMachine.get(machine);
@@ -280,6 +285,7 @@ function defaultDeps(): CloudControlDeps {
       return { localPort, alive: () => !exited, stop: () => child.kill() };
     },
     run(args, configHome, input) {
+      const started = Date.now();
       return new Promise((resolve) => {
         const child = execFile(
           launcher.file,
@@ -292,6 +298,7 @@ function defaultDeps(): CloudControlDeps {
           },
           (error, stdout, stderr) => {
             const code = error ? (typeof error.code === 'number' ? error.code : 1) : 0;
+            console.log(`[Fleet] instabox ${args[0]} ${args[1] ?? ''}: ${Date.now() - started} ms, exit ${code}`);
             resolve({ code, stdout: String(stdout), stderr: String(stderr) });
           },
         );
