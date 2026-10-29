@@ -195,6 +195,7 @@ export type ClientMessage =
   | FleetLavishOpenMessage
   | FleetDiffRequestMessage
   | FleetCloudCommentSendMessage
+  | FleetBranchActionMessage
   | ProjectTreeRequestMessage
   | ProjectNodeCreateMessage
   | ProjectNodeUpdateMessage
@@ -3525,6 +3526,14 @@ export interface FleetCloudCommentSendMessage {
   line: number;
   snippet: string;
   content: string;
+}
+
+export interface FleetBranchActionMessage {
+  type: 'fleetBranchAction';
+  requestId: string;
+  action: 'push' | 'create-draft' | 'ready' | 'delete-remote';
+  checkout: string;
+  branch: string;
 }
 
 export interface ProjectTreeRequestMessage {

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import type { GitGuardReport, ServerMessage } from '../../core/src/messages.js';
+import type { GitGuardReport, LedgerView, ServerMessage } from '../../core/src/messages.js';
 import { CloudControl, type CloudControlDeps } from '../src/fleet/cloudControl.js';
 import {
   FLEET_REASON_BAD_INPUT,
@@ -115,6 +115,35 @@ describe('handleFleetMessage', () => {
       },
     ]);
     expect(fleet.fetchFleet).not.toHaveBeenCalled();
+  });
+
+  it('only runs branch actions for a checkout and branch present in the local ledger', async () => {
+    const sent: ServerMessage[] = [];
+    const processRunner = vi.fn(async () => { throw new Error('unexpected process'); });
+    const view = {
+      repos: [{
+        repo: '/repo',
+        name: 'repo',
+        worktrees: [{ path: '/repo/worktrees/task', branch: 'feature/task' }],
+      }],
+    } as unknown as LedgerView;
+    const ledger = { getView: vi.fn(async () => view) };
+
+    const handled = handleFleetMessage({
+      type: 'fleetBranchAction',
+      requestId: 'branch-1',
+      action: 'push',
+      checkout: '/not-reported',
+      branch: 'feature/task',
+    }, (message) => sent.push(message), { ledger, processRunner, privileged: true });
+    expect(handled).toBe(true);
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]).toMatchObject({
+      type: 'fleetCommandResult',
+      requestId: 'branch-1',
+      ok: false,
+    });
+    expect(processRunner).not.toHaveBeenCalled();
   });
 
   it('keeps the local guard visible when the cloud hub is unavailable', async () => {

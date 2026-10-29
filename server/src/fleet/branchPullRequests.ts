@@ -1,4 +1,7 @@
-import type { FleetPullRequest } from '../../../core/src/messages.js';
+import { readFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
+import type { FleetBranchActionMessage, FleetPullRequest } from '../../../core/src/messages.js';
 import { isRecord } from '../company/typeGuards.js';
 import type { ProcessResult, ProcessRunner } from '../ledger/processRunner.js';
 import { runProcess } from '../ledger/processRunner.js';
@@ -213,3 +216,133 @@ function checkedPullRequestUrl(value: unknown): string | null {
   }
 }
 
+export type FleetBranchActionName = FleetBranchActionMessage['action'];
+
+export interface FleetBranchActionInput {
+  readonly action: FleetBranchActionName;
+  readonly checkout: string;
+  readonly branch: string;
+}
+
+export type FleetBranchActionResult = { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
+/** Runs one local work-branch action using argument-vector process calls only. */
+export async function runFleetBranchAction(
+  input: FleetBranchActionInput,
+  options: { readonly run?: ProcessRunner } = {},
+): Promise<FleetBranchActionResult> {
+  const branch = input.branch.trim();
+  if (branch === '' || ['main', 'staging'].includes(branch.toLowerCase())) {
+    return { ok: false, reason: 'Chỉ thao tác trên nhánh việc; không thể tác động main hoặc staging.' };
+  }
+
+  const run = options.run ?? runProcess;
+  const currentBranch = await runBranchProcess(run, 'git', ['branch', '--show-current'], input.checkout);
+  if (currentBranch === null || currentBranch.stdout.trim() !== branch) {
+    return { ok: false, reason: 'Checkout không còn ở nhánh việc đã chọn.' };
+  }
+
+  if (input.action === 'push') {
+    const pushed = await runBranchProcess(run, 'git', [
+      'push', '-u', 'origin', `refs/heads/${branch}:refs/heads/${branch}`,
+    ], input.checkout, 120_000);
+    return pushed === null
+      ? { ok: false, reason: 'Không đẩy được nhánh lên origin.' }
+      : { ok: true };
+  }
+
+  const repoRootResult = await runBranchProcess(run, 'git', ['rev-parse', '--show-toplevel'], input.checkout);
+  const originResult = await runBranchProcess(run, 'git', ['remote', 'get-url', 'origin'], input.checkout);
+  if (repoRootResult === null || originResult === null) {
+    return { ok: false, reason: 'Không đọc được repo hoặc origin của checkout.' };
+  }
+  const githubRepo = githubRepositoryFromOrigin(originResult.stdout);
+  if (githubRepo === null) return { ok: false, reason: 'Origin không phải repository GitHub được hỗ trợ.' };
+
+  if (input.action === 'create-draft') {
+    const log = await runBranchProcess(run, 'git', ['log', 'origin/main..HEAD', '--format=%s'], input.checkout);
+    if (log === null) return { ok: false, reason: 'Không đọc được commit so với origin/main.' };
+    const proposal = await readBranchProposal(repoRootResult.stdout.trim(), branch);
+    if (proposal === null) return { ok: false, reason: 'Không đọc được proposal OpenSpec.' };
+    const commits = log.stdout.trim() || '(chưa có commit so với origin/main)';
+    const body = [
+      '## Commit kể từ origin/main',
+      commits,
+      ...(proposal === undefined ? [] : ['## OpenSpec proposal', proposal]),
+    ].join('\n\n');
+    const title = `Draft: ${branch.split('/').at(-1) ?? branch}`;
+    const created = await runBranchProcess(run, 'gh', [
+      'pr', 'create', '--draft', '--title', title, '--body', body,
+      '--base', 'main', '--head', branch, '--repo', githubRepo,
+    ], input.checkout, 60_000);
+    return created === null
+      ? { ok: false, reason: 'Không tạo được PR nháp.' }
+      : { ok: true };
+  }
+
+  if (input.action === 'ready') {
+    const ready = await runBranchProcess(run, 'gh', ['pr', 'ready', branch, '--repo', githubRepo], input.checkout, 60_000);
+    return ready === null
+      ? { ok: false, reason: 'Không chuyển được PR sang trạng thái sẵn sàng.' }
+      : { ok: true };
+  }
+
+  const openPullRequests = await runBranchProcess(run, 'gh', [
+    'pr', 'list', '--head', branch, '--state', 'open', '--limit', '1', '--json', 'state', '--repo', githubRepo,
+  ], input.checkout, 60_000);
+  const openStates = openPullRequests === null ? null : parsePullRequestStates(openPullRequests.stdout);
+  if (openStates === null || openStates.includes('OPEN')) {
+    return { ok: false, reason: 'Chỉ xóa nhánh remote khi không còn PR đang mở.' };
+  }
+  const pullRequests = await runBranchProcess(run, 'gh', [
+    'pr', 'list', '--head', branch, '--state', 'all', '--limit', '1', '--json', 'state', '--repo', githubRepo,
+  ], input.checkout, 60_000);
+  const pullRequestStates = pullRequests === null ? null : parsePullRequestStates(pullRequests.stdout);
+  if (pullRequestStates === null || !pullRequestStates.some((state) => state === 'MERGED' || state === 'CLOSED')) {
+    return { ok: false, reason: 'Chỉ xóa nhánh remote khi PR đã gộp hoặc đóng.' };
+  }
+  const deleted = await runBranchProcess(run, 'git', ['push', 'origin', '--delete', branch], input.checkout, 120_000);
+  return deleted === null
+    ? { ok: false, reason: 'Không xóa được nhánh remote.' }
+    : { ok: true };
+}
+
+async function runBranchProcess(
+  run: ProcessRunner,
+  file: string,
+  args: readonly string[],
+  cwd: string,
+  timeoutMs = GH_TIMEOUT_MS,
+): Promise<ProcessResult | null> {
+  try {
+    const result = await run(file, args, { cwd, timeoutMs, okCodes: [0], maxBytes: GH_MAX_BYTES });
+    return result.ok && !result.timedOut && !result.truncated ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+async function readBranchProposal(repoRoot: string, branch: string): Promise<string | undefined | null> {
+  const changeId = branch.slice(branch.lastIndexOf('/') + 1);
+  try {
+    return await readFile(join(repoRoot, 'openspec', 'changes', changeId, 'proposal.md'), 'utf8');
+  } catch (error) {
+    if (isRecord(error) && error.code === 'ENOENT') return undefined;
+    return null;
+  }
+}
+
+function parsePullRequestStates(stdout: string): string[] | null {
+  try {
+    const payload: unknown = JSON.parse(stdout);
+    if (
+      !Array.isArray(payload) ||
+      !payload.every((entry) => isRecord(entry) && typeof entry.state === 'string')
+    ) {
+      return null;
+    }
+    return payload.map((entry: { state: string }) => entry.state);
+  } catch {
+    return null;
+  }
+}

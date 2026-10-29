@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
-import type { FleetBranchAnalysis, FleetLocalBranchSnapshot, FleetMachineSnapshot, FleetPullRequest, FleetTaskCreateMessage } from '../../../../core/src/messages.js';
+import type { FleetBranchActionMessage, FleetBranchAnalysis, FleetLocalBranchSnapshot, FleetMachineSnapshot, FleetPullRequest, FleetTaskCreateMessage } from '../../../../core/src/messages.js';
 import { MAX_SESSIONS_PER_MACHINE, pickMachine, projectMachines, randomSuffix, slugFromPrompt } from './cloudTaskPick.js';
 import { CloudTerminal } from './CloudTerminal.js';
 import { fleetStore } from './fleetClient.js';
@@ -157,6 +157,7 @@ function LocalBranchRow({
       <span className="break-all font-mono">{branch.branch}</span>
       <span className="break-all text-text-muted">{branch.checkout}</span>
       <BranchStatusBadges {...branch} />
+      <BranchActions branch={branch} busy={busy} />
       {pullRequest?.ci === 'red' && sessionId !== undefined && (
         <button
           type="button"
@@ -169,6 +170,46 @@ function LocalBranchRow({
       )}
       {analysis !== undefined ? <BranchAnalysisDetails analysis={analysis} /> : null}
     </li>
+  );
+}
+
+function BranchActions({ branch, busy }: { branch: FleetLocalBranchSnapshot; busy: boolean }) {
+  if (branch.branch.toLowerCase() === 'main' || branch.branch.toLowerCase() === 'staging') return null;
+  const run = (action: FleetBranchActionMessage['action']) => {
+    if (action === 'push' && !window.confirm(`Đẩy nhánh ${branch.branch} lên origin?`)) return;
+    if (action === 'delete-remote' && !window.confirm(`Xóa nhánh ${branch.branch} trên origin?`)) return;
+    fleetStore.runBranchAction({ action, checkout: branch.checkout, branch: branch.branch });
+  };
+  const pullRequest = branch.pullRequest;
+  const closed = pullRequest?.state === 'merged' || pullRequest?.state === 'closed';
+
+  return (
+    <details className="relative">
+      <summary aria-label={`Thao tác PR cho ${branch.branch}`} className="company-btn company-btn-sm company-btn-ghost cursor-pointer">
+        PR
+      </summary>
+      <div role="group" aria-label={`Thao tác nhánh ${branch.branch}`} className="absolute right-0 z-20 mt-1 flex min-w-48 flex-col rounded border border-hairline bg-panel p-1 shadow-xl">
+        <button type="button" disabled={busy} onClick={() => run('push')} className="rounded px-2 py-1.5 text-left hover:bg-well disabled:opacity-50">
+          Đẩy nhánh
+        </button>
+        {pullRequest === undefined && (
+          <button type="button" disabled={busy} onClick={() => run('create-draft')} className="rounded px-2 py-1.5 text-left hover:bg-well disabled:opacity-50">
+            Mở PR nháp
+          </button>
+        )}
+        {pullRequest?.state === 'open' && pullRequest.isDraft && (
+          <button type="button" disabled={busy} onClick={() => run('ready')} className="rounded px-2 py-1.5 text-left hover:bg-well disabled:opacity-50">
+            Sẵn sàng
+          </button>
+        )}
+        {closed && (
+          <button type="button" disabled={busy} onClick={() => run('delete-remote')} className="rounded px-2 py-1.5 text-left text-warning hover:bg-well disabled:opacity-50">
+            Xóa nhánh remote
+          </button>
+        )}
+        <span className="px-2 py-1.5 text-text-muted">Gộp qua merge-lane</span>
+      </div>
+    </details>
   );
 }
 function BranchAnalysisDetails({ analysis }: { analysis: FleetBranchAnalysis }) {
@@ -207,6 +248,13 @@ function BranchAnalysisDetails({ analysis }: { analysis: FleetBranchAnalysis }) 
 
 function ActionStatus({ fleet }: { fleet: FleetState }) {
   if (fleet.action !== null) {
+    if (fleet.action.kind === 'branch') {
+      return (
+        <p role="status" className="text-sm text-text-muted">
+          Đang cập nhật nhánh {fleet.action.session}…
+        </p>
+      );
+    }
     const what = {
       terminal: 'Đang mở terminal',
       task: 'Đang tạo worktree và mở Claude',

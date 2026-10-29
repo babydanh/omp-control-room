@@ -37,6 +37,34 @@ describe('fleet comment actions', () => {
     expect(store.getSnapshot().actionError).toBeNull();
   });
 
+  it('runs a local branch action and refreshes PR status after success', () => {
+    let requestIndex = 0;
+    const sent: ClientMessage[] = [];
+    const store = createFleetStore({
+      send: (message) => sent.push(message),
+      newRequestId: () => `branch-${++requestIndex}`,
+    });
+
+    store.runBranchAction({ action: 'push', checkout: 'C:/repo/.worktrees/task', branch: 'feature/task' });
+    expect(sent[0]).toEqual({
+      type: 'fleetBranchAction',
+      requestId: 'branch-1',
+      action: 'push',
+      checkout: 'C:/repo/.worktrees/task',
+      branch: 'feature/task',
+    });
+    expect(store.getSnapshot().action).toMatchObject({
+      kind: 'branch',
+      machine: 'local',
+      session: 'feature/task',
+    });
+
+    store.accept({ type: 'fleetCommandResult', requestId: 'branch-1', ok: true, code: 'success' } as ServerMessage);
+    expect(sent[1]).toEqual({ type: 'fleetRequest', requestId: 'branch-2' });
+    expect(store.getSnapshot().action).toBeNull();
+    expect(store.getSnapshot().latestRequestId).toBe('branch-2');
+  });
+
   it('routes a local CI failure through the existing project diff comment message', () => {
     const sent: ClientMessage[] = [];
     const store = createFleetStore({ send: (message) => sent.push(message), newRequestId: () => 'r2' });

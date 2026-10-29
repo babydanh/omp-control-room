@@ -1,9 +1,14 @@
 import type { FleetSnapshotMessage, GitGuardReport, LedgerView, ServerMessage } from '../../../core/src/messages.js';
 import { createGitRunner, type GitRunner } from '../ledger/git.js';
-import { runProcess } from '../ledger/processRunner.js';
+import { type ProcessRunner,runProcess } from '../ledger/processRunner.js';
 import type { PtySessionManager } from '../terminal/ptySessionManager.js';
 import { createFleetBranchAnalysisService, type FleetBranchAnalysisSnapshot } from './branchAnalysis.js';
-import { createFleetPullRequestLookup, type FleetPullRequestLookup } from './branchPullRequests.js';
+import {
+  createFleetPullRequestLookup,
+  type FleetBranchActionName,
+  type FleetPullRequestLookup,
+  runFleetBranchAction,
+} from './branchPullRequests.js';
 import { CloudControl, CloudControlError } from './cloudControl.js';
 import {
   FLEET_REASON_BAD_INPUT,
@@ -35,6 +40,7 @@ export interface FleetCommandContext {
   readonly pullRequests?: FleetPullRequestLookup;
   readonly ptyManager?: PtySessionManager | null;
   readonly getLocalGuard?: () => GitGuardReport | null;
+  readonly processRunner?: ProcessRunner;
   readonly privileged: boolean;
 }
 
@@ -76,6 +82,7 @@ const FLEET_TYPES = new Set([
   'fleetLavishOpen',
   'fleetDiffRequest',
   'fleetCloudCommentSend',
+  'fleetBranchAction',
 ]);
 
 export function handleFleetMessage(
@@ -114,6 +121,10 @@ export function handleFleetMessage(
   }
   if (msg.type === 'fleetCloudCommentSend') {
     sendCloudComment(msg, requestId, send, context);
+    return true;
+  }
+  if (msg.type === 'fleetBranchAction') {
+    runLocalBranchAction(msg, requestId, send, context);
     return true;
   }
 
@@ -327,6 +338,43 @@ function sendCloudComment(
       send({ type: 'fleetCommandResult', requestId, ok: true, code: 'success' });
     })
     .catch((error: unknown) => send(failure(requestId, error)));
+}
+
+function runLocalBranchAction(
+  msg: Record<string, unknown>,
+  requestId: string,
+  send: (message: ServerMessage) => void,
+  context: FleetCommandContext,
+): void {
+  const actions: readonly FleetBranchActionName[] = ['push', 'create-draft', 'ready', 'delete-remote'];
+  const action = typeof msg.action === 'string' && actions.includes(msg.action as FleetBranchActionName)
+    ? msg.action as FleetBranchActionName
+    : undefined;
+  const checkout = typeof msg.checkout === 'string' ? msg.checkout : '';
+  const branch = typeof msg.branch === 'string' ? msg.branch : '';
+  if (action === undefined || checkout === '' || checkout.length > 2000 || branch === '' || branch.length > 255) {
+    send(commandResult(requestId, 'failed', FLEET_REASON_BAD_INPUT));
+    return;
+  }
+  if (context.ledger === null) {
+    send(commandResult(requestId, 'unavailable', 'Dữ liệu nhánh cục bộ chưa khả dụng.'));
+    return;
+  }
+  void context.ledger.getView()
+    .then(async (view) => {
+      const reported = view.repos.some((repo) =>
+        repo.worktrees.some((worktree) => worktree.path === checkout && worktree.branch === branch),
+      );
+      if (!reported) {
+        send(commandResult(requestId, 'failed', 'Checkout không nằm trong danh sách nhánh cục bộ.'));
+        return;
+      }
+      const result = await runFleetBranchAction({ action, checkout, branch }, { run: context.processRunner });
+      send(result.ok
+        ? { type: 'fleetCommandResult', requestId, ok: true, code: 'success' }
+        : commandResult(requestId, 'failed', result.reason));
+    })
+    .catch(() => send(commandResult(requestId, 'failed', FLEET_REASON_COMMAND_FAILED)));
 }
 
 function failure(requestId: string, error: unknown): ServerMessage {

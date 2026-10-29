@@ -288,6 +288,7 @@ components:
         - $ref: '#/components/schemas/FleetLavishOpenMessage'
         - $ref: '#/components/schemas/FleetDiffRequestMessage'
         - $ref: '#/components/schemas/FleetCloudCommentSendMessage'
+        - $ref: '#/components/schemas/FleetBranchActionMessage'
         # Project tree (privileged; tree CRUD, diffs, comments, settings and sessions)
         - $ref: '#/components/schemas/ProjectTreeRequestMessage'
         - $ref: '#/components/schemas/ProjectNodeCreateMessage'
@@ -6485,6 +6486,29 @@ components:
           type: string
           minLength: 1
           maxLength: 4000
+
+    FleetBranchActionMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, action, checkout, branch]
+      description: Perform a confirmed local work-branch push or pull-request action.
+      properties:
+        type:
+          const: fleetBranchAction
+        requestId:
+          type: string
+          format: uuid
+        action:
+          type: string
+          enum: [push, create-draft, ready, delete-remote]
+        checkout:
+          type: string
+          minLength: 1
+          maxLength: 2000
+        branch:
+          type: string
+          minLength: 1
+          maxLength: 255
 
     FleetDiffMessage:
       type: object

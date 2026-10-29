@@ -3,6 +3,7 @@ import { useSyncExternalStore } from 'react';
 import { TRANSPORT_DISCONNECTED_ERROR } from '../../../../core/src/messageDelivery.js';
 import type {
   ClientMessage,
+  FleetBranchActionMessage,
   FleetCloudCommentSendMessage,
   FleetCommandResultMessage,
   FleetDiffMessage,
@@ -39,7 +40,7 @@ export interface FleetTerminal {
 /** One in-flight action (open a terminal / create a task); only the latest one is tracked. */
 export interface FleetAction {
   readonly requestId: string;
-  readonly kind: 'terminal' | 'task' | 'lavish' | 'diff' | 'comment';
+  readonly kind: 'terminal' | 'task' | 'lavish' | 'diff' | 'comment' | 'branch';
   readonly machine: string;
   readonly session: string;
 }
@@ -80,6 +81,7 @@ export interface FleetStore {
   openLavish: (machine: string, key: string, tab?: PendingTab | null) => void;
   requestDiff: (machine: string, path: string) => void;
   sendCloudComment: (comment: Omit<FleetCloudCommentSendMessage, 'type' | 'requestId'>) => void;
+  runBranchAction: (action: Omit<FleetBranchActionMessage, 'type' | 'requestId'>) => void;
   sendLocalCiFailureComment: (checkout: string, receivingSessionId: string, pr: FleetPullRequest) => void;
   closeDiff: () => void;
 }
@@ -160,13 +162,23 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
   }
 
   function act(
-    request: FleetTerminalOpenMessage | FleetTaskCreateMessage | FleetLavishOpenMessage | FleetDiffRequestMessage | FleetCloudCommentSendMessage,
+    request: FleetTerminalOpenMessage | FleetTaskCreateMessage | FleetLavishOpenMessage | FleetDiffRequestMessage | FleetCloudCommentSendMessage | FleetBranchActionMessage,
     kind: FleetAction['kind'],
     session: string,
   ): void {
     // One action at a time: a double click must not create two cloud tasks.
     if (state.action !== null) return;
-    commit({ ...state, action: { requestId: request.requestId, kind, machine: request.machine, session }, actionError: null, createdTask: null });
+    commit({
+      ...state,
+      action: {
+        requestId: request.requestId,
+        kind,
+        machine: request.type === 'fleetBranchAction' ? 'local' : request.machine,
+        session,
+      },
+      actionError: null,
+      createdTask: null,
+    });
     try {
       send(request);
     } catch (error) {
@@ -191,6 +203,9 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
     } else if (message.type === 'fleetCommandResult') {
       if (action.kind === 'lavish') settleTab(null);
       commit({ ...state, action: null, actionError: message.ok ? null : message.reason ?? SEND_FAILED_REASON });
+      if (action.kind === 'branch' && message.ok) {
+        transmit({ type: 'fleetRequest', requestId: newRequestId() });
+      }
     }
     return true;
   }
@@ -266,6 +281,9 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
     },
     sendCloudComment: (comment) => {
       act({ type: 'fleetCloudCommentSend', requestId: newRequestId(), ...comment }, 'comment', comment.session);
+    },
+    runBranchAction: (action) => {
+      act({ type: 'fleetBranchAction', requestId: newRequestId(), ...action }, 'branch', action.branch);
     },
     sendLocalCiFailureComment: (checkout, receivingSessionId, pr) => {
       if (state.action !== null) return;
