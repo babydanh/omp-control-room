@@ -73,6 +73,8 @@ export type ServerMessage =
   | UsageHistoryMessage
   | UsageStatsMessage
   | LedgerSnapshotMessage
+  | LedgerOpenSpecSnapshotMessage
+  | LedgerOpenSpecFileMessage
   | LedgerTimelineMessage
   | LedgerFileDiffMessage
   | LedgerFileHistoryMessage
@@ -183,6 +185,8 @@ export type ClientMessage =
   | CompanySquadCloseMessage
   | CompanySquadClaudeCheckMessage
   | LedgerViewRequestMessage
+  | LedgerOpenSpecRequestMessage
+  | LedgerOpenSpecFileRequestMessage
   | LedgerTimelineRequestMessage
   | LedgerFileDiffRequestMessage
   | LedgerFileHistoryRequestMessage
@@ -1911,6 +1915,23 @@ export interface LedgerSnapshotMessage {
   view: LedgerView;
 }
 
+export interface LedgerOpenSpecSnapshotMessage {
+  type: 'ledgerOpenSpecSnapshot';
+  requestId: string;
+  changes: LedgerOpenSpecChange[];
+}
+
+export interface LedgerOpenSpecFileMessage {
+  type: 'ledgerOpenSpecFile';
+  requestId: string;
+  worktree: string;
+  changeId: string;
+  file: LedgerOpenSpecFileName;
+  ok: boolean;
+  content: string;
+  reason?: string;
+}
+
 export interface LedgerView {
   generatedAt: string;
   database: LedgerDatabaseStatus;
@@ -1935,6 +1956,7 @@ export type AnonymousSchema_1000 = 'ok' | 'missing' | 'unreadable';
 export interface LedgerRepo {
   repo: string;
   name: string;
+
   worktrees: LedgerWorktree[];
   workspacePath?: string;
 }
@@ -1957,6 +1979,24 @@ export interface LedgerWorktree {
   lastCommitAt: string | null;
   sessionIds: string[];
   gitError?: string;
+}
+
+export type LedgerOpenSpecFileName = 'proposal.md' | 'tasks.md' | 'handoff.md';
+
+export interface LedgerOpenSpecChange {
+  repo: string;
+  repoName: string;
+  worktree: string;
+  worktreeName: string;
+  branch: string | null;
+  id: string;
+  summary: string;
+  completedTasks: number;
+  totalTasks: number;
+  progressPercent: number | null;
+  hasProposal: boolean;
+  hasTasks: boolean;
+  hasHandoff: boolean;
 }
 
 export interface LedgerDirtyFile {
@@ -3434,6 +3474,19 @@ export interface CompanySquadClaudeCheckMessage {
 export interface LedgerViewRequestMessage {
   type: 'ledgerViewRequest';
   requestId: string;
+}
+
+export interface LedgerOpenSpecRequestMessage {
+  type: 'ledgerOpenSpecRequest';
+  requestId: string;
+}
+
+export interface LedgerOpenSpecFileRequestMessage {
+  type: 'ledgerOpenSpecFileRequest';
+  requestId: string;
+  worktree: string;
+  changeId: string;
+  file: LedgerOpenSpecFileName;
 }
 
 export interface LedgerTimelineRequestMessage {

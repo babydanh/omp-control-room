@@ -26,6 +26,12 @@ import type {
   LedgerFileHistoryRequestMessage,
   LedgerFileTouch,
   LedgerHandoff,
+  LedgerOpenSpecChange,
+  LedgerOpenSpecFileMessage,
+  LedgerOpenSpecFileName,
+  LedgerOpenSpecFileRequestMessage,
+  LedgerOpenSpecRequestMessage,
+  LedgerOpenSpecSnapshotMessage,
   LedgerSendMessage,
   LedgerSnapshotMessage,
   LedgerTimeline,
@@ -43,6 +49,8 @@ import type { LedgerWindow } from './ledgerFormat.js';
 /** The replies the ledger store applies. Everything else on the socket is ignored. */
 export type LedgerServerMessage =
   | LedgerSnapshotMessage
+  | LedgerOpenSpecSnapshotMessage
+  | LedgerOpenSpecFileMessage
   | LedgerTimelineMessage
   | LedgerFileDiffMessage
   | LedgerFileHistoryMessage
@@ -53,6 +61,8 @@ export type LedgerServerMessage =
 /** The requests the ledger store sends. */
 export type LedgerRequestMessage =
   | LedgerViewRequestMessage
+  | LedgerOpenSpecRequestMessage
+  | LedgerOpenSpecFileRequestMessage
   | LedgerTimelineRequestMessage
   | LedgerFileDiffRequestMessage
   | LedgerFileHistoryRequestMessage
@@ -83,6 +93,18 @@ export interface LedgerFileHistoryView {
   reason?: string;
 }
 
+export type LedgerOpenSpecFileStatus = 'loading' | 'done' | 'failed';
+
+export interface LedgerOpenSpecFileView {
+  requestId: string;
+  worktree: string;
+  changeId: string;
+  file: LedgerOpenSpecFileName;
+  status: LedgerOpenSpecFileStatus;
+  content: string;
+  reason?: string;
+}
+
 export type LedgerSendStatus = 'sending' | 'delivered' | 'refused';
 
 export interface LedgerSendView {
@@ -101,6 +123,8 @@ export interface LedgerLatest {
   fileHistory: string | null;
   coordination: string | null;
   toolUsage: string | null;
+  openSpec: string | null;
+  openSpecFile: string | null;
 }
 
 export interface LedgerState {
@@ -115,6 +139,9 @@ export interface LedgerState {
   timelineWindow: LedgerWindow;
   timelineError: string | null;
   diff: LedgerDiffView | null;
+  openSpecChanges: LedgerOpenSpecChange[] | null;
+  openSpecError: string | null;
+  openSpecFile: LedgerOpenSpecFileView | null;
   fileHistory: LedgerFileHistoryView | null;
   coordination: { messages: LedgerAgentMessage[]; handoffs: LedgerHandoff[] } | null;
   toolUsage: LedgerToolUsageMessage | null;
@@ -144,6 +171,9 @@ export function createInitialLedgerState(): LedgerState {
     timelineWindow: LEDGER_DEFAULT_WINDOW,
     timelineError: null,
     diff: null,
+    openSpecChanges: null,
+    openSpecError: null,
+    openSpecFile: null,
     fileHistory: null,
     coordination: null,
     toolUsage: null,
@@ -156,12 +186,16 @@ export function createInitialLedgerState(): LedgerState {
       fileHistory: null,
       coordination: null,
       toolUsage: null,
+      openSpec: null,
+      openSpecFile: null,
     },
   };
 }
 
 const LEDGER_SERVER_TYPES: Record<string, true> = {
   ledgerSnapshot: true,
+  ledgerOpenSpecSnapshot: true,
+  ledgerOpenSpecFile: true,
   ledgerTimeline: true,
   ledgerFileDiff: true,
   ledgerFileHistory: true,
@@ -188,7 +222,11 @@ function settleLost(state: LedgerState): LedgerState {
     state.fileHistory !== null && state.fileHistory.status === 'loading'
       ? { ...state.fileHistory, status: 'failed', reason: LEDGER_LOST_REASON }
       : state.fileHistory;
-  return { ...state, sends, diff, fileHistory };
+  const openSpecFile: LedgerOpenSpecFileView | null =
+    state.openSpecFile !== null && state.openSpecFile.status === 'loading'
+      ? { ...state.openSpecFile, status: 'failed', reason: LEDGER_LOST_REASON }
+      : state.openSpecFile;
+  return { ...state, sends, diff, fileHistory, openSpecFile };
 }
 
 /** Starts a connection: the probe becomes the newest view request. */
@@ -205,6 +243,8 @@ export function reduceLedgerConnect(state: LedgerState, probeRequestId: string):
       fileHistory: null,
       coordination: null,
       toolUsage: null,
+      openSpec: null,
+      openSpecFile: null,
     },
   };
 }
@@ -237,6 +277,23 @@ export function reduceLedgerRequest(
   switch (request.type) {
     case 'ledgerViewRequest':
       return { ...state, viewError: null, latest: { ...state.latest, view: request.requestId } };
+    case 'ledgerOpenSpecRequest':
+      return {
+        ...state,
+        openSpecError: null,
+        latest: { ...state.latest, openSpec: request.requestId },
+      };
+    case 'ledgerOpenSpecFileRequest': {
+      const openSpecFile: LedgerOpenSpecFileView = {
+        requestId: request.requestId,
+        worktree: request.worktree,
+        changeId: request.changeId,
+        file: request.file,
+        status: 'loading',
+        content: '',
+      };
+      return { ...state, openSpecFile, latest: { ...state.latest, openSpecFile: request.requestId } };
+    }
     case 'ledgerTimelineRequest':
       return {
         ...state,
@@ -308,6 +365,14 @@ function settleRefused(state: LedgerState, requestId: string, reason: string): L
   if (state.latest.view === requestId) {
     next = { ...next, viewError: reason, latest: { ...next.latest, view: null } };
   }
+  if (state.latest.openSpec === requestId) {
+    next = { ...next, openSpecError: reason, latest: { ...next.latest, openSpec: null } };
+  }
+  if (state.latest.openSpecFile === requestId) {
+    const openSpecFile: LedgerOpenSpecFileView | null =
+      next.openSpecFile === null ? null : { ...next.openSpecFile, status: 'failed', reason };
+    next = { ...next, openSpecFile, latest: { ...next.latest, openSpecFile: null } };
+  }
   if (state.latest.timeline === requestId) {
     next = { ...next, timelineError: reason, latest: { ...next.latest, timeline: null } };
   }
@@ -359,6 +424,41 @@ function reduceSnapshot(state: LedgerState, message: LedgerSnapshotMessage): Led
     privileged: true,
     probeRequestId: isProbe ? null : state.probeRequestId,
     latest: isLatest ? { ...state.latest, view: null } : state.latest,
+  };
+}
+
+function reduceOpenSpecSnapshot(
+  state: LedgerState,
+  message: LedgerOpenSpecSnapshotMessage,
+): LedgerState {
+  if (message.requestId !== state.latest.openSpec) return state;
+  return {
+    ...state,
+    openSpecChanges: message.changes,
+    openSpecError: null,
+    privileged: true,
+    latest: { ...state.latest, openSpec: null },
+  };
+}
+
+function reduceOpenSpecFile(state: LedgerState, message: LedgerOpenSpecFileMessage): LedgerState {
+  if (
+    message.requestId !== state.latest.openSpecFile ||
+    state.openSpecFile === null ||
+    message.worktree !== state.openSpecFile.worktree ||
+    message.changeId !== state.openSpecFile.changeId ||
+    message.file !== state.openSpecFile.file
+  ) return state;
+  return {
+    ...state,
+    openSpecFile: {
+      ...state.openSpecFile,
+      status: message.ok ? 'done' : 'failed',
+      content: message.content,
+      reason: message.reason,
+    },
+    privileged: true,
+    latest: { ...state.latest, openSpecFile: null },
   };
 }
 
@@ -431,6 +531,10 @@ export function reduceLedgerMessage(state: LedgerState, message: LedgerServerMes
   switch (message.type) {
     case 'ledgerSnapshot':
       return reduceSnapshot(state, message);
+    case 'ledgerOpenSpecSnapshot':
+      return reduceOpenSpecSnapshot(state, message);
+    case 'ledgerOpenSpecFile':
+      return reduceOpenSpecFile(state, message);
     case 'ledgerTimeline':
       return reduceTimeline(state, message);
     case 'ledgerFileDiff':
@@ -461,6 +565,9 @@ export interface LedgerStore {
   /** Starts a connection: probes privilege and re-requests the view. */
   connect: () => void;
   requestView: () => void;
+  requestOpenSpec: () => void;
+  requestOpenSpecFile: (worktree: string, changeId: string, file: LedgerOpenSpecFileName) => string;
+  clearOpenSpecFile: () => void;
   requestTimeline: (windowMinutes: LedgerWindow) => void;
   requestFileDiff: (worktree: string, path: string) => void;
   requestFileHistory: (path: string) => string;
@@ -515,6 +622,24 @@ export function createLedgerStore(options: LedgerStoreOptions): LedgerStore {
     },
     requestView: () => {
       transmit({ type: 'ledgerViewRequest', requestId: newRequestId() });
+    },
+    requestOpenSpec: () => {
+      transmit({ type: 'ledgerOpenSpecRequest', requestId: newRequestId() });
+    },
+    requestOpenSpecFile: (worktree, changeId, file) =>
+      transmit({
+        type: 'ledgerOpenSpecFileRequest',
+        requestId: newRequestId(),
+        worktree,
+        changeId,
+        file,
+      }),
+    clearOpenSpecFile: () => {
+      commit({
+        ...state,
+        openSpecFile: null,
+        latest: { ...state.latest, openSpecFile: null },
+      });
     },
     requestTimeline: (windowMinutes) => {
       transmit({ type: 'ledgerTimelineRequest', requestId: newRequestId(), windowMinutes });

@@ -15,6 +15,8 @@ import { eventRow, flushAsync, makeService, minutesAgo } from './ledgerFixtures.
 const FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
 const LEDGER_REQUEST_TYPES = [
   'ledgerViewRequest',
+  'ledgerOpenSpecRequest',
+  'ledgerOpenSpecFileRequest',
   'ledgerTimelineRequest',
   'ledgerFileDiffRequest',
   'ledgerSendMessage',
@@ -100,6 +102,35 @@ describe('handleLedgerMessage: privileged connections', () => {
     await flushAsync();
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({ type: 'ledgerSnapshot', requestId: 'req-3' });
+  });
+
+  it('lists OpenSpec changes and refuses opening an untracked worktree', async () => {
+    const h = makeService();
+    const { sent, send } = collector();
+    handleLedgerMessage({ type: 'ledgerOpenSpecRequest', requestId: 'openspec' }, send, {
+      ledger: h.service,
+      privileged: true,
+    });
+    await flushAsync();
+    expect(sent[0]).toMatchObject({ type: 'ledgerOpenSpecSnapshot', requestId: 'openspec', changes: [] });
+
+    handleLedgerMessage({
+      type: 'ledgerOpenSpecFileRequest',
+      requestId: 'open-file',
+      worktree: 'C:/not-tracked',
+      changeId: 'feature-one',
+      file: 'proposal.md',
+    }, send, {
+      ledger: h.service,
+      privileged: true,
+    });
+    await flushAsync();
+    expect(sent[1]).toMatchObject({
+      type: 'ledgerOpenSpecFile',
+      requestId: 'open-file',
+      ok: false,
+      reason: 'Worktree không còn được theo dõi.',
+    });
   });
 
   it.each([30, '15', undefined])('refuses timeline window %j', async (windowMinutes) => {

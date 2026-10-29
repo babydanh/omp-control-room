@@ -13,6 +13,7 @@ import {
   LEDGER_TIMELINE_WINDOWS,
 } from './constants.js';
 import type { LedgerService } from './ledgerService.js';
+import { isOpenSpecFileName, listOpenSpecChanges, readOpenSpecFile } from './openSpecChanges.js';
 
 /** Used when a request arrives without a usable requestId, so the reply still parses. */
 const FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
@@ -34,6 +35,8 @@ export function handleLedgerMessage(
 ): boolean {
   switch (msg.type) {
     case 'ledgerViewRequest':
+    case 'ledgerOpenSpecRequest':
+    case 'ledgerOpenSpecFileRequest':
     case 'ledgerTimelineRequest':
     case 'ledgerFileDiffRequest':
     case 'ledgerFileHistoryRequest':
@@ -73,6 +76,57 @@ async function runLedgerRequest(
     case 'ledgerViewRequest': {
       const view = await ledger.getView();
       send({ type: 'ledgerSnapshot', requestId, view });
+      return;
+    }
+    case 'ledgerOpenSpecRequest': {
+      const view = await ledger.getView();
+      const sources = view.repos.flatMap((repo) =>
+        repo.worktrees.map((worktree) => ({
+          repo: repo.repo,
+          repoName: repo.name,
+          worktree: worktree.path,
+          worktreeName: worktree.name,
+          branch: worktree.branch,
+        })),
+      );
+      const changes = await listOpenSpecChanges(sources);
+      send({ type: 'ledgerOpenSpecSnapshot', requestId, changes });
+      return;
+    }
+    case 'ledgerOpenSpecFileRequest': {
+      const worktree = typeof msg.worktree === 'string' ? msg.worktree : '';
+      const changeId = typeof msg.changeId === 'string' ? msg.changeId : '';
+      const file = isOpenSpecFileName(msg.file) ? msg.file : null;
+      if (worktree === '' || changeId === '' || file === null) {
+        send(commandResult(requestId, false, 'Yêu cầu mở tệp OpenSpec không hợp lệ.'));
+        return;
+      }
+      const view = await ledger.getView();
+      const tracked = view.repos.some((repo) => repo.worktrees.some((entry) => entry.path === worktree));
+      if (!tracked) {
+        send({
+          type: 'ledgerOpenSpecFile',
+          requestId,
+          worktree,
+          changeId,
+          file,
+          ok: false,
+          content: '',
+          reason: 'Worktree không còn được theo dõi.',
+        });
+        return;
+      }
+      const content = await readOpenSpecFile(worktree, changeId, file);
+      send({
+        type: 'ledgerOpenSpecFile',
+        requestId,
+        worktree,
+        changeId,
+        file,
+        ok: content !== null,
+        content: content ?? '',
+        ...(content === null ? { reason: 'Không đọc được tệp OpenSpec.' } : {}),
+      });
       return;
     }
     case 'ledgerTimelineRequest': {

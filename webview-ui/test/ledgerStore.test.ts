@@ -97,6 +97,54 @@ describe('ledger store: replies', () => {
     expect(store.getSnapshot().privileged).toBe(true);
   });
 
+  it('lists tracked OpenSpec changes and opens only the selected file reply', () => {
+    const { store, sent } = harness();
+    store.requestOpenSpec();
+    expect(sent[0]).toEqual({ type: 'ledgerOpenSpecRequest', requestId: 'r1' });
+    const changes = [{
+      repo: 'board',
+      repoName: 'Pixel Agents',
+      worktree: 'D:/repo-wt',
+      worktreeName: 'repo-wt',
+      branch: 'feat/openspec',
+      id: 'feature-one',
+      summary: 'Track OpenSpec changes.',
+      completedTasks: 1,
+      totalTasks: 2,
+      progressPercent: 50,
+      hasProposal: true,
+      hasTasks: true,
+      hasHandoff: false,
+    }];
+    store.accept({ type: 'ledgerOpenSpecSnapshot', requestId: 'r1', changes });
+    expect(store.getSnapshot().openSpecChanges).toEqual(changes);
+
+    const requestId = store.requestOpenSpecFile('D:/repo-wt', 'feature-one', 'proposal.md');
+    expect(store.getSnapshot().openSpecFile).toMatchObject({ requestId, status: 'loading' });
+    store.accept({
+      type: 'ledgerOpenSpecFile',
+      requestId,
+      worktree: 'D:/repo-wt',
+      changeId: 'other-change',
+      file: 'proposal.md',
+      ok: true,
+      content: 'stale',
+    });
+    expect(store.getSnapshot().openSpecFile?.status).toBe('loading');
+    store.accept({
+      type: 'ledgerOpenSpecFile',
+      requestId,
+      worktree: 'D:/repo-wt',
+      changeId: 'feature-one',
+      file: 'proposal.md',
+      ok: true,
+      content: '# Proposal',
+    });
+    expect(store.getSnapshot().openSpecFile).toMatchObject({ status: 'done', content: '# Proposal' });
+    store.clearOpenSpecFile();
+    expect(store.getSnapshot().openSpecFile).toBeNull();
+  });
+
   it('applies a timeline only when it answers the latest request for the same window', () => {
     const { store } = harness();
     store.requestTimeline(15); // r1

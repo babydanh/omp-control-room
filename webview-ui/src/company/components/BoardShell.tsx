@@ -94,6 +94,7 @@ import { CommandPalette } from './CommandPalette.js';
 import { CompanyBoard } from './CompanyBoard.js';
 import { DetailDrawer } from './DetailDrawer.js';
 import { Icon } from './Icon.js';
+import { OpenSpecPage } from './OpenSpecPage.js';
 import { PromptComposer } from './PromptComposer.js';
 import { RolesDialog } from './RolesDialog.js';
 import { ShortcutsSheet } from './ShortcutsSheet.js';
@@ -124,7 +125,8 @@ type ShellPage =
   | 'skills'
   | 'mcp'
   | 'accounts'
-  | 'changes';
+  | 'changes'
+  | 'openspec';
 const FLEET_REFRESH_INTERVAL_MS = 15_000;
 
 /** Apple platforms show ⌘ in shortcut hints; elsewhere the key names stay. */
@@ -246,6 +248,10 @@ export function BoardShell({ client }: BoardShellProps) {
   }, [activePage, sessionsAvailable]);
 
   useEffect(() => {
+    if (activePage === 'openspec' && ledgerAvailable) ledgerStore.requestOpenSpec();
+  }, [activePage, ledgerAvailable, ledger.connection]);
+
+  useEffect(() => {
     if (!fleetAvailable) return undefined;
     const refresh = () => {
       void fleetStore.requestFleet();
@@ -256,9 +262,10 @@ export function BoardShell({ client }: BoardShellProps) {
   }, [fleetAvailable]);
 
   useEffect(() => {
-    if (!fleetAvailable && (activePage === 'cloud' || activePage === 'guard'))
+    if ((!fleetAvailable && (activePage === 'cloud' || activePage === 'guard')) || (!ledgerAvailable && activePage === 'openspec')) {
       setActivePage('board');
-  }, [activePage, fleetAvailable]);
+    }
+  }, [activePage, fleetAvailable, ledgerAvailable]);
 
   // A right-click agent choice applies once: leaving the Cloud page forgets it, so coming back keeps the reader's own pick.
   useEffect(() => {
@@ -801,6 +808,7 @@ export function BoardShell({ client }: BoardShellProps) {
       ? [
           { page: 'ledger' as const, label: 'Cây git', icon: 'git-branch' as const, group: 'Không gian làm việc' },
           { page: 'changes' as const, label: 'Thay đổi', icon: 'file-text' as const, group: 'Không gian làm việc' },
+          { page: 'openspec' as const, label: 'OpenSpec', icon: 'file-text' as const, group: 'Không gian làm việc' },
         ]
       : []),
     ...(sessionsAvailable
@@ -1194,6 +1202,16 @@ export function BoardShell({ client }: BoardShellProps) {
           onRefreshFleet={refreshFleet}
           fleetAvailable={fleetAvailable}
           localAvailable={ledgerAvailable}
+        />
+      ) : activePage === 'openspec' ? (
+        <OpenSpecPage
+          changes={ledger.openSpecChanges}
+          loading={ledger.latest.openSpec !== null}
+          error={ledger.openSpecError}
+          file={ledger.openSpecFile}
+          onRefresh={() => ledgerStore.requestOpenSpec()}
+          onOpenFile={(change, file) => ledgerStore.requestOpenSpecFile(change.worktree, change.id, file)}
+          onCloseFile={() => ledgerStore.clearOpenSpecFile()}
         />
       ) : activePage === 'changes' ? (
         <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} initialTab={changesTab} initialBranchA={compareBranchA} onClose={() => selectPage('board')} />

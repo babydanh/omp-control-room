@@ -154,6 +154,8 @@ components:
         - $ref: '#/components/schemas/UsageStatsMessage'
         # Ledger (privileged; git graph and activity timeline)
         - $ref: '#/components/schemas/LedgerSnapshotMessage'
+        - $ref: '#/components/schemas/LedgerOpenSpecSnapshotMessage'
+        - $ref: '#/components/schemas/LedgerOpenSpecFileMessage'
         - $ref: '#/components/schemas/LedgerTimelineMessage'
         - $ref: '#/components/schemas/LedgerFileDiffMessage'
         - $ref: '#/components/schemas/LedgerFileHistoryMessage'
@@ -275,6 +277,8 @@ components:
         - $ref: '#/components/schemas/CompanySquadClaudeCheckMessage'
         # Ledger (privileged; read-only views and one message command)
         - $ref: '#/components/schemas/LedgerViewRequestMessage'
+        - $ref: '#/components/schemas/LedgerOpenSpecRequestMessage'
+        - $ref: '#/components/schemas/LedgerOpenSpecFileRequestMessage'
         - $ref: '#/components/schemas/LedgerTimelineRequestMessage'
         - $ref: '#/components/schemas/LedgerFileDiffRequestMessage'
         - $ref: '#/components/schemas/LedgerFileHistoryRequestMessage'
@@ -5929,6 +5933,35 @@ components:
           type: string
           format: uuid
 
+    LedgerOpenSpecRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId]
+      properties:
+        type:
+          const: ledgerOpenSpecRequest
+        requestId:
+          type: string
+          format: uuid
+
+    LedgerOpenSpecFileRequestMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, worktree, changeId, file]
+      properties:
+        type:
+          const: ledgerOpenSpecFileRequest
+        requestId:
+          type: string
+          format: uuid
+        worktree:
+          type: string
+        changeId:
+          type: string
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$'
+        file:
+          $ref: '#/components/schemas/LedgerOpenSpecFileName'
+
     LedgerCoordinationRequestMessage:
       type: object
       additionalProperties: false
@@ -6036,6 +6069,97 @@ components:
           format: uuid
         view:
           $ref: '#/components/schemas/LedgerView'
+
+    LedgerOpenSpecSnapshotMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, changes]
+      properties:
+        type:
+          const: ledgerOpenSpecSnapshot
+        requestId:
+          type: string
+          format: uuid
+        changes:
+          type: array
+          items:
+            $ref: '#/components/schemas/LedgerOpenSpecChange'
+
+    LedgerOpenSpecFileMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, worktree, changeId, file, ok, content]
+      properties:
+        type:
+          const: ledgerOpenSpecFile
+        requestId:
+          type: string
+          format: uuid
+        worktree:
+          type: string
+        changeId:
+          type: string
+        file:
+          $ref: '#/components/schemas/LedgerOpenSpecFileName'
+        ok:
+          type: boolean
+        content:
+          type: string
+        reason:
+          type: string
+
+    LedgerOpenSpecFileName:
+      type: string
+      enum: [proposal.md, tasks.md, handoff.md]
+
+    LedgerOpenSpecChange:
+      type: object
+      additionalProperties: false
+      required:
+        - repo
+        - repoName
+        - worktree
+        - worktreeName
+        - branch
+        - id
+        - summary
+        - completedTasks
+        - totalTasks
+        - progressPercent
+        - hasProposal
+        - hasTasks
+        - hasHandoff
+      properties:
+        repo:
+          type: string
+        repoName:
+          type: string
+        worktree:
+          type: string
+        worktreeName:
+          type: string
+        branch:
+          type: [string, 'null']
+        id:
+          type: string
+        summary:
+          type: string
+        completedTasks:
+          type: integer
+          minimum: 0
+        totalTasks:
+          type: integer
+          minimum: 0
+        progressPercent:
+          type: [integer, 'null']
+          minimum: 0
+          maximum: 100
+        hasProposal:
+          type: boolean
+        hasTasks:
+          type: boolean
+        hasHandoff:
+          type: boolean
 
     LedgerTimelineMessage:
       type: object
