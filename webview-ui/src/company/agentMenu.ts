@@ -29,6 +29,9 @@ export type ProjectNodeAction =
   | 'newSessionOmp'
   | 'newSessionClaude'
   | 'newSessionAgy'
+  | 'newSessionCodex'
+  | 'newSessionPi'
+  | 'newSessionThinkRail'
   /** "Phiên mới · Claude/omp cloud": the board opens the Cloud page's request box with that agent chosen. */
   | 'newCloudClaude'
   | 'newCloudOmp'
@@ -825,6 +828,9 @@ export function projectNodeMenuItems(
     add('new-omp', 'Phiên mới · omp', 'plus', 'newSessionOmp', startsGroup),
     add('new-claude', 'Phiên mới · Claude', 'plus', 'newSessionClaude'),
     add('new-agy', 'Phiên mới · agy', 'plus', 'newSessionAgy'),
+    add('new-codex', 'Phiên mới · Codex', 'plus', 'newSessionCodex'),
+    add('new-pi', 'Phiên mới · pi', 'plus', 'newSessionPi'),
+    add('new-thinkrail', 'Phiên mới · ThinkRail', 'plus', 'newSessionThinkRail'),
     ...(context.cloud
       ? [
           add('new-claude-cloud', 'Phiên mới · Claude cloud', 'plus', 'newCloudClaude'),

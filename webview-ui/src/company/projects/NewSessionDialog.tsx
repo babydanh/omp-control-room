@@ -2,6 +2,7 @@ import './NewSessionDialog.css';
 
 import { type FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AGENT_ENGINES, type ProjectSessionEngine } from '../../../../core/src/agentEngines.js';
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import { PetLoader } from '../components/PetLoader.js';
 import { foldersUnder } from './projectNodeTargets.js';
@@ -16,7 +17,7 @@ export interface NewSessionDialogProps {
   onStarted?: (session: { readonly sessionId: string; readonly engine: SessionEngine; readonly folderPath: string | undefined }) => void;
 }
 
-type SessionEngine = 'omp' | 'claude' | 'agy';
+type SessionEngine = ProjectSessionEngine;
 
 export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStarted }: NewSessionDialogProps) {
   const state = useProjectState(store);
@@ -87,7 +88,7 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
     }));
   }
 
-  // "Phiên mới · omp/Claude/agy" from the menu: open it as soon as the folder's repos are known, once.
+  // A selected CLI from the menu opens as soon as the folder's repos are known, once.
   const autoStarted = useRef(false);
   useEffect(() => {
     if (initialEngine === undefined || autoStarted.current || blocked) return;
@@ -136,7 +137,7 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
                 type="button"
                 aria-pressed={chosenEngine === choice.id}
                 disabled={blocked || needsRepo}
-                title={needsRepo ? 'Thư mục này không phải repo git: Claude và agy cần repo.' : choice.hint}
+                title={needsRepo ? 'Thư mục này không phải repo git: CLI bên herdr cần repo.' : choice.hint}
                 onClick={() => start(choice.id)}
               >
                 {choice.label}
@@ -175,11 +176,18 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
   );
 }
 
-const ENGINES: readonly { readonly id: SessionEngine; readonly label: string; readonly hint: string }[] = [
-  { id: 'omp', label: 'π omp', hint: 'Mở phiên omp ngay, gõ việc trong terminal' },
-  { id: 'claude', label: '✳ Claude', hint: 'Mở Claude Code ngay trong một tab herdr, gõ việc trong đó' },
-  { id: 'agy', label: 'agy', hint: 'Mở Antigravity ngay trong một tab herdr, gõ việc trong đó' },
-];
+const ENGINES: readonly { readonly id: SessionEngine; readonly label: string; readonly hint: string }[] = AGENT_ENGINES.map(
+  ({ id, label, icon, launch }) => ({
+    id,
+    label: `${icon} ${label}`,
+    hint:
+      launch === 'board'
+        ? 'Mở phiên omp ngay, gõ việc trong terminal'
+        : launch === 'herdr'
+          ? `Mở ${label} ngay trong một tab herdr, gõ việc trong đó`
+          : `Mở ${label} qua wrapper trong tab herdr để vào lane và guard`,
+  }),
+);
 
 /** Names the worktree when the user gives no name: the task's first words, else the tool and the time. */
 function autoTaskName(engine: SessionEngine, text: string): string {

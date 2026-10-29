@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 import type { SubmitPromptInput } from '../../../core/src/company.js';
 import type { ProjectPrepareScript, ProjectSettingsValues } from '../../../core/src/messages.js';
@@ -20,8 +22,8 @@ export interface ProjectSessionRuntimeOptions {
   readonly coordinatorFor: (folder: string) => Promise<SessionCoordinator>;
   /** The board's folders, open or not: a board chat lives in one of them. */
   readonly boardFolders: () => readonly string[];
-  /** Opens Claude and agy as interactive agents in herdr, where the user watches and types. */
-  readonly herdr: Pick<HerdrLink, 'startAgent' | 'snapshot'>;
+  /** Opens interactive CLI sessions in Herdr tabs, including lane-wrapped local providers. */
+  readonly herdr: Pick<HerdrLink, 'startAgent' | 'startCli' | 'snapshot'>;
   readonly runProcess: ProcessRunner;
   readonly effectiveSettings: (nodeId: string) => Promise<ProjectSettingsValues>;
 }
@@ -93,6 +95,16 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
         kind,
         name,
         ...(args === undefined ? {} : { args }),
+        ...(text === '' ? {} : { prompt: text }),
+      });
+    },
+
+    async startCli({ cwd, kind, name, prompt }) {
+      const text = prompt.trim();
+      return options.herdr.startCli({
+        cwd,
+        name,
+        command: path.join(os.homedir(), '.local', 'bin', `${kind}.cmd`),
         ...(text === '' ? {} : { prompt: text }),
       });
     },

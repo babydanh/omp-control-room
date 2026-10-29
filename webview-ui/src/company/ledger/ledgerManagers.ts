@@ -6,6 +6,7 @@
  * proven to be the same agent as a ledger session: both appear, and neither is hidden.
  */
 
+import { agentEngineForKind, type ProjectTreeAgentKind } from '../../../../core/src/agentEngines.js';
 import type {
   HerdrAgent,
   HerdrSleepingSession,
@@ -37,7 +38,7 @@ export type ManagerAction =
 export interface ManagerChip {
   readonly key: string;
   readonly label: string;
-  readonly agentKind: 'omp' | 'sub' | 'claude' | 'agy' | 'herdr' | 'board';
+  readonly agentKind: ProjectTreeAgentKind;
   readonly dot: ManagerDot;
   /** What the dot means, in words, so colour is never the only signal. */
   readonly state: string;
@@ -148,8 +149,8 @@ export type ManagerAgentKind = ManagerChip['agentKind'];
 export function normalizeAgentKind(agentKind: string): ManagerAgentKind {
   const kind = agentKind.toLowerCase();
   if (kind === 'sub') return 'sub';
-  if (kind.includes('claude')) return 'claude';
-  if (kind.includes('agy')) return 'agy';
+  const engine = agentEngineForKind(kind);
+  if (engine !== null) return engine;
   if (kind.includes('herdr')) return 'herdr';
   if (kind.includes('board')) return 'board';
   return 'omp';

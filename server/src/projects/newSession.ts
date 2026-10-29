@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 
+import { type BoardAgentEngine, type HerdrAgentEngine, isEngineForLaunch, type WrapperAgentEngine } from '../../../core/src/agentEngines.js';
 import type {
   ProjectSessionStartMessage,
   ProjectSessionStartResultMessage,
@@ -24,9 +25,16 @@ export interface ProjectSessionServices {
   /** Opens an interactive agent in a new herdr tab in `cwd`, with its own command-line arguments; resolves with its pane id. */
   readonly startAgent: (input: {
     readonly cwd: string;
-    readonly kind: 'omp' | 'claude' | 'agy';
+    readonly kind: BoardAgentEngine | HerdrAgentEngine;
     readonly name: string;
     readonly args?: readonly string[];
+    readonly prompt: string;
+  }) => Promise<string>;
+  /** Opens a wrapped CLI in a Herdr shell tab, where cli_session.py supplies the lane guard. */
+  readonly startCli: (input: {
+    readonly cwd: string;
+    readonly kind: WrapperAgentEngine;
+    readonly name: string;
     readonly prompt: string;
   }) => Promise<string>;
   /** The live herdr agent under this name, if any: its pane id and working directory. */
@@ -69,7 +77,7 @@ export async function startProjectSession(
   }
   // A folder that is not a git repo still hosts a plain omp chat, run right in the folder.
   if (selectedRepo === undefined) {
-    if (request.engine !== 'omp') throw new LibraryUserError('Thư mục này không phải repo git: Claude và agy cần repo. Hãy chọn OMP.');
+    if (request.engine !== 'omp') throw new LibraryUserError('Thư mục này không phải repo git: các CLI ngoài omp cần repo. Hãy chọn OMP.');
     if (request.worktree !== 'shared') throw new LibraryUserError('Thư mục này không phải repo git nên không tạo được worktree. Hãy chọn "Dùng chung thư mục này".');
   }
   const repoPath = selectedRepo === undefined ? folderPath : selectedRepo.path;
@@ -111,9 +119,25 @@ export async function startProjectSession(
 
   let sessionId: string;
   try {
-    sessionId = request.engine === 'omp' || name === undefined
-      ? await deps.services.openChat({ folder: folderPath, cwd: checkout, prompt: request.initialPrompt })
-      : await deps.services.startAgent({ cwd: checkout, kind: request.engine, name, prompt: request.initialPrompt });
+    if (request.engine === 'omp') {
+      sessionId = await deps.services.openChat({ folder: folderPath, cwd: checkout, prompt: request.initialPrompt });
+    } else if (isEngineForLaunch(request.engine, 'wrapper')) {
+      sessionId = await deps.services.startCli({
+        cwd: checkout,
+        kind: request.engine,
+        name: name ?? agentName(request.engine, request.taskName),
+        prompt: request.initialPrompt,
+      });
+    } else if (isEngineForLaunch(request.engine, 'herdr')) {
+      sessionId = await deps.services.startAgent({
+        cwd: checkout,
+        kind: request.engine,
+        name: name ?? agentName(request.engine, request.taskName),
+        prompt: request.initialPrompt,
+      });
+    } else {
+      throw new LibraryUserError('Không hỗ trợ CLI đã chọn.');
+    }
   } catch (error) {
     const taken = name !== undefined && error instanceof Error && error.message.includes('agent_name_taken');
     // Two starts of one session raced past the check above: the other one won, open it.
@@ -130,7 +154,7 @@ function opened(request: ProjectSessionStartMessage, sessionId: string, checkout
 }
 
 /** A herdr agent name for the session: the engine and the task's first words, as herdr allows. */
-function agentName(engine: 'claude' | 'agy', taskName: string): string {
+function agentName(engine: HerdrAgentEngine | WrapperAgentEngine, taskName: string): string {
   const slug = taskName.normalize('NFKD').replace(/[đĐ]/g, 'd').replace(/[\u0300-\u036f]/g, '').toLowerCase()
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
   return `${engine}-${slug}`.slice(0, 32).replace(/-+$/g, '');

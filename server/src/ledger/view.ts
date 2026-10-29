@@ -24,7 +24,6 @@ import {
   LEDGER_NOTICES_MAX,
   LEDGER_PENDING_MAX,
   LEDGER_SESSION_LIVE_MS,
-  LEDGER_SESSIONS_MAX,
   LEDGER_SPAM_RULE,
 } from './constants.js';
 import type { GitRepoScan } from './git.js';
@@ -57,9 +56,9 @@ export interface LedgerViewInput {
 
 export function buildLedgerView(input: LedgerViewInput): LedgerView {
   const eventsBySession = groupBySession(input.events);
-  const sessions = input.sessions
-    .slice(0, LEDGER_SESSIONS_MAX)
-    .map((row) => sessionView(row, eventsBySession.get(row.sessionId) ?? [], input.nowMs));
+  const sessions = input.sessions.map((row) =>
+    sessionView(row, eventsBySession.get(row.sessionId) ?? [], input.nowMs),
+  );
   const sessionsByCheckout = openSessionsByCheckout(sessions);
   const folderOf = input.folderOf ?? new Map<string, string>();
 

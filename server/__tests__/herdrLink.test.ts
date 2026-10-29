@@ -497,6 +497,34 @@ describe('HerdrLink against a herdr socket', () => {
     await fake.close();
   });
 
+  it('opens a wrapped CLI in a Herdr shell tab and sends its prompt as terminal input', async () => {
+    fake.reply('tab.create', () => ({ root_pane: { pane_id: 'wA:p30' } }));
+    fake.reply('pane.send_text', () => ({ type: 'ok' }));
+    fake.reply('pane.send_keys', () => ({ type: 'ok' }));
+
+    const prompt = "Fix this'; Invoke-Expression 'bad";
+    const paneId = await link.startCli({
+      cwd: 'C:\\work',
+      name: 'codex-fix',
+      command: 'C:\\Users\\GIGABYTE\\.local\\bin\\codex.cmd',
+      prompt,
+    });
+
+    expect(paneId).toBe('wA:p30');
+    expect(fake.requestsTo('tab.create')).toEqual([
+      { method: 'tab.create', params: { cwd: 'C:\\work', label: 'codex-fix', focus: false } },
+    ]);
+    expect(fake.requestsTo('pane.send_text')).toEqual([
+      { method: 'pane.send_text', params: { pane_id: 'wA:p30', text: "& 'C:\\Users\\GIGABYTE\\.local\\bin\\codex.cmd'" } },
+      { method: 'pane.send_text', params: { pane_id: 'wA:p30', text: prompt } },
+    ]);
+    expect(fake.requestsTo('pane.send_keys')).toEqual([
+      { method: 'pane.send_keys', params: { pane_id: 'wA:p30', keys: ['enter'] } },
+      { method: 'pane.send_keys', params: { pane_id: 'wA:p30', keys: ['enter'] } },
+    ]);
+    expect(fake.requestsTo('agent.start')).toEqual([]);
+  });
+
   it('publishes the roster after the ping and agent.list handshake', async () => {
     fake.reply('agent.list', () => ({
       agents: [

@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
+import { type AgentEngine,agentEngineForKind } from '../../../core/src/agentEngines.js';
 import type { LedgerOverlapScan, ProjectTreeNode } from '../../../core/src/messages.js';
 import { listFolderRepos } from '../company/workItems/folderRepos.js';
 import {
@@ -138,21 +139,13 @@ function pathContains(parent: string, candidate: string): boolean {
 }
 
 type ProjectAgentKind = NonNullable<ProjectTreeNode['agentKind']>;
-type ProjectSessionEngine = NonNullable<ProjectTreeNode['engine']>;
-
-export function engineForLedger(row: SessionRow): ProjectSessionEngine {
-  const kind = (row.agentKind ?? '').toLowerCase();
-  if (kind.includes('claude')) return 'claude';
-  if (kind.includes('agy')) return 'agy';
-  return 'omp';
+export function engineForLedger(row: SessionRow): AgentEngine {
+  return agentEngineForKind(row.agentKind) ?? 'omp';
 }
 
 function agentKindForLedger(row: SessionRow): ProjectAgentKind {
-  const kind = (row.agentKind ?? '').toLowerCase();
-  if (kind === 'sub') return 'sub';
-  if (kind.includes('claude')) return 'claude';
-  if (kind.includes('agy')) return 'agy';
-  return 'omp';
+  if (row.agentKind?.toLowerCase() === 'sub') return 'sub';
+  return agentEngineForKind(row.agentKind) ?? 'omp';
 }
 
 /** A ledger session row with its latest intent, the board session behind it, its spawner, its herdr pane and its last edited checkout, when known. */

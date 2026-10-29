@@ -16,6 +16,7 @@ import {
   useState,
 } from 'react';
 
+import { AGENT_ENGINES } from '../../../../core/src/agentEngines.js';
 import type { LedgerView } from '../../../../core/src/messages.js';
 import { Icon } from '../components/Icon.js';
 import { formatRelativeTime } from './ledgerFormat.js';
@@ -53,6 +54,9 @@ const AGENT_KIND_CLASS: Readonly<Record<ManagerAgentKind, string>> = {
   sub: 'bg-warning/12 text-warning',
   claude: 'bg-status-active/12 text-status-active',
   agy: 'bg-status-waiting/12 text-status-waiting',
+  codex: 'bg-accent/12 text-text',
+  pi: 'bg-status-active/12 text-status-active',
+  thinkrail: 'bg-status-waiting/12 text-status-waiting',
   herdr: 'bg-raised text-text-muted',
   board: 'bg-selected text-text',
 };
@@ -153,10 +157,8 @@ export function LedgerTreeTab(props: LedgerTreeTabProps) {
         Công cụ
         <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ManagerAgentKind | 'all')} className="rounded bg-well px-2 py-1 text-text">
           <option value="all">Tất cả</option>
-          <option value="omp">omp</option>
+          {AGENT_ENGINES.map((engine) => <option key={engine.id} value={engine.id}>{engine.label}</option>)}
           <option value="sub">sub</option>
-          <option value="claude">Claude</option>
-          <option value="agy">agy</option>
           <option value="herdr">herdr</option>
           <option value="board">board</option>
         </select>

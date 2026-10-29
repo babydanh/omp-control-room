@@ -172,7 +172,7 @@ describe('cloud tmux sessions in the snapshot', () => {
       null,
     );
     expect(snapshot.machines[0].tmuxSessions).toEqual([
-      { name: 'xep-san', attached: true, idleSeconds: 90, command: 'claude', branch: 'cloud/danh-xep-san', cwd: '/data/home/Backend/wt' },
+      { name: 'xep-san', attached: true, idleSeconds: 90, engine: 'claude', command: 'claude', branch: 'cloud/danh-xep-san', cwd: '/data/home/Backend/wt' },
     ]);
     expect(snapshot.machines[0].activePaths).toEqual(['/data/home/Backend/wt']);
   });

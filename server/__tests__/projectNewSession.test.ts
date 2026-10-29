@@ -5,6 +5,7 @@ import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import type { BoardAgentEngine, HerdrAgentEngine, WrapperAgentEngine } from '../../core/src/agentEngines.js';
 import type { SubmitPromptInput } from '../../core/src/company.js';
 import type { CompanySessionSummary, CompanySnapshot, HerdrAgentsMessage, ProjectSessionStartMessage, ProjectTreeNode } from '../../core/src/messages.js';
 import type { CompanyCoordinator } from '../src/company/companyCoordinator.js';
@@ -60,10 +61,11 @@ function createServices(overrides: Partial<ProjectSessionServices> = {}) {
       }
     },
     openChat: vi.fn(async () => 'omp-id'),
-    startAgent: vi.fn(async ({ kind }: { kind: 'omp' | 'claude' | 'agy' }) => `${kind}-pane`),
-    findAgent: vi.fn((_name: string): { paneId: string; cwd: string } | undefined => undefined),
+    startAgent: vi.fn(async ({ kind }: { kind: BoardAgentEngine | HerdrAgentEngine }) => `${kind}-pane`),
+    startCli: vi.fn(async ({ kind }: { kind: WrapperAgentEngine }) => `${kind}-pane`),
     runSetupScript: vi.fn(async () => ({ code: 0, stderr: '' })),
     ...overrides,
+    findAgent: overrides.findAgent ?? vi.fn((_name: string): { paneId: string; cwd: string } | undefined => undefined),
   } satisfies ProjectSessionServices;
 }
 
@@ -146,6 +148,8 @@ describe('project session start', () => {
     ['omp', 'omp-id', 'openChat'],
     ['claude', 'claude-pane', 'startAgent'],
     ['agy', 'agy-pane', 'startAgent'],
+    ['codex', 'codex-pane', 'startCli'],
+    ['pi', 'pi-pane', 'startCli'],
   ] as const)('starts %s with the selected checkout cwd', async (engine, sessionId, runnerName) => {
     const services = createServices();
     const result = await startProjectSession(request(engine, 'shared'), deps(services));
@@ -215,9 +219,42 @@ describe('project session start', () => {
     await expect(startProjectSession(request('claude', 'shared', 'folder'), plainDeps)).rejects.toThrow('cần repo');
   });
 
+  it.each(['codex', 'pi', 'thinkrail'] as const)('starts %s through its lane wrapper in a Herdr tab', async (engine) => {
+    const coordinator = boardCoordinator();
+    const herdr = {
+      startAgent: vi.fn(async () => 'unexpected-native-agent'),
+      startCli: vi.fn(async () => 'wA:p12'),
+      snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage,
+    };
+    const runtime = createProjectSessionRuntime({
+      coordinatorFor: vi.fn(async () => coordinator),
+      boardFolders: () => [],
+      herdr,
+      runProcess: vi.fn(async () => ({
+        ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false,
+      })),
+      effectiveSettings: async () => ({}),
+    });
+
+    const result = await startProjectSession(request(engine, 'shared'), deps(runtime));
+
+    expect(result).toMatchObject({ ok: true, sessionId: 'wA:p12', checkout: repo });
+    expect(herdr.startAgent).not.toHaveBeenCalled();
+    expect(herdr.startCli).toHaveBeenCalledWith({
+      cwd: repo,
+      name: `${engine}-sua-loi-dang-nhap`,
+      command: path.join(os.homedir(), '.local', 'bin', `${engine}.cmd`),
+      prompt: 'Hãy sửa lỗi đăng nhập.',
+    });
+  });
+
   it('adapts the coordinator and herdr using their runtime contracts', async () => {
     const coordinator = boardCoordinator();
-    const herdr = { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage };
+    const herdr = {
+      startAgent: vi.fn(async () => 'wA:p9'),
+      startCli: vi.fn(async () => 'wA:p10'),
+      snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage,
+    };
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => coordinator),
       boardFolders: () => [],
@@ -248,7 +285,11 @@ describe('project session start', () => {
 
   it('opens every engine with no first prompt: the user types into the session', async () => {
     const coordinator = boardCoordinator();
-    const herdr = { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage };
+    const herdr = {
+      startAgent: vi.fn(async () => 'wA:p9'),
+      startCli: vi.fn(async () => 'wA:p10'),
+      snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage,
+    };
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => coordinator),
       boardFolders: () => [],
@@ -269,7 +310,7 @@ describe('project session start', () => {
     const runtime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => stopped),
       boardFolders: () => [path.join(root, 'other'), root],
-      herdr: { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
+      herdr: { startAgent: vi.fn(async () => 'wA:p9'), startCli: vi.fn(async () => 'wA:p10'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
       runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
       effectiveSettings: async () => ({}),
     });
@@ -286,7 +327,7 @@ describe('project session start', () => {
     const liveRuntime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async () => live),
       boardFolders: () => [root],
-      herdr: { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
+      herdr: { startAgent: vi.fn(async () => 'wA:p9'), startCli: vi.fn(async () => 'wA:p10'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
       runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
       effectiveSettings: async () => ({}),
     });
@@ -301,7 +342,7 @@ describe('project session start', () => {
     const nestedRuntime = createProjectSessionRuntime({
       coordinatorFor: vi.fn(async (folder: string) => (folder === repo ? inner : outer)),
       boardFolders: () => [repo, root],
-      herdr: { startAgent: vi.fn(async () => 'wA:p9'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
+      herdr: { startAgent: vi.fn(async () => 'wA:p9'), startCli: vi.fn(async () => 'wA:p10'), snapshot: () => ({ agents: [] }) as unknown as HerdrAgentsMessage },
       runProcess: vi.fn(async () => ({ ok: true, code: 0, stdout: '', stderr: '', timedOut: false, truncated: false })),
       effectiveSettings: async () => ({}),
     });

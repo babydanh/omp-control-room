@@ -1,5 +1,6 @@
 import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 
+import { AGENT_ENGINES, type ProjectSessionEngine } from '../../../../core/src/agentEngines.js';
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
 import { type CloudSessionsProps,CloudSessionsSection } from '../fleet/CloudSessionsSection.js';
@@ -14,7 +15,6 @@ import {
   filterProjectTree,
   isEndedNode,
   isRunningNode,
-  isSelectedSession,
   isUnfinishedNode,
   type ProjectTreeBranch,
   recentlyStoppedSessions,
@@ -34,12 +34,15 @@ import { SessionHoverCard } from './SessionHoverCard.js';
 
 const COLLAPSED_KEY = 'company.projectTree.collapsed.v1';
 // Tools a user filters by. "herdr" is the terminal host every session runs in, not a tool, so it is not offered.
-const AGENT_KINDS = ['omp', 'sub', 'claude', 'agy', 'board'] as const;
+const AGENT_KINDS = [...AGENT_ENGINES.map((engine) => engine.id), 'sub', 'board'] as const;
 const AGENT_KIND_CLASS: Readonly<Record<NonNullable<ProjectTreeNode['agentKind']>, string>> = {
   omp: 'text-accent',
   sub: 'text-warning',
   claude: 'text-status-active',
   agy: 'text-status-waiting',
+  codex: 'text-accent',
+  pi: 'text-accent',
+  thinkrail: 'text-status-active',
   herdr: 'text-text-secondary',
   board: 'text-text',
 };
@@ -93,7 +96,7 @@ export interface ProjectTreeProps {
   onCreateProject: () => void;
   onOpenChanges: (checkoutId: string, tab?: 'diff' | 'merge' | 'compare', branchA?: string) => void;
   onOpenSettings: (nodeId: string | null) => void;
-  onNewSession: (nodeId: string, engine?: 'omp' | 'claude' | 'agy') => void;
+  onNewSession: (nodeId: string, engine?: ProjectSessionEngine) => void;
   /** Opens a session row's terminal; the branch carries the Project folder it works under. */
   onOpenSession: (session: ProjectTreeNode, where: { readonly folderPath?: string }) => void;
   /** Opens a "Vừa ngủ / tắt" session's details: its prompts, its last answer, and its wake. */
@@ -167,7 +170,7 @@ export function ProjectTree(props: ProjectTreeProps) {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 text-xs text-text-muted">
         <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-28 flex-1 rounded bg-well px-1 py-1 text-sm text-text">
           <option value="all">Mọi công cụ</option>
-          {AGENT_KINDS.map((kind) => <option key={kind} value={kind}>{kind}</option>)}
+          {AGENT_KINDS.map((kind) => <option key={kind} value={kind}>{AGENT_ENGINES.find((engine) => engine.id === kind)?.label ?? kind}</option>)}
         </select>
         <label className="flex items-center gap-1" title="Chỉ hiện phiên đang làm hoặc đang chờ bạn, ẩn phiên rảnh"><input type="checkbox" checked={liveOnly} onChange={(event) => setLiveOnly(event.target.checked)} />Ẩn phiên rảnh</label>
         <label className={`flex shrink-0 items-center gap-1 ${unfinishedCount > 0 ? 'text-warning' : ''}`} title="Chỉ hiện phiên làm dở: bị ngắt giữa chừng, hoặc đã dừng khi todo chưa xong (kể cả phiên đã tắt trong 24 giờ qua)"><input type="checkbox" checked={unfinishedOnly} onChange={(event) => setUnfinishedOnly(event.target.checked)} />Làm dở{unfinishedCount > 0 ? ` (${unfinishedCount})` : ''}</label>
@@ -264,7 +267,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   );
   const isSession = node.kind === 'session';
   const stateLabel = node.state === undefined ? undefined : (SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state);
-  const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
+  const agentEngine = node.agentKind === undefined ? undefined : AGENT_ENGINES.find((engine) => engine.id === node.agentKind);
   const rowRef = useRef<HTMLButtonElement>(null);
   // The drawer just opened this session: bring its row into view so you see where it sits.
   useEffect(() => {
@@ -334,7 +337,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                     {/* Every session runs inside herdr, so "herdr" names no tool: show the tool only when it is known. */}
                     {[
                       node.agentKind !== undefined && node.agentKind !== 'herdr'
-                        ? <span key="kind" className={AGENT_KIND_CLASS[node.agentKind]}>{node.agentKind}</span>
+                        ? <span key="kind" className={AGENT_KIND_CLASS[node.agentKind]}>{agentEngine === undefined ? node.agentKind : `${agentEngine.icon} ${agentEngine.label}`}</span>
                         : null,
                       !isRunningNode(node) && stateLabel !== undefined ? stateLabel : null,
                       children.length > 0 ? `+${children.length}` : null,

@@ -83,7 +83,6 @@ export const LEDGER_TIMELINE_LIST_MAX = 20;
 
 // ── Payload caps ──
 
-export const LEDGER_SESSIONS_MAX = 400;
 export const LEDGER_PENDING_MAX = 200;
 export const LEDGER_NOTICES_MAX = 50;
 export const LEDGER_NOTICE_CONTENT_MAX = 400;

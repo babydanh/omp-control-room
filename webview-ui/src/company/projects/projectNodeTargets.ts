@@ -1,7 +1,8 @@
+import type { ProjectSessionEngine } from '../../../../core/src/agentEngines.js';
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { ProjectNodeAction, ProjectNodeMenuContext } from '../agentMenu.js';
 
-export type ProjectSessionEngine = 'omp' | 'claude' | 'agy';
+export type { ProjectSessionEngine } from '../../../../core/src/agentEngines.js';
 
 /** The nearest ancestor of `node` of the given kind, if any. */
 export function ancestorOf(
@@ -137,5 +138,8 @@ export function engineForAction(action: ProjectNodeAction): ProjectSessionEngine
   if (action === 'newSessionOmp') return 'omp';
   if (action === 'newSessionClaude') return 'claude';
   if (action === 'newSessionAgy') return 'agy';
+  if (action === 'newSessionCodex') return 'codex';
+  if (action === 'newSessionPi') return 'pi';
+  if (action === 'newSessionThinkRail') return 'thinkrail';
   return undefined;
 }

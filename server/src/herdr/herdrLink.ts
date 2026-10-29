@@ -3,6 +3,7 @@ import * as net from 'node:net';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import type { BoardAgentEngine, HerdrAgentEngine } from '../../../core/src/agentEngines.js';
 import type {
   AgentInfo as BoardAgentInfo,
   HerdrAgent,
@@ -252,12 +253,22 @@ export interface HerdrLink {
    * Resolves with the new pane's id once the roster lists it.
    */
   startAgent(input: HerdrAgentStart): Promise<string>;
+  /** Starts a wrapped interactive CLI in a shell tab; the command is a path, never shell text. */
+  startCli(input: HerdrCliStart): Promise<string>;
+}
+
+/** What a wrapped CLI tab runs. */
+export interface HerdrCliStart {
+  readonly cwd: string;
+  readonly name: string;
+  readonly command: string;
+  readonly prompt?: string;
 }
 
 /** What a new interactive agent tab runs. */
 export interface HerdrAgentStart {
   readonly cwd: string;
-  readonly kind: 'omp' | 'claude' | 'agy';
+  readonly kind: BoardAgentEngine | HerdrAgentEngine;
   readonly name: string;
   readonly args?: readonly string[];
   readonly prompt?: string;
@@ -649,6 +660,30 @@ class HerdrLinkImpl implements HerdrLink {
     // The roster lists the pane before this resolves, so a caller that assigns work to it sees it.
     if (this.running) await this.refresh(this.generation);
     if (input.prompt !== undefined) await this.prompt(paneId, input.prompt);
+    return paneId;
+  }
+
+  async startCli(input: HerdrCliStart): Promise<string> {
+    assertAgentName(input.name);
+    if (/[\r\n\0]/.test(input.command)) throw new HerdrError('invalid_request', 'Đường dẫn CLI không hợp lệ.');
+    if (input.prompt !== undefined) assertPrompt(input.prompt);
+    const created = await this.call('tab.create', { cwd: input.cwd, label: input.name, focus: false });
+    const paneId = nonEmptyString(jsonField(jsonField(created, 'root_pane'), 'pane_id'));
+    if (paneId === undefined) throw new HerdrError('invalid_request', 'herdr không trả về pane của tab mới.');
+    try {
+      const command = `& '${input.command.replaceAll("'", "''")}'`;
+      await this.call('pane.send_text', { pane_id: paneId, text: command });
+      await this.call('pane.send_keys', { pane_id: paneId, keys: ['enter'] });
+      const prompt = input.prompt?.trim();
+      if (prompt !== undefined && prompt !== '') {
+        await this.call('pane.send_text', { pane_id: paneId, text: prompt });
+        await this.call('pane.send_keys', { pane_id: paneId, keys: ['enter'] });
+      }
+    } catch (error) {
+      await this.call('pane.close', { pane_id: paneId }).catch(() => undefined);
+      throw error;
+    }
+    if (this.running) this.scheduleRefresh();
     return paneId;
   }
 

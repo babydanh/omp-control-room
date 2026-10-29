@@ -91,6 +91,36 @@ describe('openLedgerSource: existing database', () => {
     source.sessionRows();
     expect(opened).toBe(2);
   });
+  it('reads every session row instead of truncating the unified provider list', () => {
+    const rows = Array.from({ length: 401 }, (_, index) => ({
+      session_id: `session-${index}`,
+      pid: null,
+      cwd: null,
+      agent_kind: 'codex',
+      agent_name: 'Codex',
+      parent_id: null,
+      session_file: null,
+      started_at: null,
+      last_seen: null,
+      ended_at: null,
+      state: 'ended',
+      heartbeat: null,
+    }));
+    let sql = '';
+    const database: SqliteDatabase = {
+      prepare(query) {
+        sql = query;
+        return { all: (...parameters) => {
+          expect(parameters).toEqual([]);
+          return rows;
+        } };
+      },
+      close() {},
+    };
+    const source = openLedgerSource(existingDatabase(), () => database);
+    expect(source.sessionRows()).toHaveLength(rows.length);
+    expect(sql).not.toContain('LIMIT');
+  });
   it('queries only recent msg notices and joins both session kinds and cwd values', () => {
     let sql = '';
     let parameters: (string | number)[] = [];

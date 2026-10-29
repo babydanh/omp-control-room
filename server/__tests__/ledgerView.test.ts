@@ -96,6 +96,15 @@ describe('buildLedgerView: session liveness', () => {
     expect(sessionById(view, 'done')).toMatchObject({ open: false, live: false });
   });
 });
+describe('buildLedgerView: activity session list', () => {
+  it('keeps all activity database sessions beyond the former payload cap', () => {
+    const rows = Array.from({ length: 401 }, (_, index) => sessionRow(`session-${index}`));
+    const view = buildLedgerView(viewInput({ sessions: rows }));
+    expect(view.sessions).toHaveLength(rows.length);
+    expect(view.sessions.at(-1)?.sessionId).toBe('session-400');
+  });
+});
+
 
 describe('buildLedgerView: checkout mapping', () => {
   it('maps a session to its checkout case-insensitively and lists it under that worktree', () => {

@@ -7,6 +7,8 @@
  * Editors and clients in any language can consume the spec directly.
  */
 
+import type { AgentEngine, ProjectTreeAgentKind, ProjectTreeEngine } from './agentEngines.js';
+
 export type ServerMessage =
   | ProviderCapabilities
   | AgentCreated
@@ -2265,7 +2267,7 @@ export interface FleetMachineSnapshot {
 
 export type FleetMachineState = 'online' | 'stale';
 
-export type FleetSessionEngine = 'claude' | 'codex' | 'omp';
+export type FleetSessionEngine = AgentEngine;
 
 export interface FleetRepoSnapshot {
   path?: string;
@@ -2302,6 +2304,7 @@ export interface FleetTmuxSession {
   name: string;
   attached: boolean;
   idleSeconds: number;
+  engine?: FleetSessionEngine;
   command?: string;
   branch?: string;
   cwd?: string;
@@ -2479,9 +2482,9 @@ export interface ProjectTreeNode {
 export type AnonymousSchema_1364 =
   'project' | 'folder' | 'group' | 'repository' | 'checkout' | 'file-agg' | 'session';
 
-export type AnonymousSchema_1367 = 'omp' | 'claude' | 'agy' | 'herdr' | 'board';
+export type AnonymousSchema_1367 = ProjectTreeEngine;
 
-export type AnonymousSchema_1368 = 'omp' | 'sub' | 'claude' | 'agy' | 'herdr' | 'board';
+export type AnonymousSchema_1368 = ProjectTreeAgentKind;
 
 export interface AnonymousSchema_1376 {
   done: number;
@@ -3634,7 +3637,7 @@ export interface ProjectSessionStartMessage {
   initialPrompt: string;
 }
 
-export type AnonymousSchema_2010 = 'omp' | 'claude' | 'agy';
+export type AnonymousSchema_2010 = AgentEngine;
 
 export type AnonymousSchema_2011 = 'separate' | 'shared';
 

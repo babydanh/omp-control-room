@@ -86,6 +86,7 @@ import { closeUsagePage, openUsagePage, useUsageRoute } from '../useUsageRoute.j
 import { workItemCardTarget, workItemsOf } from '../workItemView.js';
 import { AgentContextMenu } from './AgentContextMenu.js';
 import { AgentRail } from './AgentRail.js';
+import { AgentSessionsPage } from './AgentSessionsPage.js';
 import { AgentSidebar } from './AgentSidebar.js';
 import { AttentionBar } from './AttentionBar.js';
 import { BoardTopBar } from './BoardTopBar.js';
@@ -115,6 +116,7 @@ function browserStorage(): Storage | null {
 type ShellPage =
   | 'board'
   | 'ledger'
+  | 'sessions'
   | 'cloud'
   | 'guard'
   | 'usage'
@@ -177,6 +179,7 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledgerShown = activePage === 'ledger' && ledger.privileged === true;
   const ledgerAvailable = ledger.privileged === true;
   const fleetAvailable = fleet.privileged === true;
+  const sessionsAvailable = ledgerAvailable || fleetAvailable;
   const redGuardCount = [
     ...(fleet.snapshot?.localGuard?.risks ?? []),
     ...(fleet.snapshot?.machines.flatMap((machine) => machine.guard?.risks ?? []) ?? []),
@@ -239,6 +242,10 @@ export function BoardShell({ client }: BoardShellProps) {
   }, [activePage, ledgerAvailable]);
 
   useEffect(() => {
+    if (!sessionsAvailable && activePage === 'sessions') setActivePage('board');
+  }, [activePage, sessionsAvailable]);
+
+  useEffect(() => {
     if (!fleetAvailable) return undefined;
     const refresh = () => {
       void fleetStore.requestFleet();
@@ -274,11 +281,13 @@ export function BoardShell({ client }: BoardShellProps) {
       closeUsagePage();
     }
     if ((page === 'cloud' || page === 'guard') && !fleetAvailable) return;
+    if (page === 'sessions' && !sessionsAvailable) return;
     if (
       page !== 'board' &&
       page !== 'usage' &&
       page !== 'cloud' &&
       page !== 'guard' &&
+      page !== 'sessions' &&
       !ledgerAvailable
     )
       return;
@@ -559,7 +568,15 @@ export function BoardShell({ client }: BoardShellProps) {
       window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('#tao-claude-cloud textarea')?.focus(), 50);
       return;
     }
-    if (action === 'newSession' || action === 'newSessionOmp' || action === 'newSessionClaude' || action === 'newSessionAgy') {
+    if (
+      action === 'newSession' ||
+      action === 'newSessionOmp' ||
+      action === 'newSessionClaude' ||
+      action === 'newSessionAgy' ||
+      action === 'newSessionCodex' ||
+      action === 'newSessionPi' ||
+      action === 'newSessionThinkRail'
+    ) {
       const engine = engineForAction(action);
       setNewSessionNode({ nodeId: node.id, ...(engine === undefined ? {} : { engine }) });
     }
@@ -785,6 +802,9 @@ export function BoardShell({ client }: BoardShellProps) {
           { page: 'ledger' as const, label: 'Cây git', icon: 'git-branch' as const, group: 'Không gian làm việc' },
           { page: 'changes' as const, label: 'Thay đổi', icon: 'file-text' as const, group: 'Không gian làm việc' },
         ]
+      : []),
+    ...(sessionsAvailable
+      ? [{ page: 'sessions' as const, label: 'Phiên agent', icon: 'terminal' as const, group: 'Không gian làm việc' }]
       : []),
     ...(fleetAvailable
       ? [
@@ -1167,6 +1187,14 @@ export function BoardShell({ client }: BoardShellProps) {
         <FleetView request={cloudRequest} />
       ) : activePage === 'guard' ? (
         <GuardView />
+      ) : activePage === 'sessions' ? (
+        <AgentSessionsPage
+          localSessions={ledger.view?.sessions ?? []}
+          machines={fleet.snapshot?.machines ?? []}
+          onRefreshFleet={refreshFleet}
+          fleetAvailable={fleetAvailable}
+          localAvailable={ledgerAvailable}
+        />
       ) : activePage === 'changes' ? (
         <ChangesPage store={projectStore} checkoutId={selectedCheckoutId} initialTab={changesTab} initialBranchA={compareBranchA} onClose={() => selectPage('board')} />
       ) : activePage === 'usage' ? (

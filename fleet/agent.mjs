@@ -55,11 +55,13 @@ export function parseTmux(text, nowSec, branchOf = () => '') {
     .filter(Boolean)
     .map((line) => {
       const [name, attached, activity, cwd, command] = line.split('\t');
+      const engine = Object.keys(ENGINES).find((kind) => ENGINES[kind].test(command ?? ''));
       return {
         name,
         cwd: cwd ?? '',
         attached: Number(attached) > 0,
         idle_seconds: Math.max(0, nowSec - Number(activity || nowSec)),
+        ...(engine === undefined ? {} : { engine }),
         command: command ?? '',
         branch: cwd ? branchOf(cwd) : '',
       };

@@ -15,7 +15,6 @@ import {
   LEDGER_MAIN_WRITES_MAX,
   LEDGER_NOTICES_MAX,
   LEDGER_PENDING_MAX,
-  LEDGER_SESSIONS_MAX,
   LEDGER_SQLITE_BUSY_TIMEOUT_MS,
 } from './constants.js';
 
@@ -143,7 +142,7 @@ function openReadOnlySqlite(dbPath: string): SqliteDatabase {
 const SESSIONS_SQL =
   'SELECT session_id, pid, cwd, agent_kind, agent_name, parent_id, session_file, started_at, last_seen, ' +
   'ended_at, state, heartbeat FROM sessions ' +
-  'ORDER BY (ended_at IS NULL) DESC, COALESCE(heartbeat, last_seen) DESC LIMIT ?';
+  'ORDER BY (ended_at IS NULL) DESC, COALESCE(heartbeat, last_seen) DESC';
 
 const EVENTS_SQL =
   'SELECT id, ts, session_id, kind, tool, path, path_key, repo, checkout, is_main_checkout, ' +
@@ -189,7 +188,7 @@ class SqliteLedgerSource implements LedgerSource {
 
   sessionRows(): SessionRow[] {
     return this.read([], (db) =>
-      rowsOf(db.prepare(SESSIONS_SQL).all(LEDGER_SESSIONS_MAX)).map(sessionRowOf),
+      rowsOf(db.prepare(SESSIONS_SQL).all()).map(sessionRowOf),
     );
   }
 

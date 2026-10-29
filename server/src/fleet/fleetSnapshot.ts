@@ -1,3 +1,4 @@
+import { agentEngineForCommand, agentEngineForKind } from '../../../core/src/agentEngines.js';
 import type {
   FleetMachineSnapshot,
   FleetOverlapWarning,
@@ -178,22 +179,26 @@ export function buildFleetSnapshot(
           .filter(
             (session) => typeof session.name === 'string' && FLEET_SESSION_NAME.test(session.name),
           )
-          .map((session) => ({
-            name: session.name,
-            attached: session.attached === true,
-            idleSeconds: Number.isFinite(session.idle_seconds)
-              ? Math.max(0, Math.floor(session.idle_seconds))
-              : 0,
-            ...(typeof session.command === 'string' && session.command
-              ? { command: session.command }
-              : {}),
-            ...(typeof session.branch === 'string' && session.branch
-              ? { branch: session.branch }
-              : {}),
-            ...(typeof session.cwd === 'string' && session.cwd
-              ? { cwd: session.cwd }
-              : {}),
-          })),
+          .map((session) => {
+            const engine = agentEngineForKind(session.engine) ?? agentEngineForCommand(session.command);
+            return {
+              name: session.name,
+              attached: session.attached === true,
+              idleSeconds: Number.isFinite(session.idle_seconds)
+                ? Math.max(0, Math.floor(session.idle_seconds))
+                : 0,
+              ...(engine === null ? {} : { engine }),
+              ...(typeof session.command === 'string' && session.command
+                ? { command: session.command }
+                : {}),
+              ...(typeof session.branch === 'string' && session.branch
+                ? { branch: session.branch }
+                : {}),
+              ...(typeof session.cwd === 'string' && session.cwd
+                ? { cwd: session.cwd }
+                : {}),
+            };
+          }),
         ...(machine.guard ? { guard: machine.guard } : {}),
         ...(activeBranches.length ? { activeBranches } : {}),
         ...(activePaths.length ? { activePaths } : {}),

@@ -96,8 +96,8 @@ test('many repos with long dirty paths still end under the limit', () => {
   assert.ok(Buffer.byteLength(JSON.stringify(report)) <= 60_000);
 });
 
-test('tmux lines become name, attached, idle time and branch; empty output means no sessions', () => {
-  const text = 'xep-san\t1\t900\t/data/home/wt/backend-xep-san\tclaude\nnhap\t0\t1000\t\tbash\n';
+test('tmux lines include detected engine, attached state, idle time and branch', () => {
+  const text = 'xep-san\t1\t900\t/data/home/wt/backend-xep-san\tclaude\nnhap\t0\t1000\t\tbash\ncodex\t0\t950\t/data/home/wt/codex\tcodex\n';
   assert.deepEqual(
     parseTmux(text, 1000, (cwd) => (cwd.includes('xep-san') ? 'cloud/danh-xep-san' : '')),
     [
@@ -106,10 +106,20 @@ test('tmux lines become name, attached, idle time and branch; empty output means
         cwd: '/data/home/wt/backend-xep-san',
         attached: true,
         idle_seconds: 100,
+        engine: 'claude',
         command: 'claude',
         branch: 'cloud/danh-xep-san',
       },
       { name: 'nhap', cwd: '', attached: false, idle_seconds: 0, command: 'bash', branch: '' },
+      {
+        name: 'codex',
+        cwd: '/data/home/wt/codex',
+        attached: false,
+        idle_seconds: 50,
+        engine: 'codex',
+        command: 'codex',
+        branch: '',
+      },
     ],
   );
   assert.deepEqual(parseTmux('', 1000), []);

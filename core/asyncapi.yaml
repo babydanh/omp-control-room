@@ -6377,6 +6377,8 @@ components:
         idleSeconds:
           type: integer
           minimum: 0
+        engine:
+          $ref: '#/components/schemas/FleetSessionEngine'
         command:
           type: string
         branch:
@@ -6727,9 +6729,12 @@ components:
       type: string
       enum: [online, stale]
 
-    FleetSessionEngine:
+    AgentEngine:
       type: string
-      enum: [claude, codex, omp]
+      enum: [omp, claude, agy, codex, pi, thinkrail]
+
+    FleetSessionEngine:
+      $ref: '#/components/schemas/AgentEngine'
 
     FleetCommandResultCode:
       type: string
@@ -9083,8 +9088,7 @@ components:
           minLength: 1
           maxLength: 1024
         engine:
-          type: string
-          enum: [omp, claude, agy]
+          $ref: '#/components/schemas/AgentEngine'
         worktree:
           type: string
           enum: [separate, shared]
@@ -9093,7 +9097,7 @@ components:
           minLength: 1
           maxLength: 256
         initialPrompt:
-          description: Empty for an omp chat the user types into; Claude and agy need it as their task.
+          description: Empty opens the selected interactive CLI without a first prompt; a non-empty prompt is sent to the provider.
           type: string
           maxLength: 12000
 
@@ -9211,6 +9215,18 @@ components:
           type: string
           description: Vietnamese refusal or failure reason.
 
+    ProjectTreeEngine:
+      anyOf:
+        - $ref: '#/components/schemas/AgentEngine'
+        - type: string
+          enum: [herdr, board]
+
+    ProjectTreeAgentKind:
+      anyOf:
+        - $ref: '#/components/schemas/AgentEngine'
+        - type: string
+          enum: [sub, herdr, board]
+
     ProjectTreeNode:
       type: object
       additionalProperties: false
@@ -9232,11 +9248,9 @@ components:
         path:
           type: string
         engine:
-          type: string
-          enum: [omp, claude, agy, herdr, board]
+          $ref: '#/components/schemas/ProjectTreeEngine'
         agentKind:
-          type: string
-          enum: [omp, sub, claude, agy, herdr, board]
+          $ref: '#/components/schemas/ProjectTreeAgentKind'
         branch:
           type: string
         sessionId:

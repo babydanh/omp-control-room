@@ -1,11 +1,12 @@
 import { createPrivateKey, randomUUID, sign } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
+import type { AgentEngine } from '../../../core/src/agentEngines.js';
 import type { GitGuardReport } from '../../../core/src/messages.js';
 import { type FleetConfig, readFleetConfig } from './config.js';
 import { FLEET_CACHE_MS, FLEET_FETCH_TIMEOUT_MS } from './constants.js';
 
-export type FleetHubEngine = 'claude' | 'codex' | 'omp';
+export type FleetHubEngine = AgentEngine;
 
 export interface FleetHubSession {
   readonly engine: FleetHubEngine;
@@ -39,6 +40,7 @@ export interface FleetHubTmux {
   readonly idle_seconds: number;
   readonly command?: string;
   readonly branch?: string;
+  readonly engine?: FleetHubEngine;
 }
 export interface FleetHubTask {
   readonly slug: string;
