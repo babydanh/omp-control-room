@@ -112,15 +112,20 @@ function findRepositories(roots) {
     const path = resolve(directory);
     try {
       if (!statSync(path).isDirectory()) return;
+      // A broken .git (rev-parse fails) or a repo holding other repos must not stop the walk:
+      // V:/Duancanhan/Project_QuanLyGiaiDau has a dead .git with the three real repos below it.
       if (existsSync(join(path, '.git'))) {
-        const locations = gitText(path, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir').split(/\r?\n/);
-        if (locations.length >= 2 && locations[0] && locations[1]) {
-          const top = resolve(locations[0]);
-          const common = resolve(locations[1]);
-          const key = process.platform === 'win32' ? common.toLowerCase() : common;
-          if (!groups.has(key)) groups.set(key, { common, path: top });
+        try {
+          const locations = gitText(path, 'rev-parse', '--path-format=absolute', '--show-toplevel', '--git-common-dir').split(/\r?\n/);
+          if (locations.length >= 2 && locations[0] && locations[1]) {
+            const top = resolve(locations[0]);
+            const common = resolve(locations[1]);
+            const key = process.platform === 'win32' ? common.toLowerCase() : common;
+            if (!groups.has(key)) groups.set(key, { common, path: top });
+          }
+        } catch {
+          // Not a usable repository; keep looking inside it.
         }
-        return;
       }
       if (depth >= 3) return;
       for (const entry of readdirSync(path, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
