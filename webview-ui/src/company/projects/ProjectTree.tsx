@@ -2,6 +2,7 @@ import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
+import { CloudSessionsSection, type CloudSessionsProps } from '../fleet/CloudSessionsSection.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
 import { projectMenuContext } from './projectNodeTargets.js';
@@ -100,6 +101,8 @@ export interface ProjectTreeProps {
   onMenu: (request: AgentMenuRequest) => void;
   /** The session the detail drawer shows; its row is highlighted and scrolled into view. */
   selection?: TreeSelection;
+  /** Agents in tmux on cloud machines, listed under "Cloud"; absent when this connection may not see the fleet. */
+  cloud?: CloudSessionsProps;
 }
 
 /** Sidebar: Project → groups → folders → repos → sessions, subagents under theirs. Git and files live on other pages. */
@@ -170,6 +173,7 @@ export function ProjectTree(props: ProjectTreeProps) {
         <label className={`flex shrink-0 items-center gap-1 ${unfinishedCount > 0 ? 'text-warning' : ''}`} title="Chỉ hiện phiên làm dở: bị ngắt giữa chừng, hoặc đã dừng khi todo chưa xong (kể cả phiên đã tắt trong 24 giờ qua)"><input type="checkbox" checked={unfinishedOnly} onChange={(event) => setUnfinishedOnly(event.target.checked)} />Làm dở{unfinishedCount > 0 ? ` (${unfinishedCount})` : ''}</label>
       </div>
       <RecentlyStopped nodes={nodes} onOpenStopped={props.onOpenStopped} />
+      {props.cloud !== undefined && <CloudSessionsSection {...props.cloud} />}
       <div className="min-h-0 overflow-y-auto">
         {visible.map((branch) => (
           <ProjectTreeRow key={branch.node.id} branch={branch} depth={0} collapsed={collapsed} onToggleCollapse={toggleCollapse} onMove={moveNode} {...props} />

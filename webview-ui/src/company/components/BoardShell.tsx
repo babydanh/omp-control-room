@@ -153,6 +153,7 @@ export function BoardShell({ client }: BoardShellProps) {
   useSessionLogBackfill(client, state);
   const ledger = useLedgerState(ledgerStore);
   const fleet = useFleetState(fleetStore);
+  const refreshFleet = useCallback(() => void fleetStore.requestFleet(), []);
   const usageRouteOpen = useUsageRoute();
   const [activePage, setActivePage] = useState<ShellPage>(() => usageRouteOpen ? 'usage' : 'board');
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -953,6 +954,22 @@ export function BoardShell({ client }: BoardShellProps) {
                 onMenu: openMenu,
                 store: projectStore,
                 selection: { sessionId: selectedSessionId, paneId: selectedPaneId },
+                ...(fleetAvailable
+                  ? {
+                      cloud: {
+                        machines: fleet.snapshot?.machines ?? [],
+                        refresh: refreshFleet,
+                        onOpenTerminal: (machine: string, session: string) => {
+                          fleetStore.openTerminal(machine, session);
+                          selectPage('cloud');
+                        },
+                        onOpenDiff: (machine: string, path: string) => {
+                          fleetStore.requestDiff(machine, path);
+                          selectPage('cloud');
+                        },
+                      },
+                    }
+                  : {}),
               }}
               onOpenRoles={() => setRolesOpen(true)}
               onDismiss={dismissSheet}
