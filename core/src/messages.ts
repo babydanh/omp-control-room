@@ -2283,15 +2283,13 @@ export interface FleetPullRequest {
   number: number;
   state: AnonymousSchema_1247;
   isDraft: boolean;
-  reviewDecision: AnonymousSchema_1249;
+  reviewDecision: string | null;
   url: string;
   ci: AnonymousSchema_1251;
   failedChecks: string[];
 }
 
 export type AnonymousSchema_1247 = 'open' | 'merged' | 'closed';
-
-export type AnonymousSchema_1249 = 'APPROVED' | 'CHANGES_REQUESTED' | 'REVIEW_REQUIRED' | 'null';
 
 export type AnonymousSchema_1251 = 'green' | 'red' | 'running' | 'none';
 

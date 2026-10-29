@@ -253,6 +253,11 @@ export function BoardShell({ client }: BoardShellProps) {
       setActivePage('board');
   }, [activePage, fleetAvailable]);
 
+  // A right-click agent choice applies once: leaving the Cloud page forgets it, so coming back keeps the reader's own pick.
+  useEffect(() => {
+    if (activePage !== 'cloud') setCloudRequest(null);
+  }, [activePage]);
+
   useEffect(() => {
     if (!mobileNavOpen || !mobileViewport) return undefined;
     function closeOnEscape(event: KeyboardEvent): void {

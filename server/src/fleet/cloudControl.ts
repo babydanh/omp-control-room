@@ -155,7 +155,7 @@ export class CloudControl {
     if (result.code !== 0 || !/^OK /m.test(result.stdout)) {
       const said = `${result.stdout}\n${result.stderr}`.trim().split('\n').filter(Boolean).pop();
       if (engine !== 'claude' && result.code === 2 && said?.startsWith('Repo phai la')) {
-        throw new CloudControlError('failed', `Máy ${machine} chưa hỗ trợ ${engine}: cloud-giao còn bản cũ, cài lại bằng fleet/install-agent.sh`);
+        throw new CloudControlError('failed', `Máy ${machine} chưa hỗ trợ ${engine}: cloud-giao còn bản cũ, cần đẩy bản mới (fleet/cloud-giao) lên máy bằng dong-bo-cloud`);
       }
       throw new CloudControlError('failed', said ?? `cloud-giao exit ${result.code}`);
     }

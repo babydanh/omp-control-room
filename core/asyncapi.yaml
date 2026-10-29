@@ -6751,7 +6751,7 @@ components:
           type: boolean
         reviewDecision:
           type: [string, 'null']
-          enum: [APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED, null]
+          description: APPROVED, CHANGES_REQUESTED, REVIEW_REQUIRED or null (no decision yet).
         url:
           type: string
           format: uri
