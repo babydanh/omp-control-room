@@ -120,6 +120,8 @@ export function createFleetStore(options: FleetStoreOptions): FleetStore {
   }
 
   function act(request: FleetTerminalOpenMessage | FleetTaskCreateMessage, kind: FleetAction['kind'], session: string): void {
+    // One action at a time: a double click must not create two cloud tasks.
+    if (state.action !== null) return;
     commit({ ...state, action: { requestId: request.requestId, kind, machine: request.machine, session }, actionError: null, createdTask: null });
     try {
       send(request);
