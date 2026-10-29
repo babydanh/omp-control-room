@@ -11,7 +11,6 @@ import {
   canMoveProjectNode,
   countSessions,
   filterProjectTree,
-  isEndedNode,
   isRunningNode,
   isSelectedSession,
   isUnfinishedNode,
@@ -52,6 +51,7 @@ const SESSION_STATE_LABEL: Readonly<Record<string, string>> = {
   blocked: 'chờ bạn',
   idle: 'rảnh',
   sleeping: 'ngủ',
+  ended: 'tắt',
   ended: 'đã tắt',
 };
 const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>> = {
@@ -111,7 +111,8 @@ export function ProjectTree(props: ProjectTreeProps) {
   const [liveOnly, setLiveOnly] = useState(false);
   const [unfinishedOnly, setUnfinishedOnly] = useState(false);
   // Ended sessions are history: the tree lists them only when asked for the unfinished ones.
-  const tree = useMemo(() => buildAgentTree(unfinishedOnly ? nodes : nodes.filter((node) => !isEndedNode(node))), [nodes, unfinishedOnly]);
+  // A session that exited or fell asleep stays under its folder (marked "tắt"/"ngủ"): hiding it made the folder lose it.
+  const tree = useMemo(() => buildAgentTree(nodes), [nodes]);
   const unfinishedCount = useMemo(() => new Set(nodes.filter(isUnfinishedNode).map((node) => node.sessionId ?? node.id)).size, [nodes]);
   // A refused create, rename, move or delete says why; before this it failed without a word.
   const { errors } = useProjectState(props.store);
@@ -262,6 +263,8 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   const menuSubject = useMemo(() => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node) }), [node, props.nodes]);
   const menu = useAgentMenuGestures<HTMLButtonElement>(menuSubject, props.onMenu);
   const isSession = node.kind === 'session';
+  // A subagent is its parent's little helper: a mini face and one line, with no card of its own.
+  const isSub = isSession && node.agentKind === 'sub';
   const stateLabel = node.state === undefined ? undefined : (SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state);
   const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
   const rowRef = useRef<HTMLButtonElement>(null);
@@ -318,13 +321,15 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           className={`touch-target flex min-w-0 flex-1 items-center text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} ${
             isSession
               // A session is a chip, as an agent is in ZCode: room around a bigger face, a soft card behind it.
-              ? `gap-2.5 rounded-lg border px-2 py-1.5 transition-colors duration-150 ${selected ? 'border-accent/50' : 'border-white/5 bg-white/[0.03] hover:border-white/10 hover:bg-hover'}`
+              ? isSub
+                ? `gap-1.5 rounded-md border px-1.5 py-0.5 text-xs transition-colors duration-150 ${selected ? 'border-accent/50' : 'border-transparent hover:bg-hover'}`
+                : `gap-2.5 rounded-lg border px-2 py-1.5 transition-colors duration-150 ${selected ? 'border-accent/50' : 'border-white/5 bg-white/[0.03] hover:border-white/10 hover:bg-hover'}`
               : 'gap-2 rounded px-1 py-0.5'
           }`}
         >
           {isSession ? (
             <>
-              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="lg" />
+              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size={isSub ? 'sm' : 'lg'} />
               <span className="min-w-0 flex-1 leading-snug">
                 {/* One line: the name, then only what a glance needs. A running session's face glances around ("đang chạy"); main is the usual branch. */}
                 <span className="flex min-w-0 items-baseline gap-1.5">
@@ -342,10 +347,10 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                     ].filter((part) => part !== null).flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))}
                   </span>
                 </span>
-                {progress === null && sessionSummary(node) !== undefined && (
+                {!isSub && progress === null && sessionSummary(node) !== undefined && (
                   <span className="block truncate text-xs text-text-muted" data-testid="session-summary">{sessionSummary(node)}</span>
                 )}
-                {progress !== null && (
+                {!isSub && progress !== null && (
                   <span className="mt-1 block" data-testid="session-progress" title={[progress.current && `Đang: ${progress.current}`, progress.blocked && `Kẹt: ${progress.blocked}`].filter(Boolean).join('\n')}>
                     <span className="flex items-center gap-2 text-xs text-text-muted">
                       <span aria-hidden="true" className="h-1 flex-1 overflow-hidden rounded-full bg-well">
