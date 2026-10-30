@@ -15,6 +15,7 @@ import {
   filterProjectTree,
   isEndedNode,
   isRunningNode,
+  isSelectedSession,
   isUnfinishedNode,
   type ProjectTreeBranch,
   recentlyStoppedSessions,
@@ -266,6 +267,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
     props.onMenu,
   );
   const isSession = node.kind === 'session';
+  const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
   const stateLabel = node.state === undefined ? undefined : (SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state);
   const agentEngine = node.agentKind === undefined ? undefined : AGENT_ENGINES.find((engine) => engine.id === node.agentKind);
   const rowRef = useRef<HTMLButtonElement>(null);
