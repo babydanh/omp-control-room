@@ -24,6 +24,8 @@ import {
 } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
+import { pendingCloudRow } from '../fleet/cloudRows.js';
+import { randomSuffix, slugFromPrompt } from '../fleet/cloudTaskPick.js';
 import { fleetStore } from '../fleet/fleetClient.js';
 import { useFleetState } from '../fleet/fleetStore.js';
 import { type CloudRequest, FleetView } from '../fleet/FleetView.js';
@@ -257,6 +259,17 @@ export function BoardShell({ client }: BoardShellProps) {
   useEffect(() => {
     if (activePage !== 'cloud') setCloudRequest(null);
   }, [activePage]);
+
+  // A cloud task opens in the drawer as soon as the machine has created it, like a new local session; each
+  // created task is handled once, so closing the drawer does not bring it back.
+  const handledCloudTask = useRef<typeof fleet.createdTask>(null);
+  useEffect(() => {
+    const created = fleet.createdTask;
+    if (created === null || created === handledCloudTask.current) return;
+    handledCloudTask.current = created;
+    setOpened({ kind: 'cloud', machine: created.machine, session: created.session });
+    refreshFleet();
+  }, [fleet.createdTask, refreshFleet]);
 
   useEffect(() => {
     if (!mobileNavOpen || !mobileViewport) return undefined;
@@ -553,10 +566,8 @@ export function BoardShell({ client }: BoardShellProps) {
     }
     const cloudEngine = cloudEngineForAction(action);
     if (cloudEngine !== undefined) {
-      selectPage('cloud');
+      // The request box is the sidebar's Cloud section: it opens there, with no change of page.
       setCloudRequest({ engine: cloudEngine, token: Date.now() });
-      // The Cloud page mounts on the next render: focus its request box then.
-      window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('#tao-claude-cloud textarea')?.focus(), 50);
       return;
     }
     if (action === 'newSession' || action === 'newSessionOmp' || action === 'newSessionClaude' || action === 'newSessionAgy') {
@@ -1054,18 +1065,21 @@ export function BoardShell({ client }: BoardShellProps) {
                         machines: fleet.snapshot?.machines ?? [],
                         refresh: refreshFleet,
                         onOpenTerminal: (machine: string, session: string) => {
-                          fleetStore.openTerminal(machine, session);
-                          selectPage('cloud');
+                          setOpened({ kind: 'cloud', machine, session });
+                          dismissSheet();
                         },
                         onOpenDiff: (machine: string, path: string) => {
                           fleetStore.requestDiff(machine, path);
                           selectPage('cloud');
                         },
-                        onCreate: () => {
-                          selectPage('cloud');
-                          // The Cloud page mounts on the next render: focus its request box then.
-                          window.setTimeout(() => document.querySelector<HTMLTextAreaElement>('#tao-claude-cloud textarea')?.focus(), 50);
-                        },
+                        onCreate: ({ machine, prompt, engine }) =>
+                          fleetStore.createTask({ machine, repo: 'all', slug: slugFromPrompt(prompt, randomSuffix()), prompt, engine }),
+                        pending: pendingCloudRow(fleet, fleet.snapshot?.machines ?? []),
+                        // The drawer's own panel reports a failed terminal, so the section keeps its error for creation.
+                        error: opened?.kind === 'cloud' ? null : fleet.actionError,
+                        busy: fleet.action !== null,
+                        request: cloudRequest,
+                        selected: opened?.kind === 'cloud' ? { machine: opened.machine, session: opened.session } : null,
                       },
                     }
                   : {}),

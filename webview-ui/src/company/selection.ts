@@ -91,6 +91,8 @@ export type DrawerSubject =
   | { kind: 'question'; questionId: string }
   | { kind: 'workItem'; id: string; workspacePath: string }
   | { kind: 'squad'; runId: string; workspacePath: string }
+  /** A tmux session on a cloud machine, shown as a live terminal like a local agent. */
+  | { kind: 'cloud'; machine: string; session: string }
   | { kind: 'files' };
 
 /** Something the user explicitly opened. A board subject is never opened this way. */
@@ -152,6 +154,8 @@ export function drawerSubjectKey(subject: DrawerSubject): string {
       return `squad:${squadRunKey(subject)}`;
     case 'contract':
       return `contract:${subject.contractId ?? 'pending'}`;
+    case 'cloud':
+      return `cloud:${subject.machine}/${subject.session}`;
     case 'files':
       return subject.kind;
   }

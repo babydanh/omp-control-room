@@ -43,6 +43,7 @@ import {
   effectiveDrawerWidth,
   rememberedOrChatWidth,
 } from '../drawerPrefs.js';
+import { CloudDrawerPanel } from '../fleet/CloudDrawerPanel.js';
 import { HERDR_TONE_LABELS, type HerdrDrawerTab, herdrToneFor } from '../herdrView.js';
 import { drawerPresentation, layoutModeFor } from '../layoutMode.js';
 import { questionProvenance } from '../questionProvenance.js';
@@ -149,6 +150,7 @@ export function DetailDrawer({
   // A live terminal, a board chat or a herdr agent's screen, is where the work shows: it opens wide.
   const liveScreen =
     retained.kind === 'herdr' ||
+    retained.kind === 'cloud' ||
     (liveSessionId !== null && terminalPolicy(rest.state.sessions[liveSessionId]?.status ?? '').attach);
   const width = effectiveDrawerWidth(
     rememberedOrChatWidth(prefs.width, liveScreen, boardWidth),
@@ -386,6 +388,8 @@ function DrawerContent(props: ContentProps) {
           onOpenHolder={openHolder}
         />
       );
+    case 'cloud':
+      return <CloudDrawerPanel key={drawerSubjectKey(subject)} machine={subject.machine} session={subject.session} onClose={props.onClose} />;
     case 'files':
       return (
         <WorkspaceFileBrowser
@@ -455,6 +459,8 @@ function headingFor(
       const head = workItemCardHead(run.request);
       return { title: head === '' ? 'Đội' : head, status: squadStatusLabel(run.status) };
     }
+    case 'cloud':
+      return { title: subject.session, status: `Cloud · ${subject.machine}` };
     case 'files':
       return { title: 'Tệp trong workspace', status: null };
   }
@@ -489,6 +495,7 @@ function drawerMenuSubject(
     case 'files':
     case 'workItem':
     case 'squad':
+    case 'cloud':
       return null;
   }
 }
