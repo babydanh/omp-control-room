@@ -5,10 +5,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const script = join(dirname(fileURLToPath(import.meta.url)), 'cloud-giao');
-const run = (...args) => spawnSync('bash', [script, ...args], { encoding: 'utf8', input: '' });
+// On Windows `bash` on PATH is often WSL's launcher (System32\bash.exe), not a shell for this file.
+const BASH = process.platform === 'win32' ? (process.env.GIT_BASH ?? 'C:/Program Files/Git/bin/bash.exe') : 'bash';
+const run = (...args) => spawnSync(BASH, [script, ...args], { encoding: 'utf8', input: '' });
 
 test('the script is valid bash', () => {
-  assert.equal(spawnSync('bash', ['-n', script], { encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(BASH, ['-n', script], { encoding: 'utf8' }).status, 0);
 });
 
 test('an unknown engine is refused before anything is touched', () => {
