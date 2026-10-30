@@ -16,7 +16,7 @@ import { serverToken } from '../../transport/serverToken.js';
  * only while this component is mounted: closing it detaches (tmux and the agent
  * keep running on the machine).
  */
-export function CloudTerminal({ terminalId, label, onClose }: { terminalId: number; label: string; onClose: () => void }) {
+export function CloudTerminal({ terminalId, label, onClose, fill = false }: { terminalId: number; label: string; onClose: () => void; fill?: boolean }) {
   const host = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState('Đang nối tới máy (máy ngủ thì mất 1–2 phút)…');
 
@@ -79,7 +79,8 @@ export function CloudTerminal({ terminalId, label, onClose }: { terminalId: numb
   }, [terminalId]);
 
   return (
-    <section className="flex min-h-[420px] flex-col rounded border border-hairline bg-well">
+    // `fill`: in the detail drawer the terminal takes all the height it is given, not a fixed 420px.
+    <section className={`flex flex-col rounded border border-hairline bg-well ${fill ? 'min-h-0 flex-1' : 'min-h-[420px]'}`}>
       <header className="flex items-center justify-between gap-2 border-b border-hairline px-3 py-2">
         <span className="font-mono text-sm text-text-primary">{label}</span>
         <span className="flex-1 truncate text-xs text-text-muted">

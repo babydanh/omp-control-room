@@ -11,7 +11,7 @@ import { finishedTurn, SESSION_FACE_CHEER_MS, type SessionFaceMood, shownFaceMoo
  * the hue staggers the loops so no two faces blink together. When a session finishes a turn (it was
  * working and now rests), the face cheers "^ ^" for a moment before settling.
  */
-export function SessionFace({ mood, hue, size = 'md' }: { mood: SessionFaceMood; hue: number; size?: 'sm' | 'md' | 'lg' }) {
+export function SessionFace({ mood, hue, size = 'md', variant }: { mood: SessionFaceMood; hue: number; size?: 'sm' | 'md' | 'lg'; variant?: 'cloud' }) {
   const previous = useRef(mood);
   const [cheering, setCheering] = useState(false);
 
@@ -34,7 +34,8 @@ export function SessionFace({ mood, hue, size = 'md' }: { mood: SessionFaceMood;
 
   const style = { '--face-hue': hue, '--face-delay': `${-((hue % 37) / 10)}s` } as CSSProperties;
   return (
-    <span aria-hidden="true" className={`session-face${size === 'md' ? '' : ` session-face--${size}`}`} data-mood={shownFaceMood(mood, cheering)} style={style}>
+    // `cloud` swaps the body's shape for a cloud (CSS only): an agent on a cloud machine wears the same face.
+    <span aria-hidden="true" className={`session-face${size === 'md' ? '' : ` session-face--${size}`}${variant === undefined ? '' : ` session-face--${variant}`}`} data-mood={shownFaceMood(mood, cheering)} style={style}>
       <span className="session-face__body">
         <span className="session-face__eyes">
           <span className="session-face__eye session-face__eye--left">
