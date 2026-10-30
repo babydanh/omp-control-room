@@ -180,9 +180,8 @@ describe('herdr project session menu', () => {
     const items = projectNodeMenuItems(folder, { hasCheckout: false, folderCount: 1, cloud: true });
     expect(items.find((item) => item.label === 'Phiên mới · omp cloud')?.action).toEqual({ kind: 'projectNodeAction', action: 'newCloudOmp' });
     expect(items.find((item) => item.label === 'Phiên mới · Claude cloud')?.action).toEqual({ kind: 'projectNodeAction', action: 'newCloudClaude' });
-    expect(items.find((item) => item.label === 'Phiên mới · Codex')?.action).toEqual({ kind: 'projectNodeAction', action: 'newSessionCodex' });
-    expect(items.find((item) => item.label === 'Phiên mới · pi')?.action).toEqual({ kind: 'projectNodeAction', action: 'newSessionPi' });
-    expect(items.find((item) => item.label === 'Phiên mới · ThinkRail')?.action).toEqual({ kind: 'projectNodeAction', action: 'newSessionThinkRail' });
+    // The board only opens omp, Claude and agy itself.
+    expect(items.filter((item) => /^Phiên mới · (Codex|pi|ThinkRail)$/.test(item.label))).toEqual([]);
   });
 
   it('offers pane deletion for sleeping and awake herdr sessions only', () => {

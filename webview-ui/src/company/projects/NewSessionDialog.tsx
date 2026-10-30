@@ -176,18 +176,17 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
   );
 }
 
-const ENGINES: readonly { readonly id: SessionEngine; readonly label: string; readonly hint: string }[] = AGENT_ENGINES.map(
-  ({ id, label, icon, launch }) => ({
-    id,
-    label: `${icon} ${label}`,
-    hint:
-      launch === 'board'
-        ? 'Mở phiên omp ngay, gõ việc trong terminal'
-        : launch === 'herdr'
-          ? `Mở ${label} ngay trong một tab herdr, gõ việc trong đó`
-          : `Mở ${label} qua wrapper trong tab herdr để vào lane và guard`,
-  }),
-);
+// Opened from the board: omp, Claude Code and agy only. Other CLIs still show up in the session list.
+const ENGINES: readonly { readonly id: SessionEngine; readonly label: string; readonly hint: string }[] = AGENT_ENGINES.filter(
+  ({ launch }) => launch !== 'wrapper',
+).map(({ id, label, icon, launch }) => ({
+  id,
+  label: `${icon} ${label}`,
+  hint:
+    launch === 'board'
+      ? 'Mở phiên omp ngay, gõ việc trong terminal'
+      : `Mở ${label} ngay trong một tab herdr, gõ việc trong đó`,
+}));
 
 /** Names the worktree when the user gives no name: the task's first words, else the tool and the time. */
 function autoTaskName(engine: SessionEngine, text: string): string {
