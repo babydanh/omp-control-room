@@ -3,7 +3,7 @@ import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AGENT_ENGINES, type ProjectSessionEngine } from '../../../../core/src/agentEngines.js';
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
-import { type CloudSessionsProps,CloudSessionsSection } from '../fleet/CloudSessionsSection.js';
+import { CloudFolderRows, type CloudSessionsProps, CloudSessionsSection } from '../fleet/CloudSessionsSection.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
 import { ancestorOf, projectMenuContext } from './projectNodeTargets.js';
@@ -140,6 +140,13 @@ export function ProjectTree(props: ProjectTreeProps) {
     unfoldedFor.current = selectionKey;
     setCollapsed((current) => (ancestors.some((id) => current.has(id)) ? new Set([...current].filter((id) => !ancestors.includes(id))) : current));
   }, [nodes, selection, selectionKey]);
+  // A right-click "Phiên mới · … cloud" opens its request box under that node: unfold the node so the box shows.
+  const cloudNodeId = props.cloud?.request?.nodeId;
+  const cloudToken = props.cloud?.request?.token;
+  useEffect(() => {
+    if (cloudNodeId === undefined) return;
+    setCollapsed((current) => (current.has(cloudNodeId) ? new Set([...current].filter((id) => id !== cloudNodeId)) : current));
+  }, [cloudNodeId, cloudToken]);
   useEffect(() => {
     try {
       window.localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...collapsed]));
@@ -420,6 +427,8 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
       {(!isCollapsed || isSession) && children.map((child) => (
         <ProjectTreeRow key={child.node.id} branch={child} depth={depth + 1} collapsed={collapsed} onToggleCollapse={onToggleCollapse} onMove={onMove} {...props} />
       ))}
+      {/* Cloud sessions started from this node sit under it like its local sessions. */}
+      {!isCollapsed && !isSession && props.cloud !== undefined && <CloudFolderRows {...props.cloud} nodeId={node.id} depth={depth + 1} />}
       {hover.anchor !== null && (
         <SessionHoverCard
           node={node}

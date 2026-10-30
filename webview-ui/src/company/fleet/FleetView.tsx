@@ -12,6 +12,8 @@ type TaskEngine = NonNullable<FleetTaskCreateMessage['engine']>;
 export interface CloudRequest {
   readonly engine: TaskEngine;
   readonly token: number;
+  /** The Project-tree node that was right-clicked: the sidebar opens the box and the session under it. */
+  readonly nodeId?: string;
 }
 
 export function FleetView({ request = null }: { request?: CloudRequest | null }) {

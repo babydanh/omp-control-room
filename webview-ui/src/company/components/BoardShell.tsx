@@ -24,6 +24,7 @@ import {
 } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
+import { cloudFolderKey, type CloudFolders, readCloudFolders, writeCloudFolders } from '../fleet/cloudFolders.js';
 import { pendingCloudRow } from '../fleet/cloudRows.js';
 import { randomSuffix, slugFromPrompt } from '../fleet/cloudTaskPick.js';
 import { fleetStore } from '../fleet/fleetClient.js';
@@ -164,6 +165,9 @@ export function BoardShell({ client }: BoardShellProps) {
   const [projectSettingsNode, setProjectSettingsNode] = useState<string | null>(null);
   const [newSessionNode, setNewSessionNode] = useState<{ nodeId: string; engine?: ProjectSessionEngine } | null>(null);
   const [cloudRequest, setCloudRequest] = useState<CloudRequest | null>(null);
+  // Which tree node started each cloud session, so it sits under that node like a local session.
+  const [cloudFolders, setCloudFolders] = useState<CloudFolders>(readCloudFolders);
+  const projectNodeIds = useMemo(() => new Set(projects.nodes.map((node) => node.id)), [projects.nodes]);
   /** The "Vừa ngủ / tắt" session whose details are open, to be woken from there. */
   const [stoppedNode, setStoppedNode] = useState<ProjectTreeNode | null>(null);
   const [selectedCheckoutId, setSelectedCheckoutId] = useState('');
@@ -582,8 +586,8 @@ export function BoardShell({ client }: BoardShellProps) {
     }
     const cloudEngine = cloudEngineForAction(action);
     if (cloudEngine !== undefined) {
-      // The request box is the sidebar's Cloud section: it opens there, with no change of page.
-      setCloudRequest({ engine: cloudEngine, token: Date.now() });
+      // The request box opens under the right-clicked node in the sidebar, with no change of page.
+      setCloudRequest({ engine: cloudEngine, token: Date.now(), nodeId: node.id });
       return;
     }
     if (
@@ -1100,8 +1104,18 @@ export function BoardShell({ client }: BoardShellProps) {
                           fleetStore.requestDiff(machine, path);
                           selectPage('cloud');
                         },
-                        onCreate: ({ machine, prompt, engine }) =>
-                          fleetStore.createTask({ machine, repo: 'all', slug: slugFromPrompt(prompt, randomSuffix()), prompt, engine }),
+                        onCreate: ({ machine, prompt, engine, nodeId }) => {
+                          const slug = slugFromPrompt(prompt, randomSuffix());
+                          if (nodeId !== undefined) {
+                            // The tmux session is named after the slug, so its row can be placed before the machine reports it.
+                            const next = { ...cloudFolders, [cloudFolderKey(machine, slug)]: nodeId };
+                            setCloudFolders(next);
+                            writeCloudFolders(next);
+                          }
+                          fleetStore.createTask({ machine, repo: 'all', slug, prompt, engine });
+                        },
+                        folders: cloudFolders,
+                        folderIds: projectNodeIds,
                         pending: pendingCloudRow(fleet, fleet.snapshot?.machines ?? []),
                         // The drawer's own panel reports a failed terminal, so the section keeps its error for creation.
                         error: opened?.kind === 'cloud' ? null : fleet.actionError,
