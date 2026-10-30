@@ -15,6 +15,9 @@ type SessionCoordinator = Pick<CompanyCoordinator, 'openNewChat' | 'submitPrompt
 /** How a board chat with no process comes back: a parked or paused one resumes, a stopped or crashed one restarts. */
 const REOPEN_ACTION: Readonly<Record<string, 'resume' | 'restart'>> = { parked: 'resume', paused: 'resume', stopped: 'restart', crashed: 'restart' };
 
+/** A Claude opened from the Project tree never asks for permission (the user's choice: these are their own repos). */
+const CLAUDE_START_ARGS = ['--dangerously-skip-permissions'] as const;
+
 const MAX_PROCESS_OUTPUT_BYTES = 1024 * 1024;
 const DEFAULT_GIT_TIMEOUT_MS = 120_000;
 
@@ -90,11 +93,12 @@ export function createProjectSessionRuntime(options: ProjectSessionRuntimeOption
     },
     async startAgent({ cwd, kind, name, args, prompt }) {
       const text = prompt.trim();
+      const launchArgs = args ?? (kind === 'claude' ? CLAUDE_START_ARGS : undefined);
       return options.herdr.startAgent({
         cwd,
         kind,
         name,
-        ...(args === undefined ? {} : { args }),
+        ...(launchArgs === undefined ? {} : { args: launchArgs }),
         ...(text === '' ? {} : { prompt: text }),
       });
     },

@@ -279,6 +279,8 @@ describe('project session start', () => {
       cwd: repo,
       kind: 'claude',
       name: 'claude-sua-loi-dang-nhap',
+      // A Claude opened from the Project tree never asks for permission.
+      args: ['--dangerously-skip-permissions'],
       prompt: 'Hãy sửa lỗi đăng nhập.',
     });
   });

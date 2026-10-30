@@ -14,6 +14,7 @@ import type { CSSProperties, RefObject } from 'react';
 import { memo, useContext } from 'react';
 
 import { TERMINAL_THEME } from '../../constants.js';
+import { splitLinks } from '../screenText.js';
 import { rowBand, type ScreenLine, type ScreenStyle } from '../terminalScreen.js';
 import { WrapLinesContext } from '../wrapLines.js';
 
@@ -73,7 +74,9 @@ const ScreenRow = memo(function ScreenRow({ line, newline }: ScreenRowProps) {
   const { segments, band, rule } = rowBand(line);
   const spans = segments.map((segment, index) => (
     <span key={index} style={segmentStyle(segment.style)}>
-      {segment.text}
+      {splitLinks(segment.text).map((piece, at) =>
+        piece.href === undefined ? piece.text : <ScreenLink key={at} href={piece.href} text={piece.text} />,
+      )}
     </span>
   ));
   // A box's ruled edge spans the terminal's width: clip it at the frame rather than wrap it.
@@ -88,6 +91,24 @@ const ScreenRow = memo(function ScreenRow({ line, newline }: ScreenRowProps) {
     </>
   );
 });
+
+/** A link in the screen: a click opens it, unless the reader was dragging to select text. */
+function ScreenLink({ href, text }: { href: string; text: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer noopener"
+      title={href}
+      className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+      onClick={(event) => {
+        if (document.getSelection()?.isCollapsed === false) event.preventDefault();
+      }}
+    >
+      {text}
+    </a>
+  );
+}
 
 function segmentStyle(style: ScreenStyle): CSSProperties {
   const css: CSSProperties = {};

@@ -6,14 +6,13 @@ import type { AgentMenuRequest } from '../agentMenu.js';
 import { type CloudSessionsProps,CloudSessionsSection } from '../fleet/CloudSessionsSection.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
-import { projectMenuContext } from './projectNodeTargets.js';
-import type { ProjectStore } from './projectStore.js';
+import { ancestorOf, projectMenuContext } from './projectNodeTargets.js';
+import { type ProjectStore, useProjectState } from './projectStore.js';
 import {
   buildAgentTree,
   canMoveProjectNode,
   countSessions,
   filterProjectTree,
-  isEndedNode,
   isRunningNode,
   isSelectedSession,
   isUnfinishedNode,
@@ -118,8 +117,12 @@ export function ProjectTree(props: ProjectTreeProps) {
   const [liveOnly, setLiveOnly] = useState(false);
   const [unfinishedOnly, setUnfinishedOnly] = useState(false);
   // Ended sessions are history: the tree lists them only when asked for the unfinished ones.
-  const tree = useMemo(() => buildAgentTree(unfinishedOnly ? nodes : nodes.filter((node) => !isEndedNode(node))), [nodes, unfinishedOnly]);
+  // A session that exited or fell asleep stays under its folder (marked "tắt"/"ngủ"): hiding it made the folder lose it.
+  const tree = useMemo(() => buildAgentTree(nodes), [nodes]);
   const unfinishedCount = useMemo(() => new Set(nodes.filter(isUnfinishedNode).map((node) => node.sessionId ?? node.id)).size, [nodes]);
+  // A refused create, rename, move or delete says why; before this it failed without a word.
+  const { errors } = useProjectState(props.store);
+  const commandError = Object.entries(errors).find(([key, reason]) => key.startsWith('command:') && reason !== '')?.[1];
   const selectedRoots = selectedProjectId === null
     ? tree
     : tree.filter((branch) => branch.node.id === selectedProjectId);
@@ -168,6 +171,7 @@ export function ProjectTree(props: ProjectTreeProps) {
         <button type="button" aria-pressed={selectedProjectId === null} onClick={() => onSelectProject(null)} className="touch-target min-w-0 flex-1 rounded px-2 text-left text-sm text-text-secondary aria-pressed:bg-selected">Tất cả dự án</button>
         <button type="button" aria-label="Tạo project" title="Tạo project từ một thư mục (mở hộp chọn thư mục của Windows)" onClick={props.onCreateProject} className="touch-target rounded px-2 text-text-secondary">➕</button>
       </div>
+      {commandError !== undefined && <p role="alert" className="px-2 text-xs text-status-error">{commandError}</p>}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 text-xs text-text-muted">
         <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-28 flex-1 rounded bg-well px-1 py-1 text-sm text-text">
           <option value="all">Mọi công cụ</option>
@@ -218,13 +222,13 @@ function RecentlyStopped({ nodes, onOpenStopped }: Pick<ProjectTreeProps, 'nodes
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>Vừa ngủ / tắt
       </button>
-      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} now={now} onOpenStopped={onOpenStopped} />)}
+      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} folder={ancestorOf(nodes, node, 'folder')?.name} now={now} onOpenStopped={onOpenStopped} />)}
     </section>
   );
 }
 
 /** One "Vừa ngủ / tắt" row with its session code; the pointer shows its card, a click opens its details. */
-function RecentStoppedRow({ node, now, onOpenStopped }: Pick<ProjectTreeProps, 'onOpenStopped'> & { node: ProjectTreeNode; now: number }) {
+function RecentStoppedRow({ node, folder, now, onOpenStopped }: Pick<ProjectTreeProps, 'onOpenStopped'> & { node: ProjectTreeNode; folder: string | undefined; now: number }) {
   const hover = useSessionHover(true);
   const label = stoppedLabel(node, now);
   const code = sessionCode(node);
@@ -238,7 +242,11 @@ function RecentStoppedRow({ node, now, onOpenStopped }: Pick<ProjectTreeProps, '
         className="touch-target flex min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-hover"
       >
         <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" />
-        <span className="min-w-0 flex-1 truncate text-text">{sessionDisplayName(node)}</span>
+        <span className="min-w-0 flex-1 leading-snug">
+          <span className="block truncate text-text">{sessionDisplayName(node)}</span>
+          {/* A stopped session leaves its folder in the tree: name the folder here so it can be found. */}
+          {folder !== undefined && <span className="block truncate text-2xs text-text-muted" data-testid="recent-stopped-folder">📁 {folder}</span>}
+        </span>
         {code !== null && <span className="shrink-0 font-mono text-2xs text-text-muted" title={`Mã phiên ${code.full}`}>#{code.short}</span>}
         <UnfinishedMark node={node} count />
         <span className="shrink-0 text-2xs text-text-muted">{label}</span>
@@ -259,14 +267,14 @@ interface ProjectTreeRowProps extends ProjectTreeProps {
 function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ...props }: ProjectTreeRowProps) {
   const { node, children } = branch;
   const isCollapsed = collapsed.has(node.id);
-  const menu = useAgentMenuGestures<HTMLButtonElement>(
-    useMemo(
-      () => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node, props.cloud !== undefined) }),
-      [node, props.nodes, props.cloud],
-    ),
-    props.onMenu,
+  const menuSubject = useMemo(
+    () => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node, props.cloud !== undefined) }),
+    [node, props.nodes, props.cloud],
   );
+  const menu = useAgentMenuGestures<HTMLButtonElement>(menuSubject, props.onMenu);
   const isSession = node.kind === 'session';
+  // A subagent is its parent's little helper: a mini face and one line, with no card of its own.
+  const isSub = isSession && node.agentKind === 'sub';
   const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
   const stateLabel = node.state === undefined ? undefined : (SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state);
   const agentEngine = node.agentKind === undefined ? undefined : AGENT_ENGINES.find((engine) => engine.id === node.agentKind);
@@ -324,13 +332,15 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
           className={`touch-target flex min-w-0 flex-1 items-center text-left ${ROW_TEXT_CLASS[node.kind] ?? 'text-sm'} ${(node.kind === 'project' && props.selectedProjectId === node.id) || selected ? 'bg-selected text-text' : 'text-text-secondary'} ${
             isSession
               // A session is a chip, as an agent is in ZCode: room around a bigger face, a soft card behind it.
-              ? `gap-2.5 rounded-lg border px-2 py-1.5 transition-colors duration-150 ${selected ? 'border-accent/50' : 'border-white/5 bg-white/[0.03] hover:border-white/10 hover:bg-hover'}`
+              ? isSub
+                ? `gap-1.5 rounded-md border px-1.5 py-0.5 text-xs transition-colors duration-150 ${selected ? 'border-accent/50' : 'border-transparent hover:bg-hover'}`
+                : `gap-2.5 rounded-lg border px-2 py-1.5 transition-colors duration-150 ${selected ? 'border-accent/50' : 'border-white/5 bg-white/[0.03] hover:border-white/10 hover:bg-hover'}`
               : 'gap-2 rounded px-1 py-0.5'
           }`}
         >
           {isSession ? (
             <>
-              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="lg" />
+              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size={isSub ? 'sm' : 'lg'} />
               <span className="min-w-0 flex-1 leading-snug">
                 {/* One line: the name, then only what a glance needs. A running session's face glances around ("đang chạy"); main is the usual branch. */}
                 <span className="flex min-w-0 items-baseline gap-1.5">
@@ -348,10 +358,10 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                     ].filter((part) => part !== null).flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))}
                   </span>
                 </span>
-                {progress === null && sessionSummary(node) !== undefined && (
+                {!isSub && progress === null && sessionSummary(node) !== undefined && (
                   <span className="block truncate text-xs text-text-muted" data-testid="session-summary">{sessionSummary(node)}</span>
                 )}
-                {progress !== null && (
+                {!isSub && progress !== null && (
                   <span className="mt-1 block" data-testid="session-progress" title={[progress.current && `Đang: ${progress.current}`, progress.blocked && `Kẹt: ${progress.blocked}`].filter(Boolean).join('\n')}>
                     <span className="flex items-center gap-2 text-xs text-text-muted">
                       <span aria-hidden="true" className="h-1 flex-1 overflow-hidden rounded-full bg-well">
@@ -380,6 +390,20 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
             </>
           )}
         </button>
+        {(node.kind === 'project' || node.kind === 'group' || node.kind === 'folder') && (
+          <button
+            type="button"
+            aria-label={`Thao tác với ${node.name}`}
+            title="Đổi tên, xoá… (hoặc chuột phải)"
+            onClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              props.onMenu({ subject: menuSubject, anchor: { x: rect.left, y: rect.bottom }, returnFocus: event.currentTarget });
+            }}
+            className="touch-target shrink-0 rounded px-1.5 text-base text-text-muted hover:bg-hover hover:text-text"
+          >
+            ⋯
+          </button>
+        )}
         {node.kind === 'folder' && (
           <button
             type="button"

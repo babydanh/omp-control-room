@@ -21,3 +21,43 @@ export function screenPlainText(text: string): string {
   while (end > 0 && rows[end - 1] === '') end -= 1;
   return rows.slice(0, end).join('\n');
 }
+
+/** A piece of a screen row: plain text, or an http(s) link the reader can open. */
+export interface LinkPiece {
+  readonly text: string;
+  readonly href?: string;
+}
+
+const URL_PATTERN = /https?:\/\/[^\s<>"'`]+/g;
+const TRAILING_PUNCTUATION = /[.,;:!?]$/;
+
+/** The URL without the punctuation a sentence puts after it, and without a closing bracket it never opened. */
+function trimUrl(url: string): string {
+  let end = url;
+  for (;;) {
+    if (TRAILING_PUNCTUATION.test(end)) end = end.slice(0, -1);
+    else if (/[)\]}]$/.test(end) && !hasOpenFor(end)) end = end.slice(0, -1);
+    else return end;
+  }
+}
+
+function hasOpenFor(url: string): boolean {
+  const closer = url[url.length - 1] ?? '';
+  const opener = closer === ')' ? '(' : closer === ']' ? '[' : '{';
+  return url.split(opener).length >= url.split(closer).length;
+}
+
+/** Splits one screen row into text and http(s) links; other schemes stay text. */
+export function splitLinks(row: string): LinkPiece[] {
+  const pieces: LinkPiece[] = [];
+  let from = 0;
+  for (const match of row.matchAll(URL_PATTERN)) {
+    const url = trimUrl(match[0]);
+    if (url === 'http://' || url === 'https://') continue;
+    if (match.index > from) pieces.push({ text: row.slice(from, match.index) });
+    pieces.push({ text: url, href: url });
+    from = match.index + url.length;
+  }
+  if (from < row.length) pieces.push({ text: row.slice(from) });
+  return pieces;
+}
