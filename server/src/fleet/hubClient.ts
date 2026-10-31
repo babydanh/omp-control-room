@@ -54,6 +54,7 @@ export interface FleetHubMachine {
   readonly sessions: readonly FleetHubSession[];
   readonly repos: readonly FleetHubRepo[];
   readonly disk_free_gb?: number | null;
+  readonly skill_version?: string | null;
   readonly tmux?: readonly FleetHubTmux[];
   readonly lavish?: readonly { readonly key: string; readonly file: string }[];
   readonly viec?: readonly FleetHubTask[];

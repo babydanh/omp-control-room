@@ -113,6 +113,7 @@ export function buildFleetSnapshot(
   response: FleetHubResponse,
   localView: LedgerView | null,
   localGuard: GitGuardReport | null = null,
+  expectedSkillVersion: string | null = null,
 ): FleetSnapshotMessage {
   const localActiveSessions = localView?.sessions.filter((session) => session.open) ?? [];
   const localActiveBranches = [
@@ -167,6 +168,9 @@ export function buildFleetSnapshot(
           ...(typeof repo.staged === 'boolean' ? { staged: repo.staged } : {}),
         })),
         ...(typeof machine.disk_free_gb === 'number' ? { diskFreeGb: machine.disk_free_gb } : {}),
+        ...(machine.skill_version ? { skillVersion: machine.skill_version } : {}),
+        // Stale = differs from the last bundle dong-bo-cloud.ps1 pushed; a machine that reports none counts as stale.
+        ...(expectedSkillVersion ? { skillStale: machine.skill_version !== expectedSkillVersion } : {}),
         lavishSessions: (machine.lavish ?? [])
           .filter(
             (session) =>

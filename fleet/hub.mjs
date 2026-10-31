@@ -158,6 +158,7 @@ export function createHub({ keysPath, statePath, now = () => Date.now(), started
           agent_id: claims.iss,
           received_at: now(),
           disk_free_gb: typeof body.disk_free_gb === 'number' ? body.disk_free_gb : null,
+          skill_version: typeof body.skill_version === 'string' && /^[0-9a-f]{12}$/.test(body.skill_version) ? body.skill_version : null,
           sessions: Array.isArray(body.sessions) ? body.sessions.slice(0, 50) : [],
           tmux: Array.isArray(body.tmux) ? body.tmux.slice(0, 30) : [],
           lavish: Array.isArray(body.lavish) ? body.lavish.slice(0, 20) : [],

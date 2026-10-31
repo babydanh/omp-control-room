@@ -8,6 +8,7 @@ import {
   fitReport,
   parseLavish,
   parseTmux,
+  readSkillVersion,
   readTaskBook,
   shouldBackupGuard,
   shouldPruneGuard,
@@ -151,3 +152,14 @@ test('cloud guard pruning is enabled by default every six hours', () => {
   assert.equal(shouldPruneGuard(Number.NaN, 1_000, false), false);
 });
 
+
+test('readSkillVersion returns the 12-char sync hash, or null when the file is missing or malformed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'skillver-'));
+  const good = join(dir, 'good');
+  const bad = join(dir, 'bad');
+  writeFileSync(good, '9e7a47bf9348\n');
+  writeFileSync(bad, 'not a hash');
+  assert.equal(readSkillVersion(good), '9e7a47bf9348');
+  assert.equal(readSkillVersion(bad), null);
+  assert.equal(readSkillVersion(join(dir, 'missing')), null);
+});

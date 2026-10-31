@@ -485,6 +485,9 @@ function MachineCard({
         {machine.diskFreeGb !== undefined && (
           <span className={machine.diskFreeGb < 3 ? 'text-warning' : ''}> · đĩa trống {machine.diskFreeGb} GB</span>
         )}
+        {machine.skillStale === true && (
+          <span className="text-warning" title="Skill, luật hoặc plugin trên máy này chưa theo bản đồng bộ mới nhất"> · bản cũ, cần đồng bộ</span>
+        )}
       </p>
       <p className="text-sm text-text-secondary">
         {machine.sessionCount} phiên · {machine.engines.length > 0 ? machine.engines.join(', ') : 'không có engine'}

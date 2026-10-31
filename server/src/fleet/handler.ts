@@ -24,6 +24,7 @@ import {
 import { collectFleetBranchPullRequests } from './fleetBranchStatus.js';
 import { buildFleetSnapshot } from './fleetSnapshot.js';
 import { createFleetHubClient, type FleetHubClient, type FleetHubResponse, FleetUnavailableError } from './hubClient.js';
+import { readExpectedSkillVersion } from './skillVersion.js';
 
 const FALLBACK_REQUEST_ID = '00000000-0000-4000-8000-000000000000';
 const LEDGER_WAIT_MS = 5000;
@@ -181,7 +182,7 @@ async function snapshotWithPullRequests(
   localGuard: GitGuardReport | null,
   context: FleetCommandContext,
 ): Promise<FleetSnapshotMessage> {
-  const snapshot = askWatchOf(context).annotate(buildFleetSnapshot(requestId, response, localView, localGuard));
+  const snapshot = askWatchOf(context).annotate(buildFleetSnapshot(requestId, response, localView, localGuard, readExpectedSkillVersion()));
   try {
     const status = await collectFleetBranchPullRequests(localView, response, {
       git: context.git ?? defaultPullRequestGit,

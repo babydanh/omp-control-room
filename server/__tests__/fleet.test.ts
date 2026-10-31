@@ -352,3 +352,27 @@ describe('cloud control', () => {
     });
   });
 });
+
+describe('skill sync version in the snapshot', () => {
+  const build = (skill_version: string | null | undefined, expected: string | null) =>
+    buildFleetSnapshot(
+      'r',
+      { now: 1_000, machines: [{ ...machine('danh', '/data/home/Backend', []), skill_version }] },
+      null,
+      null,
+      expected,
+    ).machines[0];
+
+  it('marks a machine stale when its version differs from the last synced one, or is missing', () => {
+    expect(build('aaaaaaaaaaaa', 'bbbbbbbbbbbb')).toMatchObject({ skillVersion: 'aaaaaaaaaaaa', skillStale: true });
+    expect(build(null, 'bbbbbbbbbbbb')).toMatchObject({ skillStale: true });
+  });
+
+  it('marks a machine current when versions match', () => {
+    expect(build('bbbbbbbbbbbb', 'bbbbbbbbbbbb')).toMatchObject({ skillVersion: 'bbbbbbbbbbbb', skillStale: false });
+  });
+
+  it('says nothing about staleness when the last synced version is unknown', () => {
+    expect(build('aaaaaaaaaaaa', null).skillStale).toBeUndefined();
+  });
+});

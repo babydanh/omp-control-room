@@ -145,3 +145,13 @@ test('a restarted hub refuses tokens issued before it started', async () => {
   restarted.close();
   assert.equal(res.status, 401);
 });
+
+test('keeps a 12-hex skill_version and drops anything else', async () => {
+  assert.equal((await report(tok('m1', 'report', m1.priv), { ...body('m1'), skill_version: '9e7a47bf9348' })).status, 200);
+  const read1 = await (await read(tok('board', 'read', board.priv))).json();
+  assert.equal(read1.machines.find((m) => m.agent_id === 'm1').skill_version, '9e7a47bf9348');
+
+  assert.equal((await report(tok('m1', 'report', m1.priv), { ...body('m1'), skill_version: 'x; rm -rf /' })).status, 200);
+  const read2 = await (await read(tok('board', 'read', board.priv))).json();
+  assert.equal(read2.machines.find((m) => m.agent_id === 'm1').skill_version, null);
+});

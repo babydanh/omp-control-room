@@ -6766,6 +6766,11 @@ components:
         diskFreeGb:
           type: number
           minimum: 0
+        skillVersion:
+          type: string
+          pattern: '^[0-9a-f]{12}$'
+        skillStale:
+          type: boolean
         lavishSessions:
           type: array
           items:

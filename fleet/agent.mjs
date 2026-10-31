@@ -230,6 +230,14 @@ function diskFreeGb() {
   } catch { return null; }
 }
 
+/** The sync hash dong-bo-cloud.ps1 writes to ~/.skill-version (12 hex chars), or null when absent or malformed. */
+export function readSkillVersion(file) {
+  try {
+    const text = readFileSync(file, 'utf8').trim();
+    return /^[0-9a-f]{12}$/.test(text) ? text : null;
+  } catch { return null; }
+}
+
 /**
  * Keep the report under the hub's 64 KB limit: drop per-file line ranges from the largest repos
  * first (dirty_files stay, so overlaps fall back to file level) and flag what was cut.
@@ -368,6 +376,7 @@ if (process.env.FLEET_ID) {
       fitReport({
         agent_id: id,
         disk_free_gb: diskFreeGb(),
+        skill_version: readSkillVersion(join(process.env.HOME ?? ROOT, '.skill-version')),
         sessions: sessionRows,
         tmux,
         lavish: lavishSessions(),
