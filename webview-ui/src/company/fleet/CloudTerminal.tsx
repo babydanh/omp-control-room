@@ -8,6 +8,7 @@ import { TERMINAL_WS_PREFIX } from '../../../../core/src/constants.js';
 import { encodeTerminalFrame, parseServerFrame } from '../../../../core/src/terminalFrames.js';
 import { TERMINAL_FONT_SIZE_PX, TERMINAL_SCROLLBACK_LINES, TERMINAL_THEME } from '../../constants.js';
 import { serverToken } from '../../transport/serverToken.js';
+import { registerCloudInput } from './cloudInput.js';
 
 /**
  * One cloud tmux session, live. The board server holds a local PTY running
@@ -64,6 +65,12 @@ export function CloudTerminal({ terminalId, label, onClose, fill = false }: { te
     const input = term.onData((data) => {
       if (socket.readyState === WebSocket.OPEN) socket.send(encodeTerminalFrame({ type: 'input', data }));
     });
+    // The composer types into this session through the same socket.
+    const unregister = registerCloudInput(terminalId, (data) => {
+      if (socket.readyState !== WebSocket.OPEN) return false;
+      socket.send(encodeTerminalFrame({ type: 'input', data }));
+      return true;
+    });
     const observer = new ResizeObserver(() => {
       fit.fit();
       sendResize();
@@ -72,6 +79,7 @@ export function CloudTerminal({ terminalId, label, onClose, fill = false }: { te
 
     return () => {
       observer.disconnect();
+      unregister();
       input.dispose();
       socket.close(1000);
       term.dispose();

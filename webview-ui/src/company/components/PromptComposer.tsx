@@ -111,6 +111,8 @@ export interface PromptComposerProps {
   client: CompanyClient;
   /** The Project tree's folders: new work can go to any of them, opened or not yet. */
   projectFolders: readonly { path: string; name?: string }[];
+  /** The cloud session the drawer shows: a plain send types into it. Returns false when its terminal is not connected. */
+  cloudTarget?: { readonly label: string; readonly send: (text: string) => boolean };
 }
 
 /** One line's height, the padding and border around it, and the height the text needs. */
@@ -150,7 +152,7 @@ function fitTextarea(el: HTMLTextAreaElement | null, savedPx: number | null): vo
   el.style.height = `${composerInputHeight(fitPx, rowPx, chromePx, savedPx)}px`;
 }
 
-export function PromptComposer({ client, projectFolders }: PromptComposerProps) {
+export function PromptComposer({ client, projectFolders, cloudTarget }: PromptComposerProps) {
   const state = useCompanyState(client);
   const draft = state.prompt;
   const [notice, setNotice] = useState<string | null>(null);
@@ -296,6 +298,17 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
     });
   };
 
+  /** Type the draft into the cloud session in the drawer; the draft clears once its terminal took the text. */
+  const sendToCloud = (target: NonNullable<PromptComposerProps['cloudTarget']>) => {
+    if (draft.text.trim() === '') return;
+    if (!target.send(draft.text)) {
+      setNotice('Terminal cloud chưa nối xong hoặc đã đóng: đợi nó hiện rồi gửi lại.');
+      return;
+    }
+    setNotice(null);
+    client.setDraftText('');
+  };
+
   /** Wake a sleeping session with the draft as its first prompt; the draft clears once the server accepts. */
   const wakeWithPrompt = (session: { readonly paneId: string }) => {
     if (herdrRequest !== null) return;
@@ -437,7 +450,8 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
         openResumePicker();
         return;
       case 'prompt':
-        if (sleepingTarget !== null) wakeWithPrompt(sleepingTarget);
+        if (cloudTarget !== undefined) sendToCloud(cloudTarget);
+        else if (sleepingTarget !== null) wakeWithPrompt(sleepingTarget);
         else if (herdrTarget === null) typeIntoSession();
         else sendToHerdr(herdrTarget);
         return;
@@ -787,7 +801,7 @@ export function PromptComposer({ client, projectFolders }: PromptComposerProps) 
       </div>
       <p className="mt-0.5 flex min-w-0 items-center gap-2 text-2xs text-text-muted">
         <span className="min-w-0 truncate" data-testid="prompt-target">
-          {sleepingTarget === null ? sendTargetLabel(selectedSession, herdrTarget) : sleepingTargetLabel(sleepingTarget)}
+          {cloudTarget !== undefined ? `Gửi vào cloud: ${cloudTarget.label}` : sleepingTarget === null ? sendTargetLabel(selectedSession, herdrTarget) : sleepingTargetLabel(sleepingTarget)}
         </span>
         {pickerFolders.length > 0 && focus !== null && (
           <select

@@ -25,6 +25,7 @@ import {
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
 import { cloudFolderKey, type CloudFolders, readCloudFolders, writeCloudFolders } from '../fleet/cloudFolders.js';
+import { sendCloudLine } from '../fleet/cloudInput.js';
 import { cloudNodeId, cloudTreeNodes, parseCloudNodeId, readCloudSeen, rememberCloud, writeCloudSeen } from '../fleet/cloudNodes.js';
 import { pendingCloudRow } from '../fleet/cloudRows.js';
 import { randomSuffix, slugFromPrompt } from '../fleet/cloudTaskPick.js';
@@ -191,6 +192,18 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledgerAvailable = ledger.privileged === true;
   const fleetAvailable = fleet.privileged === true;
   const fleetMachines = fleet.snapshot?.machines;
+  // The cloud session the drawer shows, once its terminal is attached: the composer types into it.
+  const attachedTerminal = fleet.terminal;
+  const cloudTarget = useMemo(
+    () => {
+      const shown = drawerSubjectFor(state, opened);
+      return shown?.kind === 'cloud' && attachedTerminal !== null && attachedTerminal.machine === shown.machine && attachedTerminal.session === shown.session
+        ? { label: `${shown.machine} · ${shown.session}`, send: (text: string) => sendCloudLine(attachedTerminal.terminalId, text) }
+        : undefined;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `state` changes on every board message; only the selection decides the drawer subject
+    [opened, attachedTerminal, state.selection],
+  );
   const pendingCloud = useMemo(() => pendingCloudRow(fleet, fleetMachines ?? []), [fleet, fleetMachines]);
   // Cloud agents join the Project tree as session rows, so they look and sort like the local ones.
   const treeNodes = useMemo(
@@ -1224,7 +1237,7 @@ export function BoardShell({ client }: BoardShellProps) {
               identityOf={(id) => folderIdentityOf(state, id)}
             />
           )}
-          {!composerHidden && <PromptComposer client={client} projectFolders={ledgerFolders} />}
+          {!composerHidden && <PromptComposer client={client} projectFolders={ledgerFolders} {...(cloudTarget === undefined ? {} : { cloudTarget })} />}
           </div>
           <DetailDrawer
             client={client}
