@@ -59,7 +59,8 @@ function clean(slug: string): { code: number | null; last: string } {
   return { code: result.status, last: `${result.stdout}${result.stderr}`.trim().split('\n').pop() ?? '' };
 }
 
-describe.skipIf(!hasBash)('TASK_CLEAN_SCRIPT', () => {
+// Each test runs real git and bash processes (slow on Windows and under load).
+describe.skipIf(!hasBash)('TASK_CLEAN_SCRIPT', { timeout: 30_000 }, () => {
   beforeEach(() => {
     machine = setup();
   });
@@ -115,8 +116,8 @@ describe.skipIf(!hasBash)('TASK_CLEAN_SCRIPT', () => {
     expect(clean('viec-cache').code).toBe(0);
   });
 
-  it('refuses a session cloud-giao did not create, and a ledger path outside the worktree base', () => {
-    expect(clean('khong-co')).toMatchObject({ code: 3 });
+  it('treats a task nothing remembers as already gone, and refuses a ledger path outside the worktree base', () => {
+    expect(clean('khong-co')).toMatchObject({ code: 0 });
 
     writeFileSync(`${machine.home}/.cloud-viec/ngoai.json`, JSON.stringify({ cwd: `${machine.home}/repo` }));
     expect(clean('ngoai')).toMatchObject({ code: 3 });

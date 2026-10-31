@@ -196,7 +196,7 @@ export function ProjectTree(props: ProjectTreeProps) {
         <label className="flex items-center gap-1" title="Chỉ hiện phiên đang làm hoặc đang chờ bạn, ẩn phiên rảnh"><input type="checkbox" checked={liveOnly} onChange={(event) => setLiveOnly(event.target.checked)} />Ẩn phiên rảnh</label>
         <label className={`flex shrink-0 items-center gap-1 ${unfinishedCount > 0 ? 'text-warning' : ''}`} title="Chỉ hiện phiên làm dở: bị ngắt giữa chừng, hoặc đã dừng khi todo chưa xong (kể cả phiên đã tắt trong 24 giờ qua)"><input type="checkbox" checked={unfinishedOnly} onChange={(event) => setUnfinishedOnly(event.target.checked)} />Làm dở{unfinishedCount > 0 ? ` (${unfinishedCount})` : ''}</label>
       </div>
-      <RecentlyStopped nodes={nodes} onOpenStopped={props.onOpenStopped} />
+      <RecentlyStopped nodes={nodes} onOpenStopped={props.onOpenStopped} onMenu={props.onMenu} cloud={props.cloud !== undefined} />
       <div className="min-h-0 overflow-y-auto">
         {visible.map((branch) => (
           <ProjectTreeRow key={branch.node.id} branch={branch} depth={0} collapsed={collapsed} onToggleCollapse={toggleCollapse} onMove={moveNode} {...props} />
@@ -223,7 +223,7 @@ function UnfinishedMark({ node, count = false }: { node: ProjectTreeNode; count?
 }
 
 /** The sessions put to sleep or exited last, newest first: which one, how long ago, and whether it left work undone. */
-function RecentlyStopped({ nodes, onOpenStopped }: Pick<ProjectTreeProps, 'nodes' | 'onOpenStopped'>) {
+function RecentlyStopped({ nodes, onOpenStopped, onMenu, cloud }: Pick<ProjectTreeProps, 'nodes' | 'onOpenStopped' | 'onMenu'> & { cloud: boolean }) {
   const now = useNow();
   const [open, setOpen] = useState(true);
   const recent = useMemo(() => recentlyStoppedSessions(nodes, RECENT_STOPPED_MAX), [nodes]);
@@ -238,14 +238,19 @@ function RecentlyStopped({ nodes, onOpenStopped }: Pick<ProjectTreeProps, 'nodes
       >
         <span aria-hidden="true">{open ? '▾' : '▸'}</span>Vừa ngủ / tắt
       </button>
-      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} folder={ancestorOf(nodes, node, 'folder')?.name} now={now} onOpenStopped={onOpenStopped} />)}
+      {open && recent.map((node) => <RecentStoppedRow key={node.id} node={node} menuContext={projectMenuContext(nodes, node, cloud)} folder={ancestorOf(nodes, node, 'folder')?.name} now={now} onOpenStopped={onOpenStopped} onMenu={onMenu} />)}
     </section>
   );
 }
 
 /** One "Vừa ngủ / tắt" row with its session code; the pointer shows its card, a click opens its details. */
-function RecentStoppedRow({ node, folder, now, onOpenStopped }: Pick<ProjectTreeProps, 'onOpenStopped'> & { node: ProjectTreeNode; folder: string | undefined; now: number }) {
+function RecentStoppedRow({ node, menuContext, folder, now, onOpenStopped, onMenu }: Pick<ProjectTreeProps, 'onOpenStopped' | 'onMenu'> & { node: ProjectTreeNode; menuContext: ReturnType<typeof projectMenuContext>; folder: string | undefined; now: number }) {
   const hover = useSessionHover(true);
+  // Right-click: a board session gets its own menu (with Xoá phiên); a cloud or herdr one, the tree node's (Xoá phiên cloud / Xoá phiên).
+  const menu = useAgentMenuGestures<HTMLButtonElement>(
+    node.boardSessionId === undefined ? { kind: 'projectNode', node, menu: menuContext } : { kind: 'session', sessionId: node.boardSessionId, drawer: null },
+    onMenu,
+  );
   const label = stoppedLabel(node, now);
   const code = sessionCode(node);
   return (
@@ -255,6 +260,7 @@ function RecentStoppedRow({ node, folder, now, onOpenStopped }: Pick<ProjectTree
         data-testid="recent-stopped-row"
         onClick={() => onOpenStopped(node)}
         {...hover.bind}
+        {...menu}
         className="touch-target flex min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-hover"
       >
         <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" {...(parseCloudNodeId(node.id) === null ? {} : { variant: 'cloud' as const })} />

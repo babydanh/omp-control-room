@@ -5,12 +5,16 @@
  * It removes nothing when any worktree holds uncommitted files or commits no remote has: those would be lost.
  * The only path it ever removes comes from the ledger entry and must lie under the worktree base. The slug is
  * validated by the caller against FLEET_TASK_SLUG and is only ever read as "$1", never spliced into code.
- * Exit codes: 3 no such task or a path it will not touch, 5 git refused, 7 unsaved work. The last line is the reason, or `OK <slug>`.
+ * A task with no ledger entry and no tmux session is already gone: that is success, so the board can forget its row.
+ * Exit codes: 3 a live session cloud-giao did not create, or a path it will not touch, 5 git refused, 7 unsaved work. The last line is the reason, or `OK <slug>`.
  */
 export const TASK_CLEAN_SCRIPT = String.raw`set -u
 slug="$1"
 f="$HOME/.cloud-viec/$slug.json"
-[ -f "$f" ] || { echo "Khong co so viec $slug (phien nay khong do cloud-giao tao)"; exit 3; }
+if [ ! -f "$f" ]; then
+  if tmux has-session -t "=$slug" 2>/dev/null; then echo "Phien $slug dang chay nhung khong do cloud-giao tao, board khong don"; exit 3; fi
+  echo "OK $slug (khong con gi tren may)"; exit 0
+fi
 base="\${CLOUD_WT_BASE:-/data/home/wt}"
 cwd=$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).cwd || ""))' "$f") || { echo "So viec bi hong"; exit 3; }
 case "$cwd" in *..*|*[!A-Za-z0-9._:/-]*) echo "Duong dan viec khong hop le"; exit 3 ;; esac
