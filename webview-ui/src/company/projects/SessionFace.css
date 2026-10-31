@@ -128,7 +128,7 @@
     opacity 200ms ease-out;
 }
 
-/* The mood's mark beside the face: "z" asleep, "!" waiting on you; hidden otherwise. */
+/* The mood's mark beside the face: "z" asleep, "?" waiting on you; hidden otherwise. */
 .session-face__mark {
   position: absolute;
   top: -5px;
@@ -142,7 +142,7 @@
   content: 'z';
 }
 .session-face[data-mood='waiting'] .session-face__mark::after {
-  content: '!';
+  content: '?';
 }
 
 /* The error eye: a small "×", two bars crossing, shown in place of the lid. */
@@ -421,7 +421,7 @@
   .session-face__mark {
     animation: none !important;
   }
-  /* Still, the marks stay readable: "z" asleep, "!" waiting. */
+  /* Still, the marks stay readable: "z" asleep, "?" waiting. */
   .session-face[data-mood='sleep'] .session-face__mark,
   .session-face[data-mood='waiting'] .session-face__mark {
     opacity: 1;

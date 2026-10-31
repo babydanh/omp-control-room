@@ -39,3 +39,14 @@ export const FLEET_DIFF_MAX_BYTES = 300_000;
 export const FLEET_DIFF_NEW_FILES = 20;
 export const FLEET_DIFF_NEW_FILE_BYTES = 20_000;
 export const FLEET_REASON_NOT_REPORTED = 'Máy này chưa báo repository đó cho hub (đợi 30 giây rồi thử lại).';
+/** A tmux pane peek: one marker line per session in the dump, and how many bottom lines of each pane are read. */
+export const FLEET_PEEK_MARKER = '@@BOARD-PEEK@@';
+export const FLEET_PEEK_TAIL_LINES = 25;
+/** Lines taken from each pane's screen before blank rows are dropped (a tall empty pane keeps its text at the top). */
+export const FLEET_PEEK_DUMP_LINES = 60;
+/** A cloud session idle for less than this is at work, never waiting for an answer: it is not peeked. */
+export const FLEET_ASK_MIN_IDLE_S = 20;
+/** How long a machine's peek answer is reused before the next snapshot starts a fresh one (never awaited by the snapshot). */
+export const FLEET_ASK_CACHE_MS = 12_000;
+/** The peek runs on the machine and must not hang a snapshot's follow-up: seconds, passed to `instabox exec --timeout`. */
+export const FLEET_ASK_PEEK_TIMEOUT_S = 20;

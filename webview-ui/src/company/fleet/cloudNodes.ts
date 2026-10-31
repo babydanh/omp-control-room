@@ -103,6 +103,8 @@ interface CloudRow {
   readonly repos: readonly CloudRepo[];
   readonly lastSeen?: number;
   readonly starting?: boolean;
+  /** The session's pane shows a menu waiting for the user's choice. */
+  readonly asking?: boolean;
 }
 
 /** The machines whose tmux listing is current: only they can say a session is gone. */
@@ -121,6 +123,7 @@ function liveRows(machines: readonly FleetMachineSnapshot[]): CloudRow[] {
         session: session.name,
         state: session.idleSeconds < WORKING_WITHIN_S ? ('working' as const) : ('idle' as const),
         repos,
+        ...(session.asking === true ? { asking: true } : {}),
         ...(session.branch ? { branch: session.branch } : {}),
         ...(path ? { path } : {}),
       };
@@ -202,7 +205,8 @@ export function cloudTreeNodes(input: {
       kind: 'session',
       name: row.session,
       sessionId: id,
-      state: row.state,
+      // A session on a menu waits on the user, like a blocked local agent: its face asks "?".
+      state: row.asking === true ? 'waiting_input' : row.state,
       request: row.starting ? `đang khởi động trên ${row.machine}` : where,
       ...(row.branch ? { branch: row.branch } : {}),
       ...(row.path ? { path: row.path } : {}),

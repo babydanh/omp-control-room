@@ -2,6 +2,7 @@ import type { FleetSnapshotMessage, GitGuardReport, LedgerView, ServerMessage } 
 import { createGitRunner, type GitRunner } from '../ledger/git.js';
 import { type ProcessRunner,runProcess } from '../ledger/processRunner.js';
 import type { PtySessionManager } from '../terminal/ptySessionManager.js';
+import { createAskWatch } from './askWatch.js';
 import { createFleetBranchAnalysisService, type FleetBranchAnalysisSnapshot } from './branchAnalysis.js';
 import {
   createFleetPullRequestLookup,
@@ -31,6 +32,8 @@ const defaultPullRequestGit = createGitRunner(runProcess);
 const defaultPullRequests = createFleetPullRequestLookup();
 const defaultBranchAnalysis = createFleetBranchAnalysisService();
 let defaultCloudControl: CloudControl | null = null;
+// Which cloud sessions wait on a menu: one watch per cloud control, peeking in the background through it.
+const askWatches = new WeakMap<CloudControl, ReturnType<typeof createAskWatch>>();
 
 export interface FleetCommandContext {
   readonly fleet?: FleetHubClient;
@@ -168,7 +171,7 @@ async function snapshotWithPullRequests(
   localGuard: GitGuardReport | null,
   context: FleetCommandContext,
 ): Promise<FleetSnapshotMessage> {
-  const snapshot = buildFleetSnapshot(requestId, response, localView, localGuard);
+  const snapshot = askWatchOf(context).annotate(buildFleetSnapshot(requestId, response, localView, localGuard));
   try {
     const status = await collectFleetBranchPullRequests(localView, response, {
       git: context.git ?? defaultPullRequestGit,
@@ -215,6 +218,16 @@ function startBranchAnalysis(
     () => send(attach()),
   );
   return attach();
+}
+
+function askWatchOf(context: FleetCommandContext): ReturnType<typeof createAskWatch> {
+  const cloud = cloudOf(context);
+  let watch = askWatches.get(cloud);
+  if (watch === undefined) {
+    watch = createAskWatch((machine, sessions) => cloud.peekAsking(machine, sessions));
+    askWatches.set(cloud, watch);
+  }
+  return watch;
 }
 
 function cloudOf(context: FleetCommandContext): CloudControl {

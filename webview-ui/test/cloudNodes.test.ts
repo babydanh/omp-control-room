@@ -36,6 +36,20 @@ describe('cloud node ids', () => {
 });
 
 describe('cloudTreeNodes', () => {
+  it('shows a session that waits on a menu as waiting for you, so its face asks "?"', () => {
+    const live = machine({
+      tmuxSessions: [
+        { name: 'ask', attached: false, idleSeconds: 300, asking: true },
+        { name: 'quiet', attached: false, idleSeconds: 300 },
+      ],
+    });
+    const sessions = cloudTreeNodes({ ...base, machines: [live] }).filter((node) => node.kind === 'session');
+    const byName = (name: string) => sessions.find((node) => node.name === name);
+    expect(byName('ask')?.state).toBe('waiting_input');
+    expect(sessionFaceMood(byName('ask')!)).toBe('waiting');
+    expect(byName('quiet')?.state).toBe('idle');
+  });
+
   it('turns a live tmux session into a session node under the folder named like its repository', () => {
     const live = machine({
       tmuxSessions: [{ name: 'hi-dnma', attached: false, idleSeconds: 5, branch: 'cloud/danh-hi-dnma' }],

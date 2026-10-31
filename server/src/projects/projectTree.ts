@@ -310,6 +310,13 @@ export function linkHerdrPanes(
   return { rows: linked, panes: panes.filter((pane) => !joined.has(pane.id)) };
 }
 
+/** What a Claude agent tracked by hooks shows: a permission prompt or a question waits on the user, else rest or work. */
+export function boardAgentStatus(agent: Pick<AgentState, 'isWaiting' | 'permissionSent' | 'activeToolNames'>): string {
+  if (agent.permissionSent) return 'permission';
+  if ([...agent.activeToolNames.values()].includes('AskUserQuestion')) return 'waiting_input';
+  return agent.isWaiting ? 'waiting' : 'running';
+}
+
 function ledgerStatus(row: SessionRow): string {
   if (row.endedAt !== null) return 'ended';
   const state = row.state?.toLowerCase();
@@ -358,7 +365,7 @@ function sessionsForCheckout(
       engine: 'board',
       agentKind: 'board',
       id: agent.sessionId,
-      status: agent.isWaiting ? 'waiting' : 'running',
+      status: boardAgentStatus(agent),
       title: agent.agentName ?? agent.teamName ?? '',
       cwd: agent.projectDir,
     });

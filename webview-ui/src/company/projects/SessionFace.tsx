@@ -48,7 +48,7 @@ export function SessionFace({ mood, hue, size = 'md', variant }: { mood: Session
           </span>
         </span>
       </span>
-      {/* The mood's mark: a drifting "z" asleep, a bobbing "!" waiting on you, a sparkle when done. */}
+      {/* The mood's mark: a drifting "z" asleep, a bobbing "?" waiting on you, a sparkle when done. */}
       <span className="session-face__mark" />
     </span>
   );

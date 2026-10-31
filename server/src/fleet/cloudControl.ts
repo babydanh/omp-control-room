@@ -31,6 +31,7 @@ import {
 import type { PtySessionManager } from '../terminal/ptySessionManager.js';
 import {
   FLEET_ACCOUNT_CACHE_MS,
+  FLEET_ASK_PEEK_TIMEOUT_S,
   FLEET_DIFF_MAX_BYTES,
   FLEET_DIFF_NEW_FILE_BYTES,
   FLEET_DIFF_NEW_FILES,
@@ -48,6 +49,7 @@ import {
   FLEET_TASK_SLUG,
   FLEET_TERMINAL_ID_BASE,
 } from './constants.js';
+import { PANE_PEEK_SCRIPT, parsePanePeek } from './paneAsk.js';
 
 export type FleetTaskRepo = (typeof FLEET_TASK_REPOS)[number];
 export type FleetTaskEngine = (typeof FLEET_TASK_ENGINES)[number];
@@ -314,6 +316,23 @@ export class CloudControl {
     );
     if (result.code !== 0) {
       throw new CloudControlError('failed', result.stdout.trim().split('\n').pop() ?? 'tmux comment failed');
+    }
+  }
+
+  /**
+   * The sessions of `machine` whose pane shows a menu waiting for the user. Reads only: it never starts or wakes the
+   * machine (a sleeping one has nothing asking), and any failure reads as "none asking".
+   */
+  async peekAsking(machine: string, sessions: readonly string[]): Promise<Set<string>> {
+    if (!FLEET_MACHINE_NAME.test(machine) || !sessions.every((name) => FLEET_SESSION_NAME.test(name))) return new Set();
+    try {
+      const home = await this.#accountFor(machine);
+      const result = await this.deps.run(['exec', machine, '--timeout', String(FLEET_ASK_PEEK_TIMEOUT_S), '--', PANE_PEEK_SCRIPT], home);
+      if (result.code !== 0) return new Set();
+      const wanted = new Set(sessions);
+      return new Set([...parsePanePeek(result.stdout)].filter((name) => wanted.has(name)));
+    } catch {
+      return new Set();
     }
   }
 
