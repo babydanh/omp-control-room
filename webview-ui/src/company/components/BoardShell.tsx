@@ -192,18 +192,6 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledgerAvailable = ledger.privileged === true;
   const fleetAvailable = fleet.privileged === true;
   const fleetMachines = fleet.snapshot?.machines;
-  // The cloud session the drawer shows, once its terminal is attached: the composer types into it.
-  const attachedTerminal = fleet.terminal;
-  const cloudTarget = useMemo(
-    () => {
-      const shown = drawerSubjectFor(state, opened);
-      return shown?.kind === 'cloud' && attachedTerminal !== null && attachedTerminal.machine === shown.machine && attachedTerminal.session === shown.session
-        ? { label: `${shown.machine} · ${shown.session}`, send: (text: string) => sendCloudLine(attachedTerminal.terminalId, text) }
-        : undefined;
-    },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `state` changes on every board message; only the selection decides the drawer subject
-    [opened, attachedTerminal, state.selection],
-  );
   const pendingCloud = useMemo(() => pendingCloudRow(fleet, fleetMachines ?? []), [fleet, fleetMachines]);
   // Cloud agents join the Project tree as session rows, so they look and sort like the local ones.
   const treeNodes = useMemo(
@@ -223,6 +211,18 @@ export function BoardShell({ client }: BoardShellProps) {
     ...(fleet.snapshot?.machines.flatMap((machine) => machine.guard?.risks ?? []) ?? []),
   ].filter((risk) => risk.level === 'red').length;
   const [opened, setOpened] = useState<OpenedSubject | null>(null);
+  // The cloud session the drawer shows, once its terminal is attached: the composer types into it.
+  const attachedTerminal = fleet.terminal;
+  const cloudTarget = useMemo(
+    () => {
+      const shown = drawerSubjectFor(state, opened);
+      return shown?.kind === 'cloud' && attachedTerminal !== null && attachedTerminal.machine === shown.machine && attachedTerminal.session === shown.session
+        ? { label: `${shown.machine} · ${shown.session}`, send: (text: string) => sendCloudLine(attachedTerminal.terminalId, text) }
+        : undefined;
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `state` changes on every board message; only the selection decides the drawer subject
+    [opened, attachedTerminal, state.selection],
+  );
   // Why a session clicked in the tree opened nothing: it runs outside herdr, so there is no pane.
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
   const [artifactId, setArtifactId] = useState<string | null>(null);
