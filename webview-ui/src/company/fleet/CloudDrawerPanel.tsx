@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 
+import { lavishOfSession, openPendingTab } from './cloudLavish.js';
 import { CloudTerminal } from './CloudTerminal.js';
 import { fleetStore } from './fleetClient.js';
 import { useFleetState } from './fleetStore.js';
@@ -7,12 +8,14 @@ import { useFleetState } from './fleetStore.js';
 /**
  * A cloud tmux session in the detail drawer: its live terminal, like a local agent's. The board server
  * holds one PTY attached to the session; closing the panel only detaches, the agent keeps running.
+ * The session's Lavish pages (plans, reports it wrote on the machine) get a button here, not only on the Cloud page.
  */
 export function CloudDrawerPanel({ machine, session, onClose }: { machine: string; session: string; onClose: () => void }) {
   const fleet = useFleetState(fleetStore);
   const terminal = fleet.terminal;
   const attached = terminal !== null && terminal.machine === machine && terminal.session === session;
   const connecting = fleet.action?.kind === 'terminal';
+  const lavish = lavishOfSession(fleet.snapshot?.machines.find((entry) => entry.agentId === machine)?.lavishSessions, session);
 
   // Opens once per session shown; a failure is reported below with a retry instead of looping.
   useEffect(() => {
@@ -22,6 +25,24 @@ export function CloudDrawerPanel({ machine, session, onClose }: { machine: strin
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2 p-2">
+      {lavish.length > 0 && (
+        <ul className="flex flex-col gap-1 rounded border border-hairline bg-well px-3 py-2">
+          {lavish.map((entry) => (
+            <li key={entry.key} className="flex items-center gap-2 text-xs text-text-secondary">
+              <span className="font-medium text-text">Lavish</span>
+              <span className="min-w-0 flex-1 truncate font-mono" title={entry.file}>{entry.file.replace(/^\/data\/home\/(wt\/)?/, '')}</span>
+              <button
+                type="button"
+                disabled={fleet.action !== null}
+                className="company-btn company-btn-sm company-btn-ghost"
+                onClick={() => fleetStore.openLavish(machine, entry.key, openPendingTab())}
+              >
+                Mở Lavish
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       {attached && (
         <CloudTerminal key={terminal.terminalId} terminalId={terminal.terminalId} label={`${machine} · ${session}`} onClose={onClose} fill />
       )}

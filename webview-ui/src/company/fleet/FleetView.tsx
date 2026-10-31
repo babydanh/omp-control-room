@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { FleetBranchActionMessage, FleetBranchAnalysis, FleetLocalBranchSnapshot, FleetMachineSnapshot, FleetPullRequest, FleetTaskCreateMessage } from '../../../../core/src/messages.js';
+import { openPendingTab } from './cloudLavish.js';
 import { MAX_SESSIONS_PER_MACHINE, pickMachine, projectMachines, randomSuffix, slugFromPrompt } from './cloudTaskPick.js';
 import { CloudTerminal } from './CloudTerminal.js';
 import { fleetStore } from './fleetClient.js';
@@ -600,16 +601,6 @@ function MachineCard({
 /** `/data/home/wt/backend-x/.lavish/plan.html` -> `backend-x/.lavish/plan.html`. */
 function shortPath(file: string): string {
   return file.replace(/^\/data\/home\/(wt\/)?/, '');
-}
-
-/** A blank tab opened inside the click (so it is not blocked as a popup), pointed at Lavish once the port is forwarded. */
-function openPendingTab() {
-  const tab = window.open('about:blank', '_blank');
-  if (!tab) return null;
-  tab.opener = null;
-  tab.document.title = 'Đang nối tới Lavish…';
-  tab.document.body.textContent = 'Đang nối cổng tới máy cloud (máy ngủ thì mất 1–2 phút)…';
-  return { navigate: (url: string) => tab.location.replace(url), close: () => tab.close() };
 }
 
 function diffLineClass(line: string): string {

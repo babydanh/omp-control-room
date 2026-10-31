@@ -6,7 +6,7 @@ import type {
   GitGuardReport,
   LedgerView,
 } from '../../../core/src/messages.js';
-import { FLEET_LAVISH_KEY, FLEET_SESSION_NAME, FLEET_STALE_AFTER_MS } from './constants.js';
+import { FLEET_HUB_TASK_LIMIT, FLEET_LAVISH_KEY, FLEET_SESSION_NAME, FLEET_STALE_AFTER_MS, FLEET_TASK_SLUG } from './constants.js';
 import type { FleetHubMachine, FleetHubRepo, FleetHubResponse } from './hubClient.js';
 
 export type FleetMachineState = FleetMachineSnapshot['state'];
@@ -169,8 +169,13 @@ export function buildFleetSnapshot(
         })),
         ...(typeof machine.disk_free_gb === 'number' ? { diskFreeGb: machine.disk_free_gb } : {}),
         ...(machine.skill_version ? { skillVersion: machine.skill_version } : {}),
-        // Stale = differs from the last bundle dong-bo-cloud.ps1 pushed; a machine that reports none counts as stale.
-        ...(expectedSkillVersion ? { skillStale: machine.skill_version !== expectedSkillVersion } : {}),
+        // Stale = differs from the last bundle dong-bo-cloud.ps1 pushed. A machine that reports none is not judged:
+        // its agent or the hub may be older than this field, which would flag every machine at once.
+        ...(expectedSkillVersion && machine.skill_version ? { skillStale: machine.skill_version !== expectedSkillVersion } : {}),
+        // Every task the machine remembers, finished too. A list the hub cut short says nothing about the rest: left out.
+        ...(machine.viec && machine.viec.length < FLEET_HUB_TASK_LIMIT
+          ? { taskSlugs: machine.viec.map((task) => task.slug).filter((slug) => FLEET_TASK_SLUG.test(slug)) }
+          : {}),
         lavishSessions: (machine.lavish ?? [])
           .filter(
             (session) =>

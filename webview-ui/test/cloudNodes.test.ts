@@ -122,6 +122,17 @@ describe('cloudTreeNodes', () => {
     expect(stoppedLabel(session!, NOW)).toMatch(/^ngủ /);
   });
 
+  it('drops a remembered session the machine no longer has anywhere: no tmux, no task entry, no branch', () => {
+    const seen = { 'danh/hi-dnma': { machine: 'danh', session: 'hi-dnma', folder: 'folder-web', branch: 'cloud/danh-hi-dnma', lastSeen: NOW - 5 * 60_000 } };
+    expect(cloudTreeNodes({ ...base, machines: [machine({ taskSlugs: ['other'] })], seen })).toEqual([]);
+  });
+
+  it('keeps it asleep while the machine still lists its task, because its worktree is still there to delete', () => {
+    const seen = { 'danh/hi-dnma': { machine: 'danh', session: 'hi-dnma', folder: 'folder-web', lastSeen: NOW - 5 * 60_000 } };
+    const result = cloudTreeNodes({ ...base, machines: [machine({ taskSlugs: ['hi-dnma'] })], seen });
+    expect(result.find((node) => node.kind === 'session')).toMatchObject({ id: 'cloud:danh/hi-dnma', state: 'sleeping' });
+  });
+
   it('does not call a session asleep while its machine is not reporting', () => {
     const seen = { 'danh/hi-dnma': { machine: 'danh', session: 'hi-dnma', folder: 'folder-web', lastSeen: NOW - 60_000 } };
     expect(cloudTreeNodes({ ...base, machines: [machine({ state: 'stale' })], seen })).toEqual([]);

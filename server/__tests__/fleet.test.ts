@@ -363,9 +363,13 @@ describe('skill sync version in the snapshot', () => {
       expected,
     ).machines[0];
 
-  it('marks a machine stale when its version differs from the last synced one, or is missing', () => {
+  it('marks a machine stale when its version differs from the last synced one', () => {
     expect(build('aaaaaaaaaaaa', 'bbbbbbbbbbbb')).toMatchObject({ skillVersion: 'aaaaaaaaaaaa', skillStale: true });
-    expect(build(null, 'bbbbbbbbbbbb')).toMatchObject({ skillStale: true });
+  });
+
+  it('claims nothing about a machine that reports no version: its agent may simply be too old to say', () => {
+    expect(build(null, 'bbbbbbbbbbbb').skillStale).toBeUndefined();
+    expect(build(undefined, 'bbbbbbbbbbbb').skillStale).toBeUndefined();
   });
 
   it('marks a machine current when versions match', () => {
@@ -374,5 +378,31 @@ describe('skill sync version in the snapshot', () => {
 
   it('says nothing about staleness when the last synced version is unknown', () => {
     expect(build('aaaaaaaaaaaa', null).skillStale).toBeUndefined();
+  });
+});
+
+describe('task slugs in the snapshot', () => {
+  const build = (viec: FleetHubMachine['viec']) =>
+    buildFleetSnapshot('r', { now: 1_000, machines: [{ ...machine('danh', '/data/home/Backend', []), viec }] }, null).machines[0];
+
+  it('lists every task the machine remembers, finished ones too, so the board can tell a deleted session from a finished one', () => {
+    const tasks = [
+      { slug: 'a', status: 'dang-lam' as const, branch: 'cloud/danh-a' },
+      { slug: 'b', status: 'xong' as const, branch: 'cloud/danh-b' },
+    ];
+    expect(build(tasks).taskSlugs).toEqual(['a', 'b']);
+    expect(build([]).taskSlugs).toEqual([]);
+  });
+
+  it('says nothing when the hub did not send a task list', () => {
+    expect(build(undefined).taskSlugs).toBeUndefined();
+  });
+});
+
+describe('task slugs, hub list limit', () => {
+  it('leaves taskSlugs out when the list is as long as the hub keeps, since it may have been cut', () => {
+    const tasks = Array.from({ length: 30 }, (_, i) => ({ slug: `t${i}`, status: 'xong' as const, branch: `cloud/danh-t${i}` }));
+    const snapshot = buildFleetSnapshot('r', { now: 1_000, machines: [{ ...machine('danh', '/data/home/Backend', []), viec: tasks }] }, null);
+    expect(snapshot.machines[0].taskSlugs).toBeUndefined();
   });
 });

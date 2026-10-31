@@ -169,10 +169,13 @@ function rowsOf(machines: readonly FleetMachineSnapshot[], seen: CloudSeen, pend
   }
   const liveBranches = new Set([...rows.values()].flatMap((row) => (row.branch === undefined ? [] : [row.branch])));
   for (const row of leftoverRows(machines, new Set(rows.keys()), liveBranches)) rows.set(cloudFolderKey(row.machine, row.session), row);
-  const online = new Set(reporting(machines).map((machine) => machine.agentId));
+  const online = new Map(reporting(machines).map((machine) => [machine.agentId, machine] as const));
   for (const [key, entry] of Object.entries(seen)) {
-    if (!online.has(entry.machine)) continue;
+    const reported = online.get(entry.machine);
+    if (reported === undefined) continue;
     const row = rows.get(key);
+    // Nothing of it is left on a machine that lists its tasks (tmux gone, no task entry, no branch to finish): it was deleted.
+    if (row === undefined && reported.taskSlugs !== undefined && !reported.taskSlugs.includes(entry.session)) continue;
     if (row === undefined) {
       rows.set(key, { machine: entry.machine, session: entry.session, state: 'sleeping', repos: [], lastSeen: entry.lastSeen, ...(entry.branch ? { branch: entry.branch } : {}), ...(entry.path ? { path: entry.path } : {}) });
     } else if (row.state === 'sleeping') {

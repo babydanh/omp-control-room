@@ -50,3 +50,5 @@ export const FLEET_ASK_MIN_IDLE_S = 20;
 export const FLEET_ASK_CACHE_MS = 12_000;
 /** The peek runs on the machine and must not hang a snapshot's follow-up: seconds, passed to `instabox exec --timeout`. */
 export const FLEET_ASK_PEEK_TIMEOUT_S = 20;
+/** The hub keeps at most this many task entries per machine (fleet/hub.mjs); a list this long may have been cut. */
+export const FLEET_HUB_TASK_LIMIT = 30;

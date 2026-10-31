@@ -9,6 +9,10 @@ import { encodeTerminalFrame, parseServerFrame } from '../../../../core/src/term
 import { TERMINAL_FONT_SIZE_PX, TERMINAL_SCROLLBACK_LINES, TERMINAL_THEME } from '../../constants.js';
 import { serverToken } from '../../transport/serverToken.js';
 import { registerCloudInput } from './cloudInput.js';
+import { exitScreen } from './cloudTerminalExit.js';
+
+/** xterm's own default stack starts with Courier New, which is thin and uneven on Windows; these ship with the OS. */
+const TERMINAL_FONT_FAMILY = '"Cascadia Mono", Consolas, "DejaVu Sans Mono", Menlo, monospace';
 
 /**
  * One cloud tmux session, live. The board server holds a local PTY running
@@ -26,6 +30,7 @@ export function CloudTerminal({ terminalId, label, onClose, fill = false }: { te
     if (!element) return;
     const term = new Terminal({
       fontSize: TERMINAL_FONT_SIZE_PX,
+      fontFamily: TERMINAL_FONT_FAMILY,
       scrollback: TERMINAL_SCROLLBACK_LINES,
       theme: TERMINAL_THEME,
       convertEol: false,
@@ -56,7 +61,12 @@ export function CloudTerminal({ terminalId, label, onClose, fill = false }: { te
       } else if (frame.type === 'output') {
         term.write(frame.data);
       } else {
-        setStatus(`Phiên SSH đã đóng (mã ${frame.exitCode}). Agent trên máy vẫn chạy trong tmux.`);
+        const reason = `Phiên SSH đã đóng (mã ${frame.exitCode}). Agent trên máy vẫn chạy trong tmux.`;
+        const buffer = term.buffer.active;
+        const lines = Array.from({ length: buffer.length }, (_, row) => buffer.getLine(row)?.translateToString(true) ?? '');
+        term.reset();
+        term.write(exitScreen(lines, reason));
+        setStatus(reason);
       }
     };
     socket.onclose = (event: CloseEvent) => {
@@ -71,13 +81,20 @@ export function CloudTerminal({ terminalId, label, onClose, fill = false }: { te
       socket.send(encodeTerminalFrame({ type: 'input', data }));
       return true;
     });
+    // Resizing the drawer fires this many times a second; one fit per frame keeps the resize frames sent over SSH few.
+    let frame = 0;
     const observer = new ResizeObserver(() => {
-      fit.fit();
-      sendResize();
+      if (frame !== 0) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        fit.fit();
+        sendResize();
+      });
     });
     observer.observe(element);
 
     return () => {
+      cancelAnimationFrame(frame);
       observer.disconnect();
       unregister();
       input.dispose();
