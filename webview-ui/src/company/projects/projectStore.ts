@@ -62,13 +62,22 @@ export interface ProjectState {
   nodes: readonly ProjectTreeNode[];
   /** The nodes come from a full snapshot: repos and worktrees are known, not just folders. */
   treeComplete: boolean;
+  /** The nodes are the saved tree of an earlier visit; the server's full tree has not arrived yet. */
+  treeStale: boolean;
   diff: ProjectDiffMessage | null;
   settings: ProjectSettingsMessage | null;
   pending: Readonly<Record<string, ProjectRequest>>;
   results: Readonly<Record<string, ProjectCommandResultMessage | ProjectSessionStartResultMessage | ProjectBranchCompareMessage | ProjectMergePreviewResultMessage | ProjectImageSavedMessage>>;
   errors: Readonly<Record<string, string>>;
 }
-export interface ProjectStoreOptions { send: (message: ClientMessage) => void; newRequestId?: () => string; }
+export interface ProjectStoreOptions {
+  send: (message: ClientMessage) => void;
+  newRequestId?: () => string;
+  /** The full tree saved by an earlier visit: shown, marked stale, until the server's full tree replaces it. */
+  restoreNodes?: readonly ProjectTreeNode[];
+  /** Called with every full tree the server sends. */
+  saveNodes?: (nodes: readonly ProjectTreeNode[]) => void;
+}
 export interface ProjectStore {
   subscribe: (listener: () => void) => () => void;
   getSnapshot: () => ProjectState;
@@ -112,7 +121,8 @@ export function isProjectServerMessage(message: ServerMessage): message is Proje
 
 export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
   const requestId = options.newRequestId ?? defaultRequestId;
-  let state: ProjectState = { nodes: [], treeComplete: false, diff: null, settings: null, pending: {}, results: {}, errors: {} };
+  const restored = options.restoreNodes ?? [];
+  let state: ProjectState = { nodes: restored, treeComplete: restored.length > 0, treeStale: restored.length > 0, diff: null, settings: null, pending: {}, results: {}, errors: {} };
   const listeners = new Set<() => void>();
   const latest = new Map<string, string>();
   const commit = (next: ProjectState) => { if (next === state) return; state = next; for (const listener of listeners) listener(); };
@@ -140,7 +150,10 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
       if (latest.get('tree') === message.requestId) latest.delete('tree');
       // A quick snapshot after a full one would hide repos for a moment: keep the full nodes.
       if (message.partial === true && state.treeComplete) commit({ ...state, pending });
-      else commit({ ...state, nodes: message.nodes, treeComplete: message.partial !== true, pending });
+      else {
+        commit({ ...state, nodes: message.nodes, treeComplete: message.partial !== true, treeStale: false, pending });
+        if (message.partial !== true) options.saveNodes?.(message.nodes);
+      }
       return;
     }
     const request = state.pending[message.requestId];

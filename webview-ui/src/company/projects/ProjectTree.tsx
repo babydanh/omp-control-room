@@ -121,7 +121,8 @@ export function ProjectTree(props: ProjectTreeProps) {
   const tree = useMemo(() => buildAgentTree(nodes), [nodes]);
   const unfinishedCount = useMemo(() => new Set(nodes.filter(isUnfinishedNode).map((node) => node.sessionId ?? node.id)).size, [nodes]);
   // A refused create, rename, move or delete says why; before this it failed without a word.
-  const { errors } = useProjectState(props.store);
+  const { errors, treeComplete, treeStale } = useProjectState(props.store);
+  const reposLoading = nodes.length > 0 && (!treeComplete || treeStale);
   const commandError = Object.entries(errors).find(([key, reason]) => key.startsWith('command:') && reason !== '')?.[1];
   const selectedRoots = selectedProjectId === null
     ? tree
@@ -179,6 +180,7 @@ export function ProjectTree(props: ProjectTreeProps) {
         <button type="button" aria-label="Tạo project" title="Tạo project từ một thư mục (mở hộp chọn thư mục của Windows)" onClick={props.onCreateProject} className="touch-target rounded px-2 text-text-secondary">➕</button>
       </div>
       {commandError !== undefined && <p role="alert" className="px-2 text-xs text-status-error">{commandError}</p>}
+      {reposLoading && <p role="status" className="px-2 text-xs text-text-muted">Đang tải repo…</p>}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-2 text-xs text-text-muted">
         <select aria-label="Lọc theo công cụ" value={agentKind} onChange={(event) => setAgentKind(event.target.value as ProjectTreeNode['agentKind'] | 'all')} className="min-w-28 flex-1 rounded bg-well px-1 py-1 text-sm text-text">
           <option value="all">Mọi công cụ</option>
