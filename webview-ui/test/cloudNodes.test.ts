@@ -50,6 +50,13 @@ describe('cloudTreeNodes', () => {
     expect(byName('quiet')?.state).toBe('idle');
   });
 
+  it('shows the sessions of a machine that stopped reporting as asleep, not as idle with a terminal that cannot open', () => {
+    const paused = machine({ state: 'stale', receivedAt: NOW - 3_600_000, tmuxSessions: [{ name: 'hi-dnma', attached: false, idleSeconds: 3505, asking: true }] });
+    const session = cloudTreeNodes({ ...base, machines: [paused] }).find((node) => node.kind === 'session');
+    expect(session).toMatchObject({ id: 'cloud:danh/hi-dnma', state: 'sleeping', stoppedAt: new Date(NOW - 3_600_000).toISOString() });
+    expect(sessionFaceMood(session!)).toBe('sleep');
+  });
+
   it('turns a live tmux session into a session node under the folder named like its repository', () => {
     const live = machine({
       tmuxSessions: [{ name: 'hi-dnma', attached: false, idleSeconds: 5, branch: 'cloud/danh-hi-dnma' }],

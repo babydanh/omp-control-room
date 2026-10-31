@@ -591,6 +591,11 @@ export function BoardShell({ client }: BoardShellProps) {
       dismissSheet();
       return;
     }
+    // Its changes are read from the machine: a paused one cannot answer, so say so instead of opening an empty page.
+    if (fleetMachines?.some((entry) => entry.agentId === machine && entry.state !== 'online') === true) {
+      setSessionNotice(`Máy ${machine} đang tạm dừng (hub không nhận tin từ máy hơn 10 phút). Mở máy lại ở InstaBox rồi bấm lại.`);
+      return;
+    }
     openCloudChanges(node, machine);
   }
 

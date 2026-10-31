@@ -118,12 +118,15 @@ function liveRows(machines: readonly FleetMachineSnapshot[]): CloudRow[] {
       const repos = session.branch ? machine.repos.filter((repo) => repo.branch === session.branch && repo.path) : [];
       // Only a repository of the session can show changes: a bare tmux working directory is not one.
       const path = repos[0]?.path;
+      // A machine that stopped reporting is paused or gone: what it last listed is old news and its terminal cannot open.
+      const reachable = machine.state === 'online';
       return {
         machine: machine.agentId,
         session: session.name,
-        state: session.idleSeconds < WORKING_WITHIN_S ? ('working' as const) : ('idle' as const),
+        state: !reachable ? ('sleeping' as const) : session.idleSeconds < WORKING_WITHIN_S ? ('working' as const) : ('idle' as const),
         repos,
-        ...(session.asking === true ? { asking: true } : {}),
+        ...(!reachable ? { lastSeen: machine.receivedAt } : {}),
+        ...(reachable && session.asking === true ? { asking: true } : {}),
         ...(session.branch ? { branch: session.branch } : {}),
         ...(path ? { path } : {}),
       };
