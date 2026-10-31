@@ -20,6 +20,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent
 import type { ProjectTreeNode } from '../../../core/src/messages.js';
 import { sessionAcceptsWork } from './assigneeOptions.js';
 import type { CompanyDrawerTab } from './companyState.js';
+import { parseCloudNodeId } from './fleet/cloudNodes.js';
 import type { HerdrDrawerTab } from './herdrView.js';
 import type { IconName } from './iconNames.js';
 import { HOLDS_WORK_REASON, sessionControls, type SessionControlSet } from './sessionActions.js';
@@ -883,6 +884,15 @@ export function projectNodeMenuItems(
         ...(node.branch === undefined ? [] : [add('copy-branch', 'Sao chép nhánh', 'copy', 'copyBranch')]),
       ];
     case 'session':
+      // A cloud agent lives in tmux on a cloud machine: only its terminal (while awake), its changes and its names apply.
+      if (parseCloudNodeId(node.id) !== null) {
+        return [
+          ...(node.state === 'sleeping' ? [] : [add('open-session', 'Mở terminal', 'external', 'openSession')]),
+          ...(node.path === undefined ? [] : [add('changes', 'Xem thay đổi', 'file-text', 'changes', node.state !== 'sleeping')]),
+          add('copy-session', 'Sao chép mã phiên', 'copy', 'copySessionId', true),
+          ...(node.path === undefined ? [] : [add('copy-path', 'Sao chép thư mục làm việc', 'copy', 'copyPath')]),
+        ];
+      }
       return [
         ...(node.agentKind === 'herdr' && node.state === 'sleeping'
           ? [add('wake', 'Đánh thức', 'play', 'wake')]

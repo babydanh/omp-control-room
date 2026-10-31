@@ -25,6 +25,7 @@ import {
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
 import { cloudFolderKey, type CloudFolders, readCloudFolders, writeCloudFolders } from '../fleet/cloudFolders.js';
+import { cloudNodeId, cloudTreeNodes, parseCloudNodeId, readCloudSeen, rememberCloud, writeCloudSeen } from '../fleet/cloudNodes.js';
 import { pendingCloudRow } from '../fleet/cloudRows.js';
 import { randomSuffix, slugFromPrompt } from '../fleet/cloudTaskPick.js';
 import { fleetStore } from '../fleet/fleetClient.js';
@@ -168,6 +169,8 @@ export function BoardShell({ client }: BoardShellProps) {
   const [cloudRequest, setCloudRequest] = useState<CloudRequest | null>(null);
   // Which tree node started each cloud session, so it sits under that node like a local session.
   const [cloudFolders, setCloudFolders] = useState<CloudFolders>(readCloudFolders);
+  // The cloud sessions this browser has seen, so one whose tmux session is gone shows asleep like a local one.
+  const [cloudSeen, setCloudSeen] = useState(readCloudSeen);
   /** The "Vừa ngủ / tắt" session whose details are open, to be woken from there. */
   const [stoppedNode, setStoppedNode] = useState<ProjectTreeNode | null>(null);
   const [selectedCheckoutId, setSelectedCheckoutId] = useState('');
@@ -187,6 +190,20 @@ export function BoardShell({ client }: BoardShellProps) {
   const ledgerShown = activePage === 'ledger' && ledger.privileged === true;
   const ledgerAvailable = ledger.privileged === true;
   const fleetAvailable = fleet.privileged === true;
+  const fleetMachines = fleet.snapshot?.machines;
+  const pendingCloud = useMemo(() => pendingCloudRow(fleet, fleetMachines ?? []), [fleet, fleetMachines]);
+  // Cloud agents join the Project tree as session rows, so they look and sort like the local ones.
+  const treeNodes = useMemo(
+    () => (fleetAvailable ? [...projects.nodes, ...cloudTreeNodes({ machines: fleetMachines ?? [], folders: cloudFolders, nodes: projects.nodes, seen: cloudSeen, pending: pendingCloud })] : projects.nodes),
+    [fleetAvailable, projects.nodes, fleetMachines, cloudFolders, cloudSeen, pendingCloud],
+  );
+  useEffect(() => {
+    if (!fleetAvailable || fleetMachines === undefined) return;
+    const next = rememberCloud(cloudSeen, fleetMachines, cloudFolders, projects.nodes, Date.now());
+    if (next === cloudSeen) return;
+    setCloudSeen(next);
+    writeCloudSeen(next);
+  }, [fleetAvailable, fleetMachines, cloudFolders, projects.nodes, cloudSeen]);
   const sessionsAvailable = ledgerAvailable || fleetAvailable;
   const redGuardCount = [
     ...(fleet.snapshot?.localGuard?.risks ?? []),
@@ -532,6 +549,11 @@ export function BoardShell({ client }: BoardShellProps) {
     const id = session.sessionId;
     if (id === undefined) return;
     setSessionNotice(null);
+    const cloud = parseCloudNodeId(id);
+    if (cloud !== null) {
+      openCloudNode(session, cloud.machine, cloud.session);
+      return;
+    }
     // The tree names omp sessions by their native id; the server adds the board session behind one.
     const boardKey = session.boardSessionId ?? (state.sessions[id] !== undefined ? id : null);
     if (boardKey !== null && state.sessions[boardKey] !== undefined) selectSession(boardKey);
@@ -542,6 +564,30 @@ export function BoardShell({ client }: BoardShellProps) {
     else if (session.agentKind === 'herdr') openHerdr(revealPane(id, where));
     else if (session.engine === 'claude' || session.engine === 'agy') setSessionNotice(`Phiên ${session.name} chạy ngoài herdr (cửa sổ terminal riêng): board không mở hay gõ vào được. Gõ ở cửa sổ đang chạy nó, hoặc bấm "+ Phiên mới" để mở phiên trong herdr.`);
     else setSessionNotice(`Phiên ${session.name} không có khung nào để mở trên board lúc này.`);
+  }
+
+  /** A cloud row: a live one opens its tmux terminal in the drawer; an asleep one has none, so its branch's changes open instead. */
+  function openCloudNode(node: ProjectTreeNode, machine: string, session: string): void {
+    // The terminal cannot open before the machine has created the session: opening it now would wait forever.
+    if (pendingCloud?.machine === machine && pendingCloud.session === session) {
+      setSessionNotice(`Phiên cloud ${node.name} đang khởi động trên ${machine}, đợi máy tạo xong rồi bấm lại.`);
+      return;
+    }
+    if (node.state !== 'sleeping') {
+      setOpened({ kind: 'cloud', machine, session });
+      dismissSheet();
+      return;
+    }
+    openCloudChanges(node, machine);
+  }
+
+  function openCloudChanges(node: ProjectTreeNode, machine: string): void {
+    if (node.path === undefined) {
+      setSessionNotice(`Phiên cloud ${node.name} đã ngủ và không còn nhánh nào để xem thay đổi.`);
+      return;
+    }
+    fleetStore.requestDiff(machine, node.path);
+    selectPage('cloud');
   }
 
   /**
@@ -556,6 +602,11 @@ export function BoardShell({ client }: BoardShellProps) {
 
   /** Menu actions that leave the menu: pages and dialogs. Tree edits run in the menu itself. */
   function runProjectNodeAction(node: ProjectTreeNode, action: ProjectNodeAction): void {
+    const cloudRef = parseCloudNodeId(node.id);
+    if (cloudRef !== null && action === 'changes') {
+      openCloudChanges(node, cloudRef.machine);
+      return;
+    }
     if (action === 'changes' || action === 'merge' || action === 'compare') {
       const checkout = checkoutPathFor(projects.nodes, node);
       if (checkout !== null) openProjectChanges(checkout, action === 'merge' ? 'merge' : action === 'compare' ? 'compare' : 'diff', node.branch ?? '');
@@ -1068,7 +1119,7 @@ export function BoardShell({ client }: BoardShellProps) {
               }
               onCollapse={toggleSidebar}
               projectTree={{
-                nodes: projects.nodes,
+                nodes: treeNodes,
                 selectedProjectId,
                 onSelectProject: (projectId) => {
                   setSelectedProjectId(projectId);
@@ -1087,24 +1138,19 @@ export function BoardShell({ client }: BoardShellProps) {
                 onOpenSettings: openProjectSettings,
                 onNewSession: (nodeId, engine) => setNewSessionNode({ nodeId, ...(engine === undefined ? {} : { engine }) }),
                 onOpenSession: openProjectSession,
-                onOpenStopped: setStoppedNode,
+                onOpenStopped: (node) => {
+                  const cloud = parseCloudNodeId(node.id);
+                  if (cloud === null) setStoppedNode(node);
+                  else openCloudNode(node, cloud.machine, cloud.session);
+                },
                 onMenu: openMenu,
                 store: projectStore,
-                selection: { sessionId: selectedSessionId, paneId: selectedPaneId },
+                selection: { sessionId: opened?.kind === 'cloud' ? cloudNodeId(opened.machine, opened.session) : selectedSessionId, paneId: selectedPaneId },
                 contextOf: (node) => contextOfNode(node, state.sessions),
                 ...(fleetAvailable
                   ? {
                       cloud: {
                         machines: fleet.snapshot?.machines ?? [],
-                        refresh: refreshFleet,
-                        onOpenTerminal: (machine: string, session: string) => {
-                          setOpened({ kind: 'cloud', machine, session });
-                          dismissSheet();
-                        },
-                        onOpenDiff: (machine: string, path: string) => {
-                          fleetStore.requestDiff(machine, path);
-                          selectPage('cloud');
-                        },
                         onCreate: ({ machine, prompt, engine, nodeId }) => {
                           const slug = slugFromPrompt(prompt, randomSuffix());
                           if (nodeId !== undefined) {
@@ -1115,14 +1161,11 @@ export function BoardShell({ client }: BoardShellProps) {
                           }
                           fleetStore.createTask({ machine, repo: 'all', slug, prompt, engine });
                         },
-                        folders: cloudFolders,
                         nodes: projects.nodes,
-                        pending: pendingCloudRow(fleet, fleet.snapshot?.machines ?? []),
                         // The drawer's own panel reports a failed terminal, so the section keeps its error for creation.
                         error: opened?.kind === 'cloud' ? null : fleet.actionError,
                         busy: fleet.action !== null,
                         request: cloudRequest,
-                        selected: opened?.kind === 'cloud' ? { machine: opened.machine, session: opened.session } : null,
                       },
                     }
                   : {}),

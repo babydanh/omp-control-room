@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { FleetMachineSnapshot } from '../../core/src/messages.js';
-import { cloudFaceMood, pendingCloudRow } from '../src/company/fleet/cloudRows.js';
+import { pendingCloudRow } from '../src/company/fleet/cloudRows.js';
 import type { FleetAction } from '../src/company/fleet/fleetStore.js';
 import { drawerSubjectKey } from '../src/company/selection.js';
 import { previewTargetOfSubject } from '../src/company/terminalPreview.js';
@@ -19,18 +19,6 @@ function machine(agentId: string, sessions: readonly string[]): FleetMachineSnap
 }
 
 const taskAction: FleetAction = { requestId: 'r1', kind: 'task', machine: 'danh', session: 'sua-loi-ab12' };
-
-describe('cloudFaceMood', () => {
-  it('shows a working face while the session was active in the last minute', () => {
-    expect(cloudFaceMood(0)).toBe('work');
-    expect(cloudFaceMood(59)).toBe('work');
-  });
-
-  it('shows a resting face once the session has been idle for a minute', () => {
-    expect(cloudFaceMood(60)).toBe('idle');
-    expect(cloudFaceMood(3600)).toBe('idle');
-  });
-});
 
 describe('pendingCloudRow', () => {
   it('holds a row while the task is being created, before tmux exists', () => {

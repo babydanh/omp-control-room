@@ -3,6 +3,7 @@ import { type DragEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AGENT_ENGINES, type ProjectSessionEngine } from '../../../../core/src/agentEngines.js';
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
 import type { AgentMenuRequest } from '../agentMenu.js';
+import { CLOUD_OTHER_ID, parseCloudNodeId } from '../fleet/cloudNodes.js';
 import { CloudFolderRows, type CloudSessionsProps, CloudSessionsSection } from '../fleet/CloudSessionsSection.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
@@ -76,6 +77,7 @@ const ROW_TEXT_CLASS: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>>
 };
 /** Branches a session row leaves unsaid: most sessions work on one of them. */
 const MAIN_BRANCHES: ReadonlySet<string> = new Set(['main', 'master']);
+const NO_MENU = () => {};
 /** How many sessions the "Vừa ngủ / tắt" list shows. */
 const RECENT_STOPPED_MAX = 6;
 
@@ -130,7 +132,8 @@ export function ProjectTree(props: ProjectTreeProps) {
   const commandError = Object.entries(errors).find(([key, reason]) => key.startsWith('command:') && reason !== '')?.[1];
   const selectedRoots = selectedProjectId === null
     ? tree
-    : tree.filter((branch) => branch.node.id === selectedProjectId);
+    // The cloud group belongs to no Project: it stays whichever Project is chosen.
+    : tree.filter((branch) => branch.node.id === selectedProjectId || branch.node.id === CLOUD_OTHER_ID);
   const visible = filterProjectTree(selectedRoots, { agentKind, liveOnly, unfinishedOnly, ...(props.selection === undefined ? {} : { keep: props.selection }) });
   // The drawer opened a session inside a folded folder: unfold the way down to its row, once per
   // session, so folding that folder again afterwards stays folded on later tree updates.
@@ -254,7 +257,7 @@ function RecentStoppedRow({ node, folder, now, onOpenStopped }: Pick<ProjectTree
         {...hover.bind}
         className="touch-target flex min-w-0 items-center gap-2 rounded px-2 text-left text-xs hover:bg-hover"
       >
-        <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" />
+        <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size="sm" {...(parseCloudNodeId(node.id) === null ? {} : { variant: 'cloud' as const })} />
         <span className="min-w-0 flex-1 leading-snug">
           <span className="block truncate text-text">{sessionDisplayName(node)}</span>
           {/* A stopped session leaves its folder in the tree: name the folder here so it can be found. */}
@@ -284,8 +287,11 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
     () => ({ kind: 'projectNode' as const, node, menu: projectMenuContext(props.nodes, node, props.cloud !== undefined) }),
     [node, props.nodes, props.cloud],
   );
-  const menu = useAgentMenuGestures<HTMLButtonElement>(menuSubject, props.onMenu);
+  // A cloud group has no server node behind it: no menu, no drag, no rename or new-session button.
+  const isCloudGroup = node.id === CLOUD_OTHER_ID;
+  const menu = useAgentMenuGestures<HTMLButtonElement>(menuSubject, isCloudGroup ? NO_MENU : props.onMenu);
   const isSession = node.kind === 'session';
+  const cloudHome = isSession ? parseCloudNodeId(node.id) : null;
   // A subagent is its parent's little helper: a mini face and one line, with no card of its own.
   const isSub = isSession && node.agentKind === 'sub';
   const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
@@ -297,7 +303,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   useEffect(() => {
     if (selected) rowRef.current?.scrollIntoView({ block: 'nearest' });
   }, [selected]);
-  const receivesDrop = DROP_KINDS.has(node.kind);
+  const receivesDrop = !isCloudGroup && DROP_KINDS.has(node.kind);
   const counts = isSession ? null : countSessions(branch);
   const progress = isSession ? sessionProgressView(node.progress) : null;
   const hover = useSessionHover(isSession);
@@ -310,7 +316,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   return (
     <div>
       <div
-        draggable={node.kind === 'folder' || node.kind === 'group'}
+        draggable={!isCloudGroup && (node.kind === 'folder' || node.kind === 'group')}
         onDragStart={(event) => event.dataTransfer.setData('text/plain', node.id)}
         onDragOver={onDragOver}
         onDrop={(event) => {
@@ -354,7 +360,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
         >
           {isSession ? (
             <>
-              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size={isSub ? 'sm' : 'lg'} />
+              <SessionFace mood={sessionFaceMood(node)} hue={sessionFaceHue(node.sessionId ?? node.id)} size={isSub ? 'sm' : 'lg'} {...(cloudHome === null ? {} : { variant: 'cloud' as const })} />
               <span className="min-w-0 flex-1 leading-snug">
                 {/* One line: the name, then only what a glance needs. A running session's face glances around ("đang chạy"); main is the usual branch. */}
                 <span className="flex min-w-0 items-baseline gap-1.5">
@@ -362,6 +368,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                   <span className="max-w-[45%] shrink-0 truncate text-2xs text-text-muted">
                     {/* Every session runs inside herdr, so "herdr" names no tool: show the tool only when it is known. */}
                     {[
+                      cloudHome === null ? null : <span key="cloud" className="font-mono" title={`Chạy trên máy cloud ${cloudHome.machine}`}><span aria-hidden="true">☁ </span><span className="sr-only">cloud </span>{cloudHome.machine}</span>,
                       node.agentKind !== undefined && node.agentKind !== 'herdr'
                         ? <span key="kind" className={AGENT_KIND_CLASS[node.agentKind]}>{agentEngine === undefined ? node.agentKind : `${agentEngine.icon} ${agentEngine.label}`}</span>
                         : null,
@@ -405,7 +412,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
             </>
           )}
         </button>
-        {(node.kind === 'project' || node.kind === 'group' || node.kind === 'folder') && (
+        {!isCloudGroup && (node.kind === 'project' || node.kind === 'group' || node.kind === 'folder') && (
           <button
             type="button"
             aria-label={`Thao tác với ${node.name}`}
@@ -436,7 +443,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
         <ProjectTreeRow key={child.node.id} branch={child} depth={depth + 1} collapsed={collapsed} onToggleCollapse={onToggleCollapse} onMove={onMove} {...props} />
       ))}
       {/* Cloud sessions started from this node sit under it like its local sessions. */}
-      {!isCollapsed && !isSession && props.cloud !== undefined && <CloudFolderRows {...props.cloud} nodeId={node.id} depth={depth + 1} />}
+      {!isCollapsed && !isSession && !isCloudGroup && props.cloud !== undefined && <CloudFolderRows {...props.cloud} nodeId={node.id} depth={depth + 1} />}
       {hover.anchor !== null && (
         <SessionHoverCard
           node={node}

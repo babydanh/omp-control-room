@@ -10,47 +10,24 @@ const machines: FleetMachineSnapshot[] = [
     agentId: 'danh',
     receivedAt: 0,
     state: 'online',
-    sessionCount: 2,
+    sessionCount: 0,
     engines: [],
     repos: [],
-    tmuxSessions: [
-      { name: 'fix-ab12', attached: false, idleSeconds: 5 },
-      { name: 'old-task', attached: false, idleSeconds: 900 },
-    ],
+    tmuxSessions: [],
   },
 ];
 
 const props: CloudSessionsProps = {
   machines,
-  refresh: () => {},
-  onOpenTerminal: () => {},
-  onOpenDiff: () => {},
   onCreate: () => {},
-  pending: null,
   error: null,
   busy: false,
   request: null,
-  selected: null,
-  folders: { 'danh/fix-ab12': 'folder-1' },
   nodes: [{ id: 'folder-1', kind: 'folder' }],
 };
 
-describe('cloud sessions under a tree node', () => {
-  it('lists a session under the node that started it, and not in the Cloud section', () => {
-    const folder = renderToStaticMarkup(createElement(CloudFolderRows, { ...props, nodeId: 'folder-1', depth: 1 }));
-    expect(folder).toContain('fix-ab12');
-    expect(folder).not.toContain('old-task');
-
-    const section = renderToStaticMarkup(createElement(CloudSessionsSection, props));
-    expect(section).toContain('Cloud khác (1)');
-    expect(section).not.toContain('fix-ab12');
-  });
-
-  it('shows no Cloud section at all when every session sits under a node', () => {
-    const placed = { ...props, folders: { 'danh/fix-ab12': 'folder-1', 'danh/old-task': 'folder-1' } };
-    expect(renderToStaticMarkup(createElement(CloudSessionsSection, placed))).toBe('');
-  });
-
+// The sessions themselves are rows of the Project tree now (cloudNodes.test.ts); this part keeps the request box and a failed create.
+describe('cloud request box and errors under a tree node', () => {
   it('shows a failed create under the node that asked for it, not at the foot of the tree', () => {
     const failed = { ...props, error: 'May da du 3 viec', request: { engine: 'omp' as const, token: 1, nodeId: 'folder-1' } };
     expect(renderToStaticMarkup(createElement(CloudFolderRows, { ...failed, nodeId: 'folder-1', depth: 1 }))).toContain('May da du 3 viec');
@@ -62,18 +39,8 @@ describe('cloud sessions under a tree node', () => {
     expect(renderToStaticMarkup(createElement(CloudSessionsSection, failed))).toContain('May da du 3 viec');
   });
 
-  it('keeps the loose list closed until it is opened', () => {
-    const section = renderToStaticMarkup(createElement(CloudSessionsSection, props));
-    expect(section).toContain('aria-expanded="false"');
-    expect(section).not.toContain('old-task');
-  });
-
-  it('renders nothing under a node that started no cloud session', () => {
+  it('renders nothing under a node that asked for no cloud session', () => {
     expect(renderToStaticMarkup(createElement(CloudFolderRows, { ...props, nodeId: 'folder-2', depth: 1 }))).toBe('');
-  });
-
-  it('falls back to the Cloud section once the node that started a session is gone', () => {
-    const section = renderToStaticMarkup(createElement(CloudSessionsSection, { ...props, nodes: [] }));
-    expect(section).toContain('Cloud khác (2)');
+    expect(renderToStaticMarkup(createElement(CloudSessionsSection, props))).toBe('');
   });
 });

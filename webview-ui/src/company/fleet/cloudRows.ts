@@ -1,14 +1,5 @@
 import type { FleetMachineSnapshot } from '../../../../core/src/messages.js';
-import type { SessionFaceMood } from '../projects/projectTreeView.js';
 import type { FleetState } from './fleetStore.js';
-
-/** A cloud session active within this many seconds shows its working face. */
-const CLOUD_WORKING_WITHIN_S = 60;
-
-/** The face a cloud tmux session wears: working while it was active in the last minute, resting after. */
-export function cloudFaceMood(idleSeconds: number): SessionFaceMood {
-  return idleSeconds < CLOUD_WORKING_WITHIN_S ? 'work' : 'idle';
-}
 
 export interface PendingCloudRow {
   readonly machine: string;
