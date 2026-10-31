@@ -65,8 +65,8 @@ const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>>
   folder: '📁',
   repository: '⎇',
 };
-/** Rows another folder or group can be dropped on. */
 const CONTEXT_TONE_CLASS: Readonly<Record<ContextTone, string>> = { calm: 'text-text-muted', warn: 'text-warning', error: 'text-status-error' };
+/** Rows another folder or group can be dropped on. */
 const DROP_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
 /** Row text size by kind: Projects and folders read as headings, sessions one compact line each. */
 const ROW_TEXT_CLASS: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>> = {

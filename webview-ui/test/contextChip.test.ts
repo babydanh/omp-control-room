@@ -6,6 +6,8 @@ describe('contextChip', () => {
   it('says nothing when the session reports no context', () => {
     expect(contextChip(null)).toBeNull();
     expect(contextChip(Number.NaN)).toBeNull();
+    expect(contextChip(Number.POSITIVE_INFINITY)).toBeNull();
+    expect(contextChip(Number.NEGATIVE_INFINITY)).toBeNull();
   });
 
   it('shows the share rounded, calm under 70%, warning from 70%, error from 90%', () => {
@@ -31,5 +33,9 @@ describe('contextOfNode', () => {
   it('answers null for a node with no board session, such as a herdr pane', () => {
     expect(contextOfNode({ sessionId: 'pane-9' }, sessions)).toBeNull();
     expect(contextOfNode({}, sessions)).toBeNull();
+  });
+
+  it('does not borrow another session when the board session it names is not loaded yet', () => {
+    expect(contextOfNode({ boardSessionId: 'later', sessionId: 'board1' }, sessions)).toBeNull();
   });
 });

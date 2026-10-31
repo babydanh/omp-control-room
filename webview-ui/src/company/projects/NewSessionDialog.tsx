@@ -48,7 +48,8 @@ export function NewSessionDialog({ store, nodeId, onClose, initialEngine, onStar
   }, [candidateRepos, repoId]);
 
   // Repos arrive with the full tree; the quick one lists folders only.
-  const reposKnown = state.treeComplete;
+  // A saved tree from an earlier visit is not proof: its repos may have changed since.
+  const reposKnown = state.treeComplete && !state.treeStale;
   const plainFolder = target?.kind === 'folder' && reposKnown && candidateRepos.length === 0;
   const workdir = plainFolder ? 'shared' : worktree;
   const selectedRepo = candidateRepos.find((repo) => repo.id === repoId);

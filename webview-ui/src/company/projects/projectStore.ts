@@ -141,6 +141,12 @@ export function createProjectStore(options: ProjectStoreOptions): ProjectStore {
     return request.requestId;
   }
   function accept(message: ServerMessage): void {
+    // A read-only connection is never sent a tree: the saved one would show forever as "loading", so forget it.
+    if (message.type === 'officeAccess' && message.readOnly && state.treeStale) {
+      commit({ ...state, nodes: [], treeComplete: false, treeStale: false });
+      options.saveNodes?.([]);
+      return;
+    }
     if (!isProjectServerMessage(message)) return;
     // The tree is pushed unasked (sessions start and stop) and may come twice per
     // request (quick, then full): every snapshot is the latest state.

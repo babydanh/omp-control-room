@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ServerMessage } from '../../core/src/messages.js';
 import { createProjectStore } from '../src/company/projects/projectStore.js';
-import { parseTreeCache } from '../src/company/projects/projectTreeCache.js';
+import { parseTreeCache, storedTreeNodes } from '../src/company/projects/projectTreeCache.js';
 
 const node = (id: string, kind: string) => ({ id, kind, name: id });
 const snapshot = (requestId: string, nodes: object[], partial = false): ServerMessage =>
@@ -10,7 +10,7 @@ const snapshot = (requestId: string, nodes: object[], partial = false): ServerMe
 
 describe('parseTreeCache', () => {
   it('reads a stored node list and drops anything without a string id and kind', () => {
-    const raw = JSON.stringify([node('p', 'project'), { id: 7, kind: 'folder' }, null, { id: 'x' }]);
+    const raw = JSON.stringify([node('p', 'project'), { id: 7, kind: 'folder', name: 'a' }, null, 'text', true, { id: 'x' }, { id: 'y', kind: 'folder' }]);
     expect(parseTreeCache(raw).map((entry) => entry.id)).toEqual(['p']);
   });
 
@@ -18,6 +18,13 @@ describe('parseTreeCache', () => {
     expect(parseTreeCache(null)).toEqual([]);
     expect(parseTreeCache('{oops')).toEqual([]);
     expect(parseTreeCache('{"a":1}')).toEqual([]);
+  });
+});
+
+describe('storedTreeNodes', () => {
+  it('keeps the structure and drops what a user typed or an agent answered', () => {
+    const [kept] = storedTreeNodes([{ id: 's', kind: 'session', name: 'n', path: 'V:/x', request: 'secret', lastRequest: 'secret', recentRequests: ['secret'], lastReply: 'secret', title: 'secret', interrupted: 'secret', progress: { done: 1, total: 2, current: 'secret' } }] as never);
+    expect(kept).toEqual({ id: 's', kind: 'session', name: 'n', path: 'V:/x' });
   });
 });
 
@@ -53,6 +60,20 @@ describe('project store with a saved tree', () => {
     store.accept(snapshot('r', [node('proj', 'project')], true));
     expect(writes).toEqual([]);
     expect(store.getSnapshot().treeStale).toBe(false);
+  });
+
+  it('drops the saved tree and forgets it when the connection turns out read-only, since no full tree will ever come', () => {
+    const writes: string[][] = [];
+    const store = createProjectStore({ send: () => undefined, restoreNodes: saved, saveNodes: (nodes) => writes.push(nodes.map((entry) => entry.id)) });
+    store.accept({ type: 'officeAccess', readOnly: true } as ServerMessage);
+    expect(store.getSnapshot()).toMatchObject({ nodes: [], treeComplete: false, treeStale: false });
+    expect(writes).toEqual([[]]);
+  });
+
+  it('keeps the saved tree when the connection is writable', () => {
+    const store = createProjectStore({ send: () => undefined, restoreNodes: saved });
+    store.accept({ type: 'officeAccess', readOnly: false } as ServerMessage);
+    expect(store.getSnapshot().nodes).toHaveLength(2);
   });
 
   it('starts empty and complete-less when nothing was saved', () => {
