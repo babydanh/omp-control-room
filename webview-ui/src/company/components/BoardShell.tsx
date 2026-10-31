@@ -25,6 +25,7 @@ import {
 } from '../constants.js';
 import { type DrawerPrefs, readDrawerPrefs, writeDrawerPrefs } from '../drawerPrefs.js';
 import { readDrawerTabPrefs, writeDrawerTabPrefs } from '../drawerTabPrefs.js';
+import { settleCleaned } from '../fleet/cloudClean.js';
 import { cloudFolderKey, type CloudFolders, readCloudFolders, writeCloudFolders } from '../fleet/cloudFolders.js';
 import { sendCloudLine } from '../fleet/cloudInput.js';
 import { cloudNodeId, cloudTreeNodes, parseCloudNodeId, readCloudSeen, rememberCloud, writeCloudSeen } from '../fleet/cloudNodes.js';
@@ -195,9 +196,18 @@ export function BoardShell({ client }: BoardShellProps) {
   const fleetMachines = fleet.snapshot?.machines;
   const pendingCloud = useMemo(() => pendingCloudRow(fleet, fleetMachines ?? []), [fleet, fleetMachines]);
   // Cloud agents join the Project tree as session rows, so they look and sort like the local ones.
+  // Tasks the machine removed stay out of the tree until its own reports stop naming them.
+  const [cleanedCloud, setCleanedCloud] = useState<ReadonlyMap<string, number>>(() => new Map());
   const treeNodes = useMemo(
-    () => (fleetAvailable ? [...projects.nodes, ...cloudTreeNodes({ machines: fleetMachines ?? [], folders: cloudFolders, nodes: projects.nodes, seen: cloudSeen, pending: pendingCloud })] : projects.nodes),
-    [fleetAvailable, projects.nodes, fleetMachines, cloudFolders, cloudSeen, pendingCloud],
+    () => {
+      if (!fleetAvailable) return projects.nodes;
+      const cloud = cloudTreeNodes({ machines: fleetMachines ?? [], folders: cloudFolders, nodes: projects.nodes, seen: cloudSeen, pending: pendingCloud }).filter((node) => {
+        const ref = parseCloudNodeId(node.id);
+        return ref === null || !cleanedCloud.has(cloudFolderKey(ref.machine, ref.session));
+      });
+      return [...projects.nodes, ...cloud];
+    },
+    [fleetAvailable, projects.nodes, fleetMachines, cloudFolders, cloudSeen, pendingCloud, cleanedCloud],
   );
   useEffect(() => {
     if (!fleetAvailable || fleetMachines === undefined) return;
@@ -226,6 +236,37 @@ export function BoardShell({ client }: BoardShellProps) {
   );
   // Why a session clicked in the tree opened nothing: it runs outside herdr, so there is no pane.
   const [sessionNotice, setSessionNotice] = useState<string | null>(null);
+  // A removed cloud task: hide it, close its drawer, and read the fleet again.
+  const handledCleaned = useRef<typeof fleet.cleanedTask>(null);
+  useEffect(() => {
+    const cleaned = fleet.cleanedTask;
+    if (cleaned === null || cleaned === handledCleaned.current) return;
+    handledCleaned.current = cleaned;
+    setCleanedCloud((current) => new Map(current).set(cloudFolderKey(cleaned.machine, cleaned.session), Date.now()));
+    setOpened((current) => (current?.kind === 'cloud' && current.machine === cleaned.machine && current.session === cleaned.session ? null : current));
+    refreshFleet();
+  }, [fleet.cleanedTask, refreshFleet]);
+  // The machine's refusal (unsaved work) has no page to show on: say it here.
+  const cleanInFlight = useRef(false);
+  useEffect(() => {
+    if (fleet.action?.kind === 'clean') {
+      cleanInFlight.current = true;
+      return;
+    }
+    if (!cleanInFlight.current || fleet.action !== null) return;
+    cleanInFlight.current = false;
+    if (fleet.actionError !== null) setSessionNotice(`Không xoá được phiên cloud: ${fleet.actionError}`);
+  }, [fleet.action, fleet.actionError]);
+  // Once the machine no longer names a removed task (or the hide time is up), forget it for good, remembered sleeping row included.
+  useEffect(() => {
+    if (cleanedCloud.size === 0 || fleetMachines === undefined) return;
+    const { remaining, settled } = settleCleaned(cleanedCloud, fleetMachines, Date.now());
+    if (settled.length === 0) return;
+    setCleanedCloud(remaining);
+    const kept = Object.fromEntries(Object.entries(cloudSeen).filter(([key]) => !settled.includes(key)));
+    setCloudSeen(kept);
+    writeCloudSeen(kept);
+  }, [cleanedCloud, fleetMachines, cloudSeen]);
   const [artifactId, setArtifactId] = useState<string | null>(null);
   const [prefs, setPrefs] = useState<SidebarPrefs>(() => readSidebarPrefs(browserStorage()));
   // A phone's sidebar sheet starts closed and is not remembered; other layouts keep the saved pref.
@@ -633,6 +674,10 @@ export function BoardShell({ client }: BoardShellProps) {
     }
     if (action === 'settings') {
       openProjectSettings(node.id);
+      return;
+    }
+    if (cloudRef !== null && action === 'cloudClean') {
+      fleetStore.cleanTask(cloudRef.machine, cloudRef.session);
       return;
     }
     if (action === 'closeHerdr') {

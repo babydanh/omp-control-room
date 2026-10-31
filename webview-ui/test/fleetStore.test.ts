@@ -121,3 +121,28 @@ describe('fleet comment actions', () => {
     expect(store.getSnapshot().snapshot?.branchAnalyses?.[0]?.changedFiles).toEqual(['src/a.ts']);
   });
 });
+
+describe('fleet task cleaning', () => {
+  it('asks the machine to remove a task and records which one it removed', () => {
+    const sent: ClientMessage[] = [];
+    const store = createFleetStore({ send: (message) => sent.push(message), newRequestId: () => 'c1' });
+
+    store.cleanTask('danh1', 'fix-aqp');
+
+    expect(sent).toEqual([{ type: 'fleetTaskClean', requestId: 'c1', machine: 'danh1', session: 'fix-aqp' }]);
+    expect(store.getSnapshot().action).toMatchObject({ kind: 'clean', machine: 'danh1', session: 'fix-aqp' });
+    store.accept({ type: 'fleetTaskCleaned', requestId: 'c1', machine: 'danh1', session: 'fix-aqp' } as ServerMessage);
+    expect(store.getSnapshot().action).toBeNull();
+    expect(store.getSnapshot().cleanedTask).toEqual({ machine: 'danh1', session: 'fix-aqp' });
+  });
+
+  it('keeps the machine\'s reason when it refuses and records nothing', () => {
+    const store = createFleetStore({ send: () => undefined, newRequestId: () => 'c2' });
+
+    store.cleanTask('danh1', 'fix-aqp');
+    store.accept({ type: 'fleetCommandResult', requestId: 'c2', ok: false, code: 'failed', reason: 'Con file chua commit trong /x' } as ServerMessage);
+
+    expect(store.getSnapshot().actionError).toBe('Con file chua commit trong /x');
+    expect(store.getSnapshot().cleanedTask).toBeNull();
+  });
+});

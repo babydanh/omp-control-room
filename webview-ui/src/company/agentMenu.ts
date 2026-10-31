@@ -55,7 +55,8 @@ export type ProjectNodeAction =
   | 'wake'
   | 'cloudHandoff'
   | 'stop'
-  | 'closeHerdr';
+  | 'closeHerdr'
+  | 'cloudClean';
 
 /** What a project-tree menu needs beyond the node: whether git rows sit under it, and its folders. */
 export interface ProjectNodeMenuContext {
@@ -891,6 +892,7 @@ export function projectNodeMenuItems(
           ...(node.path === undefined ? [] : [add('changes', 'Xem thay đổi', 'file-text', 'changes', node.state !== 'sleeping')]),
           add('copy-session', 'Sao chép mã phiên', 'copy', 'copySessionId', true),
           ...(node.path === undefined ? [] : [add('copy-path', 'Sao chép thư mục làm việc', 'copy', 'copyPath')]),
+          add('cloud-clean', 'Xoá phiên cloud…', 'trash', 'cloudClean', true, true),
         ];
       }
       return [

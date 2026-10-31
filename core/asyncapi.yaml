@@ -167,6 +167,7 @@ components:
         - $ref: '#/components/schemas/FleetCommandResultMessage'
         - $ref: '#/components/schemas/FleetTerminalOpenedMessage'
         - $ref: '#/components/schemas/FleetTaskCreatedMessage'
+        - $ref: '#/components/schemas/FleetTaskCleanedMessage'
         - $ref: '#/components/schemas/FleetLavishOpenedMessage'
         - $ref: '#/components/schemas/FleetDiffMessage'
         # Project tree (privileged; project, checkout and session data)
@@ -289,6 +290,7 @@ components:
         - $ref: '#/components/schemas/FleetRequestMessage'
         - $ref: '#/components/schemas/FleetTerminalOpenMessage'
         - $ref: '#/components/schemas/FleetTaskCreateMessage'
+        - $ref: '#/components/schemas/FleetTaskCleanMessage'
         - $ref: '#/components/schemas/FleetLavishOpenMessage'
         - $ref: '#/components/schemas/FleetDiffRequestMessage'
         - $ref: '#/components/schemas/FleetCloudCommentSendMessage'
@@ -6482,6 +6484,39 @@ components:
       properties:
         type:
           const: fleetTaskCreated
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+        session:
+          type: string
+
+    FleetTaskCleanMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, session]
+      description: Remove a cloud task the board started - its tmux session, worktrees, local branch and ledger entry - when nothing in it is uncommitted or unpushed (privileged).
+      properties:
+        type:
+          const: fleetTaskClean
+        requestId:
+          type: string
+          format: uuid
+        machine:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+        session:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{0,39}$'
+
+    FleetTaskCleanedMessage:
+      type: object
+      additionalProperties: false
+      required: [type, requestId, machine, session]
+      properties:
+        type:
+          const: fleetTaskCleaned
         requestId:
           type: string
           format: uuid

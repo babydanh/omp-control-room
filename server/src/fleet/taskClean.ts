@@ -1,0 +1,34 @@
+/**
+ * The shell the board runs on a cloud machine (`bash -s -- <slug>`, script on stdin) to remove a task `cloud-giao`
+ * started: its tmux session, its worktrees, its local branch and its `~/.cloud-viec/<slug>.json` entry.
+ *
+ * It removes nothing when any worktree holds uncommitted files or commits no remote has: those would be lost.
+ * The only path it ever removes comes from the ledger entry and must lie under the worktree base. The slug is
+ * validated by the caller against FLEET_TASK_SLUG and is only ever read as "$1", never spliced into code.
+ * Exit codes: 3 no such task or a path it will not touch, 5 git refused, 7 unsaved work. The last line is the reason, or `OK <slug>`.
+ */
+export const TASK_CLEAN_SCRIPT = String.raw`set -u
+slug="$1"
+f="$HOME/.cloud-viec/$slug.json"
+[ -f "$f" ] || { echo "Khong co so viec $slug (phien nay khong do cloud-giao tao)"; exit 3; }
+base="\${CLOUD_WT_BASE:-/data/home/wt}"
+cwd=$(node -e 'process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).cwd || ""))' "$f") || { echo "So viec bi hong"; exit 3; }
+case "$cwd" in *..*|*[!A-Za-z0-9._:/-]*) echo "Duong dan viec khong hop le"; exit 3 ;; esac
+case "$cwd" in "$base"/?*) ;; *) echo "Thu muc viec nam ngoai $base"; exit 3 ;; esac
+trees=()
+for w in "$cwd" "$cwd/backend" "$cwd/web" "$cwd/app"; do [ -e "$w/.git" ] && trees+=("$w"); done
+for w in "\${trees[@]}"; do
+  if git -C "$w" status --porcelain 2>/dev/null | grep -qv ' \.tsc-cache/\?$'; then echo "Con file chua commit trong $w"; exit 7; fi
+  [ -z "$(git -C "$w" log --oneline -1 HEAD --not --remotes 2>/dev/null)" ] || { echo "Con commit chua push trong $w"; exit 7; }
+done
+tmux kill-session -t "=$slug" 2>/dev/null || true
+for w in "\${trees[@]}"; do
+  root="$(git -C "$w" rev-parse --path-format=absolute --git-common-dir)/.."
+  branch="$(git -C "$w" rev-parse --abbrev-ref HEAD)"
+  git -C "$root" worktree remove --force "$w" 2>/dev/null || { echo "Khong go duoc worktree $w"; exit 5; }
+  case "$branch" in cloud/*) git -C "$root" branch -D "$branch" >/dev/null 2>&1 || true ;; esac
+done
+rm -f "$cwd/CLOUD-VIEC.md"; rmdir "$cwd" 2>/dev/null || true
+rm -f "$f"
+echo "OK $slug"
+`.replace(/\\\$/g, '$');

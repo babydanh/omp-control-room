@@ -13,6 +13,8 @@ import type {
   FleetPullRequest,
   FleetRequestMessage,
   FleetSnapshotMessage,
+  FleetTaskCleanedMessage,
+  FleetTaskCleanMessage,
   FleetTaskCreatedMessage,
   FleetTaskCreateMessage,
   FleetTerminalOpenedMessage,
@@ -27,6 +29,7 @@ export type FleetServerMessage =
   | FleetCommandResultMessage
   | FleetTerminalOpenedMessage
   | FleetTaskCreatedMessage
+  | FleetTaskCleanedMessage
   | FleetLavishOpenedMessage
   | FleetDiffMessage;
 
@@ -40,7 +43,7 @@ export interface FleetTerminal {
 /** One in-flight action (open a terminal / create a task); only the latest one is tracked. */
 export interface FleetAction {
   readonly requestId: string;
-  readonly kind: 'terminal' | 'task' | 'lavish' | 'diff' | 'comment' | 'branch';
+  readonly kind: 'terminal' | 'task' | 'clean' | 'lavish' | 'diff' | 'comment' | 'branch';
   readonly machine: string;
   readonly session: string;
 }
@@ -58,6 +61,8 @@ export interface FleetState {
   readonly terminal: FleetTerminal | null;
   /** Set when a task was created: the machine/session to open next. */
   readonly createdTask: { readonly machine: string; readonly session: string } | null;
+  /** Set when the machine removed a task: the board hides it until the machine's reports agree. */
+  readonly cleanedTask: { readonly machine: string; readonly session: string } | null;
   /** The last diff the user asked for, shown until closed. */
   readonly diff: Omit<FleetDiffMessage, 'type' | 'requestId'> | null;
 }
@@ -76,6 +81,8 @@ export interface FleetStore {
   openTerminal: (machine: string, session: string) => void;
   closeTerminal: () => void;
   createTask: (task: Omit<FleetTaskCreateMessage, 'type' | 'requestId'>) => void;
+  /** Removes a task the board started (tmux, worktrees, branch); the machine refuses while it holds unsaved work. */
+  cleanTask: (machine: string, session: string) => void;
   /** Opens the session in a new browser tab once the board has forwarded a local port to the machine. */
   /** `tab` is opened by the click handler itself (a tab opened later, after the network round trip, is blocked as a popup). */
   openLavish: (machine: string, key: string, tab?: PendingTab | null) => void;
@@ -111,6 +118,7 @@ export function createInitialFleetState(): FleetState {
     actionError: null,
     terminal: null,
     createdTask: null,
+    cleanedTask: null,
     diff: null,
   };
 }
@@ -121,6 +129,7 @@ export function isFleetServerMessage(message: ServerMessage): message is FleetSe
     message.type === 'fleetCommandResult' ||
     message.type === 'fleetTerminalOpened' ||
     message.type === 'fleetTaskCreated' ||
+    message.type === 'fleetTaskCleaned' ||
     message.type === 'fleetLavishOpened' ||
     message.type === 'fleetDiff'
   );
@@ -162,7 +171,7 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
   }
 
   function act(
-    request: FleetTerminalOpenMessage | FleetTaskCreateMessage | FleetLavishOpenMessage | FleetDiffRequestMessage | FleetCloudCommentSendMessage | FleetBranchActionMessage,
+    request: FleetTerminalOpenMessage | FleetTaskCreateMessage | FleetTaskCleanMessage | FleetLavishOpenMessage | FleetDiffRequestMessage | FleetCloudCommentSendMessage | FleetBranchActionMessage,
     kind: FleetAction['kind'],
     session: string,
   ): void {
@@ -178,6 +187,7 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
       },
       actionError: null,
       createdTask: null,
+      cleanedTask: null,
     });
     try {
       send(request);
@@ -200,6 +210,8 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
       commit({ ...state, action: null, diff: { machine: message.machine, path: message.path, text: message.text, truncated: message.truncated } });
     } else if (message.type === 'fleetTaskCreated') {
       commit({ ...state, action: null, createdTask: { machine: message.machine, session: message.session } });
+    } else if (message.type === 'fleetTaskCleaned') {
+      commit({ ...state, action: null, cleanedTask: { machine: message.machine, session: message.session } });
     } else if (message.type === 'fleetCommandResult') {
       if (action.kind === 'lavish') settleTab(null);
       commit({ ...state, action: null, actionError: message.ok ? null : message.reason ?? SEND_FAILED_REASON });
@@ -267,6 +279,9 @@ export function createFleetStore(options: FleetStoreOptions & FleetStoreEnvironm
     closeTerminal: () => commit({ ...state, terminal: null }),
     createTask: (task) => {
       act({ type: 'fleetTaskCreate', requestId: newRequestId(), ...task }, 'task', task.slug);
+    },
+    cleanTask: (machine, session) => {
+      act({ type: 'fleetTaskClean', requestId: newRequestId(), machine, session }, 'clean', session);
     },
     openLavish: (machine, key, tab) => {
       if (state.action !== null) {

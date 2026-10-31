@@ -102,7 +102,8 @@ type ConfirmKind =
   | 'project-delete'
   | 'project-remove-folder'
   | 'project-stop'
-  | 'close-herdr';
+  | 'close-herdr'
+  | 'cloud-clean';
 
 type MenuMode = 'menu' | 'rename' | 'folder-rename' | 'project-rename' | 'project-move' | 'project-create-group' | 'project-add-folder' | ConfirmKind;
 
@@ -632,6 +633,10 @@ export function AgentContextMenu({
       setMode('close-herdr');
       return;
     }
+    if (action === 'cloudClean') {
+      setMode('cloud-clean');
+      return;
+    }
     if (action === 'removeFolder') {
       setMode('project-remove-folder');
       return;
@@ -761,6 +766,15 @@ export function AgentContextMenu({
             if (subject.kind === 'projectNode' && subject.node.sessionId !== undefined) {
               projectStore?.stopSession(subject.node.sessionId);
             }
+            onClose();
+          },
+        };
+      case 'cloud-clean':
+        return {
+          message: `Xoá phiên cloud ${subject.kind === 'projectNode' ? subject.node.name : ''}? Máy cloud tắt agent, gỡ worktree và nhánh cục bộ của phiên. Máy từ chối nếu còn file chưa commit hoặc commit chưa push.`,
+          label: 'Xoá phiên cloud',
+          run: () => {
+            if (subject.kind === 'projectNode') onProjectNodeAction?.(subject.node, 'cloudClean');
             onClose();
           },
         };

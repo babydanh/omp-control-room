@@ -260,6 +260,7 @@ function ActionStatus({ fleet }: { fleet: FleetState }) {
     const what = {
       terminal: 'Đang mở terminal',
       task: 'Đang tạo worktree và mở Claude',
+      clean: 'Đang dọn phiên trên máy cloud',
       lavish: 'Đang nối cổng tới Lavish',
       diff: 'Đang đọc thay đổi',
       comment: 'Đang gửi tin tới phiên',
