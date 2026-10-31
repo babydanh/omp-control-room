@@ -46,12 +46,25 @@ function segments(path: string): string[] {
   return path.split(/[\\/]+/).filter(Boolean).map((part) => part.toLowerCase());
 }
 
-/** Each folder's own name plus every directory name its sessions work in: a repo checked out inside it counts as its repo. */
-function folderNames(nodes: readonly CloudPlaceNode[]): Map<string, { readonly node: CloudPlaceNode; readonly names: Set<string> }> {
+interface FolderEntry {
+  readonly node: CloudPlaceNode;
+  readonly own: readonly string[];
+  readonly names: Set<string>;
+}
+
+/** The directory names inside a folder's own path that a path sits below; none for a path elsewhere. */
+function below(path: readonly string[], own: readonly string[]): readonly string[] {
+  return own.every((part, index) => path[index] === part) ? path.slice(own.length) : [];
+}
+
+/** Each folder's own name plus every directory its sessions work in below it: a repo checked out inside counts as its repo. */
+function folderNames(nodes: readonly CloudPlaceNode[]): Map<string, FolderEntry> {
   const byId = new Map(nodes.map((node) => [node.id, node]));
-  const folders = new Map<string, { readonly node: CloudPlaceNode; readonly names: Set<string> }>();
+  const folders = new Map<string, FolderEntry>();
   for (const node of nodes) {
-    if (node.kind === 'folder' && node.path !== undefined) folders.set(node.id, { node, names: new Set(segments(node.path).slice(-1)) });
+    if (node.kind !== 'folder' || node.path === undefined) continue;
+    const own = segments(node.path);
+    folders.set(node.id, { node, own, names: new Set(own.slice(-1)) });
   }
   for (const node of nodes) {
     if (node.path === undefined) continue;
@@ -59,23 +72,26 @@ function folderNames(nodes: readonly CloudPlaceNode[]): Map<string, { readonly n
     for (let hops = 0; owner !== undefined && owner.kind !== 'folder' && hops < nodes.length; hops += 1) {
       owner = owner.parentId === undefined ? undefined : byId.get(owner.parentId);
     }
-    const names = owner === undefined ? undefined : folders.get(owner.id)?.names;
-    if (names !== undefined) for (const part of segments(node.path)) names.add(part);
+    const entry = owner === undefined ? undefined : folders.get(owner.id);
+    if (entry !== undefined) for (const part of below(segments(node.path), entry.own)) entry.names.add(part);
   }
   return folders;
 }
 
-/** The folder that holds the session's repositories; worktrees in several folders sit under their shared project. */
-function folderOfRepos(repos: readonly { readonly name: string }[], folders: ReturnType<typeof folderNames>): string | undefined {
-  const matched = new Map<string, CloudPlaceNode>();
+/** The folder holding most of the session's repositories; several folders under one project mean that project. */
+function folderOfRepos(repos: readonly { readonly name: string }[], folders: ReadonlyMap<string, FolderEntry>): string | undefined {
+  const counts = new Map<string, { readonly node: CloudPlaceNode; count: number }>();
   for (const repo of repos) {
     const wanted = repo.name.toLowerCase();
-    for (const { node, names } of folders.values()) if (names.has(wanted)) matched.set(node.id, node);
+    for (const { node, names } of folders.values()) {
+      if (names.has(wanted)) counts.set(node.id, { node, count: (counts.get(node.id)?.count ?? 0) + 1 });
+    }
   }
-  const [first, ...rest] = [...matched.values()];
-  if (first === undefined) return undefined;
-  const parent = first.parentId;
-  return parent !== undefined && rest.length > 0 && rest.every((node) => node.parentId === parent) ? parent : first.id;
+  const matched = [...counts.values()].sort((a, b) => b.count - a.count || (a.node.id < b.node.id ? -1 : 1));
+  const [best] = matched;
+  if (best === undefined) return undefined;
+  const parent = best.node.parentId;
+  return parent !== undefined && matched.length > 1 && matched.every((entry) => entry.node.parentId === parent) ? parent : best.node.id;
 }
 
 /**

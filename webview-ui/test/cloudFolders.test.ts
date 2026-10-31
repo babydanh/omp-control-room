@@ -74,6 +74,39 @@ describe('placeCloudRows by repository', () => {
     expect(placed.byFolder.has('f-be')).toBe(false);
   });
 
+  it('does not match a repository that only equals a directory above the folders', () => {
+    const nodes = [
+      { id: 'proj', kind: 'project' },
+      folder('f-a', 'V:\\Duancanhan\\ProjA', 'proj'),
+      folder('f-b', 'V:\\Duancanhan\\ProjB', 'proj'),
+      { id: 's1', parentId: 'f-a', kind: 'session', path: 'V:\\Duancanhan\\ProjA\\src' },
+    ];
+    const placed = placeCloudRows([row('danh', 'x', ['Duancanhan'])], {}, nodes);
+    expect(placed.byFolder.size).toBe(0);
+    expect(placed.loose).toHaveLength(1);
+  });
+
+  it('picks the folder matching most of the repositories whatever the order of the nodes', () => {
+    const fa = folder('f-a', 'V:\\x\\RepoX', 'p1');
+    const fb = folder('f-b', 'V:\\y\\RepoY', 'p2');
+    const sessions = [
+      { id: 's1', parentId: 'f-b', kind: 'session', path: 'V:\\y\\RepoY\\RepoX' },
+    ];
+    const rows = [row('danh', 'two', ['RepoX', 'RepoY'])];
+    const forward = placeCloudRows(rows, {}, [fa, fb, ...sessions]);
+    const reversed = placeCloudRows(rows, {}, [...sessions, fb, fa]);
+    expect([...forward.byFolder.keys()]).toEqual(['f-b']);
+    expect([...reversed.byFolder.keys()]).toEqual(['f-b']);
+  });
+
+  it('survives a parent loop between nodes', () => {
+    const nodes = [
+      { id: 's1', parentId: 's2', kind: 'session', path: 'V:\\a\\RepoX' },
+      { id: 's2', parentId: 's1', kind: 'session', path: 'V:\\a\\RepoX' },
+    ];
+    expect(placeCloudRows([row('danh', 'x', ['RepoX'])], {}, nodes).loose).toHaveLength(1);
+  });
+
   it('leaves a session whose repository has no folder in the loose list', () => {
     const placed = placeCloudRows([row('danh3', 'x', ['agent-chung-khoan']), row('danh3', 'y')], {}, tree);
     expect(placed.byFolder.size).toBe(0);

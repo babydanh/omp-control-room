@@ -88,14 +88,16 @@ export function CloudSessionsSection(props: CloudSessionsProps) {
 
   return (
     <section aria-label="Cloud khác" className="flex flex-col gap-1">
-      <button
-        type="button"
-        aria-expanded={shown}
-        onClick={() => setOpen(!open)}
-        className="touch-target flex w-full items-center gap-1 rounded px-2 text-left text-xs font-semibold text-text-muted hover:bg-hover"
-      >
-        <span aria-hidden="true">{shown ? '▾' : '▸'}</span>Cloud khác ({loose.length})
-      </button>
+      {loose.length > 0 && (
+        <button
+          type="button"
+          aria-expanded={shown}
+          onClick={() => setOpen(!open)}
+          className="touch-target flex w-full items-center gap-1 rounded px-2 text-left text-xs font-semibold text-text-muted hover:bg-hover"
+        >
+          <span aria-hidden="true">{shown ? '▾' : '▸'}</span>Cloud khác ({loose.length})
+        </button>
+      )}
       {error !== null && (
         <p role="alert" className="mx-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs text-warning">
           {error}
