@@ -47,6 +47,7 @@ import { McpPage } from '../library/McpPage.js';
 import { SkillsPage } from '../library/SkillsPage.js';
 import { StoragePage } from '../library/StoragePage.js';
 import { ChangesPage } from '../projects/ChangesPage.js';
+import { contextOfNode } from '../projects/contextChip.js';
 import { LayeredSettingsDialog } from '../projects/LayeredSettingsDialog.js';
 import { NewSessionDialog } from '../projects/NewSessionDialog.js';
 import { projectStore } from '../projects/projectClient.js';
@@ -1090,6 +1091,7 @@ export function BoardShell({ client }: BoardShellProps) {
                 onMenu: openMenu,
                 store: projectStore,
                 selection: { sessionId: selectedSessionId, paneId: selectedPaneId },
+                contextOf: (node) => contextOfNode(node, state.sessions),
                 ...(fleetAvailable
                   ? {
                       cloud: {

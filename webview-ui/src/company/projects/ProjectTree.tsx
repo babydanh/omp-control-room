@@ -6,6 +6,7 @@ import type { AgentMenuRequest } from '../agentMenu.js';
 import { CloudFolderRows, type CloudSessionsProps, CloudSessionsSection } from '../fleet/CloudSessionsSection.js';
 import { useAgentMenuGestures } from '../useAgentMenuGestures.js';
 import { useNow } from '../useNow.js';
+import { contextChip,type ContextTone } from './contextChip.js';
 import { ancestorOf, projectMenuContext } from './projectNodeTargets.js';
 import { type ProjectStore, useProjectState } from './projectStore.js';
 import {
@@ -65,6 +66,7 @@ const STRUCTURE_ICON: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>>
   repository: '⎇',
 };
 /** Rows another folder or group can be dropped on. */
+const CONTEXT_TONE_CLASS: Readonly<Record<ContextTone, string>> = { calm: 'text-text-muted', warn: 'text-warning', error: 'text-status-error' };
 const DROP_KINDS: ReadonlySet<ProjectTreeNode['kind']> = new Set(['project', 'group', 'folder']);
 /** Row text size by kind: Projects and folders read as headings, sessions one compact line each. */
 const ROW_TEXT_CLASS: Readonly<Partial<Record<ProjectTreeNode['kind'], string>>> = {
@@ -104,6 +106,8 @@ export interface ProjectTreeProps {
   onMenu: (request: AgentMenuRequest) => void;
   /** The session the detail drawer shows; its row is highlighted and scrolled into view. */
   selection?: TreeSelection;
+  /** The share of its context window a session row's agent has used (0–1); null or absent shows no chip. */
+  contextOf?: (node: ProjectTreeNode) => number | null;
   /** Agents in tmux on cloud machines, listed under "Cloud"; absent when this connection may not see the fleet. */
   cloud?: CloudSessionsProps;
 }
@@ -286,6 +290,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
   const isSub = isSession && node.agentKind === 'sub';
   const selected = isSession && props.selection !== undefined && isSelectedSession(node, props.selection);
   const stateLabel = node.state === undefined ? undefined : (SESSION_STATE_LABEL[node.state.toLowerCase()] ?? node.state);
+  const context = isSession && !isSub ? contextChip(props.contextOf?.(node) ?? null) : null;
   const agentEngine = node.agentKind === undefined ? undefined : AGENT_ENGINES.find((engine) => engine.id === node.agentKind);
   const rowRef = useRef<HTMLButtonElement>(null);
   // The drawer just opened this session: bring its row into view so you see where it sits.
@@ -362,6 +367,7 @@ function ProjectTreeRow({ branch, depth, collapsed, onToggleCollapse, onMove, ..
                         : null,
                       !isRunningNode(node) && stateLabel !== undefined ? stateLabel : null,
                       children.length > 0 ? `+${children.length}` : null,
+                      context === null ? null : <span key="ctx" className={CONTEXT_TONE_CLASS[context.tone]} title="Phần cửa sổ context đã dùng">{context.text}</span>,
                       isUnfinishedNode(node) ? <UnfinishedMark key="left" node={node} /> : null,
                       branch.where !== undefined && !MAIN_BRANCHES.has(branch.where) ? branch.where : null,
                     ].filter((part) => part !== null).flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))}
