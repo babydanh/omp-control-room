@@ -72,7 +72,7 @@ function cloudRows(machines: readonly FleetMachineSnapshot[]): CloudRow[] {
  * their repository): collapsed at the foot of the tree, one face-and-name chip each. Everything else sits under its folder.
  */
 export function CloudSessionsSection(props: CloudSessionsProps) {
-  const { machines, refresh, pending, error, selected, folders, nodes } = props;
+  const { machines, refresh, pending, selected, folders, nodes, request } = props;
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const timer = window.setInterval(refresh, REFRESH_MS);
@@ -83,6 +83,8 @@ export function CloudSessionsSection(props: CloudSessionsProps) {
   const { loose } = placeCloudRows(cloudRows(machines), folders, nodes);
   const pendingFolder = pending === null ? undefined : folders[cloudFolderKey(pending.machine, pending.session)];
   const pendingHere = pending !== null && !folderIds.has(pendingFolder ?? '') ? pending : null;
+  // A failed create shows under the node that asked for it; only one whose node is gone is shown here.
+  const error = request?.nodeId !== undefined && folderIds.has(request.nodeId) ? null : props.error;
   if (loose.length === 0 && pendingHere === null && error === null) return null;
   const shown = open || pendingHere !== null;
 
@@ -125,9 +127,15 @@ export function CloudFolderRows({ nodeId, depth, ...props }: CloudSessionsProps 
 
   const rows = placeCloudRows(cloudRows(machines), folders, nodes).byFolder.get(nodeId) ?? [];
   const pendingHere = pending !== null && folders[cloudFolderKey(pending.machine, pending.session)] === nodeId ? pending : null;
-  if (!formOpen && rows.length === 0 && pendingHere === null) return null;
+  const error = request?.nodeId === nodeId ? props.error : null;
+  if (!formOpen && rows.length === 0 && pendingHere === null && error === null) return null;
   return (
     <div className="flex flex-col gap-1" style={{ paddingLeft: `${depth * 12}px` }}>
+      {error !== null && (
+        <p role="alert" className="mx-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs text-warning">
+          {error}
+        </p>
+      )}
       {formOpen && request !== null && (
         <CloudNewForm
           key={request.token}
