@@ -4,9 +4,10 @@ import type { HerdrAgent } from '../../core/src/company.js';
 import type {
   CompanyPromptSummary,
   CompanySessionLogEntry,
+  ProjectTreeNode,
   ServerMessage,
 } from '../../core/src/messages.js';
-import { type AgentBoardCard, buildAgentCards } from '../src/company/agentBoard.js';
+import { type AgentBoardCard, buildAgentCards, cloudAgentCards } from '../src/company/agentBoard.js';
 import { buildBoardLanes } from '../src/company/boardView.js';
 import { applyCompanyMessage, type CompanyViewState } from '../src/company/companyState.js';
 import { HERDR_TONE_LABELS } from '../src/company/herdrView.js';
@@ -284,5 +285,54 @@ describe('agent card order and board dedupe', () => {
     expect(lanes.find((lane) => lane.id === 'needs_input')?.agents.map((card) => card.key)).toEqual(
       ['session:s-wait'],
     );
+  });
+});
+
+function cloudNode(overrides: Partial<ProjectTreeNode> & { id: string }): ProjectTreeNode {
+  return { kind: 'session', name: 'fix-aqp', ...overrides };
+}
+
+describe('cloud sessions as agent cards', () => {
+  it('puts a working one in Đang làm, a menu-asking one in Chờ bạn and an idle one in Kiểm', () => {
+    const cards = cloudAgentCards([
+      cloudNode({ id: 'cloud:danh1/work', name: 'work', state: 'working', branch: 'cloud/danh1-work' }),
+      cloudNode({ id: 'cloud:danh1/ask', name: 'ask', state: 'waiting_input' }),
+      cloudNode({ id: 'cloud:danh1/rest', name: 'rest', state: 'idle' }),
+    ]);
+
+    expect(laneByKey(cards)).toEqual({
+      'cloud:danh1/work': 'running',
+      'cloud:danh1/ask': 'needs_input',
+      'cloud:danh1/rest': 'review',
+    });
+    expect(cards.find((card) => card.key === 'cloud:danh1/work')).toMatchObject({
+      subject: { kind: 'cloud', machine: 'danh1', session: 'work' },
+      tag: 'cloud',
+      project: 'danh1',
+      title: 'work',
+      branch: 'cloud/danh1-work',
+    });
+  });
+
+  it('leaves out a sleeping session, a node that is no cloud session and a group', () => {
+    expect(
+      cloudAgentCards([
+        cloudNode({ id: 'cloud:danh1/gone', state: 'sleeping' }),
+        cloudNode({ id: 'local-session', state: 'working' }),
+        cloudNode({ id: 'cloud:other', kind: 'group', state: 'working' }),
+        cloudNode({ id: 'cloud:danh1/nostate' }),
+      ]),
+    ).toEqual([]);
+  });
+
+  it('reaches the board lanes next to the company agents', () => {
+    const state = withHerdr(stateFrom(), [herdrAgent({ paneId: 'p-work', status: 'working' })]);
+    const cloud = cloudAgentCards([cloudNode({ id: 'cloud:danh1/work', state: 'working' })]);
+    const lanes = buildBoardLanes(state, cloud);
+
+    expect(lanes.find((lane) => lane.id === 'running')?.agents.map((card) => card.key)).toEqual([
+      'herdr:p-work',
+      'cloud:danh1/work',
+    ]);
   });
 });

@@ -11,6 +11,7 @@
 import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ProjectTreeNode } from '../../../../core/src/messages.js';
+import { cloudAgentCards } from '../agentBoard.js';
 import type { AgentMenuRequest, ProjectNodeAction, WorkItemMenuAction } from '../agentMenu.js';
 import { boardFlow, buildBoardLanes, planningPrompts } from '../boardView.js';
 import { buildPaletteItems, type PaletteActionId, type PaletteItem } from '../commandPalette.js';
@@ -372,7 +373,7 @@ export function BoardShell({ client }: BoardShellProps) {
     [prefs.collapsedProjects],
   );
 
-  const lanes = useMemo(() => buildBoardLanes(state), [state]);
+  const lanes = useMemo(() => buildBoardLanes(state, cloudAgentCards(treeNodes)), [state, treeNodes]);
   const squadPath = state.settings?.workspacePath ?? null;
   const squadFolder =
     squadPath === null
@@ -1229,12 +1230,19 @@ export function BoardShell({ client }: BoardShellProps) {
               onOpenSquad={(ref) => setOpened({ kind: 'squad', ...ref })}
               client={client}
               onMenu={openMenu}
+              selectedCloudId={opened?.kind === 'cloud' ? cloudNodeId(opened.machine, opened.session) : null}
+              onOpenCloud={(machine, session) => {
+                const node = treeNodes.find((entry) => entry.id === cloudNodeId(machine, session));
+                if (node !== undefined) openCloudNode(node, machine, session);
+              }}
               changesFor={(card) => {
+                const { subject } = card;
+                if (subject.kind === 'cloud') return null;
                 // The session in the pane knows where it edits; the pane's own repo is the fallback.
-                const checkout = (card.subject.kind === 'herdr' ? paneCheckout.get(card.subject.paneId) : undefined) ?? card.checkout;
+                const checkout = (subject.kind === 'herdr' ? paneCheckout.get(subject.paneId) : undefined) ?? card.checkout;
                 // The counts are the session's own: sessions sharing a checkout must not all show its total.
                 const session = projects.nodes.find((node) =>
-                  node.kind === 'session' && (card.subject.kind === 'herdr' ? node.herdrPaneId === card.subject.paneId : node.boardSessionId === card.subject.sessionId));
+                  node.kind === 'session' && (subject.kind === 'herdr' ? node.herdrPaneId === subject.paneId : node.boardSessionId === subject.sessionId));
                 const changes = sessionChanges(session);
                 return checkout === null || changes === null ? null : { checkout, ...changes };
               }}

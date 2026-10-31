@@ -374,7 +374,11 @@ function squadCards(state: CompanyViewState): BoardSquad[] {
   return cards;
 }
 
-export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
+/** `cloud` is the cloud sessions' agent cards, which live outside the company state. */
+export function buildBoardLanes(
+  state: CompanyViewState,
+  cloud: readonly AgentBoardCard[] = [],
+): BoardLane[] {
   const tasks = Object.values(state.tasks);
   const byId = new Map(tasks.map((task) => [task.id, task]));
   const codeOf = (id: string): string => byId.get(id)?.code ?? id;
@@ -435,7 +439,7 @@ export function buildBoardLanes(state: CompanyViewState): BoardLane[] {
       (finished ? finishedPanes : carded).add(item.assignee.paneId);
     }
   }
-  const agents = buildAgentCards(state, carded, finishedPanes);
+  const agents = [...buildAgentCards(state, carded, finishedPanes), ...cloud];
   const squads = squadCards(state);
   const cloudIssues = cloudIssueCards(state);
   return COMPANY_LANE_ORDER.map((id) => ({

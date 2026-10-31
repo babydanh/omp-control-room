@@ -84,6 +84,9 @@ export interface CompanyBoardProps {
   onSelectSession: (sessionId: string) => void;
   /** Opens the drawer on a herdr pane's agent card. */
   onOpenHerdr: (paneId: string) => void;
+  /** The cloud session open in the drawer, as its tree node id; null when none is. */
+  selectedCloudId: string | null;
+  onOpenCloud: (machine: string, session: string) => void;
   /** The herdr pane and session the drawer shows, so their agent cards read as pressed. */
   selectedPaneId: string | null;
   selectedSessionId: string | null;
@@ -339,17 +342,22 @@ function AgentCard({
   onOpenChanges: (checkout: string) => void;
 }) {
   const { subject } = card;
-  const target: PreviewTarget =
+  // A cloud session has no terminal tail or session menu on the board: its terminal opens in the drawer.
+  const target: PreviewTarget | null =
     subject.kind === 'herdr'
       ? { kind: 'herdr', paneId: subject.paneId }
-      : { kind: 'session', sessionId: subject.sessionId };
+      : subject.kind === 'session'
+        ? { kind: 'session', sessionId: subject.sessionId }
+        : null;
   const actions = useTerminalPreview();
   const triggers = useAgentMenuGestures<HTMLButtonElement>(
     subject.kind === 'herdr'
       ? { kind: 'herdr', paneId: subject.paneId, drawer: null }
-      : { kind: 'session', sessionId: subject.sessionId, drawer: null },
-    onMenu,
-    () => actions.press(target),
+      : { kind: 'session', sessionId: subject.kind === 'session' ? subject.sessionId : card.key, drawer: null },
+    subject.kind === 'cloud' ? () => undefined : onMenu,
+    () => {
+      if (target !== null) actions.press(target);
+    },
   );
   const updated = card.updatedAt === null ? null : relativeTimeVi(card.updatedAt, now);
   const showChanges = changes !== null && changes.additions + changes.deletions > 0;
@@ -358,7 +366,7 @@ function AgentCard({
       <button
         type="button"
         onClick={onOpen}
-        {...previewTriggers(actions, target)}
+        {...(target === null ? {} : previewTriggers(actions, target))}
         {...triggers}
         aria-pressed={selected}
         title={`${card.tag} · ${card.project} · ${card.title} · ${card.statusLabel}`}
@@ -444,6 +452,8 @@ export function CompanyBoard({
   onSelectTask,
   onSelectSession,
   onOpenHerdr,
+  selectedCloudId,
+  onOpenCloud,
   selectedPaneId,
   selectedSessionId,
   selectedWorkItem,
@@ -512,6 +522,7 @@ export function CompanyBoard({
 
   function openAgent(subject: AgentCardSubject): void {
     if (subject.kind === 'herdr') onOpenHerdr(subject.paneId);
+    else if (subject.kind === 'cloud') onOpenCloud(subject.machine, subject.session);
     else onSelectSession(subject.sessionId);
   }
 
@@ -677,7 +688,9 @@ export function CompanyBoard({
                 selected={
                   agent.subject.kind === 'herdr'
                     ? agent.subject.paneId === selectedPaneId
-                    : agent.subject.sessionId === selectedSessionId
+                    : agent.subject.kind === 'cloud'
+                      ? agent.key === selectedCloudId
+                      : agent.subject.sessionId === selectedSessionId
                 }
                 onOpen={() => openAgent(agent.subject)}
                 onMenu={onMenu}

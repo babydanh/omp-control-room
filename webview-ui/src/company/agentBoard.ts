@@ -19,20 +19,23 @@
  */
 
 import type { CompanySessionSummary, HerdrAgent } from '../../../core/src/company.js';
-import type { CompanySessionLogEntry } from '../../../core/src/messages.js';
+import type { CompanySessionLogEntry, ProjectTreeNode } from '../../../core/src/messages.js';
 import type { AgentTone } from './agentSidebarView.js';
 import { herdrSummary, pendingQuestionSessionIds, repoPlacement } from './agentSidebarView.js';
 import type { CompanyViewState, HerdrScreenView, HerdrView } from './companyState.js';
 import type { CompanyLaneId } from './constants.js';
+import { parseCloudNodeId } from './fleet/cloudNodes.js';
 import { HERDR_TONE_LABELS, type HerdrTone, herdrToneFor } from './herdrView.js';
 import { companyRoleLabel } from './roleProfiles.js';
 import { screenActivityLine } from './screenActivity.js';
 import { sessionStatusLabel } from './statusLabels.js';
 import { parseAnsiScreen } from './terminalScreen.js';
 
-/** What an agent card stands for: a herdr pane, or a company session. */
+/** What an agent card stands for: a herdr pane, a company session, or a tmux session on a cloud machine. */
 export type AgentCardSubject =
-  { kind: 'herdr'; paneId: string } | { kind: 'session'; sessionId: string };
+  | { kind: 'herdr'; paneId: string }
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'cloud'; machine: string; session: string };
 
 export interface AgentBoardCard {
   /** Stable identity across renders: the React key and the flight key. */
@@ -41,7 +44,7 @@ export interface AgentBoardCard {
   lane: CompanyLaneId;
   /** The status dot's tone: a herdr tone for a pane, a session tone for a session. */
   tone: AgentTone | HerdrTone;
-  /** The small tag: "herdr" for a pane, the role's label for a session. */
+  /** The small tag: "herdr" for a pane, "cloud" for a cloud session, the role's label for a session. */
   tag: string;
   /** The repo, workspace or folder a pane works in; the session code for a session. */
   project: string;
@@ -153,13 +156,19 @@ function sessionCard(
   };
 }
 
+const KIND_ORDER: Readonly<Record<AgentCardSubject['kind'], number>> = {
+  herdr: 0,
+  session: 1,
+  cloud: 2,
+};
+
 /**
- * Herdr panes first, then company sessions; within each kind, by project and
- * then by identity, so the same board reads the same way on every render.
+ * Herdr panes first, then company sessions, then cloud sessions; within each kind,
+ * by project and then by identity, so the same board reads the same way on every render.
  */
 function compareAgentCards(left: AgentBoardCard, right: AgentBoardCard): number {
   if (left.subject.kind !== right.subject.kind) {
-    return left.subject.kind === 'herdr' ? -1 : 1;
+    return KIND_ORDER[left.subject.kind] - KIND_ORDER[right.subject.kind];
   }
   return (
     left.project.localeCompare(right.project, 'en', { numeric: true }) ||
@@ -199,6 +208,47 @@ export function buildAgentCards(
     if (carded.has(session.id)) continue;
     const card = sessionCard(session, questioning, state.sessionLogs[session.id]?.entries ?? []);
     if (card !== null) cards.push(card);
+  }
+  return cards.sort(compareAgentCards);
+}
+
+/** The lane and tone a cloud session's tree state shows; null for a sleeping or unknown one, which is not work in progress. */
+const CLOUD_LANE_BY_STATE: Readonly<Record<string, { lane: CompanyLaneId; tone: AgentTone }>> = {
+  working: { lane: 'running', tone: 'working' },
+  waiting_input: { lane: 'needs_input', tone: 'needs' },
+  idle: { lane: 'review', tone: 'idle' },
+};
+
+const CLOUD_STATUS_LABELS: Readonly<Record<string, string>> = {
+  working: HERDR_TONE_LABELS.working,
+  waiting_input: HERDR_TONE_LABELS.needs,
+  idle: 'đã dừng, chờ xem',
+};
+
+/**
+ * The cloud sessions of the Project tree as agent cards, so the board shows them as it shows a local agent:
+ * working in Đang làm, waiting on a menu in Chờ bạn, stopped in Kiểm. A sleeping session is not a card.
+ */
+export function cloudAgentCards(nodes: readonly ProjectTreeNode[]): AgentBoardCard[] {
+  const cards: AgentBoardCard[] = [];
+  for (const node of nodes) {
+    const cloud = node.kind === 'session' ? parseCloudNodeId(node.id) : null;
+    const place = node.state === undefined ? undefined : CLOUD_LANE_BY_STATE[node.state];
+    if (cloud === null || place === undefined || node.state === undefined) continue;
+    cards.push({
+      key: node.id,
+      subject: { kind: 'cloud', machine: cloud.machine, session: cloud.session },
+      lane: place.lane,
+      tone: place.tone,
+      tag: 'cloud',
+      project: cloud.machine,
+      title: node.name,
+      statusLabel: CLOUD_STATUS_LABELS[node.state] ?? node.state,
+      branch: node.branch ?? null,
+      checkout: null,
+      activity: null,
+      updatedAt: null,
+    });
   }
   return cards.sort(compareAgentCards);
 }
