@@ -167,7 +167,6 @@ export function BoardShell({ client }: BoardShellProps) {
   const [cloudRequest, setCloudRequest] = useState<CloudRequest | null>(null);
   // Which tree node started each cloud session, so it sits under that node like a local session.
   const [cloudFolders, setCloudFolders] = useState<CloudFolders>(readCloudFolders);
-  const projectNodeIds = useMemo(() => new Set(projects.nodes.map((node) => node.id)), [projects.nodes]);
   /** The "Vừa ngủ / tắt" session whose details are open, to be woken from there. */
   const [stoppedNode, setStoppedNode] = useState<ProjectTreeNode | null>(null);
   const [selectedCheckoutId, setSelectedCheckoutId] = useState('');
@@ -1115,7 +1114,7 @@ export function BoardShell({ client }: BoardShellProps) {
                           fleetStore.createTask({ machine, repo: 'all', slug, prompt, engine });
                         },
                         folders: cloudFolders,
-                        folderIds: projectNodeIds,
+                        nodes: projects.nodes,
                         pending: pendingCloudRow(fleet, fleet.snapshot?.machines ?? []),
                         // The drawer's own panel reports a failed terminal, so the section keeps its error for creation.
                         error: opened?.kind === 'cloud' ? null : fleet.actionError,

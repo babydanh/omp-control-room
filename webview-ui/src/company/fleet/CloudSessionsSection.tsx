@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FleetMachineSnapshot, FleetTaskCreateMessage } from '../../../../core/src/messages.js';
 import { sessionFaceHue } from '../projects/projectTreeView.js';
 import { SessionFace } from '../projects/SessionFace.js';
-import { cloudFolderKey, type CloudFolders, placeCloudRows } from './cloudFolders.js';
+import { cloudFolderKey, type CloudFolders, type CloudPlaceNode, placeCloudRows } from './cloudFolders.js';
 import { cloudFaceMood, type PendingCloudRow } from './cloudRows.js';
 import { pickMachine } from './cloudTaskPick.js';
 import type { CloudRequest } from './FleetView.js';
@@ -40,10 +40,10 @@ export interface CloudSessionsProps {
   readonly request: CloudRequest | null;
   /** The cloud session the drawer shows, so its row can be marked. */
   readonly selected: { readonly machine: string; readonly session: string } | null;
-  /** Which tree node started each session; those sessions show under that node, the rest stay in the Cloud section. */
+  /** Which tree node started each session; those sessions show under that node. */
   readonly folders: CloudFolders;
-  /** Ids of the tree nodes that exist now: a session whose node was removed falls back to the Cloud section. */
-  readonly folderIds: ReadonlySet<string>;
+  /** The tree nodes that exist now: a session with no node of its own (by start or by repository) stays in the closing "Cloud khác" list. */
+  readonly nodes: readonly CloudPlaceNode[];
 }
 
 interface CloudRow {
@@ -68,72 +68,41 @@ function cloudRows(machines: readonly FleetMachineSnapshot[]): CloudRow[] {
 }
 
 /**
- * Sidebar section listing the agents running in tmux on cloud machines that no tree node started: each
- * is a face-and-name chip like a local agent. A click opens its terminal in the drawer, the repo chips open
- * the diff of the worktrees on its branch, and "+ Tạo Claude cloud" takes the request right here.
+ * The agents running in tmux on cloud machines that fit no tree node (no node started them and no folder is named like
+ * their repository): collapsed at the foot of the tree, one face-and-name chip each. Everything else sits under its folder.
  */
 export function CloudSessionsSection(props: CloudSessionsProps) {
-  const { machines, refresh, pending, error, busy, request, selected, folders, folderIds } = props;
-  const [open, setOpen] = useState(true);
-  const [formOpen, setFormOpen] = useState(false);
+  const { machines, refresh, pending, error, selected, folders, nodes } = props;
+  const [open, setOpen] = useState(false);
   useEffect(() => {
     const timer = window.setInterval(refresh, REFRESH_MS);
     return () => window.clearInterval(timer);
   }, [refresh]);
-  // A right-click request from a tree node opens its own box under that node, not this one.
-  useEffect(() => {
-    if (request === null || request.nodeId !== undefined) return;
-    setOpen(true);
-    setFormOpen(true);
-  }, [request]);
 
-  const { loose } = placeCloudRows(cloudRows(machines), folders, folderIds);
+  const folderIds = new Set(nodes.map((node) => node.id));
+  const { loose } = placeCloudRows(cloudRows(machines), folders, nodes);
   const pendingFolder = pending === null ? undefined : folders[cloudFolderKey(pending.machine, pending.session)];
   const pendingHere = pending !== null && !folderIds.has(pendingFolder ?? '') ? pending : null;
+  if (loose.length === 0 && pendingHere === null && error === null) return null;
+  const shown = open || pendingHere !== null;
 
   return (
-    <section aria-label="Cloud" className="flex flex-col gap-1">
-      <div className="flex items-center">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen(!open)}
-          className="touch-target flex min-w-0 flex-1 items-center gap-1 rounded px-2 text-left text-xs font-semibold text-text-muted hover:bg-hover"
-        >
-          <span aria-hidden="true">{open ? '▾' : '▸'}</span>Cloud ({loose.length})
-        </button>
-        <button
-          type="button"
-          aria-expanded={formOpen}
-          onClick={() => {
-            setOpen(true);
-            setFormOpen(!formOpen);
-          }}
-          title="Tạo Claude cloud: gõ việc, board tự chọn máy rảnh. Muốn nằm trong một folder thì chuột phải folder đó."
-          className="touch-target shrink-0 rounded px-2 text-xs text-text-secondary hover:bg-hover"
-        >
-          + Tạo Claude cloud
-        </button>
-      </div>
-      {formOpen && (
-        <CloudNewForm
-          key={request?.token ?? 0}
-          machines={machines}
-          busy={busy}
-          initialEngine={request !== null && request.nodeId === undefined ? request.engine : 'claude'}
-          onSubmit={(task) => {
-            props.onCreate(task);
-            setFormOpen(false);
-          }}
-        />
-      )}
+    <section aria-label="Cloud khác" className="flex flex-col gap-1">
+      <button
+        type="button"
+        aria-expanded={shown}
+        onClick={() => setOpen(!open)}
+        className="touch-target flex w-full items-center gap-1 rounded px-2 text-left text-xs font-semibold text-text-muted hover:bg-hover"
+      >
+        <span aria-hidden="true">{shown ? '▾' : '▸'}</span>Cloud khác ({loose.length})
+      </button>
       {error !== null && (
         <p role="alert" className="mx-2 rounded border border-warning/30 bg-warning/10 px-2 py-1 text-xs text-warning">
           {error}
         </p>
       )}
-      {open && pendingHere !== null && <CloudPendingChip row={pendingHere} />}
-      {open &&
+      {shown && pendingHere !== null && <CloudPendingChip row={pendingHere} />}
+      {shown &&
         loose.map((row) => (
           <CloudRowChip key={cloudFolderKey(row.machine, row.session)} row={row} selected={selected} onOpenTerminal={props.onOpenTerminal} onOpenDiff={props.onOpenDiff} />
         ))}
@@ -146,13 +115,13 @@ export function CloudSessionsSection(props: CloudSessionsProps) {
  * right-click asked for one here, the row held while the task starts, then one chip per session.
  */
 export function CloudFolderRows({ nodeId, depth, ...props }: CloudSessionsProps & { readonly nodeId: string; readonly depth: number }) {
-  const { machines, pending, folders, folderIds, request, busy, selected } = props;
+  const { machines, pending, folders, nodes, request, busy, selected } = props;
   const [formOpen, setFormOpen] = useState(false);
   useEffect(() => {
     if (request?.nodeId === nodeId) setFormOpen(true);
   }, [request, nodeId]);
 
-  const rows = placeCloudRows(cloudRows(machines), folders, folderIds).byFolder.get(nodeId) ?? [];
+  const rows = placeCloudRows(cloudRows(machines), folders, nodes).byFolder.get(nodeId) ?? [];
   const pendingHere = pending !== null && folders[cloudFolderKey(pending.machine, pending.session)] === nodeId ? pending : null;
   if (!formOpen && rows.length === 0 && pendingHere === null) return null;
   return (

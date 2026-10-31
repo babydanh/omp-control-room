@@ -188,7 +188,6 @@ export function ProjectTree(props: ProjectTreeProps) {
         <label className={`flex shrink-0 items-center gap-1 ${unfinishedCount > 0 ? 'text-warning' : ''}`} title="Chỉ hiện phiên làm dở: bị ngắt giữa chừng, hoặc đã dừng khi todo chưa xong (kể cả phiên đã tắt trong 24 giờ qua)"><input type="checkbox" checked={unfinishedOnly} onChange={(event) => setUnfinishedOnly(event.target.checked)} />Làm dở{unfinishedCount > 0 ? ` (${unfinishedCount})` : ''}</label>
       </div>
       <RecentlyStopped nodes={nodes} onOpenStopped={props.onOpenStopped} />
-      {props.cloud !== undefined && <CloudSessionsSection {...props.cloud} />}
       <div className="min-h-0 overflow-y-auto">
         {visible.map((branch) => (
           <ProjectTreeRow key={branch.node.id} branch={branch} depth={0} collapsed={collapsed} onToggleCollapse={toggleCollapse} onMove={moveNode} {...props} />
@@ -198,6 +197,7 @@ export function ProjectTree(props: ProjectTreeProps) {
             {nodes.length === 0 ? 'Đang tải dự án…' : 'Chưa có Project nào.'}
           </p>
         )}
+        {props.cloud !== undefined && <CloudSessionsSection {...props.cloud} />}
       </div>
     </nav>
   );

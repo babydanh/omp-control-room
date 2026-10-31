@@ -32,7 +32,7 @@ const props: CloudSessionsProps = {
   request: null,
   selected: null,
   folders: { 'danh/fix-ab12': 'folder-1' },
-  folderIds: new Set(['folder-1']),
+  nodes: [{ id: 'folder-1', kind: 'folder' }],
 };
 
 describe('cloud sessions under a tree node', () => {
@@ -42,9 +42,19 @@ describe('cloud sessions under a tree node', () => {
     expect(folder).not.toContain('old-task');
 
     const section = renderToStaticMarkup(createElement(CloudSessionsSection, props));
-    expect(section).toContain('Cloud (1)');
-    expect(section).toContain('old-task');
+    expect(section).toContain('Cloud khác (1)');
     expect(section).not.toContain('fix-ab12');
+  });
+
+  it('shows no Cloud section at all when every session sits under a node', () => {
+    const placed = { ...props, folders: { 'danh/fix-ab12': 'folder-1', 'danh/old-task': 'folder-1' } };
+    expect(renderToStaticMarkup(createElement(CloudSessionsSection, placed))).toBe('');
+  });
+
+  it('keeps the loose list closed until it is opened', () => {
+    const section = renderToStaticMarkup(createElement(CloudSessionsSection, props));
+    expect(section).toContain('aria-expanded="false"');
+    expect(section).not.toContain('old-task');
   });
 
   it('renders nothing under a node that started no cloud session', () => {
@@ -52,8 +62,7 @@ describe('cloud sessions under a tree node', () => {
   });
 
   it('falls back to the Cloud section once the node that started a session is gone', () => {
-    const section = renderToStaticMarkup(createElement(CloudSessionsSection, { ...props, folderIds: new Set<string>() }));
-    expect(section).toContain('Cloud (2)');
-    expect(section).toContain('fix-ab12');
+    const section = renderToStaticMarkup(createElement(CloudSessionsSection, { ...props, nodes: [] }));
+    expect(section).toContain('Cloud khác (2)');
   });
 });
